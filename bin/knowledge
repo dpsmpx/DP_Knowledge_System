@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Обёртка: knowledge <команда> … (Python 3.11+, без зависимостей; z3-solver — необязательно)
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m ksys "$@"

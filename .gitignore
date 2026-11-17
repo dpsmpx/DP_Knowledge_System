@@ -1,0 +1,31 @@
+# User vaults and local configuration
+/ks.json
+/vault/
+/notes/
+/private/
+/secrets/
+/.obsidian/
+**/.obsidian/
+.env
+.env.*
+!.env.example
+
+# Derived personal knowledge data
+/data/
+/reports/
+/var/
+/**/*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+
+# Runtime / editors
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store

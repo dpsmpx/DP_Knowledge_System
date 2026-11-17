@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "description": "Базовая схема предикатов лексикона. Ключи атрибутов/классов нормализуются тем же стеммером, что и знания.",
+  "predicates": {
+    "is_a": {"arity": 2, "args": ["entity", "class"]},
+    "has_property": {"arity": 2, "args": ["entity", "class"]},
+    "has": {"arity": 2, "args": ["entity", "any"]},
+    "value": {"arity": 3, "args": ["entity", "class", "any"]},
+    "measure": {"arity": 4, "args": ["entity", "class", "number", "string"]},
+    "bound": {"arity": 4, "args": ["entity", "class", "string", "number"]},
+    "attr_cmp": {"arity": 5, "args": ["entity", "class", "string", "entity", "class"]},
+    "member_of": {"arity": 2, "args": ["entity", "entity"]},
+    "uses": {"arity": 2, "args": ["entity", "entity"]},
+    "causes": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true},
+    "part_of": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true},
+    "has_part": {"arity": 2, "args": ["entity", "entity"]},
+    "depends_on": {"arity": 2, "args": ["entity", "entity"]},
+    "works_with": {"arity": 2, "args": ["entity", "entity"]},
+    "works_at": {"arity": 2, "args": ["entity", "entity"]},
+    "located_in": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true},
+    "lives_in": {"arity": 2, "args": ["entity", "entity"]},
+    "likes": {"arity": 2, "args": ["entity", "any"]},
+    "prefers": {"arity": 2, "args": ["entity", "any"]},
+    "born_on": {"arity": 2, "args": ["entity", "date"], "functional": true},
+    "older_than": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true, "asymmetric": true},
+    "younger_than": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true, "asymmetric": true},
+    "better_than": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true, "asymmetric": true},
+    "worse_than": {"arity": 2, "args": ["entity", "entity"], "irreflexive": true, "asymmetric": true},
+    "greater_than": {"arity": 2, "irreflexive": true, "asymmetric": true},
+    "less_than": {"arity": 2, "irreflexive": true, "asymmetric": true}
+  },
+  "attributes": {
+    "возраст": {"datatype": "number", "min": 0, "max": 150, "functional": true},
+    "рост": {"datatype": "number", "min": 0, "max": 300, "functional": true},
+    "вес": {"datatype": "number", "min": 0, "functional": true}
+  },
+  "classes": {},
+  "disjoint": [],
+  "constraints": []
+}
