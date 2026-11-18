@@ -1,0 +1,127 @@
+name: Signed Markor test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/markor-signed-release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-markor-release
+  cancel-in-progress: false
+
+jobs:
+  build-sign-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout DP Knowledge System
+        uses: actions/checkout@v4
+
+      - name: Configure Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Confirm release signing secrets are configured
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required secret ${name} is not configured"
+              exit 1
+            fi
+          done
+
+      - name: Build unchanged Markor default release
+        working-directory: third_party/markor
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleFlavorDefaultRelease --no-daemon --stacktrace
+
+      - name: Align, sign, and verify APK
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk_dir"
+          zipalign="$sdk_dir/build-tools/35.0.0/zipalign"
+          apksigner="$sdk_dir/build-tools/35.0.0/apksigner"
+          test -x "$zipalign"
+          test -x "$apksigner"
+
+          mapfile -d '' -t unsigned < <(find third_party/markor/app/build/outputs/apk/flavorDefault/release -maxdepth 1 -type f -name '*-unsigned.apk' -print0)
+          if [[ ${#unsigned[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one unsigned default-release APK, found ${#unsigned[@]}"
+            exit 1
+          fi
+
+          keystore="$RUNNER_TEMP/markor-release-keystore"
+          aligned="$RUNNER_TEMP/markor-aligned.apk"
+          apk="$GITHUB_WORKSPACE/markor-test-${GITHUB_RUN_NUMBER}-signed.apk"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          "$zipalign" -f 4 "${unsigned[0]}" "$aligned"
+          "$apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out "$apk" "$aligned"
+          "$apksigner" verify --min-sdk-version 21 "$apk" >/dev/null
+          sha256sum "$apk" > "$apk.sha256"
+          printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
+          echo "Signed APK created and verified"
+
+      - name: Publish signed APK as GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="markor-test-build-${GITHUB_RUN_NUMBER}"
+          notes="$(printf '%s\n' \
+            'Тестовая подписанная сборка оригинального Android-приложения Markor из репозитория DP Knowledge System.' \
+            '' \
+            '- Исходники: Markor, ревизия 7b15e66932f170c0b3f105c522111b0f32d6c73d.' \
+            '- Версия Markor: 2026.10.0 (versionCode 164), flavorDefaultRelease.' \
+            '- Пакет: net.gsantner.markor.' \
+            '- APK подписан предоставленным keystore из GitHub Secrets; подпись проверена apksigner.' \
+            '- Файл .sha256 содержит SHA-256 подписанного APK.' \
+            '- Код Markor не модифицирован; интеллектуальное ядро DP Knowledge System пока не интегрировано.' \
+            '- Оригинальный Markor: Gregor Santner и участники; код Apache-2.0, переводы и примеры CC0-1.0.' \
+            '' \
+            'Внимание: пакет совпадает с официальным Markor. Android не позволит установить эту сборку поверх приложения с другой подписью. Перед любым удалением установленного приложения сохраните его данные.' \
+          )"
+          gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Markor — подписанная тестовая сборка #${GITHUB_RUN_NUMBER}" \
+            --notes "$notes" \
+            --prerelease
