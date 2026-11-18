@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from ksys.store.journal import Entry, entry_id
 from pathlib import Path
 
 from ksys import KS_VERSION
@@ -214,3 +215,88 @@ def knowledge_diagnostics(workspace_dir: str) -> str:
         "unknowns": unknowns,
         "read_only": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+MAX_JOURNAL_BYTES = 8_000_000
+
+
+def journal_export_info(workspace_dir: str) -> str:
+    """Verify the authoritative journal before a user-directed encrypted export."""
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    if not path.is_file() or path.stat().st_size > MAX_JOURNAL_BYTES:
+        raise ValueError("Journal is empty or too large for portable backup")
+    content = path.read_bytes()
+    if not content:
+        raise ValueError("No decisions to export")
+    return json.dumps({
+        "protocol": "dpksys.backup.v1",
+        "count": len(kb.journal.entries()),
+        "head": kb.journal.head,
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }, ensure_ascii=False, sort_keys=True)
+
+
+def _validate_journal_text(content: str) -> dict:
+    if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_JOURNAL_BYTES:
+        raise ValueError("Backup is too large")
+    prev = None
+    count = 0
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        e = Entry(obj["seq"], obj["id"], obj.get("prev"), obj["ts"], obj["actor"],
+                  obj["op"], obj["data"], obj.get("note"))
+        count += 1
+        if e.seq != count or e.prev != prev or e.id != entry_id(
+                e.prev, e.seq, e.ts, e.actor, e.op, e.data, e.note):
+            raise ValueError("Backup has a broken or modified hash chain")
+        prev = e.id
+    if count == 0:
+        raise ValueError("Backup has no decisions")
+    return {"count": count, "head": prev,
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
+
+
+def journal_restore_preview(workspace_dir: str, content: str) -> str:
+    info = _validate_journal_text(content)
+    kb = _kb(workspace_dir)
+    if kb.journal.entries():
+        raise ValueError("Current journal is not empty; refusing to overwrite decisions")
+    return json.dumps(dict(info, protocol="dpksys.backup.v1"), sort_keys=True)
+
+
+def journal_restore_commit(workspace_dir: str, content: str,
+                           expected_sha256: str) -> str:
+    info = _validate_journal_text(content)
+    if info["sha256"] != expected_sha256:
+        raise ValueError("Backup contents changed after preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.entries():
+        raise ValueError("Existing decisions must never be overwritten")
+    path = kb.ws.journal_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import os
+    import tempfile
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=".journal-import-", delete=False) as target:
+            temporary = Path(target.name)
+            target.write(content)
+            target.flush()
+            os.fsync(target.fileno())
+        # Native UI serializes these operations; refuse nonempty state again.
+        if path.exists() and path.stat().st_size != 0:
+            raise ValueError("Journal was modified during import")
+        temporary.replace(path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    restored = _kb(workspace_dir)
+    if restored.journal.head != info["head"]:
+        raise ValueError("Restored journal verification failed")
+    return json.dumps(dict(info, protocol="dpksys.backup.v1"), sort_keys=True)

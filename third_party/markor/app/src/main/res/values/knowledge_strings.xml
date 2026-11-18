@@ -38,7 +38,7 @@
     <string name="knowledge_decision_reject">Reject this interpretation</string>
     <string name="knowledge_decision_defer">Defer decision (unknown)</string>
     <string name="knowledge_cannot_accept">This interpretation is unresolved or invalid and cannot be accepted.</string>
-    <string name="knowledge_decision_warning">Your decision will be appended to the private knowledge journal. Original Markdown will not change. This journal currently has no export or recovery interface; uninstalling the app will erase it.</string>
+    <string name="knowledge_decision_warning">Your decision will be appended to the private knowledge journal. Original Markdown will not change. There is no automatic backup: export an encrypted journal archive before uninstalling or resetting the app.</string>
     <string name="knowledge_confirm_decision">Confirm decision</string>
     <string name="knowledge_recording_decision">Verifying source and recording your decision…</string>
     <string name="knowledge_decision_saved">Decision recorded in the local knowledge journal.</string>
@@ -55,4 +55,18 @@
     <string name="knowledge_state_counts">Records: %1$d\nAccepted: %2$d\nClaims: %3$d\nContradictions: %4$d</string>
     <string name="knowledge_state_unknowns">Open hypotheses: %1$d\nDeferred: %2$d\nUnreviewed claims: %3$d</string>
     <string name="knowledge_conflict_heading">Contradiction</string>
+    <string name="knowledge_backup_export">Encrypted export</string>
+    <string name="knowledge_backup_import">Restore backup</string>
+    <string name="knowledge_backup_password">Backup passphrase (12+ characters)</string>
+    <string name="knowledge_backup_password_confirm">Repeat passphrase</string>
+    <string name="knowledge_backup_password_invalid">Passphrases do not match or are too short.</string>
+    <string name="knowledge_backup_privacy">Your knowledge journal may contain private note excerpts. Save it as an encrypted file with a strong, memorable passphrase. No passphrase is stored or sent anywhere. Losing it makes the backup unreadable.</string>
+    <string name="knowledge_backup_import_warning">Only encrypted DP Knowledge Journal backups are supported. Restore works only with an empty local journal; existing decisions will never be overwritten.</string>
+    <string name="knowledge_backup_decrypt">Decrypt locally</string>
+    <string name="knowledge_backup_working">Verifying and processing encrypted journal backup…</string>
+    <string name="knowledge_backup_exported">Encrypted knowledge journal saved to the location you chose.</string>
+    <string name="knowledge_backup_imported">Private journal successfully verified and restored.</string>
+    <string name="knowledge_backup_failed">Backup operation failed. Local knowledge journal was preserved.</string>
+    <string name="knowledge_backup_import_details">Verified decisions: %1$d\nJournal head: %2$s\n\nImport these records? Only an empty journal can be restored.</string>
+    <string name="knowledge_backup_confirm_import">Confirm restore</string>
 </resources>

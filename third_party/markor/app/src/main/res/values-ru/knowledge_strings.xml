@@ -38,7 +38,7 @@
     <string name="knowledge_decision_reject">Отклонить эту интерпретацию</string>
     <string name="knowledge_decision_defer">Отложить решение (неизвестно)</string>
     <string name="knowledge_cannot_accept">Неоднозначная или некорректная интерпретация не может быть принята.</string>
-    <string name="knowledge_decision_warning">Ваше решение будет записано в приватный журнал знаний. Исходный Markdown не изменится. Экспорт и восстановление журнала пока не реализованы: при удалении приложения журнал будет утрачен.</string>
+    <string name="knowledge_decision_warning">Ваше решение будет записано в приватный журнал знаний. Исходный Markdown не изменится. Автоматического резервирования пока нет: перед удалением приложения или сбросом данных экспортируйте зашифрованный архив.</string>
     <string name="knowledge_confirm_decision">Подтвердить решение</string>
     <string name="knowledge_recording_decision">Проверка источника и запись решения…</string>
     <string name="knowledge_decision_saved">Решение записано в локальный журнал знаний.</string>
@@ -55,4 +55,18 @@
     <string name="knowledge_state_counts">Записей: %1$d\nПринято: %2$d\nЗаявлений: %3$d\nПротиворечий: %4$d</string>
     <string name="knowledge_state_unknowns">Открытых гипотез: %1$d\nОтложено: %2$d\nЗаявлений без проверки: %3$d</string>
     <string name="knowledge_conflict_heading">Противоречие</string>
+    <string name="knowledge_backup_export">Шифрованный экспорт</string>
+    <string name="knowledge_backup_import">Восстановить</string>
+    <string name="knowledge_backup_password">Пароль архива (12+ символов)</string>
+    <string name="knowledge_backup_password_confirm">Повторите пароль</string>
+    <string name="knowledge_backup_password_invalid">Пароли не совпадают или слишком короткие.</string>
+    <string name="knowledge_backup_privacy">Журнал знаний может содержать личные фрагменты заметок. Сохраните его в зашифрованный файл с надёжным запоминающимся паролем. Пароль не сохраняется и никуда не передаётся. Потеря пароля делает архив недоступным.</string>
+    <string name="knowledge_backup_import_warning">Поддерживаются только зашифрованные архивы DP Knowledge Journal. Восстановление возможно лишь при пустом локальном журнале: существующие решения не перезаписываются.</string>
+    <string name="knowledge_backup_decrypt">Расшифровать локально</string>
+    <string name="knowledge_backup_working">Проверка и обработка зашифрованного архива журнала…</string>
+    <string name="knowledge_backup_exported">Зашифрованный журнал сохранён в выбранное место.</string>
+    <string name="knowledge_backup_imported">Приватный журнал проверен и восстановлен.</string>
+    <string name="knowledge_backup_failed">Операция с архивом не удалась. Локальный журнал сохранён.</string>
+    <string name="knowledge_backup_import_details">Проверено решений: %1$d\nГолова журнала: %2$s\n\nВосстановить эти записи? Восстановление допустимо только при пустом журнале.</string>
+    <string name="knowledge_backup_confirm_import">Подтвердить восстановление</string>
 </resources>
