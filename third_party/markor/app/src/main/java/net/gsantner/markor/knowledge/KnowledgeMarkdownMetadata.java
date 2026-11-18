@@ -133,11 +133,8 @@ public final class KnowledgeMarkdownMetadata {
         if (token.length() > 0) {
             tokens.add(token.toString());
         }
-        if (tokens.size() > 8) {
-            tokens = tokens.subList(0, 8);
-        }
         final StringBuilder query = new StringBuilder();
-        for (final String part : tokens) {
+        for (final String part : tokens.subList(0, Math.min(tokens.size(), 8))) {
             if (query.length() > 0) {
                 query.append(' ');
             }
