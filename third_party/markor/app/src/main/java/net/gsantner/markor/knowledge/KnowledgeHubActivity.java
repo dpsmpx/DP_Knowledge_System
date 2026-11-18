@@ -6,7 +6,11 @@
  */
 package net.gsantner.markor.knowledge;
 
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.text.InputType;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.MenuItem;
@@ -34,9 +38,14 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,6 +58,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
+    private static final int REQUEST_EXPORT_JOURNAL = 40021;
+    private static final int REQUEST_IMPORT_JOURNAL = 40022;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
@@ -66,6 +77,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView status;
     private ProgressBar progress;
     private EditText filter;
+    private char[] pendingExportPassword;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -129,6 +141,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         refresh.setOnClickListener(view -> scanNotebook());
         findViewById(R.id.knowledge_ask).setOnClickListener(view -> promptKnowledgeQuery());
         findViewById(R.id.knowledge_diagnostics).setOnClickListener(view -> showKnowledgeDiagnostics());
+        findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
+        findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         scanNotebook();
     }
 
@@ -667,6 +681,237 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return a == null ? 0 : a.length();
     }
 
+    private static EditText passwordInput(final Activity activity) {
+        final EditText input = new EditText(activity);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setSingleLine(true);
+        return input;
+    }
+
+    private void requestJournalExport() {
+        final android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
+        fields.setOrientation(android.widget.LinearLayout.VERTICAL);
+        fields.setPadding(24, 0, 24, 0);
+        final EditText password = passwordInput(this);
+        final EditText confirm = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        confirm.setHint(R.string.knowledge_backup_password_confirm);
+        fields.addView(password);
+        fields.addView(confirm);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_backup_export)
+                .setMessage(R.string.knowledge_backup_privacy)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_export, (dialog, which) -> {
+                    final String first = password.getText().toString();
+                    if (first.length() < 12 || !first.equals(confirm.getText().toString())) {
+                        Toast.makeText(this, R.string.knowledge_backup_password_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (pendingExportPassword != null) {
+                        Arrays.fill(pendingExportPassword, '\0');
+                    }
+                    pendingExportPassword = first.toCharArray();
+                    final Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("application/octet-stream");
+                    intent.putExtra(Intent.EXTRA_TITLE, "DP_Knowledge_Journal.dpks");
+                    startActivityForResult(intent, REQUEST_EXPORT_JOURNAL);
+                })
+                .show();
+    }
+
+    private void requestJournalImport() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_backup_import)
+                .setMessage(R.string.knowledge_backup_import_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_import, (dialog, which) -> {
+                    final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("application/octet-stream");
+                    startActivityForResult(intent, REQUEST_IMPORT_JOURNAL);
+                })
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_EXPORT_JOURNAL) {
+            final char[] password = pendingExportPassword;
+            pendingExportPassword = null;
+            if (password == null) {
+                return;
+            }
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                exportJournalToUri(data.getData(), password);
+            } else {
+                Arrays.fill(password, '\0');
+            }
+        } else if (requestCode == REQUEST_IMPORT_JOURNAL
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptJournalImportPassword(data.getData());
+        }
+    }
+
+    private static byte[] readLimited(final InputStream input, final int limit) throws IOException {
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        final byte[] buffer = new byte[16 * 1024];
+        int n;
+        while ((n = input.read(buffer)) != -1) {
+            if (bytes.size() + n > limit) {
+                throw new IOException("Backup exceeds size limit");
+            }
+            bytes.write(buffer, 0, n);
+        }
+        return bytes.toByteArray();
+    }
+
+    private static String sha256Hex(final byte[] data) throws Exception {
+        final byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
+        final char[] hex = "0123456789abcdef".toCharArray();
+        final StringBuilder result = new StringBuilder(64);
+        for (final byte b : digest) {
+            result.append(hex[(b >>> 4) & 0xF]).append(hex[b & 0xF]);
+        }
+        return result.toString();
+    }
+
+    private void exportJournalToUri(final Uri destination, final char[] password) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            byte[] plaintext = null;
+            try {
+                final JSONObject metadata = KnowledgePythonBridge.journalExportInfo(
+                        this, workspacePath());
+                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+                try (FileInputStream in = new FileInputStream(journal)) {
+                    plaintext = readLimited(in, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES);
+                }
+                if (!sha256Hex(plaintext).equals(metadata.getString("sha256"))) {
+                    throw new IOException("Journal changed while exporting");
+                }
+                final byte[] ciphertext = KnowledgeJournalCrypto.encrypt(plaintext, password);
+                try (OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
+                    if (output == null) {
+                        throw new IOException("Cannot open user-selected destination");
+                    }
+                    output.write(ciphertext);
+                    output.flush();
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_backup_exported,
+                                Toast.LENGTH_LONG).show();
+                        if (syncResult != null && snapshot != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_backup_failed);
+                    }
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (plaintext != null) {
+                    Arrays.fill(plaintext, (byte) 0);
+                }
+            }
+        });
+    }
+
+    private void promptJournalImportPassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_backup_import)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt,
+                        (dialog, which) -> importJournalFromUri(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void importJournalFromUri(final Uri source, final char[] password) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            byte[] decrypted = null;
+            try {
+                final byte[] payload;
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    if (input == null) {
+                        throw new IOException("Cannot read user-selected backup");
+                    }
+                    payload = readLimited(input, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES + 128);
+                }
+                decrypted = KnowledgeJournalCrypto.decrypt(payload, password);
+                final String journalText = new String(decrypted,
+                        java.nio.charset.StandardCharsets.UTF_8);
+                final JSONObject preview = KnowledgePythonBridge.journalRestorePreview(
+                        this, workspacePath(), journalText);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        confirmJournalImport(journalText, preview);
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_backup_failed);
+                    }
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (decrypted != null) {
+                    Arrays.fill(decrypted, (byte) 0);
+                }
+            }
+        });
+    }
+
+    private void confirmJournalImport(final String journalText, final JSONObject preview) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_backup_import)
+                .setMessage(getString(R.string.knowledge_backup_import_details,
+                        preview.optInt("count"), preview.optString("head")))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_confirm_import, (dialog, which) -> {
+                    final int scan = scanGeneration.get();
+                    status.setText(R.string.knowledge_backup_working);
+                    worker.submit(() -> {
+                        try {
+                            KnowledgePythonBridge.journalRestoreCommit(this, workspacePath(),
+                                    journalText, preview.getString("sha256"));
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                                    Toast.makeText(this, R.string.knowledge_backup_imported,
+                                            Toast.LENGTH_LONG).show();
+                                    if (syncResult != null && snapshot != null) {
+                                        showIndexStatus(displayed.size());
+                                    }
+                                }
+                            });
+                        } catch (Exception ignored) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                                    status.setText(R.string.knowledge_backup_failed);
+                                }
+                            });
+                        }
+                    });
+                })
+                .show();
+    }
+
     @Override
     public boolean onOptionsItemSelected(@NonNull final MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
@@ -685,6 +930,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         if (runningSearch != null) {
             runningSearch.cancel(true);
+        }
+        if (pendingExportPassword != null) {
+            Arrays.fill(pendingExportPassword, '\0');
+            pendingExportPassword = null;
         }
         worker.shutdownNow();
         super.onDestroy();

@@ -31,8 +31,9 @@ snapshot until the integrated application is ready.
 | 03 | Formal `ksys` integration with deterministic Python/native bridge; reproduce existing fixtures rather than silently reimplement logic | Android ↔ core contract tests, offline execution, parity against Python golden cases |
 | 04 | Human-in-the-loop knowledge intake: CLAIM/FACT/HYPOTHESIS, preview, approval, editable interpretations, journal, provenance | No unapproved fact, journal integrity, source trace and undo-safe decisions |
 | 05 | Knowledge search, relationships, contradictions, explanations, hypotheses, and temporal queries | Inspectable evidence trees; `UNKNOWN` and `CONTESTED` correctly distinguished |
-| 06 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
-| 07 | Reliable large-vault UX: background incremental work, backup/restore, conflicting edits, migrations, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 06 | Explicit, encrypted journal export/import before wider release | User-chosen backup/restore, source hash-chain verified, existing journal never overwritten |
+| 07 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
+| 08 | Reliable large-vault UX: background incremental work, conflicting edits, migrations, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -137,6 +138,38 @@ that questions do not modify the journal.
 This is not yet free-form AI chat. It is deterministic, limited by the
 existing controlled-language parser and the body of user-approved knowledge.
 No LLM invocation or external connection is part of this milestone.
+
+## Stage 06 — encrypted journal portability (safety priority)
+
+Because a human-approved knowledge journal is authoritative and irreplaceable,
+the next integration PR prioritizes portable backup/recovery before optional
+LLM transport. The Knowledge Library exposes two Android Storage Access
+Framework actions: **Encrypted export** and **Restore backup**. Only the user
+chooses the destination/source document.
+
+The export verifies the existing Python journal's hash chain and compares its
+raw SHA-256 digest immediately before encryption. The DP Knowledge Journal
+`.dpks` container has a versioned header, random 128-bit salt, random 96-bit
+AES-GCM nonce, 256-bit AES key derived from a user passphrase by
+PBKDF2-HMAC-SHA1 (600,000 iterations, for Android API 24 compatibility) and
+a 128-bit authentication tag. Neither passphrase nor key is stored in the
+repository, journal or app settings. The selected backup content is encrypted
+before leaving the app. Tampered ciphertext and incorrect passwords are
+rejected. API 26+ could use PBKDF2-HMAC-SHA256; a future versioned container
+may adopt a memory-hard KDF.
+
+Recovery decrypts locally, verifies every sequential journal entry and hash
+link against the original `ksys.store.journal` algorithm, displays the entry
+count and head for user confirmation, and then installs the journal from a
+temporary file. **An existing nonempty journal is never replaced or merged.**
+There is an 8 MB plaintext limit for this initial portable format. User
+passphrases must contain at least 12 characters, and users are responsible
+for keeping both the encrypted archive and the passphrase safe.
+
+**Limitations:** no scheduled automatic backup, password recovery, key
+rotation, multi-device merge, atomic guarantees across an external cloud
+provider's document write, or large-journal streaming yet. Complete migration
+and realistic device recovery testing remain a release gate.
 
 ## Integration branch and PR process
 

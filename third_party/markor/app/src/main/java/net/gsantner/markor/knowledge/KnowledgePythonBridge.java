@@ -51,6 +51,22 @@ public final class KnowledgePythonBridge {
         return invoke(context, "knowledge_diagnostics", workspace);
     }
 
+    public static JSONObject journalExportInfo(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "journal_export_info", workspace);
+    }
+
+    public static JSONObject journalRestorePreview(final Context context, final String workspace,
+                                                   final String text) throws JSONException {
+        return invoke(context, "journal_restore_preview", workspace, text);
+    }
+
+    public static JSONObject journalRestoreCommit(final Context context, final String workspace,
+                                                  final String text, final String expectedSha)
+            throws JSONException {
+        return invoke(context, "journal_restore_commit", workspace, text, expectedSha);
+    }
+
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
         if (!Python.isStarted()) {
@@ -62,7 +78,8 @@ public final class KnowledgePythonBridge {
         final String protocol = result.optString("protocol");
         if (!"dpksys.inspect.v1".equals(protocol)
                 && !"dpksys.decision.v1".equals(protocol)
-                && !"dpksys.query.v1".equals(protocol)) {
+                && !"dpksys.query.v1".equals(protocol)
+                && !"dpksys.backup.v1".equals(protocol)) {
             throw new JSONException("Unexpected knowledge core protocol");
         }
         return result;
