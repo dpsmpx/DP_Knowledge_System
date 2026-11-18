@@ -1,8 +1,8 @@
-"""Deterministic, read-only Android entry point for repository-root ksys.
+"""Offline Android bridge for the actual repository-root ksys package.
 
-No vault filesystem access, no journal writes, no network or model inference.
-Android passes the selected Markdown text; this module uses the same imported
-source parser and classifier as the desktop Python core.
+The explicitly selected vault is only read. Automatic analysis writes solely
+to an app-private disposable index, never to original notes or the human
+approved knowledge journal. Journal writes require a separate review flow.
 """
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from ksys.source.markdown import parse_document
 from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
+from ksys.importer.vault import import_vault, MARKDOWN_EXT
+from ksys.store.db import connect
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
 from ksys.dialogue.session import Dialogue
@@ -24,8 +26,86 @@ from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
 from ksys.core.enums import DialogueOp
 
-MAX_CHARACTERS = 150_000
+MAX_CHARACTERS = 2_000_000
 MAX_DISPLAYED = 24
+MAX_IMPORT_BYTES = 2_000_000
+MAX_IMPORT_FILES = 200_000
+
+
+def analyze_vault(workspace_dir: str, vault_dir: str, callback=None) -> str:
+    """Classify every accessible Markdown note and extract unapproved candidates.
+
+    The callback receives only a counter, never note bodies or private paths.
+    It may return False to abort the transaction without publishing partial
+    analysis. Missing documents are retained because an Android storage scan
+    cannot prove that files were deleted rather than temporarily inaccessible.
+    """
+    root = Path(vault_dir).resolve()
+    workspace = Path(workspace_dir).resolve()
+    if not Path(vault_dir).is_absolute() or not Path(workspace_dir).is_absolute() \
+            or not root.is_dir() or root == workspace \
+            or workspace.is_relative_to(root) or root.is_relative_to(workspace):
+        raise ValueError("Invalid selected notebook or app-private workspace")
+    seen = 0
+
+    def report(_path: str) -> None:
+        nonlocal seen
+        seen += 1
+        if callback is not None and not callback.onProgress(seen):
+            raise InterruptedError("Semantic notebook analysis cancelled")
+
+    result = import_vault(
+        Workspace(workspace), root, SystemClock(), LanguageAnalyzer(),
+        progress=report, only_extensions=MARKDOWN_EXT, skip_hidden=True,
+        max_bytes=MAX_IMPORT_BYTES, max_files=MAX_IMPORT_FILES,
+        reconcile_missing=False,
+        cancelled=(lambda: callback is not None and not callback.onProgress(seen)),
+    )
+    return json.dumps({
+        "protocol": "dpksys.bulk.v1",
+        "engine_version": KS_VERSION,
+        "totals": result.manifest["totals"],
+        "truncated": result.manifest["truncated"],
+        "unreadable_directories": result.manifest["unreadable_directories"],
+        "coverage_failures": len(result.coverage_failures),
+        "read_only_sources": True,
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def review_queue(workspace_dir: str, offset: int = 0) -> str:
+    """Page through unapproved semantic suggestions, without a journal write."""
+    workspace = Path(workspace_dir)
+    if not workspace.is_absolute() or not isinstance(offset, int) \
+            or offset < 0 or offset > 1_000_000:
+        raise ValueError("Invalid workspace or queue offset")
+    db_path = Workspace(workspace).db_path
+    if not db_path.is_file():
+        return json.dumps({"protocol": "dpksys.bulk.v1", "total": 0, "offset": offset,
+                           "candidates": [], "requires_human_review": True})
+    con = connect(db_path)
+    try:
+        total = con.execute(
+            "SELECT COUNT(*) FROM candidates c JOIN fragments f ON f.id=c.origin "
+            "JOIN documents d ON d.path=f.doc WHERE d.status='PARSED'"
+        ).fetchone()[0]
+        rows = con.execute(
+            "SELECT f.doc, f.id, f.locator, c.paraphrase, c.reading_id "
+            "FROM candidates c JOIN fragments f ON f.id=c.origin "
+            "JOIN documents d ON d.path=f.doc WHERE d.status='PARSED' "
+            "ORDER BY f.doc COLLATE NOCASE, f.ordinal, c.id LIMIT 80 OFFSET ?",
+            (offset,)
+        ).fetchall()
+    finally:
+        con.close()
+    return json.dumps({
+        "protocol": "dpksys.bulk.v1",
+        "total": total, "offset": offset,
+        "candidates": [{"path": row[0], "fragment_id": row[1],
+                        "locator": row[2], "preview": row[3][:180],
+                        "reading_id": row[4]} for row in rows],
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def inspect_note(relative_path: str, markdown: str) -> str:

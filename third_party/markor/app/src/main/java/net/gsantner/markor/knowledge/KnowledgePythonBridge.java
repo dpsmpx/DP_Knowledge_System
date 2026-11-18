@@ -21,6 +21,21 @@ public final class KnowledgePythonBridge {
     private KnowledgePythonBridge() {
     }
 
+    public interface BulkProgress {
+        boolean onProgress(int processed);
+    }
+
+    public static JSONObject analyzeVault(final Context context, final String workspace,
+                                          final String notebook, final BulkProgress progress)
+            throws JSONException {
+        return invoke(context, "analyze_vault", workspace, notebook, progress);
+    }
+
+    public static JSONObject reviewQueue(final Context context, final String workspace,
+                                         final int offset) throws JSONException {
+        return invoke(context, "review_queue", workspace, offset);
+    }
+
     public static JSONObject inspect(final Context context, final String relativePath,
                                      final String markdown) throws JSONException {
         return invoke(context, "inspect_note", relativePath, markdown);
@@ -69,8 +84,10 @@ public final class KnowledgePythonBridge {
 
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
-        if (!Python.isStarted()) {
-            Python.start(new AndroidPlatform(context.getApplicationContext()));
+        synchronized (KnowledgePythonBridge.class) {
+            if (!Python.isStarted()) {
+                Python.start(new AndroidPlatform(context.getApplicationContext()));
+            }
         }
         final String output = Python.getInstance().getModule("ksys_android_bridge")
                 .callAttr(method, arguments).toString();
@@ -79,7 +96,8 @@ public final class KnowledgePythonBridge {
         if (!"dpksys.inspect.v1".equals(protocol)
                 && !"dpksys.decision.v1".equals(protocol)
                 && !"dpksys.query.v1".equals(protocol)
-                && !"dpksys.backup.v1".equals(protocol)) {
+                && !"dpksys.backup.v1".equals(protocol)
+                && !"dpksys.bulk.v1".equals(protocol)) {
             throw new JSONException("Unexpected knowledge core protocol");
         }
         return result;

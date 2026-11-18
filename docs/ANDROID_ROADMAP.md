@@ -32,8 +32,9 @@ snapshot until the integrated application is ready.
 | 04 | Human-in-the-loop knowledge intake: CLAIM/FACT/HYPOTHESIS, preview, approval, editable interpretations, journal, provenance | No unapproved fact, journal integrity, source trace and undo-safe decisions |
 | 05 | Knowledge search, relationships, contradictions, explanations, hypotheses, and temporal queries | Inspectable evidence trees; `UNKNOWN` and `CONTESTED` correctly distinguished |
 | 06 | Explicit, encrypted journal export/import before wider release | User-chosen backup/restore, source hash-chain verified, existing journal never overwritten |
-| 07 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
-| 08 | Reliable large-vault UX: background incremental work, conflicting edits, migrations, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 07 | Automatic, local, whole-library semantic classification, candidate extraction, incremental indexing and review queue | All accessible Markdown notes processed without authorizing facts; cancellation, size bounds and partial-scan safety tested |
+| 08 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
+| 09 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -170,6 +171,48 @@ for keeping both the encrypted archive and the passphrase safe.
 rotation, multi-device merge, atomic guarantees across an external cloud
 provider's document write, or large-journal streaming yet. Complete migration
 and realistic device recovery testing remain a release gate.
+
+## Stage 07 — automatic semantic processing of the library
+
+The Knowledge Library can now process the **entire selected local Markdown
+notebook** using the original repository-root Python
+`ksys.importer.vault.import_vault` and `LanguageAnalyzer` through
+`dpksys.bulk.v1`. It segments notes into source-linked fragments, classifies
+them, runs deterministic controlled-language formalization, counts unresolved
+or ambiguous statements, and creates candidate interpretations in a private,
+disposable SQLite database. The UI shows a progress counter, aggregate
+statistics, and a paginated candidate review list. Selecting a candidate
+reopens the current Markdown and uses the existing two-step human approval
+and provenance checks. **No imported suggestion automatically becomes an
+approved claim, hypothesis or fact.**
+
+Users can start/cancel processing at any time; a separate, explicitly enabled
+setting automatically reruns the semantic importer after the ordinary library
+refresh. Unchanged notes reuse their prior indexed fragments and candidates.
+Both search and bulk interpretation run away from the UI thread on independent
+executors. No web API, model service, telemetry, personal notes, or processed
+data enter GitHub.
+
+The Android import deliberately skips hidden metadata, non-Markdown and
+Git-ignored files; it prevents symlink escapes, caps individual Markdown
+sources at 2 MB and processing at 200,000 Markdown files per run, and reports
+unreadable, oversized, truncated or coverage-failed sources. A cancelled run
+rolls back its in-progress derived-index transaction. **Missing file entries
+are retained** because external storage access and partial scans cannot prove
+that a source was deleted. This conservative approach can leave old candidates
+in the private index; reopening a candidate always checks its current source
+and rejects stale fragment identities. An explicit complete reconciliation
+strategy is planned for a later stage.
+
+Limitations: this stage performs deterministic language interpretation,
+classification and extraction — **not LLM-driven semantic understanding,
+embeddings, cross-document entity disambiguation, automatic knowledge
+authorization, an unattended OS-managed WorkManager job, or reliable real-time
+change observation**. Automatic reprocessing runs on manual library refresh
+while the Knowledge Library screen is active and opt-in is enabled. Candidate
+pagination includes previously reviewed candidates; review-state filtering
+and priority ranking remain future work. APK/device validation and large
+real-world vault load testing remain required before production use.
 
 ## Integration branch and PR process
 
