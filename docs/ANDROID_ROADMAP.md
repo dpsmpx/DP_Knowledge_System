@@ -36,7 +36,8 @@ snapshot until the integrated application is ready.
 | 08 | Conservative cross-note semantic relationships between independently extracted claims | Exact predicate/argument matching, opposite-negation candidates, paired provenance, no automatic factual authority |
 | 09 | Whole-library audit of contradictions, ambiguous and unresolved text, source errors, approved-knowledge gaps and journal integrity | Fresh local import, exact severity-separated counts, bounded source-provenanced pages, explicit completeness limits; no automatic repair |
 | 10 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
-| 11 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 11 | Optional embedding-based semantic search and LLM evidence selection; bounded incremental vector index | Ranked passage-level matches, strict per-action upload consent, local-only vector search, privacy-safe cache invalidation |
+| 12 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -340,6 +341,64 @@ retrieval, reranking, streaming or autonomous network traffic in this stage.
 Lexical retrieval will miss paraphrases; prompts embedded in notes may still
 influence an LLM despite being clearly marked as untrusted. Android-device
 integration tests against actual local and remote models remain necessary.
+
+## Stage 11 — optional semantic embeddings for Markdown retrieval
+
+**Build embeddings** in the Android knowledge screen now creates a disposable,
+local vector projection for **the selected notebook only**. Users separately
+choose an OpenAI-compatible embeddings endpoint and an *embedding model*
+(which is different from the chat completion model), and optionally enter
+an API key. Compatible servers implement `POST /v1/embeddings` and return
+indexed, numeric vectors of equal length. For instance, with a loaded
+embedding-capable model in LM Studio, a PC service can be reached from Android
+through `http://192.168.x.y:1234/v1`; remote endpoints require HTTPS. The
+same private-network HTTP restrictions and disabled redirect policy as Stage
+10 apply to embeddings. Local model IDs must be obtained from the selected
+service; the project does not silently download or bundle any model.
+
+**Privacy and explicit permission:**
+
+- Indexing is **manual and off by default**. Before a batch, the app lists
+  up to 40 selected note paths, the total note count (up to 120 per run),
+  the destination host/model and a clear warning that selected private
+  excerpts will be sent in multiple network requests, and may be retained
+  by that service. Cancel means **no upload**. No endpoint is contacted
+  merely by scanning a vault, opening the app or performing the deterministic
+  knowledge audit.
+- A note contributes at most **three excerpts of 850 characters**. This
+  is a *sample* across longer notes, not full-content semantic coverage.
+  Paths and journal data are not included as embedding inputs. Up to six
+  excerpts are sent per request; runs resume from still-unindexed notes
+  when the user starts the next batch. There is no autonomous background
+  continuation after the user leaves the screen.
+- The **question itself** is sent to the embedding service only after an
+  additional per-query dialog showing its exact text and destination.
+  Search compares the resulting vector with local embeddings, so no note
+  text is uploaded while querying. In **Ask LLM**, the user can explicitly
+  choose semantic rather than lexical source selection. The existing second
+  confirmation still displays *every exact excerpt* before the chat model
+  receives it. API keys are never stored; endpoint/model preferences are.
+
+Vectors are float32, length-normalized, checked for finite values,
+stored in the app-private `noBackupFilesDir` SQLite database, and ranked
+by actual cosine similarity against the query. The best chunk per document
+is shown with a score; the source note can be opened. The index retains
+the model/endpoint fingerprint, source timestamp, size, and excerpt offsets.
+Changing/deleting notes or switching notebook roots invalidates relevant
+cached vectors. A **long press on Build embeddings** clears the entire
+disposable semantic projection with an extra confirmation, leaving Markdown
+files and the authoritative knowledge journal untouched.
+
+**Current bounds:** batches are capped at 120 notes; Android reads at
+most 2 MiB per eligible Markdown file; each note contributes up to 3 chunks;
+up to 60,000 vector rows are compared in a search. Very large libraries
+may require multiple authorized indexing runs, and all runs/queries are
+subject to the local or remote embedding server's performance, quotas
+and privacy policies. No vector ANN index, on-device inference engine,
+semantic proof, learned re-ranker, verified citations or zero-knowledge
+remote processing is claimed. Similarity is a **candidate relevance
+signal**, not evidence that source claims are true. End-to-end tests
+against actual Android hardware and embedding servers remain pending.
 
 ## Integration branch and PR process
 

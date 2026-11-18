@@ -49,7 +49,9 @@ import java.security.MessageDigest;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
@@ -63,6 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
+    private static final int MAX_EMBED_NOTES_PER_RUN = 120;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final String[] AUDIT_CATEGORIES = {
@@ -78,10 +81,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService analysisWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService embeddingWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
     private final AtomicInteger analysisGeneration = new AtomicInteger();
     private final AtomicInteger auditGeneration = new AtomicInteger();
+    private final AtomicInteger embeddingGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
 
@@ -89,6 +94,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Future<?> runningSearch;
     private Future<?> runningAnalysis;
     private Future<?> runningAudit;
+    private Future<?> runningEmbedding;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
@@ -98,9 +104,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView analysisStatus;
     private Button analysisButton;
     private Button auditButton;
+    private Button embeddingButton;
     private CheckBox automaticAnalysis;
     private boolean analysisActive;
     private boolean auditActive;
+    private boolean embeddingActive;
     private ProgressBar progress;
     private EditText filter;
     private char[] pendingExportPassword;
@@ -127,6 +135,34 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         status = findViewById(R.id.knowledge_status);
         analysisStatus = findViewById(R.id.knowledge_bulk_status);
         analysisButton = findViewById(R.id.knowledge_bulk_analyze);
+        embeddingButton = findViewById(R.id.knowledge_embedding_build);
+        embeddingButton.setOnClickListener(view -> {
+            if (embeddingActive) {
+                cancelEmbeddingBuild();
+            } else {
+                promptEmbeddingSettings(this::prepareEmbeddingBuild);
+            }
+        });
+        embeddingButton.setOnLongClickListener(view -> {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_embedding_clear)
+                    .setMessage(R.string.knowledge_embedding_clear_warning)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.knowledge_embedding_clear, (dialog, which) -> {
+                        cancelEmbeddingBuild();
+                        embeddingWorker.submit(() -> {
+                            index.clearEmbeddings();
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) {
+                                    status.setText(R.string.knowledge_embedding_cleared);
+                                }
+                            });
+                        });
+                    }).show();
+            return true;
+        });
+        findViewById(R.id.knowledge_semantic_search).setOnClickListener(
+                view -> promptSemanticQuestion());
         auditButton = findViewById(R.id.knowledge_full_audit);
         auditButton.setOnClickListener(view -> {
             if (auditActive) {
@@ -206,6 +242,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void scanNotebook() {
+        if (embeddingActive) {
+            cancelEmbeddingBuild();
+        }
         auditGeneration.incrementAndGet();
         if (auditActive) {
             cancelFullAudit();
@@ -1029,6 +1068,425 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
+    private interface EmbeddingReady {
+        void proceed(URL endpoint, String model, String apiKey);
+    }
+
+    private interface SemanticMatches {
+        void receive(List<KnowledgeLocalIndex.SemanticHit> matches);
+    }
+
+    private void promptEmbeddingSettings(final EmbeddingReady onReady) {
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setPadding(24, 8, 24, 8);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final EditText endpointText = new EditText(this);
+        endpointText.setSingleLine(true);
+        endpointText.setHint(R.string.knowledge_llm_endpoint_hint);
+        endpointText.setText(getPreferences(MODE_PRIVATE)
+                .getString("knowledge_embedding_endpoint", ""));
+        final EditText modelText = new EditText(this);
+        modelText.setSingleLine(true);
+        modelText.setHint(R.string.knowledge_embedding_model_hint);
+        modelText.setText(getPreferences(MODE_PRIVATE)
+                .getString("knowledge_embedding_model", ""));
+        final EditText apiKeyText = new EditText(this);
+        apiKeyText.setSingleLine(true);
+        apiKeyText.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        apiKeyText.setHint(R.string.knowledge_llm_key_hint);
+        fields.addView(endpointText);
+        fields.addView(modelText);
+        fields.addView(apiKeyText);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_embedding_settings)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_llm_continue, (dialog, which) -> {
+                    try {
+                        final URL endpoint = KnowledgeEmbeddingClient.endpoint(
+                                endpointText.getText().toString());
+                        final String model = modelText.getText().toString().trim();
+                        KnowledgeEmbeddingClient.modelKey(endpoint, model);
+                        final String key = apiKeyText.getText().toString();
+                        if (key.length() > 1024 || key.indexOf('\n') >= 0
+                                || key.indexOf('\r') >= 0) {
+                            throw new IllegalArgumentException("Invalid key");
+                        }
+                        // Only endpoint and model metadata are saved. The key is per-action.
+                        getPreferences(MODE_PRIVATE).edit()
+                                .putString("knowledge_embedding_endpoint", endpoint.toString())
+                                .putString("knowledge_embedding_model", model).apply();
+                        onReady.proceed(endpoint, model, key);
+                    } catch (IllegalArgumentException invalid) {
+                        Toast.makeText(this, R.string.knowledge_embedding_config_invalid,
+                                Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void prepareEmbeddingBuild(final URL endpoint, final String model,
+                                       final String apiKey) {
+        final KnowledgeVaultScanner.Snapshot selectedSnapshot = snapshot;
+        if (selectedSnapshot == null) {
+            status.setText(R.string.knowledge_embedding_need_scan);
+            return;
+        }
+        final int scan = scanGeneration.get();
+        final String key = KnowledgeEmbeddingClient.modelKey(endpoint, model);
+        status.setText(R.string.knowledge_embedding_batch_check);
+        worker.submit(() -> {
+            try {
+                final Set<String> done = index.embeddedPaths(key);
+                final List<KnowledgeVaultScanner.Note> pending = new ArrayList<>();
+                for (final KnowledgeVaultScanner.Note note : selectedSnapshot.notes) {
+                    if (scanGeneration.get() != scan || Thread.currentThread().isInterrupted()) {
+                        return;
+                    }
+                    if (note.sizeBytes <= KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE
+                            && !done.contains(note.relativePath)) {
+                        pending.add(note);
+                        if (pending.size() >= MAX_EMBED_NOTES_PER_RUN) {
+                            break;
+                        }
+                    }
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    if (pending.isEmpty()) {
+                        status.setText(R.string.knowledge_embedding_up_to_date);
+                        return;
+                    }
+                    final StringBuilder names = new StringBuilder();
+                    for (int i = 0; i < Math.min(40, pending.size()); i++) {
+                        names.append("\n• ").append(pending.get(i).relativePath);
+                    }
+                    if (pending.size() > 40) {
+                        names.append("\n… +").append(pending.size() - 40);
+                    }
+                    final String plainWarning = "http".equals(endpoint.getProtocol())
+                            ? "\n\n" + getString(R.string.knowledge_llm_plaintext_warning) : "";
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_embedding_consent_title)
+                            .setMessage(getString(R.string.knowledge_embedding_consent,
+                                    pending.size(), endpoint.getHost(), model,
+                                    getString(R.string.knowledge_embedding_partial_warning))
+                                    + plainWarning + names)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_llm_send,
+                                    (dialog, which) -> startEmbeddingBuild(endpoint, model,
+                                            apiKey, key, pending, scan))
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_embedding_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void cancelEmbeddingBuild() {
+        embeddingGeneration.incrementAndGet();
+        if (runningEmbedding != null) {
+            runningEmbedding.cancel(true);
+        }
+        embeddingActive = false;
+        if (embeddingButton != null) {
+            embeddingButton.setText(R.string.knowledge_embedding_build);
+        }
+        if (status != null) {
+            status.setText(R.string.knowledge_embedding_cancelled);
+        }
+    }
+
+    private void startEmbeddingBuild(final URL endpoint, final String model, final String apiKey,
+                                     final String modelKey,
+                                     final List<KnowledgeVaultScanner.Note> pending,
+                                     final int scan) {
+        if (embeddingActive || scanGeneration.get() != scan) {
+            return;
+        }
+        embeddingActive = true;
+        embeddingButton.setText(R.string.knowledge_embedding_cancel);
+        final int operation = embeddingGeneration.incrementAndGet();
+        status.setText(getString(R.string.knowledge_embedding_running, 0, pending.size()));
+        runningEmbedding = embeddingWorker.submit(() -> {
+            int completed = 0;
+            int skipped = 0;
+            try {
+                for (int i = 0; i < pending.size(); i += 2) {
+                    if (Thread.currentThread().isInterrupted() || scanGeneration.get() != scan
+                            || embeddingGeneration.get() != operation) {
+                        return;
+                    }
+                    final List<String> inputs = new ArrayList<>();
+                    final List<KnowledgeVaultScanner.Note> noteBatch = new ArrayList<>();
+                    final List<List<KnowledgeEmbeddingChunks.Chunk>> chunksBatch = new ArrayList<>();
+                    for (int j = i; j < Math.min(pending.size(), i + 2); j++) {
+                        final KnowledgeVaultScanner.Note note = pending.get(j);
+                        try {
+                            if (note.file.lastModified() != note.modifiedAtMillis
+                                    || note.file.length() != note.sizeBytes) {
+                                skipped++;
+                                continue;
+                            }
+                            final String text = readSelectedNote(note.relativePath);
+                            if (note.file.lastModified() != note.modifiedAtMillis
+                                    || note.file.length() != note.sizeBytes) {
+                                skipped++;
+                                continue;
+                            }
+                            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                                    KnowledgeEmbeddingChunks.fromNote(text);
+                            if (chunks.isEmpty()) {
+                                skipped++;
+                                continue;
+                            }
+                            noteBatch.add(note);
+                            chunksBatch.add(chunks);
+                            for (final KnowledgeEmbeddingChunks.Chunk chunk : chunks) {
+                                inputs.add(chunk.text);
+                            }
+                        } catch (IOException inaccessible) {
+                            skipped++;
+                        }
+                    }
+                    if (!inputs.isEmpty()) {
+                        final float[][] vectors = KnowledgeEmbeddingClient.embed(
+                                endpoint, model, apiKey, inputs);
+                        int offset = 0;
+                        for (int j = 0; j < noteBatch.size(); j++) {
+                            final KnowledgeVaultScanner.Note note = noteBatch.get(j);
+                            final List<KnowledgeEmbeddingChunks.Chunk> chunks = chunksBatch.get(j);
+                            if (note.file.lastModified() != note.modifiedAtMillis
+                                    || note.file.length() != note.sizeBytes) {
+                                skipped++;
+                                offset += chunks.size();
+                                continue;
+                            }
+                            final float[][] assigned = Arrays.copyOfRange(
+                                    vectors, offset, offset + chunks.size());
+                            offset += chunks.size();
+                            index.storeEmbeddings(note.relativePath, note.modifiedAtMillis,
+                                    note.sizeBytes, modelKey, chunks, assigned);
+                            completed++;
+                        }
+                    }
+                    final int progressNow = Math.min(pending.size(), i + 2);
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed()
+                                && embeddingGeneration.get() == operation) {
+                            status.setText(getString(R.string.knowledge_embedding_running,
+                                    progressNow, pending.size()));
+                        }
+                    });
+                }
+                final int succeeded = completed;
+                final int missing = skipped;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && embeddingGeneration.get() == operation) {
+                        embeddingActive = false;
+                        embeddingButton.setText(R.string.knowledge_embedding_build);
+                        status.setText(getString(R.string.knowledge_embedding_done,
+                                succeeded, missing));
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && embeddingGeneration.get() == operation) {
+                        embeddingActive = false;
+                        embeddingButton.setText(R.string.knowledge_embedding_build);
+                        status.setText(R.string.knowledge_embedding_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void promptSemanticQuestion() {
+        final EditText question = new EditText(this);
+        question.setHint(R.string.knowledge_embedding_query);
+        question.setSingleLine(false);
+        question.setMinLines(2);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_semantic_search)
+                .setView(question)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_llm_continue, (dialog, which) -> {
+                    final String value = question.getText().toString().trim();
+                    if (value.isEmpty() || value.length() > 1200) {
+                        status.setText(R.string.knowledge_llm_invalid);
+                    } else {
+                        promptEmbeddingSettings((endpoint, model, key) ->
+                                consentSemanticQuestion(value, endpoint, model, key,
+                                        this::showSemanticResults));
+                    }
+                }).show();
+    }
+
+    private void consentSemanticQuestion(final String question, final URL endpoint,
+                                         final String model, final String apiKey,
+                                         final SemanticMatches callback) {
+        final String modelKey = KnowledgeEmbeddingClient.modelKey(endpoint, model);
+        if (index.embeddingNoteCount(modelKey) < 1) {
+            status.setText(R.string.knowledge_embedding_no_index);
+            return;
+        }
+        final String transportWarning = "http".equals(endpoint.getProtocol())
+                ? "\n" + getString(R.string.knowledge_llm_plaintext_warning) : "";
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_embedding_send_query)
+                .setMessage(getString(R.string.knowledge_embedding_query_consent,
+                        endpoint.getHost(), model) + transportWarning + "\n\n" + question)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_embedding_send_query,
+                        (dialog, which) -> performSemanticQuery(
+                                question, endpoint, model, apiKey, modelKey, callback))
+                .show();
+    }
+
+    private void performSemanticQuery(final String question, final URL endpoint,
+                                      final String model, final String apiKey,
+                                      final String modelKey, final SemanticMatches callback) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_embedding_querying);
+        embeddingWorker.submit(() -> {
+            try {
+                final float[] query = KnowledgeEmbeddingClient.embed(endpoint, model, apiKey,
+                        Collections.singletonList(question))[0];
+                final List<KnowledgeLocalIndex.SemanticHit> matches =
+                        index.semanticSearch(modelKey, query, 24);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        callback.receive(matches);
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_embedding_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showSemanticResults(final List<KnowledgeLocalIndex.SemanticHit> matches) {
+        if (matches.isEmpty()) {
+            status.setText(R.string.knowledge_embedding_no_matches);
+            return;
+        }
+        final String[] items = new String[matches.size()];
+        for (int i = 0; i < matches.size(); i++) {
+            final KnowledgeLocalIndex.SemanticHit match = matches.get(i);
+            items[i] = String.format(java.util.Locale.ROOT, "%.3f · %s",
+                    match.score, match.relativePath);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_embedding_results)
+                .setItems(items, (dialog, which) ->
+                        openIndexedNote(matches.get(which).relativePath))
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    private void maybeOfferSemanticForLlm(final String question, final URL chatEndpoint,
+                                          final String chatModel, final String chatKey) {
+        final String savedEndpoint = getPreferences(MODE_PRIVATE)
+                .getString("knowledge_embedding_endpoint", "");
+        final String savedModel = getPreferences(MODE_PRIVATE)
+                .getString("knowledge_embedding_model", "");
+        try {
+            final URL endpoint = KnowledgeEmbeddingClient.endpoint(savedEndpoint);
+            final String key = KnowledgeEmbeddingClient.modelKey(endpoint, savedModel);
+            if (index.embeddingNoteCount(key) > 0) {
+                new AlertDialog.Builder(this)
+                        .setTitle(R.string.knowledge_embedding_choose_retrieval)
+                        .setMessage(R.string.knowledge_embedding_choose_retrieval_message)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setNeutralButton(R.string.knowledge_embedding_use_lexical,
+                                (dialog, which) -> prepareLlmEvidence(
+                                        question, chatEndpoint, chatModel, chatKey))
+                        .setPositiveButton(R.string.knowledge_embedding_use_semantic,
+                                (dialog, which) -> promptEmbeddingSettings(
+                                        (queryEndpoint, queryModel, embeddingKey) ->
+                                                consentSemanticQuestion(question, queryEndpoint,
+                                                        queryModel, embeddingKey, ranked ->
+                                                                prepareSemanticLlmEvidence(question,
+                                                                        chatEndpoint, chatModel,
+                                                                        chatKey, ranked))))
+                        .show();
+                return;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // No configured semantic index yet: the established lexical path still works.
+        }
+        prepareLlmEvidence(question, chatEndpoint, chatModel, chatKey);
+    }
+
+    private void prepareSemanticLlmEvidence(final String question, final URL endpoint,
+                                            final String model, final String apiKey,
+                                            final List<KnowledgeLocalIndex.SemanticHit> ranked) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_llm_retrieving);
+        worker.submit(() -> {
+            try {
+                final List<KnowledgeLlmEvidence.Item> sources = new ArrayList<>();
+                for (final KnowledgeLocalIndex.SemanticHit match : ranked) {
+                    if (Thread.currentThread().isInterrupted() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    if (sources.size() >= KnowledgeLlmClient.MAX_EVIDENCE) {
+                        break;
+                    }
+                    try {
+                        final File file = new File(notebook, match.relativePath);
+                        if (file.lastModified() != match.modifiedAtMillis
+                                || file.length() != match.sizeBytes) {
+                            continue;
+                        }
+                        final String content = readSelectedNote(match.relativePath);
+                        if (file.lastModified() != match.modifiedAtMillis
+                                || file.length() != match.sizeBytes) {
+                            continue;
+                        }
+                        final String excerpt = KnowledgeEmbeddingChunks.atOffset(
+                                content, match.excerptStart);
+                        if (!excerpt.trim().isEmpty()) {
+                            sources.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
+                        }
+                    } catch (IOException ignored) {
+                        // Changed or inaccessible indexed files are never disclosed.
+                    }
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    if (sources.isEmpty()) {
+                        status.setText(R.string.knowledge_llm_no_sources);
+                    } else {
+                        requestLlmConsent(endpoint, model, apiKey,
+                                KnowledgeLlmClient.requestPreview(question, sources), sources);
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_llm_failed);
+                    }
+                });
+            }
+        });
+    }
+
     private void promptLlmQuestion() {
         final EditText question = new EditText(this);
         question.setHint(R.string.knowledge_llm_question);
@@ -1083,7 +1541,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         getPreferences(MODE_PRIVATE).edit()
                                 .putString("knowledge_llm_endpoint", selected.toString())
                                 .putString("knowledge_llm_model", selectedModel).apply();
-                        prepareLlmEvidence(question, selected, selectedModel,
+                        maybeOfferSemanticForLlm(question, selected, selectedModel,
                                 apiKey.getText().toString());
                     } catch (IllegalArgumentException invalid) {
                         Toast.makeText(this, R.string.knowledge_llm_invalid,
@@ -1589,8 +2047,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         queryGeneration.incrementAndGet();
         analysisGeneration.incrementAndGet();
         auditGeneration.incrementAndGet();
+        embeddingGeneration.incrementAndGet();
         if (runningAudit != null) {
             runningAudit.cancel(true);
+        }
+        if (runningEmbedding != null) {
+            runningEmbedding.cancel(true);
         }
         if (runningAnalysis != null) {
             runningAnalysis.cancel(true);
@@ -1607,6 +2069,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();
+        embeddingWorker.shutdownNow();
         super.onDestroy();
     }
 }

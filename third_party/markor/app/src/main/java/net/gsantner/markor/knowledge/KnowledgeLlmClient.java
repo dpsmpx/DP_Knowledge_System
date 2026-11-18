@@ -33,6 +33,15 @@ public final class KnowledgeLlmClient {
     }
 
     public static URL endpoint(final String provided) {
+        return serviceEndpoint(provided, "/v1/chat/completions");
+    }
+
+    /** Shared redirect-safe transport policy for chat and embedding endpoints. */
+    static URL serviceEndpoint(final String provided, final String targetPath) {
+        if (!"/v1/chat/completions".equals(targetPath)
+                && !"/v1/embeddings".equals(targetPath)) {
+            throw new IllegalArgumentException("Unsupported LLM endpoint");
+        }
         if (provided == null || provided.length() > 500 || provided.trim().isEmpty()) {
             throw new IllegalArgumentException("Missing or overly long LLM endpoint");
         }
@@ -52,11 +61,11 @@ public final class KnowledgeLlmClient {
             }
             final String normalizedPath;
             if ("/v1".equals(path) || "/v1/".equals(path)) {
-                normalizedPath = "/v1/chat/completions";
-            } else if (path != null && path.endsWith("/v1/chat/completions")) {
+                normalizedPath = targetPath;
+            } else if (targetPath.equals(path)) {
                 normalizedPath = path;
             } else {
-                throw new IllegalArgumentException("Expected /v1/chat/completions endpoint");
+                throw new IllegalArgumentException("Unexpected LLM endpoint path");
             }
             if (normalizedPath.contains("%") || normalizedPath.contains("..")) {
                 throw new IllegalArgumentException("Endpoint path must not be encoded");
