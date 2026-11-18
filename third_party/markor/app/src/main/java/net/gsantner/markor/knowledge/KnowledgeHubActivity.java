@@ -21,6 +21,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
 
 import net.gsantner.markor.R;
@@ -32,27 +33,30 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * First-stage, offline knowledge workspace: discover a local Markdown vault,
- * filter relative filenames, and open an explicitly selected note in Markor.
- * Neither scanning nor filtering reads or modifies note contents.
+ * Offline knowledge workspace: discover files without changing them, maintain
+ * an app-private disposable text index, and open a chosen file in Markor.
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
-    private final List<KnowledgeVaultScanner.Note> displayed = new ArrayList<>();
+    private final AtomicInteger queryGeneration = new AtomicInteger();
+    private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
 
     private Future<?> runningScan;
+    private Future<?> runningSearch;
     private KnowledgeVaultScanner.Snapshot snapshot;
+    private KnowledgeLocalIndex.SyncResult syncResult;
+    private KnowledgeLocalIndex index;
+    private File notebook;
     private ArrayAdapter<String> adapter;
     private TextView status;
     private ProgressBar progress;
@@ -71,7 +75,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             bar.setDisplayHomeAsUpEnabled(true);
         }
 
-        final File notebook = _appSettings.getNotebookDirectory();
+        notebook = _appSettings.getNotebookDirectory();
+        index = new KnowledgeLocalIndex(this);
         final TextView root = findViewById(R.id.knowledge_root);
         root.setText(notebook == null ? getString(R.string.knowledge_no_folder)
                 : getString(R.string.knowledge_root_label, notebook.getAbsolutePath()));
@@ -85,13 +90,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         list.setAdapter(adapter);
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < displayed.size()) {
-                final File file = displayed.get(position).file;
-                if (file.isFile()) {
-                    DocumentActivity.launch(this, file, false, null);
-                } else {
-                    Toast.makeText(this, R.string.knowledge_file_missing, Toast.LENGTH_SHORT).show();
-                }
+                openIndexedNote(displayed.get(position).relativePath);
             }
+        });
+        list.setOnItemLongClickListener((parent, view, position, id) -> {
+            if (position >= 0 && position < displayed.size()) {
+                showPossibleBacklinks(displayed.get(position).relativePath);
+            }
+            return true;
         });
 
         filter.addTextChangedListener(new TextWatcher() {
@@ -109,29 +115,36 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void scanNotebook() {
         final int generation = scanGeneration.incrementAndGet();
+        queryGeneration.incrementAndGet();
         if (runningScan != null) {
             runningScan.cancel(true);
         }
-        final File root = _appSettings.getNotebookDirectory();
+        if (runningSearch != null) {
+            runningSearch.cancel(true);
+        }
+        final File root = notebook;
         progress.setVisibility(View.VISIBLE);
         status.setText(R.string.knowledge_scanning);
 
         runningScan = worker.submit(() -> {
             try {
+                final KnowledgeVaultScanner.Cancellation cancelled =
+                        () -> Thread.currentThread().isInterrupted() || scanGeneration.get() != generation;
                 final KnowledgeVaultScanner.Snapshot result =
-                        KnowledgeVaultScanner.scan(root, KnowledgeVaultScanner.MAX_NOTES,
-                                () -> Thread.currentThread().isInterrupted()
-                                        || scanGeneration.get() != generation);
+                        KnowledgeVaultScanner.scan(root, KnowledgeVaultScanner.MAX_NOTES, cancelled);
+                final KnowledgeLocalIndex.SyncResult projection =
+                        index.synchronize(root, result, cancelled);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         snapshot = result;
+                        syncResult = projection;
                         progress.setVisibility(View.GONE);
                         refreshResults();
                     }
                 });
             } catch (InterruptedIOException ignored) {
                 // An older scan was superseded; never present partial results.
-            } catch (IOException | SecurityException failure) {
+            } catch (Exception failure) {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         progress.setVisibility(View.GONE);
@@ -150,31 +163,95 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (snapshot == null) {
             return;
         }
-        final String query = filter.getText().toString().trim().toLowerCase(Locale.ROOT);
-        displayed.clear();
-        labels.clear();
-        int matches = 0;
-        for (final KnowledgeVaultScanner.Note note : snapshot.notes) {
-            if (note.relativePath.toLowerCase(Locale.ROOT).contains(query)) {
-                matches++;
-                if (displayed.size() < MAX_VISIBLE) {
-                    displayed.add(note);
-                    labels.add(note.relativePath);
-                }
+        final String query = filter.getText().toString().trim();
+        final int generation = queryGeneration.incrementAndGet();
+        if (runningSearch != null) {
+            runningSearch.cancel(true);
+        }
+        runningSearch = worker.submit(() -> {
+            try {
+                final List<KnowledgeLocalIndex.Hit> hits = index.search(query, MAX_VISIBLE);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && queryGeneration.get() == generation) {
+                        displayed.clear();
+                        labels.clear();
+                        for (final KnowledgeLocalIndex.Hit hit : hits) {
+                            displayed.add(hit);
+                            labels.add(hit.title.equals(hit.relativePath) ? hit.relativePath
+                                    : hit.title + " — " + hit.relativePath);
+                        }
+                        adapter.notifyDataSetChanged();
+                        showIndexStatus(hits.size());
+                    }
+                });
+            } catch (RuntimeException ignored) {
+                runOnUiThread(() -> {
+                    if (queryGeneration.get() == generation && !isFinishing()) {
+                        status.setText(R.string.knowledge_index_failed);
+                    }
+                });
             }
-        }
-        adapter.notifyDataSetChanged();
+        });
+    }
 
-        final StringBuilder summary = new StringBuilder(
-                getString(R.string.knowledge_count, matches, snapshot.notes.size(), displayed.size()));
-        if (snapshot.truncated) {
-            summary.append(' ').append(getString(R.string.knowledge_truncated));
+    private void showIndexStatus(final int displayedCount) {
+        final StringBuilder summary = new StringBuilder(getString(R.string.knowledge_index_status,
+                snapshot.notes.size(), displayedCount, syncResult.indexed, syncResult.reused));
+        if (syncResult.oversized > 0) {
+            summary.append(' ').append(getString(R.string.knowledge_oversized, syncResult.oversized));
         }
-        if (snapshot.unreadableDirectories > 0) {
-            summary.append(' ').append(getString(R.string.knowledge_unreadable,
-                    snapshot.unreadableDirectories));
+        if (syncResult.keptMissingEntries) {
+            summary.append(' ').append(getString(R.string.knowledge_partial_index));
         }
         status.setText(summary);
+    }
+
+    private void openIndexedNote(final String relativePath) {
+        if (notebook == null) {
+            return;
+        }
+        try {
+            final String rootPath = notebook.getCanonicalPath() + File.separator;
+            final File file = new File(notebook, relativePath).getCanonicalFile();
+            if (file.getPath().startsWith(rootPath) && file.isFile()) {
+                DocumentActivity.launch(this, file, false, null);
+                return;
+            }
+        } catch (IOException | SecurityException ignored) {
+            // A moved or revoked source is never opened through a stale index.
+        }
+        Toast.makeText(this, R.string.knowledge_file_missing, Toast.LENGTH_SHORT).show();
+    }
+
+    private void showPossibleBacklinks(final String relativePath) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final List<String> links = index.possibleBacklinks(relativePath, 50);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_possible_backlinks)
+                                .setItems(links.isEmpty()
+                                        ? new String[]{getString(R.string.knowledge_no_backlinks)}
+                                        : links.toArray(new String[0]),
+                                        (dialog, which) -> {
+                                            if (which < links.size()) {
+                                                openIndexedNote(links.get(which));
+                                            }
+                                        })
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (RuntimeException ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_index_failed, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
     }
 
     @Override
@@ -189,8 +266,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     @Override
     protected void onDestroy() {
         scanGeneration.incrementAndGet();
+        queryGeneration.incrementAndGet();
         if (runningScan != null) {
             runningScan.cancel(true);
+        }
+        if (runningSearch != null) {
+            runningSearch.cancel(true);
         }
         worker.shutdownNow();
         super.onDestroy();

@@ -6,11 +6,17 @@
     <string name="knowledge_root_label">Хранилище: %1$s</string>
     <string name="knowledge_no_folder">Папка хранилища не выбрана</string>
     <string name="knowledge_refresh">Обновить</string>
-    <string name="knowledge_filter_hint">Поиск Markdown по имени и пути</string>
-    <string name="knowledge_scanning">Поиск локальных Markdown-заметок…</string>
+    <string name="knowledge_filter_hint">Поиск Markdown по названию и содержимому</string>
+    <string name="knowledge_scanning">Сканирование и индексация локальных Markdown-заметок…</string>
     <string name="knowledge_count">Совпадений: %1$d / заметок: %2$d (показано: %3$d)</string>
     <string name="knowledge_truncated">Достигнут предел сканирования; результаты неполные.</string>
     <string name="knowledge_unreadable">Пропущено недоступных папок: %1$d.</string>
     <string name="knowledge_unavailable">Хранилище недоступно или нет разрешения на чтение.</string>
     <string name="knowledge_file_missing">Заметка больше недоступна.</string>
+    <string name="knowledge_index_status">Просканировано: %1$d · показано: %2$d · проиндексировано: %3$d · без изменений: %4$d</string>
+    <string name="knowledge_oversized">Больших заметок только с индексом имени: %1$d.</string>
+    <string name="knowledge_partial_index">Часть путей может устареть из-за неполного сканирования.</string>
+    <string name="knowledge_possible_backlinks">Возможные входящие ссылки (не подтверждены)</string>
+    <string name="knowledge_no_backlinks">Возможные входящие ссылки не найдены.</string>
+    <string name="knowledge_index_failed">Локальный индекс знаний недоступен.</string>
 </resources>

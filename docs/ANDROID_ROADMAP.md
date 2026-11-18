@@ -27,7 +27,7 @@ snapshot until the integrated application is ready.
 | Stage | Product increment | Acceptance |
 |---|---|---|
 | 01 | Native Knowledge Library entry point, read-only local vault discovery, bounded filename search, open note in existing Markor editor | Testable on Android; no vault mutation, path escape, or secrets; CI |
-| 02 | Persistent derived Markdown index (paths, frontmatter, links, backlinks, full text), incremental reconciliation, safe cancellation | Accurate rebuild and updates; performance test with synthetic large vault |
+| 02 | Persistent private Markdown index (paths, headings, candidate links/backlinks, full text), metadata-based incremental reconciliation, safe cancellation | Search in app, no source writes, parser tests, incomplete scan does not infer deletion |
 | 03 | Formal `ksys` integration with deterministic Python/native bridge; reproduce existing fixtures rather than silently reimplement logic | Android ↔ core contract tests, offline execution, parity against Python golden cases |
 | 04 | Human-in-the-loop knowledge intake: CLAIM/FACT/HYPOTHESIS, preview, approval, editable interpretations, journal, provenance | No unapproved fact, journal integrity, source trace and undo-safe decisions |
 | 05 | Knowledge search, relationships, contradictions, explanations, hypotheses, and temporal queries | Inspectable evidence trees; `UNKNOWN` and `CONTESTED` correctly distinguished |
@@ -50,6 +50,25 @@ This first stage **does not** index note contents, run the formal knowledge
 engine, synchronize external storage, change the Android package ID, or
 publish a new signed application release. Those capabilities have explicit
 subsequent stages. No actual private vault is a test fixture.
+
+## Stage 02 scope and limits
+
+The Knowledge Library maintains an **entirely disposable** SQLite FTS4 search
+index inside Android's app-private, no-backup directory. The content of
+Markdown notes is indexed locally; the Markdown files remain authoritative,
+and nothing is uploaded or written back to them. Users can search titles and
+note contents, and long-press a result for *possible* incoming links. Links
+are lexical candidates, not established relationships or facts.
+
+On refresh, metadata (size + modification time) controls incremental
+reindexing. Index reconciliation removes missing entries only after a
+complete scan. A cancelled update rolls back its transaction. Notes larger
+than 2 MB receive filename-only entries, and results are capped at 250 per
+query. Frontmatter semantics, rigorous link resolution, background observers,
+index tamper recovery, live-update detection and large-vault performance
+validation remain open follow-up work. Android UI search is not yet connected
+to the deterministic Python `ksys` engine. A private index contains private
+note text: it must never be copied to Git, debug reports, or releases.
 
 ## Integration branch and PR process
 

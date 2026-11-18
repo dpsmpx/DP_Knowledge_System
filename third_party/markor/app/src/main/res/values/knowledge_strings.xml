@@ -6,11 +6,17 @@
     <string name="knowledge_root_label">Notebook: %1$s</string>
     <string name="knowledge_no_folder">No notebook folder selected</string>
     <string name="knowledge_refresh">Refresh</string>
-    <string name="knowledge_filter_hint">Find Markdown by path or filename</string>
-    <string name="knowledge_scanning">Finding local Markdown notes…</string>
+    <string name="knowledge_filter_hint">Search Markdown notes by title or content</string>
+    <string name="knowledge_scanning">Scanning and indexing local Markdown notes…</string>
     <string name="knowledge_count">%1$d matches / %2$d notes (showing %3$d)</string>
     <string name="knowledge_truncated">Scan limit reached; results are incomplete.</string>
     <string name="knowledge_unreadable">%1$d unreadable folders skipped.</string>
     <string name="knowledge_unavailable">Notebook is unavailable or access is denied.</string>
     <string name="knowledge_file_missing">This note is no longer available.</string>
+    <string name="knowledge_index_status">%1$d notes scanned · %2$d shown · %3$d indexed · %4$d unchanged</string>
+    <string name="knowledge_oversized">%1$d large notes indexed by filename only.</string>
+    <string name="knowledge_partial_index">Some paths may be stale because the scan was incomplete.</string>
+    <string name="knowledge_possible_backlinks">Possible incoming links (not verified)</string>
+    <string name="knowledge_no_backlinks">No possible incoming links found.</string>
+    <string name="knowledge_index_failed">Local knowledge index is unavailable.</string>
 </resources>
