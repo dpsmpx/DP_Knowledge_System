@@ -19,6 +19,7 @@ from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
 from ksys.importer.relations import related_claims
+from ksys.audit.library import audit_summary, audit_page
 from ksys.store.db import connect
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
@@ -41,6 +42,20 @@ def analyze_vault(workspace_dir: str, vault_dir: str, callback=None) -> str:
     analysis. Missing documents are retained because an Android storage scan
     cannot prove that files were deleted rather than temporarily inaccessible.
     """
+    result = _import_selected(workspace_dir, vault_dir, callback)
+    return json.dumps({
+        "protocol": "dpksys.bulk.v1",
+        "engine_version": KS_VERSION,
+        "totals": result.manifest["totals"],
+        "truncated": result.manifest["truncated"],
+        "unreadable_directories": result.manifest["unreadable_directories"],
+        "coverage_failures": len(result.coverage_failures),
+        "read_only_sources": True,
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _import_selected(workspace_dir: str, vault_dir: str, callback=None):
     root = Path(vault_dir).resolve()
     workspace = Path(workspace_dir).resolve()
     if not Path(vault_dir).is_absolute() or not Path(workspace_dir).is_absolute() \
@@ -62,14 +77,30 @@ def analyze_vault(workspace_dir: str, vault_dir: str, callback=None) -> str:
         reconcile_missing=False,
         cancelled=(lambda: callback is not None and not callback.onProgress(seen)),
     )
+    return result
+
+
+def full_library_audit(workspace_dir: str, vault_dir: str, callback=None) -> str:
+    """Refresh selected source notes then assess the entire private index."""
+    imported = _import_selected(workspace_dir, vault_dir, callback)
+    seen = {entry["path"] for entry in imported.manifest["files"]}
+    result = audit_summary(Workspace(Path(workspace_dir)), imported.manifest, seen)
     return json.dumps({
-        "protocol": "dpksys.bulk.v1",
-        "engine_version": KS_VERSION,
-        "totals": result.manifest["totals"],
-        "truncated": result.manifest["truncated"],
-        "unreadable_directories": result.manifest["unreadable_directories"],
-        "coverage_failures": len(result.coverage_failures),
+        "protocol": "dpksys.audit.v1",
+        "summary": result,
         "read_only_sources": True,
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def full_audit_page(workspace_dir: str, category: str, offset: int) -> str:
+    """Query actionable issues in bounded pages, never export to public storage."""
+    workspace = Path(workspace_dir)
+    if not workspace.is_absolute():
+        raise ValueError("Knowledge workspace must be absolute")
+    return json.dumps({
+        "protocol": "dpksys.audit.v1",
+        **audit_page(Workspace(workspace), category, offset),
         "requires_human_review": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 

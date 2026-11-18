@@ -27,7 +27,7 @@ from ..core.ids import canonical_json, digest, file_hash, nfc
 from ..source.coverage import check_coverage
 from ..source.markdown import parse_code_file, parse_document, parse_plain_text
 from ..source.model import Fragment
-from ..store.db import connect
+from ..store.db import connect, get_meta, set_meta
 from ..store.workspace import Workspace
 from .classify import Classification, classify
 from .relations import projected_atoms, RELATIONS_VERSION
@@ -142,12 +142,19 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
     vault = vault.resolve()
     patterns = _gitignore_patterns(vault)
     con = connect(ws.db_path)
+    con.execute("BEGIN")
+    if get_meta(con, "vault_root") != str(vault):
+        # A changed notebook must not mix another person's old private
+        # candidate interpretations into the newly selected library.
+        # This affects only disposable source projections, not the journal.
+        for table in ("candidate_atoms", "candidates", "fragments", "documents"):
+            con.execute(f"DELETE FROM {table}")
+        set_meta(con, "vault_root", str(vault))
     existing = {row[0]: (row[1], row[2]) for row in con.execute("SELECT path, sha256, versions FROM documents")}
     entries: list[dict] = []
     seen_paths: set[str] = set()
     coverage_failures: list = []
     ordinal = 0
-    con.execute("BEGIN")
     truncated = False
     considered = 0
     unreadable_directories = []
