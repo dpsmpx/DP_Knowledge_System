@@ -47,6 +47,24 @@ public final class KnowledgeEmbeddingVectors {
         return bytes.array();
     }
 
+    /** Decode only structurally valid cached float32 vectors. */
+    public static float[] decode(final byte[] stored) {
+        if (stored == null || stored.length % Float.BYTES != 0
+                || stored.length < MIN_DIMENSIONS * Float.BYTES
+                || stored.length > MAX_DIMENSIONS * Float.BYTES) {
+            throw new IllegalArgumentException("Invalid stored vector length");
+        }
+        final ByteBuffer input = ByteBuffer.wrap(stored).order(ByteOrder.LITTLE_ENDIAN);
+        final float[] result = new float[stored.length / Float.BYTES];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = input.getFloat();
+            if (!Float.isFinite(result[i])) {
+                throw new IllegalArgumentException("Invalid stored vector value");
+            }
+        }
+        return result;
+    }
+
     /** Invalid or mismatched cached vectors must never affect the ranking. */
     public static double similarity(final float[] normalizedQuery, final byte[] encoded) {
         if (normalizedQuery == null || encoded == null

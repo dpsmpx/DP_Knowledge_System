@@ -1218,66 +1218,84 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         runningEmbedding = embeddingWorker.submit(() -> {
             int completed = 0;
             int skipped = 0;
+            int incompleteCoverage = 0;
             try {
-                for (int i = 0; i < pending.size(); i += 2) {
+                for (int i = 0; i < pending.size(); i++) {
                     if (Thread.currentThread().isInterrupted() || scanGeneration.get() != scan
                             || embeddingGeneration.get() != operation) {
                         return;
                     }
-                    final List<String> inputs = new ArrayList<>();
-                    final List<KnowledgeVaultScanner.Note> noteBatch = new ArrayList<>();
-                    final List<List<KnowledgeEmbeddingChunks.Chunk>> chunksBatch = new ArrayList<>();
-                    for (int j = i; j < Math.min(pending.size(), i + 2); j++) {
-                        final KnowledgeVaultScanner.Note note = pending.get(j);
-                        try {
-                            if (note.file.lastModified() != note.modifiedAtMillis
-                                    || note.file.length() != note.sizeBytes) {
-                                skipped++;
-                                continue;
-                            }
-                            final String text = readSelectedNote(note.relativePath);
-                            if (note.file.lastModified() != note.modifiedAtMillis
-                                    || note.file.length() != note.sizeBytes) {
-                                skipped++;
-                                continue;
-                            }
-                            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
-                                    KnowledgeEmbeddingChunks.fromNote(text);
-                            if (chunks.isEmpty()) {
-                                skipped++;
-                                continue;
-                            }
-                            noteBatch.add(note);
-                            chunksBatch.add(chunks);
-                            for (final KnowledgeEmbeddingChunks.Chunk chunk : chunks) {
-                                inputs.add(chunk.text);
-                            }
-                        } catch (IOException inaccessible) {
+                    final KnowledgeVaultScanner.Note note = pending.get(i);
+                    try {
+                        if (note.file.lastModified() != note.modifiedAtMillis
+                                || note.file.length() != note.sizeBytes) {
                             skipped++;
+                            continue;
                         }
-                    }
-                    if (!inputs.isEmpty()) {
-                        final float[][] vectors = KnowledgeEmbeddingClient.embed(
-                                endpoint, model, apiKey, inputs);
-                        int offset = 0;
-                        for (int j = 0; j < noteBatch.size(); j++) {
-                            final KnowledgeVaultScanner.Note note = noteBatch.get(j);
-                            final List<KnowledgeEmbeddingChunks.Chunk> chunks = chunksBatch.get(j);
+                        final String text = readSelectedNote(note.relativePath);
+                        if (note.file.lastModified() != note.modifiedAtMillis
+                                || note.file.length() != note.sizeBytes) {
+                            skipped++;
+                            continue;
+                        }
+                        final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                                KnowledgeEmbeddingChunks.fromNote(text);
+                        if (chunks.isEmpty()) {
+                            skipped++;
+                            continue;
+                        }
+                        final boolean truncated = KnowledgeEmbeddingChunks.coverageTruncated(
+                                text, chunks);
+                        final int from = index.beginEmbedding(note.relativePath,
+                                note.modifiedAtMillis, note.sizeBytes, modelKey,
+                                chunks.size(), truncated);
+                        for (int position = from; position < chunks.size();
+                             position += KnowledgeEmbeddingClient.MAX_BATCH) {
+                            if (Thread.currentThread().isInterrupted()
+                                    || scanGeneration.get() != scan
+                                    || embeddingGeneration.get() != operation) {
+                                return; // Previously checkpointed chunks remain reusable.
+                            }
+                            final List<String> inputs = new ArrayList<>();
+                            final int until = Math.min(chunks.size(),
+                                    position + KnowledgeEmbeddingClient.MAX_BATCH);
+                            for (int k = position; k < until; k++) {
+                                inputs.add(chunks.get(k).text);
+                            }
+                            // No text leaves without the batch-level user confirmation.
+                            final float[][] vectors;
+                            try {
+                                vectors = KnowledgeEmbeddingClient.embed(
+                                        endpoint, model, apiKey, inputs);
+                            } catch (IOException network) {
+                                // A failed service must stop this run; retain checkpoints.
+                                throw new IllegalStateException("Embedding service unavailable");
+                            }
                             if (note.file.lastModified() != note.modifiedAtMillis
                                     || note.file.length() != note.sizeBytes) {
-                                skipped++;
-                                offset += chunks.size();
-                                continue;
+                                throw new IOException("Source changed during embedding");
                             }
-                            final float[][] assigned = Arrays.copyOfRange(
-                                    vectors, offset, offset + chunks.size());
-                            offset += chunks.size();
-                            index.storeEmbeddings(note.relativePath, note.modifiedAtMillis,
-                                    note.sizeBytes, modelKey, chunks, assigned);
-                            completed++;
+                            index.appendEmbeddingBatch(note.relativePath, note.modifiedAtMillis,
+                                    note.sizeBytes, modelKey, chunks, position, vectors);
+                            final int indexedChunks = until;
+                            final int currentNote = i + 1;
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()
+                                        && embeddingGeneration.get() == operation) {
+                                    status.setText(getString(R.string.knowledge_embedding_chunk_progress,
+                                            currentNote, pending.size(),
+                                            indexedChunks, chunks.size()));
+                                }
+                            });
                         }
+                        completed++;
+                        if (truncated) {
+                            incompleteCoverage++;
+                        }
+                    } catch (IOException inaccessible) {
+                        skipped++;
                     }
-                    final int progressNow = Math.min(pending.size(), i + 2);
+                    final int progressNow = i + 1;
                     runOnUiThread(() -> {
                         if (!isFinishing() && !isDestroyed()
                                 && embeddingGeneration.get() == operation) {
@@ -1288,13 +1306,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }
                 final int succeeded = completed;
                 final int missing = skipped;
+                final int truncated = incompleteCoverage;
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed()
                             && embeddingGeneration.get() == operation) {
                         embeddingActive = false;
                         embeddingButton.setText(R.string.knowledge_embedding_build);
                         status.setText(getString(R.string.knowledge_embedding_done,
-                                succeeded, missing));
+                                succeeded, missing) + " " + getString(
+                                R.string.knowledge_embedding_coverage, truncated));
                     }
                 });
             } catch (Exception ignored) {
@@ -1458,7 +1478,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             continue;
                         }
                         final String excerpt = KnowledgeEmbeddingChunks.atOffset(
-                                content, match.excerptStart);
+                                content, match.excerptStart, match.excerptLength);
                         if (!excerpt.trim().isEmpty()) {
                             sources.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
                         }
