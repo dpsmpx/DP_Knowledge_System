@@ -6,7 +6,7 @@ stress tests and never attach private notes, paths or logs to public issues.
 
 ## Prerequisites
 
-- Signed `net.gsantner.markor_test` prerelease from the Stage 14 workflow.
+- Signed `com.dpsmpx.dpks` prerelease from the Stage 14 workflow.
 - Redmi Note 13 (Android 15) and, if available, an Android 11 test phone.
 - PC with Python 3.11+ and `adb` configured, a USB connection and adequate
   free storage. Keep copies of any existing app data before installation.
@@ -42,7 +42,7 @@ the application to your real notes while a generated fixture is active.
 | Automatic schedule | Enable six-hour offline checks, plug into charging | Work remains persisted; actual execution can be delayed by Android |
 | Disable | Uncheck periodic scans during a run | Future periodic work cancelled; unfinished transaction cannot claim success |
 | OS interruption | Swipe app from recents or test an ordinary process death, then reopen | Scheduled work may resume/retry; index health does not claim a partial commit |
-| Force-stop distinction | `adb shell am force-stop net.gsantner.markor_test` | Android suspends jobs until manually opening app again: **not a resume guarantee** |
+| Force-stop distinction | `adb shell am force-stop com.dpsmpx.dpks` | Android suspends jobs until manually opening app again: **not a resume guarantee** |
 | Notifications denied | Deny Android notification permission, run a manual check | Local scan still works; no optional change alert or private-text leak |
 | Notifications enabled | Enable explicit change alerts, edit one fake Markdown note, check again | Count-only alert only after a complete scan and established same-vault baseline |
 | Partial traversal | Test inaccessible directories or the 200k scan limit | No speculative deletion/change notification from an incomplete pass |
@@ -53,9 +53,9 @@ the application to your real notes while a generated fixture is active.
 Useful package-limited commands:
 
 ```bash
-adb shell dumpsys meminfo net.gsantner.markor_test
+adb shell dumpsys meminfo com.dpsmpx.dpks
 adb shell dumpsys battery
-adb shell pidof net.gsantner.markor_test
+adb shell pidof com.dpsmpx.dpks
 ```
 
 To validate source preservation, compare the generator's reference SHA-256

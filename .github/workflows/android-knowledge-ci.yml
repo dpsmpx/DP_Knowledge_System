@@ -29,7 +29,16 @@ jobs:
         working-directory: third_party/markor
         run: |
           chmod +x gradlew
-          ./gradlew :app:testFlavorDefaultDebugUnitTest :app:assembleFlavorDefaultDebug --no-daemon --stacktrace
+          ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
+            :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug --no-daemon --stacktrace
+      - name: Confirm standalone DP Knowledge package ID
+        run: |
+          set -euo pipefail
+          apk=$(find third_party/markor/app/build/outputs/apk/flavorAtest/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          package_name="$("${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}/build-tools/35.0.0/aapt" \
+            dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          test "$package_name" = 'com.dpsmpx.dpks'
       - name: Verify embedded Python runtime payload
         run: |
           apk=$(find third_party/markor/app/build/outputs/apk/flavorDefault/debug -name '*.apk' -print -quit)

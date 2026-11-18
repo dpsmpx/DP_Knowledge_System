@@ -82,6 +82,7 @@ jobs:
           tools_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}/build-tools/35.0.0"
           test -x "$tools_dir/zipalign"
           test -x "$tools_dir/apksigner"
+          test -x "$tools_dir/aapt"
 
           mapfile -d '' -t apks < <(find third_party/markor/app/build/outputs/apk/flavorAtest/release \
             -maxdepth 1 -type f -name '*-unsigned.apk' -print0)
@@ -89,10 +90,15 @@ jobs:
             echo "::error::Expected exactly one unsigned flavorAtest APK, found ${#apks[@]}"
             exit 1
           fi
+          package_name="$("$tools_dir/aapt" dump badging "${apks[0]}" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          if [[ "$package_name" != 'com.dpsmpx.dpks' ]]; then
+            echo "::error::Unexpected Android applicationId (expected com.dpsmpx.dpks)"
+            exit 1
+          fi
 
           keystore="$RUNNER_TEMP/knowledge-preview-key"
           aligned="$RUNNER_TEMP/knowledge-preview-aligned.apk"
-          apk="$GITHUB_WORKSPACE/dp-knowledge-stage14-${GITHUB_RUN_NUMBER}-signed.apk"
+          apk="$GITHUB_WORKSPACE/dpks-${GITHUB_RUN_NUMBER}-signed.apk"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
           test -s "$keystore"
           "$tools_dir/zipalign" -f 4 "${apks[0]}" "$aligned"
@@ -103,6 +109,8 @@ jobs:
             --key-pass env:KEY_PASSWORD \
             --out "$apk" "$aligned"
           "$tools_dir/apksigner" verify --min-sdk-version 24 "$apk" > /dev/null
+          signed_package="$("$tools_dir/aapt" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          test "$signed_package" = 'com.dpsmpx.dpks'
           sha256sum "$apk" > "$apk.sha256"
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
           echo 'Verified signed Android preview. No signing passwords were logged.'
@@ -118,7 +126,8 @@ jobs:
           notes="$(printf '%s\n' \
             'DP Knowledge System: промежуточный Android-пререлиз на базе форка Markor.' \
             '' \
-            '- Пакет: net.gsantner.markor_test (устанавливается отдельно от обычного Markor).' \
+            '- Пакет: com.dpsmpx.dpks (устанавливается отдельно от обычного Markor и прежнего тестового пакета).' \
+            '- Перенос данных из прежнего имени пакета автоматически не выполняется.' \
             '- Содержит редактор Markor, локальное ядро знаний, поиск, аудит и ручную интеграцию LLM/эмбеддингов.' \
             '- Этап 14: добровольные длительные офлайн-проверки с WorkManager и необязательными уведомлениями только о количестве изменений.' \
             '- Никакие личные заметки не включены в APK или GitHub release.' \
@@ -131,6 +140,6 @@ jobs:
           gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "DP Knowledge Android — Stage 14 preview #${GITHUB_RUN_NUMBER}" \
+            --title "DP Knowledge System (com.dpsmpx.dpks) — signed preview #${GITHUB_RUN_NUMBER}" \
             --notes "$notes" \
             --prerelease
