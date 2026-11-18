@@ -41,4 +41,13 @@ public class KnowledgeMarkdownMetadataTest {
         assertEquals("\"drop\"* \"table\"*", KnowledgeMarkdownMetadata.ftsQuery("DROP; TABLE"));
         assertEquals("", KnowledgeMarkdownMetadata.ftsQuery("!!!"));
     }
+
+    @Test
+    public void llmEvidenceSearchUsesEscapedRecallOrNotArbitraryFtsSyntax() {
+        assertEquals("\"python\"* OR \"works\"* OR \"programming\"*",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery("How python works in programming?"));
+        assertEquals("\"drop\"* OR \"table\"*",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery("DROP; TABLE"));
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidenceQuery(""));
+    }
 }

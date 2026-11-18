@@ -143,6 +143,36 @@ public final class KnowledgeMarkdownMetadata {
         return query.toString();
     }
 
+    /** Bounded recall-first OR query for local LLM evidence, never a raw FTS expression. */
+    public static String ftsEvidenceQuery(final String question) {
+        if (question == null || question.isEmpty()) {
+            return "";
+        }
+        final StringBuilder word = new StringBuilder();
+        final List<String> terms = new ArrayList<>();
+        for (int i = 0; i <= question.length(); i++) {
+            final char ch = i < question.length() ? question.charAt(i) : ' ';
+            if (Character.isLetterOrDigit(ch)) {
+                word.append(Character.toLowerCase(ch));
+            } else if (word.length() > 0) {
+                final String term = word.toString();
+                if (term.length() >= 4 && term.length() <= 48
+                        && !terms.contains(term)) {
+                    terms.add(term);
+                }
+                word.setLength(0);
+            }
+        }
+        final StringBuilder query = new StringBuilder();
+        for (final String part : terms.subList(0, Math.min(terms.size(), 8))) {
+            if (query.length() > 0) {
+                query.append(" OR ");
+            }
+            query.append('"').append(part).append('"').append('*');
+        }
+        return query.toString();
+    }
+
     private static void addTarget(final Set<String> links, final String raw) {
         final String key = linkKey(raw);
         if (!key.isEmpty()) {

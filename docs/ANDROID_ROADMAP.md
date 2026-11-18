@@ -288,6 +288,59 @@ are explicitly disclosed. No automatic approval, repair, deletion, cloud
 request, cleartext export or scheduled background job is introduced. Large
 real-device vault stress tests and signed prerelease validation are pending.
 
+## Stage 10 — explicitly approved LLM assistance
+
+The native **Ask LLM about notes** action adds a deliberately optional
+conversational layer above the existing *local* Markdown search. The user
+enters a question, an OpenAI-compatible chat endpoint, the exact model ID,
+and optionally an API key. A local FTS4 recall query proposes at most 24
+existing notes; the app reads at most six source files (respecting the
+existing canonical-root and 2 MiB per-note limits) and extracts at most 900
+characters from each. The prompt labels every numbered excerpt as **untrusted,
+unapproved source material** and requests citations such as `[1]`.
+
+**No excerpts or question leave the device without a separate confirmation
+for every request.** The confirmation dialog displays the destination host,
+model, and the *complete outgoing user message*, including Markdown source
+paths and excerpts. Cancel means no network request. Indexing, full-vault
+processing, deterministic Q&A, auditing and knowledge-journal operations do
+not call the LLM. Only endpoint/model preferences are saved; API keys are
+entered per request, are never persisted, and no prompt, response or key is
+written into application logs or the knowledge journal.
+
+Configure a service supporting `POST /v1/chat/completions` with a text
+`choices[0].message.content` response:
+
+- On the same Android device: `http://127.0.0.1:1234/v1`, when an appropriate
+  server actually runs there.
+- On your home PC: `http://192.168.x.y:1234/v1` after enabling local-network
+  listening in a compatible service such as LM Studio. `localhost` on Android
+  **does not mean the home PC**. A private Tailscale IPv4 address
+  (`100.64.0.0/10`) is also allowed.
+- A remote service: `https://example.org/v1`, with an optional session API
+  key. The app does not ship a hosted model or create an account.
+
+The endpoint is normalized to `/v1/chat/completions`. Cleartext HTTP is
+restricted to numeric RFC1918, loopback and Tailscale-CGNAT IPv4 addresses
+or `localhost`/IPv6 loopback; arbitrary public HTTP and credential-bearing
+URLs are rejected. Redirects are disabled, timeouts and request/response
+sizes are bounded, and the dialog explicitly warns when transport is
+unencrypted. Network authorization is **per question**, not a global opt-in.
+The selected server still receives the shown note contents and may retain
+them according to its own policies. Prefer a trusted local service for
+particularly private notes, secure and authenticate any network listener,
+and do not expose your local model port to the public Internet.
+
+The response is displayed as **unverified AI text** with the six candidate
+source paths. Missing citation markers trigger an additional warning; even
+valid-looking citations are **not verified as logically sound**. There are
+no automatic knowledge approvals, note rewrites, arbitrary tool execution,
+agent actions, model downloads, on-device inference engine, semantic-vector
+retrieval, reranking, streaming or autonomous network traffic in this stage.
+Lexical retrieval will miss paraphrases; prompts embedded in notes may still
+influence an LLM despite being clearly marked as untrusted. Android-device
+integration tests against actual local and remote models remain necessary.
+
 ## Integration branch and PR process
 
 1. Maintain `feature/knowledge-android` as the continuous integration line.

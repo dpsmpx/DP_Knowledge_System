@@ -208,6 +208,31 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /** Retrieve possible source notes for a model, still entirely local/read-only. */
+    public synchronized List<Hit> evidenceSearch(final String question, final int limit) {
+        final List<Hit> result = new ArrayList<>();
+        if (question == null || limit < 1 || limit > 40) {
+            return result;
+        }
+        final String safe = KnowledgeMarkdownMetadata.ftsEvidenceQuery(question);
+        if (safe.isEmpty()) {
+            return result;
+        }
+        final SQLiteDatabase db = open();
+        try (Cursor c = db.rawQuery("SELECT notes.path, notes.title FROM documents_fts "
+                        + "JOIN notes ON notes.id=documents_fts.docid "
+                        + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
+                        + "ORDER BY notes.path COLLATE NOCASE LIMIT ?",
+                new String[]{safe, Integer.toString(limit)})) {
+            while (c.moveToNext()) {
+                result.add(new Hit(c.getString(0), c.getString(1)));
+            }
+        } finally {
+            db.close();
+        }
+        return result;
+    }
+
     /** Only possible backlinks: paths and wiki aliases can be ambiguous. */
     public synchronized List<String> possibleBacklinks(final String relativePath, final int limit) {
         final String full = KnowledgeMarkdownMetadata.linkKey(relativePath);
