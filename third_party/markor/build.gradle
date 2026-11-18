@@ -28,6 +28,8 @@ buildscript {
 
     dependencies {
         classpath "com.android.tools.build:gradle:${version_gradle_tools}"
+        // Python runtime for the unmodified ksys engine in the Android app.
+        classpath 'com.chaquo.python:gradle:17.2.0'
         classpath 'com.github.dcendents:android-maven-gradle-plugin:2.1'
         if (project.enable_plugin_kotlin) {
             classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${version_plugin_kotlin}"

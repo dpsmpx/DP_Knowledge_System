@@ -19,4 +19,13 @@
     <string name="knowledge_possible_backlinks">Возможные входящие ссылки (не подтверждены)</string>
     <string name="knowledge_no_backlinks">Возможные входящие ссылки не найдены.</string>
     <string name="knowledge_index_failed">Локальный индекс знаний недоступен.</string>
+    <string name="knowledge_inspect_note">Проанализировать в ksys (только чтение)</string>
+    <string name="knowledge_inspecting">Локальное ядро знаний анализирует заметку…</string>
+    <string name="knowledge_inspection_title">Интерпретация ядра знаний</string>
+    <string name="knowledge_core_version">Версия ядра: %1$s</string>
+    <string name="knowledge_core_coverage">Полнота покрытия источника: %1$b</string>
+    <string name="knowledge_core_counts">Блоков: %1$d · Фрагментов: %2$d</string>
+    <string name="knowledge_unconfirmed">Все интерпретации — предложения, а не подтверждённые факты.</string>
+    <string name="knowledge_inspection_partial">Показаны только первые 24 фрагмента.</string>
+    <string name="knowledge_analysis_failed">Не удалось проанализировать заметку или превышен предел размера.</string>
 </resources>

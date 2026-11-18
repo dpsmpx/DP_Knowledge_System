@@ -19,4 +19,13 @@
     <string name="knowledge_possible_backlinks">Possible incoming links (not verified)</string>
     <string name="knowledge_no_backlinks">No possible incoming links found.</string>
     <string name="knowledge_index_failed">Local knowledge index is unavailable.</string>
+    <string name="knowledge_inspect_note">Inspect with ksys (read only)</string>
+    <string name="knowledge_inspecting">Inspecting note with local knowledge core…</string>
+    <string name="knowledge_inspection_title">Knowledge core interpretation</string>
+    <string name="knowledge_core_version">Core version: %1$s</string>
+    <string name="knowledge_core_coverage">Lossless source coverage: %1$b</string>
+    <string name="knowledge_core_counts">Blocks: %1$d · Fragments: %2$d</string>
+    <string name="knowledge_unconfirmed">All extracted interpretations are suggestions, not confirmed facts.</string>
+    <string name="knowledge_inspection_partial">Showing first 24 fragments only.</string>
+    <string name="knowledge_analysis_failed">Note inspection failed or exceeds size limit.</string>
 </resources>

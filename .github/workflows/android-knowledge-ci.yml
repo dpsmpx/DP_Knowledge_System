@@ -19,6 +19,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - uses: android-actions/setup-android@v4
       - name: Android SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
@@ -27,6 +30,11 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:testFlavorDefaultDebugUnitTest :app:assembleFlavorDefaultDebug --no-daemon --stacktrace
+      - name: Verify embedded Python runtime payload
+        run: |
+          apk=$(find third_party/markor/app/build/outputs/apk/flavorDefault/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          unzip -Z1 "$apk" | grep -q '^assets/chaquopy/'
 
   python-core:
     runs-on: ubuntu-latest
