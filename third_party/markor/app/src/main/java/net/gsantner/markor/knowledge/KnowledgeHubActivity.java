@@ -50,6 +50,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -235,7 +236,18 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         refresh.setOnClickListener(view -> scanNotebook());
         findViewById(R.id.knowledge_ask).setOnClickListener(view -> promptKnowledgeQuery());
         findViewById(R.id.knowledge_llm_ask).setOnClickListener(view -> promptLlmQuestion());
-        findViewById(R.id.knowledge_diagnostics).setOnClickListener(view -> showKnowledgeDiagnostics());
+        findViewById(R.id.knowledge_diagnostics).setOnClickListener(view ->
+                new AlertDialog.Builder(this)
+                        .setTitle(R.string.knowledge_diagnostics)
+                        .setItems(new String[]{getString(R.string.knowledge_diagnostics),
+                                        getString(R.string.knowledge_index_health)},
+                                (dialog, which) -> {
+                                    if (which == 0) {
+                                        showKnowledgeDiagnostics();
+                                    } else {
+                                        showIndexHealth();
+                                    }
+                                }).show());
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         scanNotebook();
@@ -269,9 +281,23 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final KnowledgeVaultScanner.Cancellation cancelled =
                         () -> Thread.currentThread().isInterrupted() || scanGeneration.get() != generation;
                 final KnowledgeVaultScanner.Snapshot result =
-                        KnowledgeVaultScanner.scan(root, KnowledgeVaultScanner.MAX_NOTES, cancelled);
+                        KnowledgeVaultScanner.scan(root, KnowledgeVaultScanner.MAX_NOTES,
+                                cancelled, (count, directories) -> runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()
+                                            && scanGeneration.get() == generation) {
+                                        status.setText(getString(R.string.knowledge_scan_progress,
+                                                count, directories));
+                                    }
+                                }));
                 final KnowledgeLocalIndex.SyncResult projection =
-                        index.synchronize(root, result, cancelled);
+                        index.synchronize(root, result, cancelled, (count, total) ->
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()
+                                            && scanGeneration.get() == generation) {
+                                        status.setText(getString(R.string.knowledge_index_progress,
+                                                count, total));
+                                    }
+                                }));
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         snapshot = result;
@@ -1762,6 +1788,108 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             }
         }
         return out.toString();
+    }
+
+    private void showIndexHealth() {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_index_health_checking);
+        worker.submit(() -> {
+            try {
+                final KnowledgeLocalIndex.IndexHealth health = index.healthReport();
+                final String lastScan = health.lastScanMillis == 0
+                        ? getString(R.string.knowledge_index_never)
+                        : java.text.DateFormat.getDateTimeInstance().format(
+                                new Date(health.lastScanMillis));
+                final String report = getString(health.isHealthy()
+                                ? R.string.knowledge_index_health_ok
+                                : R.string.knowledge_index_health_issues)
+                        + "\n\n" + getString(R.string.knowledge_index_health_last,
+                        lastScan, health.lastScanCount,
+                        getString(health.lastScanIncomplete
+                                ? R.string.knowledge_index_yes : R.string.knowledge_index_no),
+                        health.unreadableDirectories)
+                        + "\n\n" + getString(R.string.knowledge_index_health_sources,
+                        health.quickCheck, health.sources, health.textRows,
+                        health.missingTextRows, health.orphanTextRows, health.links)
+                        + "\n\n" + getString(R.string.knowledge_index_health_vectors,
+                        health.embeddedNotes, health.embeddedChunks, health.lshRows,
+                        health.incompleteEmbeddings, health.truncatedEmbeddings,
+                        health.orphanEmbeddingNotes, health.orphanChunks, health.orphanLsh);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        return;
+                    }
+                    status.setText(health.isHealthy()
+                            ? R.string.knowledge_index_health_ok
+                            : R.string.knowledge_index_health_issues);
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_index_health)
+                            .setMessage(report)
+                            .setNegativeButton(android.R.string.ok, null)
+                            .setPositiveButton(R.string.knowledge_index_rebuild,
+                                    (dialog, which) -> requestIndexRebuild())
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && scanGeneration.get() == generation) {
+                        status.setText(R.string.knowledge_index_health_issues);
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_index_health)
+                                .setMessage(R.string.knowledge_index_unavailable)
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .setPositiveButton(R.string.knowledge_index_rebuild,
+                                        (dialog, which) -> requestIndexRebuild())
+                                .show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void requestIndexRebuild() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_index_rebuild)
+                .setMessage(R.string.knowledge_index_rebuild_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_index_rebuild, (dialog, which) -> {
+                    // Cancel every caller that could still write the disposable index.
+                    scanGeneration.incrementAndGet();
+                    if (runningScan != null) {
+                        runningScan.cancel(true);
+                    }
+                    if (runningSearch != null) {
+                        runningSearch.cancel(true);
+                    }
+                    auditGeneration.incrementAndGet();
+                    if (auditActive) {
+                        cancelFullAudit();
+                    }
+                    if (analysisActive) {
+                        cancelBulkAnalysis();
+                    }
+                    if (embeddingActive) {
+                        cancelEmbeddingBuild();
+                    }
+                    status.setText(R.string.knowledge_index_rebuilding);
+                    worker.submit(() -> {
+                        try {
+                            index.resetDerivedIndex();
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) {
+                                    scanNotebook();
+                                }
+                            });
+                        } catch (IOException failed) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) {
+                                    status.setText(R.string.knowledge_index_rebuild_failed);
+                                }
+                            });
+                        }
+                    });
+                }).show();
     }
 
     private void showKnowledgeDiagnostics() {
