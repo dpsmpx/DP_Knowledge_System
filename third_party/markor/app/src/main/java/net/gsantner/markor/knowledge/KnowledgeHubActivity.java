@@ -7,9 +7,12 @@
 package net.gsantner.markor.knowledge;
 
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.text.InputType;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -69,6 +72,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_EMBED_NOTES_PER_RUN = 120;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
+    private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -107,6 +111,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Button auditButton;
     private Button embeddingButton;
     private CheckBox automaticAnalysis;
+    private CheckBox backgroundChecks;
+    private CheckBox backgroundNotifications;
+    private TextView backgroundStatus;
     private boolean analysisActive;
     private boolean auditActive;
     private boolean embeddingActive;
@@ -182,6 +189,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 startBulkAnalysis();
             }
         });
+        setupBackgroundControls();
         analysisButton.setOnClickListener(view -> {
             if (analysisActive) {
                 cancelBulkAnalysis();
@@ -251,6 +259,110 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         scanNotebook();
+    }
+
+    private void setupBackgroundControls() {
+        backgroundChecks = findViewById(R.id.knowledge_background_auto);
+        backgroundNotifications = findViewById(R.id.knowledge_background_notifications);
+        backgroundStatus = findViewById(R.id.knowledge_background_status);
+        backgroundChecks.setChecked(KnowledgeBackgroundScheduler.isEnabled(this));
+        backgroundNotifications.setChecked(KnowledgeBackgroundScheduler.notificationsEnabled(this));
+
+        backgroundChecks.setOnCheckedChangeListener((button, enabled) -> {
+            if (enabled && !KnowledgeBackgroundScheduler.isEnabled(this)) {
+                new AlertDialog.Builder(this)
+                        .setTitle(R.string.knowledge_background_enable)
+                        .setMessage(R.string.knowledge_background_consent)
+                        .setNegativeButton(android.R.string.cancel,
+                                (dialog, which) -> backgroundChecks.setChecked(false))
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                            try {
+                                KnowledgeBackgroundScheduler.setEnabled(this, true);
+                                backgroundStatus.setText(R.string.knowledge_background_scheduled);
+                            } catch (RuntimeException failed) {
+                                backgroundChecks.setChecked(false);
+                                backgroundStatus.setText(R.string.knowledge_background_failed);
+                            }
+                        }).show();
+            } else if (!enabled && KnowledgeBackgroundScheduler.isEnabled(this)) {
+                try {
+                    KnowledgeBackgroundScheduler.setEnabled(this, false);
+                } catch (RuntimeException failed) {
+                    backgroundStatus.setText(R.string.knowledge_background_failed);
+                }
+            }
+        });
+        backgroundNotifications.setOnCheckedChangeListener((button, enabled) -> {
+            if (enabled && !notificationPermissionGranted()) {
+                backgroundNotifications.setChecked(false);
+                new AlertDialog.Builder(this)
+                        .setMessage(R.string.knowledge_background_notify_permission)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                            if (Build.VERSION.SDK_INT >= 33) {
+                                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                                        REQUEST_KNOWLEDGE_NOTIFICATIONS);
+                            }
+                        }).show();
+            } else {
+                KnowledgeBackgroundScheduler.setNotificationsEnabled(this, enabled);
+            }
+        });
+        findViewById(R.id.knowledge_background_now).setOnClickListener(view -> {
+            try {
+                KnowledgeBackgroundScheduler.enqueueOnce(this);
+                backgroundStatus.setText(R.string.knowledge_background_scheduled);
+            } catch (RuntimeException failed) {
+                backgroundStatus.setText(R.string.knowledge_background_failed);
+            }
+        });
+        refreshBackgroundStatus();
+    }
+
+    private boolean notificationPermissionGranted() {
+        return Build.VERSION.SDK_INT < 33 || checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void refreshBackgroundStatus() {
+        if (backgroundStatus == null) {
+            return;
+        }
+        final long at = KnowledgeBackgroundScheduler.lastAt(this);
+        if (at == 0) {
+            backgroundStatus.setText(R.string.knowledge_background_never);
+            return;
+        }
+        final int status = KnowledgeBackgroundScheduler.lastStatus(this);
+        final int statusString = status == KnowledgeBackgroundScheduler.LAST_OK
+                ? R.string.knowledge_background_last_ok
+                : status == KnowledgeBackgroundScheduler.LAST_PARTIAL
+                        ? R.string.knowledge_background_last_partial
+                        : status == KnowledgeBackgroundScheduler.LAST_UNAVAILABLE
+                                ? R.string.knowledge_background_last_unavailable
+                                : R.string.knowledge_background_last_error;
+        backgroundStatus.setText(getString(R.string.knowledge_background_last,
+                java.text.DateFormat.getDateTimeInstance().format(new Date(at)),
+                getString(statusString), KnowledgeBackgroundScheduler.lastScanned(this),
+                KnowledgeBackgroundScheduler.lastChanged(this)));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshBackgroundStatus();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(final int requestCode,
+                                           @NonNull final String[] permissions,
+                                           @NonNull final int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_KNOWLEDGE_NOTIFICATIONS && backgroundNotifications != null) {
+            final boolean allowed = notificationPermissionGranted();
+            KnowledgeBackgroundScheduler.setNotificationsEnabled(this, allowed);
+            backgroundNotifications.setChecked(allowed);
+        }
     }
 
     private void scanNotebook() {

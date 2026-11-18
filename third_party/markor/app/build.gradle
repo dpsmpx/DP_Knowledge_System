@@ -140,6 +140,8 @@ dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'androidx.legacy:legacy-preference-v14:1.0.0'
+    // Explicitly opt-in, durable local-vault checks. No cloud scheduler or model API.
+    implementation 'androidx.work:work-runtime:2.11.2'
 
     // Markdown convertor (Flexmark) - https://github.com/vsch/flexmark-java/releases
     ext.version_library_flexmark = "0.64.8"

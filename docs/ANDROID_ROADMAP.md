@@ -39,7 +39,8 @@ snapshot until the integrated application is ready.
 | 11 | Optional embedding-based semantic search and LLM evidence selection; bounded incremental vector index | Ranked passage-level matches, strict per-action upload consent, local-only vector search, privacy-safe cache invalidation |
 | 12 | Heading/paragraph-aware overlapping Markdown passages, resumable fine-grained embedding checkpoints and indexed approximate vector candidates | Expanded long-note coverage, source-accurate spans, migrations that preserve old vectors, bounded candidate reranking |
 | 13 | Large-vault scan/index progress, private SQLite consistency diagnostics, user-authorized rebuild, reproducible cancellation/stress tests | Bounded count-only progress, transactional success markers, read-only health report, destructive derived-index repair requires consent |
-| 14 | Durable optional local background jobs, change notifications, real-device endurance tests and signed prereleases | Crash-safe job lifecycle, real-vault benchmarks, notification permission handling and release QA |
+| 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
+| 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -511,6 +512,64 @@ change notifications, device-wide monitoring, automatic LLM requests,
 signed prerelease publication or real-device 200k-vault benchmark is
 introduced in this milestone. These require a separate reviewable
 stage and hardware-based performance/permission testing.
+
+## Stage 14 — optional durable local jobs, notification controls and preview QA
+
+**User-controlled scheduling.** Android uses `androidx.work:work-runtime:2.11.2`
+for unique, persisted checks about every six hours, *only after the user
+explicitly enables them*. Periodic runs require a charger and non-low battery;
+Android may delay them. The user can also queue a single check and disable
+periodic checks at any time. Settings contain only operation status, timestamps
+and counts. A worker resolves the current user-selected Markor notebook
+at execution time and is never passed a plaintext vault path via WorkManager
+data. No code invokes LLMs, embedding servers, knowledge-approval actions or
+network requests during these jobs.
+
+The worker performs the same bounded Markdown scan and transactional SQLite
+FTS update as the foreground library, reporting count-only progress. It uses
+WorkManager's foreground execution for long operations, the `dataSync` service
+type and a low-priority in-progress notification; cancellation causes rollback
+of unfinished SQLite transactions. After process termination, WorkManager
+retries from the **beginning of the scan**, not a per-file durable checkpoint.
+Foreground/background concurrent writes may be serialized by SQLite, and
+temporarily unavailable files lead to retry or incomplete status, never
+silently to deleting Markdown files. The separate authoritative knowledge
+journal is not accessed by these jobs.
+
+**Change alerts are a separate opt-in**, with Android 13+ notification
+permission requested in context. An alert is sent only for a *complete*
+traversal with a previous successful baseline of the same vault and a nonzero
+sum of inserted/updated/deleted indexed note rows. It displays a count only,
+no note title, folder, quoted content, model prompt or graph inference.
+The first scan, truncated scans and unreadable directories cannot produce
+change notifications. Denying notification permission never prevents a
+local scan; progress notification behavior is controlled by Android for
+foreground work.
+
+**Reproducible hardware QA:** `scripts/generate_android_stress_vault.py` safely
+creates a *new* disposable folder with 20k Markdown fixtures by default (up
+to the 200k scanner cap). It refuses to touch an existing directory and
+emits reproducible sample SHA-256 hashes. Its safety rules have Python unit
+tests. `docs/ANDROID_DEVICE_TEST_STAGE14.md` defines manual Redmi Note 13
+and Android 11 scenarios for first scan, offline mode, periodic scheduling,
+process kill, notification permissions, memory/battery measurements and
+post-test checksums. **These are not claims of successful physical-device
+testing:** device results and tuning remain the Stage 15 acceptance gate.
+
+**Signed prerelease:** `.github/workflows/knowledge-signed-prerelease.yml`
+tests the Python core and Android build, builds `flavorAtestRelease` with
+the separate `net.gsantner.markor_test` package, signs only after receiving
+repository signing secrets, verifies with `apksigner`, and attaches the
+APK plus its SHA-256 to a GitHub *prerelease*. The workflow is restricted to
+the `feature/knowledge-android` integration ref and is triggered once when
+introduced there; later runs are manually dispatched on that ref. No
+keystore or credentials are committed and no notes are bundled.
+
+**Limits:** OS battery restrictions and OEM policy can delay background work.
+`dataSync` foreground service behavior and permission dialogs require
+physical-device QA. Periodic checks are not real-time file watchers and
+do not run semantic re-embedding automatically. The proof-of-concept release
+must remain a prerelease until device tests and a data-safety review pass.
 
 ## Integration branch and PR process
 

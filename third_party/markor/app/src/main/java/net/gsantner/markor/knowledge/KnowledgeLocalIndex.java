@@ -618,6 +618,22 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /** Read-only test for the same-vault baseline before issuing change alerts. */
+    public synchronized boolean hasCommittedScanFor(final File root) throws IOException {
+        if (!databaseFile.isFile()) {
+            return false;
+        }
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(databaseFile.getAbsolutePath(),
+                null, SQLiteDatabase.OPEN_READONLY);
+        try {
+            return root.getCanonicalPath().equals(getMeta(db, "root"))
+                    && parseLong(getMeta(db, "last_scan_ms")) > 0
+                    && !"1".equals(getMeta(db, "last_scan_incomplete"));
+        } finally {
+            db.close();
+        }
+    }
+
     /**
      * Explicitly user-authorized repair of an entirely disposable projection.
      * This file is beneath noBackupFilesDir, never a Markdown source or journal.
