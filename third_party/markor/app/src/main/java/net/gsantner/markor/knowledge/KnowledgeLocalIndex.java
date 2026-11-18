@@ -16,7 +16,13 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -29,7 +35,8 @@ import java.util.UUID;
 public final class KnowledgeLocalIndex {
     public static final int MAX_INDEX_BYTES_PER_NOTE = 2_000_000;
     private static final String DB_NAME = "knowledge_index_v1.sqlite";
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
+    private static final int MAX_SEMANTIC_ROWS = 60_000;
 
     public static final class Hit {
         public final String relativePath;
@@ -58,6 +65,25 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    public static final class SemanticHit {
+        public final String relativePath;
+        public final String title;
+        public final int excerptStart;
+        public final double score;
+        public final long modifiedAtMillis;
+        public final long sizeBytes;
+
+        private SemanticHit(final String path, final String displayTitle, final int offset,
+                            final double similarity, final long modified, final long size) {
+            relativePath = path;
+            title = displayTitle;
+            excerptStart = offset;
+            score = similarity;
+            modifiedAtMillis = modified;
+            sizeBytes = size;
+        }
+    }
+
     private final File databaseFile;
 
     public KnowledgeLocalIndex(final Context context) {
@@ -80,6 +106,8 @@ public final class KnowledgeLocalIndex {
             final String previousRoot = getMeta(db, "root");
             if (previousRoot != null && !previousRoot.equals(canonicalRoot)) {
                 // The old derived projection belongs to another user-selected vault.
+                db.execSQL("DELETE FROM embedding_chunks");
+                db.execSQL("DELETE FROM embedding_notes");
                 db.execSQL("DELETE FROM links");
                 db.execSQL("DELETE FROM documents_fts");
                 db.execSQL("DELETE FROM notes");
@@ -135,6 +163,8 @@ public final class KnowledgeLocalIndex {
                 } else {
                     rowId = existingId;
                     db.update("notes", values, "id=?", new String[]{Long.toString(rowId)});
+                    db.delete("embedding_chunks", "path=?", new String[]{note.relativePath});
+                    db.delete("embedding_notes", "path=?", new String[]{note.relativePath});
                     db.execSQL("DELETE FROM documents_fts WHERE docid=?", new Object[]{rowId});
                     db.delete("links", "source_path=?", new String[]{note.relativePath});
                 }
@@ -168,6 +198,8 @@ public final class KnowledgeLocalIndex {
                     db.execSQL("DELETE FROM documents_fts WHERE docid=?",
                             new Object[]{ids.get(i)});
                     db.delete("links", "source_path=?", new String[]{paths.get(i)});
+                    db.delete("embedding_chunks", "path=?", new String[]{paths.get(i)});
+                    db.delete("embedding_notes", "path=?", new String[]{paths.get(i)});
                     db.delete("notes", "id=?", new String[]{Long.toString(ids.get(i))});
                     removed++;
                 }
@@ -233,6 +265,150 @@ public final class KnowledgeLocalIndex {
         return result;
     }
 
+    /** True only when every part of this unchanged document has been embedded. */
+    public synchronized boolean hasEmbeddings(final String path, final long modified,
+                                               final long size, final String modelKey) {
+        final SQLiteDatabase db = open();
+        try (Cursor c = db.rawQuery("SELECT 1 FROM embedding_notes "
+                        + "WHERE path=? AND modified=? AND size=? AND model_key=?",
+                new String[]{path, Long.toString(modified), Long.toString(size), modelKey})) {
+            return c.moveToFirst();
+        } finally {
+            db.close();
+        }
+    }
+
+    /** Already-current paths for this exact endpoint and model, in a single SQLite pass. */
+    public synchronized Set<String> embeddedPaths(final String modelKey) {
+        final Set<String> paths = new HashSet<>();
+        final SQLiteDatabase db = open();
+        try (Cursor c = db.rawQuery("SELECT e.path FROM embedding_notes e "
+                        + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                        + "AND n.size=e.size WHERE e.model_key=?", new String[]{modelKey})) {
+            while (c.moveToNext()) {
+                paths.add(c.getString(0));
+            }
+        } finally {
+            db.close();
+        }
+        return paths;
+    }
+
+    /** Each note is replaced atomically, so interrupted jobs cannot create partial vectors. */
+    public synchronized void storeEmbeddings(final String path, final long modified,
+                                              final long size, final String modelKey,
+                                              final List<KnowledgeEmbeddingChunks.Chunk> chunks,
+                                              final float[][] normalized) {
+        if (path == null || path.isEmpty() || modelKey == null || chunks == null
+                || chunks.isEmpty() || chunks.size() > KnowledgeEmbeddingChunks.MAX_CHUNKS_PER_NOTE
+                || normalized == null || normalized.length != chunks.size()) {
+            throw new IllegalArgumentException("Invalid indexed embedding batch");
+        }
+        final SQLiteDatabase db = open();
+        db.beginTransaction();
+        try {
+            try (Cursor c = db.rawQuery("SELECT modified, size, oversized FROM notes WHERE path=?",
+                    new String[]{path})) {
+                if (!c.moveToFirst() || c.getLong(0) != modified
+                        || c.getLong(1) != size || c.getInt(2) != 0) {
+                    throw new IllegalStateException("Source changed before embedding save");
+                }
+            }
+            final int dimension = normalized[0].length;
+            db.delete("embedding_chunks", "path=?", new String[]{path});
+            db.delete("embedding_notes", "path=?", new String[]{path});
+            for (int i = 0; i < chunks.size(); i++) {
+                if (normalized[i].length != dimension
+                        || chunks.get(i).start < 0 || chunks.get(i).start >= size + 1) {
+                    throw new IllegalArgumentException("Mismatched embedding fragments");
+                }
+                final ContentValues values = new ContentValues();
+                values.put("path", path);
+                values.put("chunk", i);
+                values.put("offset", chunks.get(i).start);
+                values.put("vector", KnowledgeEmbeddingVectors.encode(normalized[i]));
+                db.insertOrThrow("embedding_chunks", null, values);
+            }
+            final ContentValues note = new ContentValues();
+            note.put("path", path);
+            note.put("model_key", modelKey);
+            note.put("modified", modified);
+            note.put("size", size);
+            note.put("dimension", dimension);
+            note.put("chunks", chunks.size());
+            db.insertOrThrow("embedding_notes", null, note);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+            db.close();
+        }
+    }
+
+    public synchronized int embeddingNoteCount(final String modelKey) {
+        final SQLiteDatabase db = open();
+        try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_notes e "
+                        + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                        + "AND n.size=e.size WHERE e.model_key=?", new String[]{modelKey})) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        } finally {
+            db.close();
+        }
+    }
+
+    /** Exact cosine ranking of normalized float32 chunks, followed by per-file de-duplication. */
+    public synchronized List<SemanticHit> semanticSearch(final String modelKey,
+                                                          final float[] normalizedQuestion,
+                                                          final int limit) {
+        if (limit < 1 || limit > 40) {
+            throw new IllegalArgumentException("Invalid result limit");
+        }
+        final Map<String, SemanticHit> best = new HashMap<>();
+        final SQLiteDatabase db = open();
+        try (Cursor c = db.rawQuery("SELECT e.path, n.title, v.offset, v.vector, e.modified, e.size "
+                        + "FROM embedding_notes e JOIN embedding_chunks v ON v.path=e.path "
+                        + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
+                        + "WHERE e.model_key=? AND e.dimension=? "
+                        + "ORDER BY e.path COLLATE NOCASE, v.chunk LIMIT ?",
+                new String[]{modelKey, Integer.toString(normalizedQuestion.length),
+                        Integer.toString(MAX_SEMANTIC_ROWS)})) {
+            while (c.moveToNext()) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return Collections.emptyList();
+                }
+                final double score = KnowledgeEmbeddingVectors.similarity(normalizedQuestion,
+                        c.getBlob(3));
+                if (!Double.isFinite(score)) {
+                    continue;
+                }
+                final String path = c.getString(0);
+                final SemanticHit previous = best.get(path);
+                if (previous == null || score > previous.score) {
+                    best.put(path, new SemanticHit(path, c.getString(1), c.getInt(2), score,
+                            c.getLong(4), c.getLong(5)));
+                }
+            }
+        } finally {
+            db.close();
+        }
+        final List<SemanticHit> ranked = new ArrayList<>(best.values());
+        ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
+                .thenComparing(hit -> hit.relativePath));
+        return ranked.subList(0, Math.min(ranked.size(), limit));
+    }
+
+    public synchronized void clearEmbeddings() {
+        final SQLiteDatabase db = open();
+        db.beginTransaction();
+        try {
+            db.delete("embedding_chunks", null, null);
+            db.delete("embedding_notes", null, null);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+            db.close();
+        }
+    }
+
     /** Only possible backlinks: paths and wiki aliases can be ambiguous. */
     public synchronized List<String> possibleBacklinks(final String relativePath, final int limit) {
         final String full = KnowledgeMarkdownMetadata.linkKey(relativePath);
@@ -279,7 +455,7 @@ public final class KnowledgeLocalIndex {
                 db.close();
                 throw new IllegalStateException("Newer knowledge index schema is not supported");
             }
-            if (version < SCHEMA_VERSION) {
+            if (version < 1) {
                 db.execSQL("DROP TABLE IF EXISTS links");
                 db.execSQL("DROP TABLE IF EXISTS documents_fts");
                 db.execSQL("DROP TABLE IF EXISTS notes");
@@ -295,6 +471,13 @@ public final class KnowledgeLocalIndex {
         db.execSQL("CREATE TABLE IF NOT EXISTS links (source_path TEXT NOT NULL,"
                 + "target_key TEXT NOT NULL, PRIMARY KEY(source_path, target_key))");
         db.execSQL("CREATE INDEX IF NOT EXISTS links_by_target ON links(target_key)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS embedding_notes (path TEXT PRIMARY KEY,"
+                + "model_key TEXT NOT NULL, modified INTEGER NOT NULL, size INTEGER NOT NULL,"
+                + "dimension INTEGER NOT NULL, chunks INTEGER NOT NULL)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS embedding_chunks (path TEXT NOT NULL,"
+                + "chunk INTEGER NOT NULL, offset INTEGER NOT NULL, vector BLOB NOT NULL,"
+                + "PRIMARY KEY(path, chunk))");
+        db.execSQL("CREATE INDEX IF NOT EXISTS embedding_model ON embedding_notes(model_key)");
         db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
         return db;
     }
