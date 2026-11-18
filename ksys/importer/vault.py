@@ -27,14 +27,15 @@ from ..core.ids import canonical_json, digest, file_hash, nfc
 from ..source.coverage import check_coverage
 from ..source.markdown import parse_code_file, parse_document, parse_plain_text
 from ..source.model import Fragment
-from ..store.db import connect
+from ..store.db import connect, get_meta, set_meta
 from ..store.workspace import Workspace
 from .classify import Classification, classify
+from .relations import projected_atoms, RELATIONS_VERSION
 
 SERVICE_DIRS = {".git", ".obsidian", ".makemd", ".space", ".stversions", ".stfolder", ".stfolder (1)",
                 ".trash", ".smart-env", ".smart-connections"}
 SELF_DIRS = {"KNOWLEDGE_SYSTEM"}
-MARKDOWN_EXT = {".md"}
+MARKDOWN_EXT = {".md", ".markdown"}
 PLAIN_EXT = {".txt", ".org"}
 CODE_EXT = {".py", ".pas", ".js", ".css", ".html", ".htm", ".json", ".sh", ".code-workspace", ".csv",
             ".yml", ".yaml", ".toml", ".ini", ".log", ".b"}
@@ -85,12 +86,17 @@ def _ignored(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-def walk_vault(vault: Path) -> Iterable[tuple[str, Path]]:
-    """Все файлы vault (кроме .git и самой подсистемы) в стабильном порядке."""
-    for dirpath, dirnames, filenames in os.walk(vault):
+def walk_vault(vault: Path, *, skip_hidden: bool = False,
+               onerror: Callable | None = None) -> Iterable[tuple[str, Path]]:
+    """Vault paths in stable order; hidden metadata can be pruned on Android."""
+    for dirpath, dirnames, filenames in os.walk(vault, onerror=onerror):
         rel_dir = os.path.relpath(dirpath, vault)
-        dirnames[:] = sorted(d for d in dirnames if not (rel_dir == "." and (d == ".git" or d in SELF_DIRS)))
+        dirnames[:] = sorted(d for d in dirnames
+                             if not (rel_dir == "." and (d == ".git" or d in SELF_DIRS))
+                             and (not skip_hidden or not d.startswith(".")))
         for name in sorted(filenames):
+            if skip_hidden and name.startswith("."):
+                continue
             full = Path(dirpath) / name
             rel = nfc(os.path.relpath(full, vault).replace(os.sep, "/"))
             yield rel, full
@@ -118,26 +124,77 @@ class ImportResult:
 
 def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | None = None,
                  progress: Callable[[str], None] | None = None, force: bool = False,
-                 include: set | None = None) -> ImportResult:
-    """include — необязательное подмножество путей (контролируемая миграция подмножества)."""
+                 include: set | None = None, *,
+                 only_extensions: set[str] | None = None, skip_hidden: bool = False,
+                 max_bytes: int | None = None, reconcile_missing: bool = True,
+                 cancelled: Callable[[], bool] | None = None,
+                 max_files: int | None = None) -> ImportResult:
+    """Incremental read-only source import into a disposable private index.
+
+    Android uses Markdown-only/hidden-file/size filters and never reconciles
+    missing paths: an interrupted, limited or inaccessible walk must not imply
+    that previously indexed source notes have been deleted.
+    """
     analyzer = analyzer or StructuralAnalyzer()
-    versions = dict(VERSIONS, analyzer=getattr(analyzer, "version", "custom"))
+    versions = dict(VERSIONS, analyzer=getattr(analyzer, "version", "custom"),
+                    relations=RELATIONS_VERSION)
     versions_key = canonical_json(versions)
     vault = vault.resolve()
     patterns = _gitignore_patterns(vault)
     con = connect(ws.db_path)
+    con.execute("BEGIN")
+    if get_meta(con, "vault_root") != str(vault):
+        # A changed notebook must not mix another person's old private
+        # candidate interpretations into the newly selected library.
+        # This affects only disposable source projections, not the journal.
+        for table in ("candidate_atoms", "candidates", "fragments", "documents"):
+            con.execute(f"DELETE FROM {table}")
+        set_meta(con, "vault_root", str(vault))
     existing = {row[0]: (row[1], row[2]) for row in con.execute("SELECT path, sha256, versions FROM documents")}
     entries: list[dict] = []
     seen_paths: set[str] = set()
     coverage_failures: list = []
     ordinal = 0
-    con.execute("BEGIN")
-    for rel, full in walk_vault(vault):
+    truncated = False
+    considered = 0
+    unreadable_directories = []
+    for rel, full in walk_vault(vault, skip_hidden=skip_hidden,
+                                onerror=unreadable_directories.append):
         if include is not None and rel not in include:
+            continue
+        if only_extensions is not None and full.suffix.lower() not in only_extensions:
             continue
         seen_paths.add(rel)
         parts = rel.split("/")
-        size = full.stat().st_size
+        if skip_hidden and any(part.startswith(".") for part in parts):
+            continue
+        if max_files is not None and considered >= max_files:
+            truncated = True
+            break
+        considered += 1
+        if cancelled is not None and cancelled():
+            con.rollback()
+            con.close()
+            raise InterruptedError("Vault import cancelled")
+        if progress is not None:
+            try:
+                progress(rel)
+            except BaseException:
+                con.rollback()
+                con.close()
+                raise
+        try:
+            # A symlink must never allow the Android importer to read outside
+            # the notebook explicitly selected by the user.
+            if not full.resolve().is_relative_to(vault):
+                entries.append({"path": rel, "status": "SKIPPED_OUTSIDE_VAULT",
+                                "kind": "excluded", "sha256": None})
+                continue
+            size = full.stat().st_size
+        except (OSError, RuntimeError):
+            entries.append({"path": rel, "status": "SKIPPED_UNREADABLE",
+                            "kind": "excluded", "sha256": None})
+            continue
         entry: dict = {"path": rel, "size": size}
         status, kind = None, None
         if any(p in SERVICE_DIRS for p in parts[:-1]) or parts[-1] in SERVICE_DIRS:
@@ -146,13 +203,29 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             status, kind = "EXCLUDED_IGNORED", "ignored"  # содержимое не читается (секреты)
         if status:
             entry.update(status=status, kind=kind, sha256=None)
+            con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
+            con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
             con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
                         " VALUES(?,?,?,?,?,?,0,?)", (rel, None, size, status, kind, "[]", versions_key))
-            con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
-            con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
             entries.append(entry)
             continue
-        data = full.read_bytes()
+        if max_bytes is not None and size > max_bytes:
+            entry.update(status="SKIPPED_SIZE_LIMIT", kind="markdown", sha256=None)
+            # Never present interpretations from an earlier, smaller version.
+            con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
+            con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
+            con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
+                        " VALUES(?,?,?,?,?,?,0,?)", (rel, None, size, entry["status"], "markdown", "[]", versions_key))
+            entries.append(entry)
+            continue
+        try:
+            data = full.read_bytes()
+        except OSError:
+            entry.update(status="SKIPPED_UNREADABLE", kind="excluded", sha256=None)
+            entries.append(entry)
+            continue
         sha = file_hash(data)
         ext = Path(rel).suffix.lower()
         entry["sha256"] = sha
@@ -181,6 +254,9 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
         entry.update(kind=kind, flags=flags)
         if parser is None:
             entry.update(status="REGISTERED_BINARY")
+            con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
+            con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
             con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
                         " VALUES(?,?,?,?,?,?,0,?)", (rel, sha, size, "REGISTERED_BINARY", kind, json.dumps(flags), versions_key))
             entries.append(entry)
@@ -190,8 +266,6 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             entry.update(status="PARSED", reused=True, **stats)
             entries.append(entry)
             continue
-        if progress:
-            progress(rel)
         parsed = parser(rel, text)
         cov = check_coverage(text, parsed.fragments)
         errors = []
@@ -200,6 +274,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
                            "lost": [list(x) for x in cov.lost[:5]], "overlaps": len(cov.overlaps)})
             coverage_failures.append(rel)
         con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
+        con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
         con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
         doc_context = {"path": rel, "frontmatter": parsed.frontmatter, "flags": flags}
         for frag in parsed.fragments:
@@ -218,6 +293,8 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
                             (cand["id"], frag.id, cand["reading_id"], canonical_json(cand["nodes"]),
                              cand["paraphrase"], canonical_json(cand["diagnostics"]),
                              canonical_json(cand.get("ambiguity") or {}), cand["input_hash"], frag.span[0]))
+                for row in projected_atoms(cand, rel, frag.id, frag.locator):
+                    con.execute("INSERT OR IGNORE INTO candidate_atoms VALUES(?,?,?,?,?,?,?)", row)
         con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions, error)"
                     " VALUES(?,?,?,?,?,?,?,?,?)", (rel, sha, size, "PARSED", kind, json.dumps(flags),
                                                    len(parsed.fragments), versions_key,
@@ -225,12 +302,21 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
         stats = _doc_stats(con, rel)
         entry.update(status="PARSED", reused=False, **stats)
         entries.append(entry)
-    for gone in sorted(set(existing) - seen_paths):  # документ удалён из vault
-        con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (gone,))
-        con.execute("DELETE FROM fragments WHERE doc=?", (gone,))
-        con.execute("DELETE FROM documents WHERE path=?", (gone,))
+    if reconcile_missing and not truncated and include is None \
+            and only_extensions is None and not skip_hidden and not unreadable_directories:
+        for gone in sorted(set(existing) - seen_paths):  # complete vault walk only
+            con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (gone,))
+            con.execute("DELETE FROM candidate_atoms WHERE doc=?", (gone,))
+            con.execute("DELETE FROM fragments WHERE doc=?", (gone,))
+            con.execute("DELETE FROM documents WHERE path=?", (gone,))
+    if cancelled is not None and cancelled():
+        con.rollback()
+        con.close()
+        raise InterruptedError("Vault import cancelled")
     con.execute("COMMIT")
     manifest = build_manifest(entries, versions, clock.now())
+    manifest["truncated"] = truncated
+    manifest["unreadable_directories"] = len(unreadable_directories)
     con.close()
     return ImportResult(manifest, coverage_failures)
 

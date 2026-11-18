@@ -1,0 +1,124 @@
+/*
+ * Copyright 2026 DP Knowledge System contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package net.gsantner.markor.knowledge;
+
+import android.content.Context;
+
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * Thin Android transport to the *actual* Python ksys package, without a
+ * separate Java reimplementation of its source or knowledge semantics.
+ * Invoke from a worker thread. Only the caller owns the original Markdown.
+ */
+public final class KnowledgePythonBridge {
+    private KnowledgePythonBridge() {
+    }
+
+    public interface BulkProgress {
+        boolean onProgress(int processed);
+    }
+
+    public static JSONObject analyzeVault(final Context context, final String workspace,
+                                          final String notebook, final BulkProgress progress)
+            throws JSONException {
+        return invoke(context, "analyze_vault", workspace, notebook, progress);
+    }
+
+    public static JSONObject reviewQueue(final Context context, final String workspace,
+                                         final int offset) throws JSONException {
+        return invoke(context, "review_queue", workspace, offset);
+    }
+
+    public static JSONObject relationships(final Context context, final String workspace,
+                                           final String relativePath) throws JSONException {
+        return invoke(context, "note_relationships", workspace, relativePath);
+    }
+
+    public static JSONObject fullAudit(final Context context, final String workspace,
+                                       final String notebook, final BulkProgress progress)
+            throws JSONException {
+        return invoke(context, "full_library_audit", workspace, notebook, progress);
+    }
+
+    public static JSONObject auditPage(final Context context, final String workspace,
+                                       final String category, final int offset)
+            throws JSONException {
+        return invoke(context, "full_audit_page", workspace, category, offset);
+    }
+
+    public static JSONObject inspect(final Context context, final String relativePath,
+                                     final String markdown) throws JSONException {
+        return invoke(context, "inspect_note", relativePath, markdown);
+    }
+
+    public static JSONObject preview(final Context context, final String workspace,
+                                     final String relativePath, final String markdown,
+                                     final String fragmentId) throws JSONException {
+        return invoke(context, "preview_fragment", workspace, relativePath, markdown, fragmentId);
+    }
+
+    public static JSONObject decide(final Context context, final String workspace,
+                                    final String relativePath, final String markdown,
+                                    final String fragmentId, final String readingId,
+                                    final String role, final String sourceHash,
+                                    final String journalHead) throws JSONException {
+        return invoke(context, "record_decision", workspace, relativePath, markdown,
+                fragmentId, readingId, role, sourceHash, journalHead);
+    }
+
+    public static JSONObject query(final Context context, final String workspace,
+                                   final String question) throws JSONException {
+        return invoke(context, "ask_knowledge", workspace, question);
+    }
+
+    public static JSONObject diagnostics(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "knowledge_diagnostics", workspace);
+    }
+
+    public static JSONObject journalExportInfo(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "journal_export_info", workspace);
+    }
+
+    public static JSONObject journalRestorePreview(final Context context, final String workspace,
+                                                   final String text) throws JSONException {
+        return invoke(context, "journal_restore_preview", workspace, text);
+    }
+
+    public static JSONObject journalRestoreCommit(final Context context, final String workspace,
+                                                  final String text, final String expectedSha)
+            throws JSONException {
+        return invoke(context, "journal_restore_commit", workspace, text, expectedSha);
+    }
+
+    private static JSONObject invoke(final Context context, final String method,
+                                     final Object... arguments) throws JSONException {
+        synchronized (KnowledgePythonBridge.class) {
+            if (!Python.isStarted()) {
+                Python.start(new AndroidPlatform(context.getApplicationContext()));
+            }
+        }
+        final String output = Python.getInstance().getModule("ksys_android_bridge")
+                .callAttr(method, arguments).toString();
+        final JSONObject result = new JSONObject(output);
+        final String protocol = result.optString("protocol");
+        if (!"dpksys.inspect.v1".equals(protocol)
+                && !"dpksys.decision.v1".equals(protocol)
+                && !"dpksys.query.v1".equals(protocol)
+                && !"dpksys.backup.v1".equals(protocol)
+                && !"dpksys.bulk.v1".equals(protocol)
+                && !"dpksys.relations.v1".equals(protocol)
+                && !"dpksys.audit.v1".equals(protocol)) {
+            throw new JSONException("Unexpected knowledge core protocol");
+        }
+        return result;
+    }
+}

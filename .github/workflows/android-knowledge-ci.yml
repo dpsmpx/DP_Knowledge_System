@@ -1,0 +1,55 @@
+name: Android knowledge integration checks
+
+on:
+  push:
+    branches:
+      - 'feature/knowledge-android*'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: android-actions/setup-android@v4
+      - name: Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Unit tests and unsigned debug build
+        working-directory: third_party/markor
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
+            :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug --no-daemon --stacktrace
+      - name: Confirm standalone DP Knowledge package ID
+        run: |
+          set -euo pipefail
+          apk=$(find third_party/markor/app/build/outputs/apk/flavorAtest/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          package_name="$("${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}/build-tools/35.0.0/aapt" \
+            dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          test "$package_name" = 'com.dpsmpx.dpks'
+      - name: Verify embedded Python runtime payload
+        run: |
+          apk=$(find third_party/markor/app/build/outputs/apk/flavorDefault/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          unzip -Z1 "$apk" | grep -q '^assets/chaquopy/'
+
+  python-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -t .

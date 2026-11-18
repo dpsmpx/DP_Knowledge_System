@@ -7,19 +7,24 @@
  *
 #########################################################*/
 apply plugin: 'com.android.application'
+apply plugin: 'com.chaquo.python'
 if (enable_plugin_kotlin) {
     apply plugin: 'kotlin-android'
     apply plugin: 'kotlin-android-extensions'
     apply plugin: 'kotlin-kapt'
 }
 
-rootProject.ext.version_minSdk = 21
+// Chaquopy 17.2 needs API 24; Android 7.0 and newer are supported.
+rootProject.ext.version_minSdk = 24
 
 android {
     buildToolsVersion rootProject.ext.version_buildTools
     compileSdkVersion rootProject.ext.version_compileSdk
 
     defaultConfig {
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
         resValue "string", "manifest_package_id", "net.gsantner.markor"
         applicationId "net.gsantner.markor"
         versionName "2026.10.0"
@@ -40,7 +45,10 @@ android {
     flavorDimensions = ["default"]
     productFlavors {
         flavorAtest {
-            applicationId "net.gsantner.markor_test"
+            // DP Knowledge System prerelease is independently installable.
+            // Java source namespace remains upstream Markor for attribution.
+            applicationId "com.dpsmpx.dpks"
+            resValue "string", "manifest_package_id", "com.dpsmpx.dpks"
             versionCode = Integer.parseInt(new Date().format('yyMMdd'))
             versionName = defaultConfig.versionName + "-" + new Date().format('HHmm')
             buildConfigField "boolean", "IS_TEST_BUILD", "true"
@@ -89,6 +97,39 @@ android {
 
 }
 
+// Single source of truth: the Python engine stays in repository-root ksys/.
+// Build a generated, disposable package rather than maintaining a second copy
+// in the Android tree or accidentally packaging demo/private vault data.
+def stageKnowledgePython = tasks.register('stageKnowledgePython', Sync) {
+    from("${rootProject.projectDir}/../../ksys") {
+        include '**/*.py'
+        exclude '**/__pycache__/**'
+        into 'ksys'
+    }
+    from("${rootProject.projectDir}/../../schemas") {
+        include '**/*.json'
+        into 'schemas'
+    }
+    into(layout.buildDirectory.dir('generated/python'))
+}
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+        // KnowledgeBase reads its own source for deterministic cache fingerprints.
+        extractPackages('ksys')
+    }
+    sourceSets {
+        getByName('main') {
+            srcDir(layout.buildDirectory.dir('generated/python').get().asFile)
+        }
+    }
+}
+tasks.configureEach { task ->
+    if (task.name != 'stageKnowledgePython' && task.name.toLowerCase().contains('python')) {
+        task.dependsOn(stageKnowledgePython)
+    }
+}
+
 dependencies {
     // Testing
     testImplementation 'junit:junit:4.13.2'
@@ -102,6 +143,8 @@ dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'androidx.legacy:legacy-preference-v14:1.0.0'
+    // Explicitly opt-in, durable local-vault checks. No cloud scheduler or model API.
+    implementation 'androidx.work:work-runtime:2.11.2'
 
     // Markdown convertor (Flexmark) - https://github.com/vsch/flexmark-java/releases
     ext.version_library_flexmark = "0.64.8"
