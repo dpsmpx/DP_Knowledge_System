@@ -38,6 +38,10 @@ public final class KnowledgeLocalIndex {
     private static final int SCHEMA_VERSION = 3;
     private static final int MAX_SEMANTIC_CANDIDATES = 45_000;
 
+    public interface Progress {
+        void onProgress(int processed, int total);
+    }
+
     public static final class Hit {
         public final String relativePath;
         public final String title;
@@ -87,6 +91,72 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /** Read-only, count-only diagnostics; no source paths or private note text. */
+    public static final class IndexHealth {
+        public final String quickCheck;
+        public final int sources;
+        public final int textRows;
+        public final int missingTextRows;
+        public final int orphanTextRows;
+        public final int links;
+        public final int embeddedNotes;
+        public final int embeddedChunks;
+        public final int lshRows;
+        public final int incompleteEmbeddings;
+        public final int truncatedEmbeddings;
+        public final int orphanEmbeddingNotes;
+        public final int orphanChunks;
+        public final int orphanLsh;
+        public final long lastScanMillis;
+        public final int lastScanCount;
+        public final boolean lastScanIncomplete;
+        public final int unreadableDirectories;
+
+        private IndexHealth(final SQLiteDatabase db) {
+            String check = "unknown";
+            try (Cursor c = db.rawQuery("PRAGMA quick_check(1)", null)) {
+                if (c.moveToFirst()) {
+                    check = c.getString(0);
+                }
+            }
+            quickCheck = check == null ? "unknown" : check;
+            sources = count(db, "SELECT COUNT(*) FROM notes");
+            textRows = count(db, "SELECT COUNT(*) FROM documents_fts");
+            missingTextRows = count(db, "SELECT COUNT(*) FROM notes n "
+                    + "LEFT JOIN documents_fts f ON f.docid=n.id WHERE f.docid IS NULL");
+            orphanTextRows = count(db, "SELECT COUNT(*) FROM documents_fts f "
+                    + "LEFT JOIN notes n ON n.id=f.docid WHERE n.id IS NULL");
+            links = count(db, "SELECT COUNT(*) FROM links");
+            embeddedNotes = count(db, "SELECT COUNT(*) FROM embedding_notes");
+            embeddedChunks = count(db, "SELECT COUNT(*) FROM embedding_chunks");
+            lshRows = count(db, "SELECT COUNT(*) FROM embedding_lsh");
+            incompleteEmbeddings = count(db, "SELECT COUNT(*) FROM embedding_notes "
+                    + "WHERE completed<chunks");
+            truncatedEmbeddings = count(db, "SELECT COUNT(*) FROM embedding_notes "
+                    + "WHERE truncated<>0");
+            orphanEmbeddingNotes = count(db, "SELECT COUNT(*) FROM embedding_notes e "
+                    + "LEFT JOIN notes n ON n.path=e.path WHERE n.path IS NULL "
+                    + "OR n.modified<>e.modified OR n.size<>e.size");
+            orphanChunks = count(db, "SELECT COUNT(*) FROM embedding_chunks v "
+                    + "LEFT JOIN embedding_notes e ON e.path=v.path WHERE e.path IS NULL "
+                    + "OR v.chunk>=e.completed");
+            orphanLsh = count(db, "SELECT COUNT(*) FROM embedding_lsh l "
+                    + "LEFT JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk "
+                    + "WHERE v.path IS NULL");
+            lastScanMillis = parseLong(getMeta(db, "last_scan_ms"));
+            lastScanCount = (int) parseLong(getMeta(db, "last_scan_count"));
+            lastScanIncomplete = "1".equals(getMeta(db, "last_scan_incomplete"));
+            unreadableDirectories = (int) parseLong(getMeta(db, "last_scan_unreadable"));
+        }
+
+        public boolean isHealthy() {
+            return "ok".equals(quickCheck) && sources == textRows
+                    && missingTextRows == 0 && orphanTextRows == 0
+                    && orphanEmbeddingNotes == 0 && orphanChunks == 0 && orphanLsh == 0
+                    && lshRows == (long) embeddedChunks * KnowledgeEmbeddingLsh.TABLES;
+        }
+    }
+
     private final File databaseFile;
 
     public KnowledgeLocalIndex(final Context context) {
@@ -96,6 +166,14 @@ public final class KnowledgeLocalIndex {
     public synchronized SyncResult synchronize(final File root,
                                                 final KnowledgeVaultScanner.Snapshot snapshot,
                                                 final KnowledgeVaultScanner.Cancellation cancellation)
+            throws IOException {
+        return synchronize(root, snapshot, cancellation, null);
+    }
+
+    public synchronized SyncResult synchronize(final File root,
+                                                final KnowledgeVaultScanner.Snapshot snapshot,
+                                                final KnowledgeVaultScanner.Cancellation cancellation,
+                                                final Progress progress)
             throws IOException {
         final String canonicalRoot = root.getCanonicalPath();
         final String generation = UUID.randomUUID().toString();
@@ -118,8 +196,14 @@ public final class KnowledgeLocalIndex {
             }
             setMeta(db, "root", canonicalRoot);
 
+            int processed = 0;
             for (final KnowledgeVaultScanner.Note note : snapshot.notes) {
                 checkCancelled(cancellation);
+                processed++;
+                if (progress != null && (processed % 512 == 0
+                        || processed == snapshot.notes.size())) {
+                    progress.onProgress(processed, snapshot.notes.size());
+                }
                 final long existingId;
                 final long existingModified;
                 final long existingSize;
@@ -211,6 +295,13 @@ public final class KnowledgeLocalIndex {
                 }
             }
             checkCancelled(cancellation);
+            // These markers share the index transaction: a killed process can
+            // never claim a partially indexed scan completed successfully.
+            setMeta(db, "last_scan_ms", Long.toString(System.currentTimeMillis()));
+            setMeta(db, "last_scan_count", Integer.toString(snapshot.notes.size()));
+            setMeta(db, "last_scan_incomplete", incomplete ? "1" : "0");
+            setMeta(db, "last_scan_truncated", snapshot.truncated ? "1" : "0");
+            setMeta(db, "last_scan_unreadable", Integer.toString(snapshot.unreadableDirectories));
             db.setTransactionSuccessful();
             return new SyncResult(indexed, reused, oversized, removed, incomplete);
         } finally {
@@ -514,6 +605,29 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /** Snapshot-only integrity report. Never rewrites, repairs or exports private notes. */
+    public synchronized IndexHealth healthReport() {
+        // Do not call open(): that method initializes and migrates the schema.
+        // Diagnostics must never change the index under investigation.
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(databaseFile.getAbsolutePath(),
+                null, SQLiteDatabase.OPEN_READONLY);
+        try {
+            return new IndexHealth(db);
+        } finally {
+            db.close();
+        }
+    }
+
+    /**
+     * Explicitly user-authorized repair of an entirely disposable projection.
+     * This file is beneath noBackupFilesDir, never a Markdown source or journal.
+     */
+    public synchronized void resetDerivedIndex() throws IOException {
+        if (databaseFile.isFile() && !SQLiteDatabase.deleteDatabase(databaseFile)) {
+            throw new IOException("Could not remove damaged derived index");
+        }
+    }
+
     /** Only possible backlinks: paths and wiki aliases can be ambiguous. */
     public synchronized List<String> possibleBacklinks(final String relativePath, final int limit) {
         final String full = KnowledgeMarkdownMetadata.linkKey(relativePath);
@@ -635,6 +749,23 @@ public final class KnowledgeLocalIndex {
     private static String getMeta(final SQLiteDatabase db, final String key) {
         try (Cursor c = db.rawQuery("SELECT value FROM meta WHERE key=?", new String[]{key})) {
             return c.moveToFirst() ? c.getString(0) : null;
+        }
+    }
+
+    private static int count(final SQLiteDatabase db, final String sql) {
+        try (Cursor c = db.rawQuery(sql, null)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    private static long parseLong(final String text) {
+        if (text == null) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException invalid) {
+            return 0;
         }
     }
 

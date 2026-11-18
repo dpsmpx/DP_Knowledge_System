@@ -38,7 +38,8 @@ snapshot until the integrated application is ready.
 | 10 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
 | 11 | Optional embedding-based semantic search and LLM evidence selection; bounded incremental vector index | Ranked passage-level matches, strict per-action upload consent, local-only vector search, privacy-safe cache invalidation |
 | 12 | Heading/paragraph-aware overlapping Markdown passages, resumable fine-grained embedding checkpoints and indexed approximate vector candidates | Expanded long-note coverage, source-accurate spans, migrations that preserve old vectors, bounded candidate reranking |
-| 13 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 13 | Large-vault scan/index progress, private SQLite consistency diagnostics, user-authorized rebuild, reproducible cancellation/stress tests | Bounded count-only progress, transactional success markers, read-only health report, destructive derived-index repair requires consent |
+| 14 | Durable optional local background jobs, change notifications, real-device endurance tests and signed prereleases | Crash-safe job lifecycle, real-vault benchmarks, notification permission handling and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -455,6 +456,61 @@ Clearing the vector index still requires deliberate long-press confirmation.
 The batch/text-size network bounds, HTTPS/private-network rules, API-key
 non-persistence, query-specific permission, and mandatory exact LLM
 chat-context disclosure from Stages 10–11 remain unchanged.
+
+## Stage 13 — large-library progress, diagnostics, safe index recovery
+
+**Count-only progress.** The read-only vault walker and local SQLite
+full-text synchronization now report bounded progress approximately every
+512 files (and at completion). The Knowledge Library status distinguishes
+discovery from private-index updates. Neither paths nor note contents are
+passed through progress callbacks or written to logs. Both operations
+honor the previous cancellation generation; no half-completed sync can
+claim to be successful.
+
+**Committed-scan checkpoint.** Only inside the successful source-index
+SQLite transaction, metadata records the timestamp, number of discovered
+notes, truncation/incompleteness and unreadable-directory count. A process
+death or cancelled transaction rolls back these markers together with the
+FTS/index edits. This is a **consistency checkpoint**, not a claim that a
+200,000-note scan can resume mid-file or survive process termination as
+a running job.
+
+The existing Diagnostics button now offers **Knowledge state** or
+**Index health and recovery**. Index health runs on a worker thread and
+performs SQLite `PRAGMA quick_check(1)` plus independent count checks:
+
+- source rows, FTS rows, missing/orphan FTS entries and candidate links;
+- embedding documents, chunks, incomplete/truncated embeddings and LSH
+  posting totals (four per valid indexed vector);
+- stale semantic documents and orphan vector/LSH records;
+- last committed scan status and source-coverage warnings.
+
+The report is deliberately count-only, offline, and read-only. It can
+identify structural inconsistencies but **does not prove semantic validity**
+or detect every conceivable stale filesystem write. On an unreadable index,
+the UI also offers a separate recovery action.
+
+**Explicit repair:** the user must pass a second confirmation before the
+app removes only its disposable `knowledge_index_v1.sqlite` and SQLite
+journal/auxiliary files from `noBackupFilesDir`. The app cancels
+competing scans and embedding work first, then rescans the selected vault
+offline. **No Markdown note or append-only authoritative knowledge
+journal is modified or deleted.** Previously generated embeddings are
+lost on a rebuild and can only be recreated via the earlier manual
+consent procedure and the user's chosen embedding service.
+
+**Synthetic verification:** Android JUnit creates 1200 fake Markdown
+files across directories, checks deterministic discovery, progress,
+coverage and unchanged source files; a second 700-note scenario triggers
+cancellation after 512 discovered notes and checks preservation. These
+fixtures contain no personal content and run in CI with the Python core
+suite and Android APK build.
+
+**Limits:** no WorkManager-style persisted background execution, Android
+change notifications, device-wide monitoring, automatic LLM requests,
+signed prerelease publication or real-device 200k-vault benchmark is
+introduced in this milestone. These require a separate reviewable
+stage and hardware-based performance/permission testing.
 
 ## Integration branch and PR process
 

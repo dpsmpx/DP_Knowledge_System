@@ -12,6 +12,9 @@ import java.io.File;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.*;
@@ -76,5 +79,56 @@ public class KnowledgeVaultScannerTest {
     @Test(expected = InterruptedIOException.class)
     public void canCancelLongScans() throws Exception {
         KnowledgeVaultScanner.scan(temporaryFolder.newFolder("vault"), 100, () -> true);
+    }
+
+    @Test
+    public void stressScansTwelveHundredSyntheticNotesWithBoundedCountOnlyProgress()
+            throws Exception {
+        final File root = temporaryFolder.newFolder("synthetic-vault");
+        final int expected = 1200;
+        for (int i = 0; i < expected; i++) {
+            final File directory = new File(root, "group-" + i / 100);
+            assertTrue(directory.isDirectory() || directory.mkdir());
+            Files.write(new File(directory, String.format("synthetic-%04d.md", i)).toPath(),
+                    Arrays.asList("# Synthetic fixture " + i));
+        }
+        final List<Integer> progress = new ArrayList<>();
+        final KnowledgeVaultScanner.Snapshot result = KnowledgeVaultScanner.scan(
+                root, 2000, () -> false, (notes, directories) -> {
+                    assertTrue(directories >= 1);
+                    progress.add(notes);
+                });
+        assertEquals(expected, result.notes.size());
+        assertFalse(result.truncated);
+        assertEquals(0, result.unreadableDirectories);
+        assertTrue(progress.contains(512));
+        assertTrue(progress.contains(1024));
+        assertEquals(Integer.valueOf(expected), progress.get(progress.size() - 1));
+        assertEquals("group-0/synthetic-0000.md", result.notes.get(0).relativePath);
+        assertTrue(new File(root, "group-11/synthetic-1199.md").isFile());
+    }
+
+    @Test
+    public void cancelFromProgressDoesNotChangeSyntheticSourceNotes() throws Exception {
+        final File root = temporaryFolder.newFolder("cancel-vault");
+        for (int i = 0; i < 700; i++) {
+            Files.write(new File(root, String.format("item-%04d.md", i)).toPath(),
+                    Arrays.asList("# Fake content"));
+        }
+        final File sentinel = new File(root, "item-0000.md");
+        final byte[] before = Files.readAllBytes(sentinel.toPath());
+        final AtomicBoolean cancelled = new AtomicBoolean();
+        try {
+            KnowledgeVaultScanner.scan(root, 1000, cancelled::get,
+                    (notes, directories) -> {
+                        if (notes >= 512) {
+                            cancelled.set(true);
+                        }
+                    });
+            fail("Scan should honor cancellation");
+        } catch (InterruptedIOException expected) {
+            assertTrue(cancelled.get());
+        }
+        assertArrayEquals(before, Files.readAllBytes(sentinel.toPath()));
     }
 }

@@ -31,6 +31,11 @@ public final class KnowledgeVaultScanner {
         boolean isCancelled();
     }
 
+    /** Bounded count-only progress: never exposes names or note content. */
+    public interface Progress {
+        void onProgress(int discoveredNotes, int visitedDirectories);
+    }
+
     public static final class Note {
         public final File file;
         public final String relativePath;
@@ -67,6 +72,12 @@ public final class KnowledgeVaultScanner {
 
     public static Snapshot scan(final File notebook, final int limit, final Cancellation cancellation)
             throws IOException {
+        return scan(notebook, limit, cancellation, null);
+    }
+
+    public static Snapshot scan(final File notebook, final int limit,
+                                final Cancellation cancellation, final Progress progress)
+            throws IOException {
         if (limit < 1) {
             throw new IllegalArgumentException("limit must be positive");
         }
@@ -84,12 +95,14 @@ public final class KnowledgeVaultScanner {
         final Set<String> visitedFiles = new HashSet<>();
         final List<Note> notes = new ArrayList<>();
         int unreadable = 0;
+        int inspectedDirectories = 0;
         boolean truncated = false;
         queue.add(root);
 
         while (!queue.isEmpty()) {
             checkCancelled(cancellation);
             final File directory = queue.removeFirst();
+            inspectedDirectories++;
             final String canonicalDirectory;
             try {
                 canonicalDirectory = directory.getCanonicalPath();
@@ -128,6 +141,9 @@ public final class KnowledgeVaultScanner {
                         && visitedFiles.add(childPath)) {
                     notes.add(new Note(new File(childPath),
                             childPath.substring(rootPrefix.length()).replace(File.separatorChar, '/')));
+                    if (progress != null && notes.size() % 512 == 0) {
+                        progress.onProgress(notes.size(), inspectedDirectories);
+                    }
                     if (notes.size() >= limit) {
                         truncated = true;
                         queue.clear();
@@ -138,6 +154,10 @@ public final class KnowledgeVaultScanner {
         }
 
         Collections.sort(notes, NOTE_ORDER);
+        checkCancelled(cancellation);
+        if (progress != null) {
+            progress.onProgress(notes.size(), inspectedDirectories);
+        }
         return new Snapshot(notes, unreadable, truncated);
     }
 
