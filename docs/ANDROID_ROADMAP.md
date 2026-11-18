@@ -34,8 +34,9 @@ snapshot until the integrated application is ready.
 | 06 | Explicit, encrypted journal export/import before wider release | User-chosen backup/restore, source hash-chain verified, existing journal never overwritten |
 | 07 | Automatic, local, whole-library semantic classification, candidate extraction, incremental indexing and review queue | All accessible Markdown notes processed without authorizing facts; cancellation, size bounds and partial-scan safety tested |
 | 08 | Conservative cross-note semantic relationships between independently extracted claims | Exact predicate/argument matching, opposite-negation candidates, paired provenance, no automatic factual authority |
-| 09 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
-| 10 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 09 | Whole-library audit of contradictions, ambiguous and unresolved text, source errors, approved-knowledge gaps and journal integrity | Fresh local import, exact severity-separated counts, bounded source-provenanced pages, explicit completeness limits; no automatic repair |
+| 10 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
+| 11 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -243,6 +244,49 @@ do not imply that either is false. Changed or temporarily missing sources
 may leave old candidate relations until the next successful semantic refresh;
 users must inspect current notes and explicitly approve any authoritative
 knowledge through the preexisting journal flow. No network service is used.
+
+## Stage 09 — whole-library contradiction and uncertainty audit
+
+The native **Audit the whole knowledge library** action first reruns the
+read-only Markdown semantic import, then assesses the entire private derived
+index and the separately verified human-approval journal. A cancellable worker
+reports progress. After completion, a seven-category summary and paginated
+issue browser let users open the original source without rewriting it:
+
+1. Contradictions among *human-approved* knowledge, using the existing
+   `Answerer.contradictions("auth")` engine and proof provenance.
+2. Potential opposing claims anywhere in the imported sources, grouped by
+   exact canonical predicate/arguments rather than enumerating quadratic
+   numbers of pairs; each polarity has up to three source/fragment locators.
+3. Ambiguous controlled-language interpretations.
+4. Unresolved references and incomplete bindings.
+5. Prose that the current grammar cannot formalize (reported, not discarded).
+6. Skipped/inaccessible source documents and import/coverage errors.
+7. Knowledge-journal validation problems, open hypotheses, deferred claims,
+   unreviewed human claims, missing decision bases and unassessed confidence.
+
+The summary also reports indexed documents and fragments, incomplete scans,
+skipped files, previously indexed paths not observed during the latest scan,
+and the numerical consistency backend/status where supported. Every result
+states that **no detected contradiction does not prove consistency**.
+Corrupted or unreadable journals are marked invalid; their authoritative
+counts become **unknown**, never silently zero. Source-level findings remain
+inspectable even if the journal fails verification. Individual issue pages
+show at most 40 entries and signal when more exist.
+
+Switching notebook roots now clears only the *disposable source projection*
+before analyzing the new vault, avoiding accidental cross-notebook mixing.
+The authoritative journal is neither cleared nor changed. Cancellation
+rolls back the in-progress import, including any root-scoping changes.
+
+**Limits:** this is a complete audit of what the bounded deterministic parser
+can represent in the selected and accessible Markdown library, **not** proof
+of semantic consistency for arbitrary natural language. Incomplete storage
+scans, the 200,000-file / 2 MB limits, old entries conservatively retained
+after missing files, unresolved entity references and missing LLM semantics
+are explicitly disclosed. No automatic approval, repair, deletion, cloud
+request, cleartext export or scheduled background job is introduced. Large
+real-device vault stress tests and signed prerelease validation are pending.
 
 ## Integration branch and PR process
 

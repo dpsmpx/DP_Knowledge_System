@@ -61,18 +61,30 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
+    private static final String[] AUDIT_CATEGORIES = {
+            "authoritative_conflicts", "source_conflicts", "ambiguous",
+            "unresolved", "unparsed", "source_problems", "knowledge_gaps"
+    };
+    private static final int[] AUDIT_CATEGORY_LABELS = {
+            R.string.knowledge_audit_authoritative, R.string.knowledge_audit_source_conflicts,
+            R.string.knowledge_audit_ambiguous, R.string.knowledge_audit_unresolved,
+            R.string.knowledge_audit_unparsed, R.string.knowledge_audit_source_problems,
+            R.string.knowledge_audit_knowledge_gaps
+    };
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService analysisWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
     private final AtomicInteger analysisGeneration = new AtomicInteger();
+    private final AtomicInteger auditGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
 
     private Future<?> runningScan;
     private Future<?> runningSearch;
     private Future<?> runningAnalysis;
+    private Future<?> runningAudit;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
@@ -81,8 +93,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView status;
     private TextView analysisStatus;
     private Button analysisButton;
+    private Button auditButton;
     private CheckBox automaticAnalysis;
     private boolean analysisActive;
+    private boolean auditActive;
     private ProgressBar progress;
     private EditText filter;
     private char[] pendingExportPassword;
@@ -109,6 +123,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         status = findViewById(R.id.knowledge_status);
         analysisStatus = findViewById(R.id.knowledge_bulk_status);
         analysisButton = findViewById(R.id.knowledge_bulk_analyze);
+        auditButton = findViewById(R.id.knowledge_full_audit);
+        auditButton.setOnClickListener(view -> {
+            if (auditActive) {
+                cancelFullAudit();
+            } else {
+                startFullAudit();
+            }
+        });
         automaticAnalysis = findViewById(R.id.knowledge_bulk_auto);
         automaticAnalysis.setChecked(getPreferences(MODE_PRIVATE)
                 .getBoolean("semantic_analysis_on_refresh", false));
@@ -179,6 +201,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void scanNotebook() {
+        auditGeneration.incrementAndGet();
+        if (auditActive) {
+            cancelFullAudit();
+        }
         if (analysisActive) {
             cancelBulkAnalysis();
         }
@@ -231,6 +257,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void startBulkAnalysis() {
+        if (auditActive) {
+            analysisStatus.setText(R.string.knowledge_audit_wait);
+            return;
+        }
         if (notebook == null || !notebook.isDirectory() || isFinishing() || isDestroyed()) {
             analysisStatus.setText(R.string.knowledge_unavailable);
             return;
@@ -303,6 +333,231 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         analysisActive = false;
         analysisButton.setText(R.string.knowledge_bulk_analyze);
         analysisStatus.setText(R.string.knowledge_bulk_stopped);
+    }
+
+    private void startFullAudit() {
+        if (analysisActive) {
+            analysisStatus.setText(R.string.knowledge_audit_wait);
+            return;
+        }
+        if (notebook == null || !notebook.isDirectory() || isFinishing() || isDestroyed()) {
+            analysisStatus.setText(R.string.knowledge_unavailable);
+            return;
+        }
+        final int generation = auditGeneration.incrementAndGet();
+        auditActive = true;
+        auditButton.setText(R.string.knowledge_audit_cancel);
+        analysisStatus.setText(getString(R.string.knowledge_audit_running, 0));
+        final String root = notebook.getAbsolutePath();
+        runningAudit = analysisWorker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.fullAudit(
+                        this, workspacePath(), root, count -> {
+                            if (Thread.currentThread().isInterrupted()
+                                    || auditGeneration.get() != generation) {
+                                return false;
+                            }
+                            if (count % 25 == 0) {
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()
+                                            && auditGeneration.get() == generation) {
+                                        analysisStatus.setText(getString(
+                                                R.string.knowledge_audit_running, count));
+                                    }
+                                });
+                            }
+                            return true;
+                        });
+                final JSONObject summary = result.getJSONObject("summary");
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && auditGeneration.get() == generation) {
+                        auditActive = false;
+                        auditButton.setText(R.string.knowledge_audit_start);
+                        analysisStatus.setText(R.string.knowledge_audit_ready);
+                        showAuditSummary(summary);
+                    }
+                });
+            } catch (Exception ignored) {
+                // Private text and Python errors must never enter public logs.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && auditGeneration.get() == generation) {
+                        auditActive = false;
+                        auditButton.setText(R.string.knowledge_audit_start);
+                        analysisStatus.setText(R.string.knowledge_audit_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void cancelFullAudit() {
+        auditGeneration.incrementAndGet();
+        if (runningAudit != null) {
+            runningAudit.cancel(true);
+        }
+        auditActive = false;
+        auditButton.setText(R.string.knowledge_audit_start);
+        analysisStatus.setText(R.string.knowledge_audit_cancelled);
+    }
+
+    private void showAuditSummary(final JSONObject summary) {
+        final JSONObject numeric = summary.optJSONObject("numeric_consistency");
+        final StringBuilder text = new StringBuilder(getString(R.string.knowledge_audit_summary,
+                summary.optInt("indexed_documents"), summary.optInt("indexed_fragments"),
+                summary.optInt("candidate_readings"), summary.optString("journal_integrity"),
+                numeric == null ? "?" : numeric.optString("status")));
+        text.append("\n\n").append(getString(R.string.knowledge_audit_scan_status,
+                summary.optBoolean("scan_complete")
+                        ? getString(R.string.knowledge_audit_complete)
+                        : getString(R.string.knowledge_audit_incomplete),
+                summary.optInt("skipped_this_scan"),
+                summary.optInt("not_seen_in_latest_scan"),
+                summary.optInt("unreadable_directories")));
+        text.append("\n\n").append(getString(R.string.knowledge_audit_limit_notice));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_audit_title)
+                .setMessage(text.toString())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_audit_categories,
+                        (dialog, which) -> showAuditCategories(summary))
+                .show();
+    }
+
+    private void showAuditCategories(final JSONObject summary) {
+        final JSONObject counts = summary.optJSONObject("counts");
+        if (counts == null) {
+            analysisStatus.setText(R.string.knowledge_audit_failed);
+            return;
+        }
+        final String[] labels = new String[AUDIT_CATEGORIES.length];
+        for (int i = 0; i < labels.length; i++) {
+            final Object value = counts.opt(AUDIT_CATEGORIES[i]);
+            final String number = value == null || JSONObject.NULL.equals(value)
+                    ? "?" : String.valueOf(value);
+            labels[i] = getString(AUDIT_CATEGORY_LABELS[i]) + " · " + number;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_audit_categories)
+                .setItems(labels, (dialog, which) -> {
+                    if (counts.isNull(AUDIT_CATEGORIES[which])) {
+                        new AlertDialog.Builder(this)
+                                .setMessage(R.string.knowledge_audit_journal_invalid)
+                                .setPositiveButton(android.R.string.ok, null).show();
+                    } else {
+                        showAuditPage(AUDIT_CATEGORIES[which], 0);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showAuditPage(final String category, final int offset) {
+        final int generation = auditGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.auditPage(
+                        this, workspacePath(), category, offset);
+                final JSONArray findings = result.getJSONArray("findings");
+                final String[] names = new String[findings.length()];
+                for (int i = 0; i < names.length; i++) {
+                    names[i] = auditFindingLabel(category, findings.getJSONObject(i));
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || auditGeneration.get() != generation) {
+                        return;
+                    }
+                    final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_audit_title)
+                            .setNegativeButton(android.R.string.cancel, null);
+                    if (names.length == 0) {
+                        dialog.setMessage(R.string.knowledge_audit_no_findings);
+                    } else {
+                        dialog.setItems(names, (d, position) -> {
+                            final JSONObject finding = findings.optJSONObject(position);
+                            if (finding != null) {
+                                inspectAuditFinding(category, finding);
+                            }
+                        });
+                    }
+                    if (result.optBoolean("has_more")) {
+                        dialog.setNeutralButton(R.string.knowledge_bulk_queue_next,
+                                (d, which) -> showAuditPage(category, offset + names.length));
+                    }
+                    dialog.show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && auditGeneration.get() == generation) {
+                        analysisStatus.setText(R.string.knowledge_audit_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private String auditFindingLabel(final String category, final JSONObject finding) {
+        if ("source_conflicts".equals(category)) {
+            final JSONObject a = finding.optJSONArray("positive_sources") == null ? null
+                    : finding.optJSONArray("positive_sources").optJSONObject(0);
+            final JSONObject b = finding.optJSONArray("negative_sources") == null ? null
+                    : finding.optJSONArray("negative_sources").optJSONObject(0);
+            return finding.optString("predicate") + " · "
+                    + (a == null ? "?" : a.optString("path")) + " ↔ "
+                    + (b == null ? "?" : b.optString("path"));
+        }
+        if ("authoritative_conflicts".equals(category)) {
+            return finding.optString("positive") + " ↔ " + finding.optString("negative");
+        }
+        if ("knowledge_gaps".equals(category)) {
+            return finding.optString("type") + " · " + finding.optString("reference")
+                    + " " + finding.optString("detail");
+        }
+        return finding.optString("path") + " · "
+                + finding.optString("locator", finding.optString("status")) + "\n"
+                + finding.optString("preview");
+    }
+
+    private void inspectAuditFinding(final String category, final JSONObject finding) {
+        if ("source_conflicts".equals(category)) {
+            final JSONArray positives = finding.optJSONArray("positive_sources");
+            final JSONArray negatives = finding.optJSONArray("negative_sources");
+            final JSONObject a = positives == null ? null : positives.optJSONObject(0);
+            final JSONObject b = negatives == null ? null : negatives.optJSONObject(0);
+            final String first = a == null ? "" : a.optString("path");
+            final String second = b == null ? "" : b.optString("path");
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_audit_source_conflicts)
+                    .setMessage(finding.optString("atom"))
+                    .setNeutralButton(R.string.knowledge_audit_open_positive,
+                            (d, which) -> openIndexedNote(first))
+                    .setPositiveButton(R.string.knowledge_audit_open_negative,
+                            (d, which) -> openIndexedNote(second))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        } else if ("authoritative_conflicts".equals(category)) {
+            final String first = finding.optString("path");
+            final String second = finding.optString("other_path");
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_audit_authoritative)
+                    .setMessage(finding.optString("positive") + "\n↔\n"
+                            + finding.optString("negative"))
+                    .setNeutralButton(R.string.knowledge_audit_open_positive,
+                            (d, which) -> openIndexedNote(first))
+                    .setPositiveButton(R.string.knowledge_audit_open_negative,
+                            (d, which) -> openIndexedNote(second))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        } else if (!finding.optString("path").isEmpty()) {
+            openIndexedNote(finding.optString("path"));
+        } else {
+            new AlertDialog.Builder(this)
+                    .setMessage(auditFindingLabel(category, finding))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+        }
     }
 
     private void showCandidateQueue(final int offset) {
@@ -1144,6 +1399,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
         analysisGeneration.incrementAndGet();
+        auditGeneration.incrementAndGet();
+        if (runningAudit != null) {
+            runningAudit.cancel(true);
+        }
         if (runningAnalysis != null) {
             runningAnalysis.cancel(true);
         }
