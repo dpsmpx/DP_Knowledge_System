@@ -76,7 +76,8 @@ public class KnowledgeEmbeddingTest {
     public void prefersHeadingBoundaryWithoutSilentlyClaimingFullCoverage() {
         final String prefix = new String(new char[590]).replace('\0', 'a');
         final String chapter = "\n# Second chapter\nSection content";
-        final String source = prefix + chapter;
+        final String source = prefix + chapter + "\n"
+                + new String(new char[650]).replace('\0', 'z');
         final List<KnowledgeEmbeddingChunks.Chunk> pieces =
                 KnowledgeEmbeddingChunks.fromNote(source);
         assertTrue(pieces.size() >= 2);
