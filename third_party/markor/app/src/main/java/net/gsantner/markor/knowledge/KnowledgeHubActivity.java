@@ -17,6 +17,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -62,19 +63,26 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService analysisWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
+    private final AtomicInteger analysisGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
 
     private Future<?> runningScan;
     private Future<?> runningSearch;
+    private Future<?> runningAnalysis;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
     private File notebook;
     private ArrayAdapter<String> adapter;
     private TextView status;
+    private TextView analysisStatus;
+    private Button analysisButton;
+    private CheckBox automaticAnalysis;
+    private boolean analysisActive;
     private ProgressBar progress;
     private EditText filter;
     private char[] pendingExportPassword;
@@ -99,6 +107,27 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 : getString(R.string.knowledge_root_label, notebook.getAbsolutePath()));
 
         status = findViewById(R.id.knowledge_status);
+        analysisStatus = findViewById(R.id.knowledge_bulk_status);
+        analysisButton = findViewById(R.id.knowledge_bulk_analyze);
+        automaticAnalysis = findViewById(R.id.knowledge_bulk_auto);
+        automaticAnalysis.setChecked(getPreferences(MODE_PRIVATE)
+                .getBoolean("semantic_analysis_on_refresh", false));
+        automaticAnalysis.setOnCheckedChangeListener((button, enabled) -> {
+            getPreferences(MODE_PRIVATE).edit()
+                    .putBoolean("semantic_analysis_on_refresh", enabled).apply();
+            if (enabled && snapshot != null) {
+                startBulkAnalysis();
+            }
+        });
+        analysisButton.setOnClickListener(view -> {
+            if (analysisActive) {
+                cancelBulkAnalysis();
+            } else {
+                startBulkAnalysis();
+            }
+        });
+        findViewById(R.id.knowledge_bulk_review).setOnClickListener(
+                view -> showCandidateQueue(0));
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -147,6 +176,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void scanNotebook() {
+        if (analysisActive) {
+            cancelBulkAnalysis();
+        }
         final int generation = scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
         if (runningScan != null) {
@@ -173,6 +205,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         syncResult = projection;
                         progress.setVisibility(View.GONE);
                         refreshResults();
+                        if (automaticAnalysis.isChecked()) {
+                            startBulkAnalysis();
+                        }
                     }
                 });
             } catch (InterruptedIOException ignored) {
@@ -186,6 +221,132 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         displayed.clear();
                         labels.clear();
                         adapter.notifyDataSetChanged();
+                    }
+                });
+            }
+        });
+    }
+
+    private void startBulkAnalysis() {
+        if (notebook == null || !notebook.isDirectory() || isFinishing() || isDestroyed()) {
+            analysisStatus.setText(R.string.knowledge_unavailable);
+            return;
+        }
+        if (runningAnalysis != null) {
+            runningAnalysis.cancel(true);
+        }
+        final int generation = analysisGeneration.incrementAndGet();
+        analysisActive = true;
+        analysisButton.setText(R.string.knowledge_bulk_cancel);
+        analysisStatus.setText(getString(R.string.knowledge_bulk_running, 0));
+        final String root = notebook.getAbsolutePath();
+        runningAnalysis = analysisWorker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.analyzeVault(
+                        this, workspacePath(), root, count -> {
+                            if (Thread.currentThread().isInterrupted()
+                                    || analysisGeneration.get() != generation) {
+                                return false;
+                            }
+                            if (count % 25 == 0) {
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()
+                                            && analysisGeneration.get() == generation) {
+                                        analysisStatus.setText(getString(
+                                                R.string.knowledge_bulk_running, count));
+                                    }
+                                });
+                            }
+                            return true;
+                        });
+                final JSONObject totals = result.getJSONObject("totals");
+                final JSONObject byStatus = totals.getJSONObject("by_status");
+                final int skipped = byStatus.optInt("SKIPPED_SIZE_LIMIT")
+                        + byStatus.optInt("SKIPPED_UNREADABLE")
+                        + byStatus.optInt("SKIPPED_OUTSIDE_VAULT");
+                final boolean partial = result.optBoolean("truncated")
+                        || result.optInt("unreadable_directories") > 0
+                        || result.optInt("coverage_failures") > 0 || skipped > 0;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && analysisGeneration.get() == generation) {
+                        analysisActive = false;
+                        analysisButton.setText(R.string.knowledge_bulk_analyze);
+                        analysisStatus.setText(getString(R.string.knowledge_bulk_done,
+                                totals.optInt("files"), totals.optInt("fragments"),
+                                totals.optInt("candidates"), totals.optInt("unresolved"), skipped)
+                                + (partial ? "\n" + getString(R.string.knowledge_bulk_partial) : ""));
+                    }
+                });
+            } catch (Exception ignored) {
+                // Do not log source content, filenames, Python exception bodies or tokens.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && analysisGeneration.get() == generation) {
+                        analysisActive = false;
+                        analysisButton.setText(R.string.knowledge_bulk_analyze);
+                        analysisStatus.setText(R.string.knowledge_bulk_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void cancelBulkAnalysis() {
+        analysisGeneration.incrementAndGet();
+        if (runningAnalysis != null) {
+            runningAnalysis.cancel(true);
+        }
+        analysisActive = false;
+        analysisButton.setText(R.string.knowledge_bulk_analyze);
+        analysisStatus.setText(R.string.knowledge_bulk_stopped);
+    }
+
+    private void showCandidateQueue(final int offset) {
+        final int generation = analysisGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject page = KnowledgePythonBridge.reviewQueue(
+                        this, workspacePath(), offset);
+                final JSONArray candidates = page.getJSONArray("candidates");
+                final String[] names = new String[candidates.length()];
+                for (int i = 0; i < names.length; i++) {
+                    final JSONObject item = candidates.getJSONObject(i);
+                    names[i] = item.optString("path") + " · " + item.optString("locator")
+                            + "\n" + item.optString("preview");
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || analysisGeneration.get() != generation) {
+                        return;
+                    }
+                    if (names.length == 0) {
+                        new AlertDialog.Builder(this)
+                                .setMessage(R.string.knowledge_bulk_queue_empty)
+                                .setPositiveButton(android.R.string.ok, null).show();
+                        return;
+                    }
+                    final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                            .setTitle(getString(R.string.knowledge_bulk_queue_title,
+                                    page.optInt("total")))
+                            .setItems(names, (view, selected) -> {
+                                final JSONObject item = candidates.optJSONObject(selected);
+                                if (item != null) {
+                                    previewFragment(item.optString("path"),
+                                            item.optString("fragment_id"));
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null);
+                    if (offset + names.length < page.optInt("total")) {
+                        dialog.setNeutralButton(R.string.knowledge_bulk_queue_next,
+                                (view, which) -> showCandidateQueue(offset + names.length));
+                    }
+                    dialog.show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && analysisGeneration.get() == generation) {
+                        analysisStatus.setText(R.string.knowledge_bulk_failed);
                     }
                 });
             }
@@ -327,7 +488,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final File root = notebook.getCanonicalFile();
         final File source = new File(root, relativePath).getCanonicalFile();
         if (!source.getPath().startsWith(root.getPath() + File.separator)
-                || !source.isFile() || source.length() > 300_000) {
+                || !source.isFile() || source.length() > 2_000_000) {
             throw new IOException("Note absent, escaped root or oversized");
         }
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -335,7 +496,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         try (FileInputStream in = new FileInputStream(source)) {
             int n;
             while ((n = in.read(buffer)) != -1) {
-                if (Thread.currentThread().isInterrupted() || bytes.size() + n > 300_000) {
+                if (Thread.currentThread().isInterrupted() || bytes.size() + n > 2_000_000) {
                     throw new IOException("Inspection cancelled or source too large");
                 }
                 bytes.write(buffer, 0, n);
@@ -925,6 +1086,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     protected void onDestroy() {
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
+        analysisGeneration.incrementAndGet();
+        if (runningAnalysis != null) {
+            runningAnalysis.cancel(true);
+        }
         if (runningScan != null) {
             runningScan.cancel(true);
         }
@@ -936,6 +1101,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             pendingExportPassword = null;
         }
         worker.shutdownNow();
+        analysisWorker.shutdownNow();
         super.onDestroy();
     }
 }

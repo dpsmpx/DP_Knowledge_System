@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
-from ksys_android_bridge import inspect_note
+from ksys_android_bridge import inspect_note, MAX_CHARACTERS
 from ksys.source.markdown import parse_document
 from ksys.source.coverage import check_coverage
 
@@ -39,7 +39,7 @@ class AndroidBridgeTest(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 inspect_note(path, "Test")
         with self.assertRaises(ValueError):
-            inspect_note("note.md", "x" * 150_001)
+            inspect_note("note.md", "x" * (MAX_CHARACTERS + 1))
 
 
 if __name__ == "__main__":
