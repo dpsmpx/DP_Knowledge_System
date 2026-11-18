@@ -92,6 +92,31 @@ API 21 to **API 24** (Android 7.0). Android 11 and Android 15 remain supported.
 Chaquopy adds native runtime dependencies; APK size and device runtime
 performance need measurement during release QA.
 
+## Stage 04 scope and limits
+
+From an inspection of a selected note, the user can now select a fragment,
+review the formalization and explicitly choose one proposed reading. A second
+confirmation dialog includes the unmodified source, canonical KSF, possible
+conflicts, validation diagnostic count and the intended epistemic role.
+Only the explicit confirm action can record a **claim**, **hypothesis** or
+**fact**, or **reject** or **defer** a reading. There is no automatic promotion
+of extracted content. The original Python `KnowledgeBase` validates the
+candidate and appends the decision to its hash-chained journal.
+
+The journal is inside Android's private **no-backup** folder, separate from
+both the vault and the disposable FTS index. Every write checks the original
+note's content hash, provenance fragment ID, interpretation reading ID and
+prior journal head; tampered chains are rejected. A generated Python source
+tree includes the engine's public schema JSON files for validation parity.
+
+**Important limitation:** no journal export, import, or uninstall recovery is
+available yet. Users receive an explicit warning before confirming a decision.
+This branch is **not a production release** and must not be used for
+irreplaceable authoritative records before backup/recovery work is complete.
+Manual editing of an interpretation, bulk intake and retraction UX remain
+future milestones. Inference and question-answering are likewise not yet
+present in the Android interface.
+
 ## Integration branch and PR process
 
 1. Maintain `feature/knowledge-android` as the continuous integration line.

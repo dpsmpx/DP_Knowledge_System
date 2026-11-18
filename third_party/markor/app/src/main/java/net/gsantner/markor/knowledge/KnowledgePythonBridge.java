@@ -23,14 +23,35 @@ public final class KnowledgePythonBridge {
 
     public static JSONObject inspect(final Context context, final String relativePath,
                                      final String markdown) throws JSONException {
+        return invoke(context, "inspect_note", relativePath, markdown);
+    }
+
+    public static JSONObject preview(final Context context, final String workspace,
+                                     final String relativePath, final String markdown,
+                                     final String fragmentId) throws JSONException {
+        return invoke(context, "preview_fragment", workspace, relativePath, markdown, fragmentId);
+    }
+
+    public static JSONObject decide(final Context context, final String workspace,
+                                    final String relativePath, final String markdown,
+                                    final String fragmentId, final String readingId,
+                                    final String role, final String sourceHash,
+                                    final String journalHead) throws JSONException {
+        return invoke(context, "record_decision", workspace, relativePath, markdown,
+                fragmentId, readingId, role, sourceHash, journalHead);
+    }
+
+    private static JSONObject invoke(final Context context, final String method,
+                                     final Object... arguments) throws JSONException {
         if (!Python.isStarted()) {
             Python.start(new AndroidPlatform(context.getApplicationContext()));
         }
         final String output = Python.getInstance().getModule("ksys_android_bridge")
-                .callAttr("inspect_note", relativePath, markdown).toString();
+                .callAttr(method, arguments).toString();
         final JSONObject result = new JSONObject(output);
-        if (!"dpksys.inspect.v1".equals(result.optString("protocol"))
-                || !result.optBoolean("read_only", false)) {
+        final String protocol = result.optString("protocol");
+        if (!"dpksys.inspect.v1".equals(protocol)
+                && !"dpksys.decision.v1".equals(protocol)) {
             throw new JSONException("Unexpected knowledge core protocol");
         }
         return result;
