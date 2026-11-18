@@ -18,6 +18,10 @@ from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
+from ksys.dialogue.session import Dialogue
+from ksys.dialogue.intents import classify as classify_intent
+from ksys.query.answers import Answerer
+from ksys.core.enums import DialogueOp
 
 MAX_CHARACTERS = 150_000
 MAX_DISPLAYED = 24
@@ -162,4 +166,51 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
         "journal_ids": [e.id for e in entries],
         "journal_head": kb.journal.head,
         "decision": role,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+_READ_ONLY_OPS = {
+    DialogueOp.ASK, DialogueOp.VERIFY, DialogueOp.DEFINE, DialogueOp.HYPOTHESIZE,
+    DialogueOp.EXPLAIN, DialogueOp.COMPARE, DialogueOp.FIND_CONTRADICTIONS,
+    DialogueOp.DERIVE, DialogueOp.TRACE, DialogueOp.GENERALIZE,
+    DialogueOp.SPECIALIZE, DialogueOp.UNKNOWNS, DialogueOp.WHAT_IF,
+}
+
+
+def ask_knowledge(workspace_dir: str, question: str) -> str:
+    """Use the existing deterministic query engine; never authorize writes."""
+    if not isinstance(question, str) or not question.strip() or len(question) > 2_000:
+        raise ValueError("Query must be nonempty and at most 2000 characters")
+    intent = classify_intent(question)
+    if intent.op not in _READ_ONLY_OPS:
+        raise ValueError("Only read-only knowledge questions are allowed")
+    kb = _kb(workspace_dir)
+    response = Dialogue(kb).handle(question, yes=False)
+    return json.dumps({
+        "protocol": "dpksys.query.v1",
+        "operation": response.op,
+        "status": response.status,
+        "answer": response.answer,
+        "sections": response.sections,
+        "journal_head": kb.journal.head,
+        "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def knowledge_diagnostics(workspace_dir: str) -> str:
+    """Return inspectable current-state summaries, without changing the journal."""
+    kb = _kb(workspace_dir)
+    answers = Answerer(kb)
+    contradictions = answers.contradictions()
+    unknowns = answers.unknowns()
+    return json.dumps({
+        "protocol": "dpksys.query.v1",
+        "journal_head": kb.journal.head,
+        "record_count": len(kb.state.records),
+        "authoritative_count": len(kb.state.authoritative()),
+        "claim_count": len(kb.state.claims()),
+        "contradiction_count": len(contradictions),
+        "contradictions": contradictions[:12],
+        "unknowns": unknowns,
+        "read_only": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

@@ -44,5 +44,15 @@
     <string name="knowledge_decision_saved">Decision recorded in the local knowledge journal.</string>
     <string name="knowledge_decision_failed">Not recorded: source, journal or interpretation changed, or an error occurred.</string>
     <string name="knowledge_conflicts">Potential conflicts: %1$d</string>
-    <string name="knowledge_diagnostics">Validation diagnostics: %1$d</string>
+    <string name="knowledge_diagnostic_count">Validation diagnostics: %1$d</string>
+    <string name="knowledge_diagnostics">Knowledge state</string>
+    <string name="knowledge_ask">Ask knowledge core</string>
+    <string name="knowledge_query_hint">Ask a question about approved knowledge</string>
+    <string name="knowledge_answer_title">Evidence-grounded response</string>
+    <string name="knowledge_query_status">Epistemic status: %1$s</string>
+    <string name="knowledge_reasoning">Checking accepted knowledge and provenance…</string>
+    <string name="knowledge_query_failed">Read-only question could not be answered. The journal was not changed.</string>
+    <string name="knowledge_state_counts">Records: %1$d\nAccepted: %2$d\nClaims: %3$d\nContradictions: %4$d</string>
+    <string name="knowledge_state_unknowns">Open hypotheses: %1$d\nDeferred: %2$d\nUnreviewed claims: %3$d</string>
+    <string name="knowledge_conflict_heading">Contradiction</string>
 </resources>

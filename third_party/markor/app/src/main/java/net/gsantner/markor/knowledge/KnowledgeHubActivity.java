@@ -127,6 +127,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
         final Button refresh = findViewById(R.id.knowledge_refresh);
         refresh.setOnClickListener(view -> scanNotebook());
+        findViewById(R.id.knowledge_ask).setOnClickListener(view -> promptKnowledgeQuery());
+        findViewById(R.id.knowledge_diagnostics).setOnClickListener(view -> showKnowledgeDiagnostics());
         scanNotebook();
     }
 
@@ -488,7 +490,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .append(getString(R.string.knowledge_conflicts,
                         option.optJSONArray("conflicts") == null ? 0 :
                                 option.optJSONArray("conflicts").length())).append("\n")
-                .append(getString(R.string.knowledge_diagnostics,
+                .append(getString(R.string.knowledge_diagnostic_count,
                         option.optJSONArray("diagnostics") == null ? 0 :
                                 option.optJSONArray("diagnostics").length())).append("\n\n")
                 .append(getString(R.string.knowledge_decision_warning));
@@ -533,6 +535,136 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void promptKnowledgeQuery() {
+        final EditText question = new EditText(this);
+        question.setHint(R.string.knowledge_query_hint);
+        question.setSingleLine(false);
+        question.setMinLines(2);
+        question.setMaxLines(5);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_ask)
+                .setView(question)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_ask,
+                        (dialog, which) -> askKnowledge(question.getText().toString()))
+                .show();
+    }
+
+    private void askKnowledge(final String question) {
+        if (question.trim().isEmpty()) {
+            return;
+        }
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_reasoning);
+        worker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.query(this, workspacePath(), question);
+                final String formatted = formatQueryResult(result);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_answer_title)
+                                .setMessage(formatted)
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                        if (snapshot != null && syncResult != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_query_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private String formatQueryResult(final JSONObject result) {
+        final StringBuilder out = new StringBuilder();
+        out.append(getString(R.string.knowledge_query_status, result.optString("status")))
+                .append("\n\n").append(result.optString("answer"));
+        final JSONObject sections = result.optJSONObject("sections");
+        if (sections != null) {
+            for (final String key : new String[]{
+                    "evidence", "derivation", "contradictions", "unknowns",
+                    "notes", "bindings", "comparison", "trace", "definition", "preview"}) {
+                final Object details = sections.opt(key);
+                if (details == null || JSONObject.NULL.equals(details)
+                        || "[]".equals(details.toString()) || "{}".equals(details.toString())) {
+                    continue;
+                }
+                out.append("\n\n").append(key.toUpperCase(java.util.Locale.ROOT))
+                        .append(":\n").append(details.toString());
+                if (out.length() > 16_000) {
+                    out.setLength(16_000);
+                    out.append("\n…");
+                    break;
+                }
+            }
+        }
+        return out.toString();
+    }
+
+    private void showKnowledgeDiagnostics() {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_reasoning);
+        worker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.diagnostics(this, workspacePath());
+                final JSONObject unknowns = result.optJSONObject("unknowns");
+                final StringBuilder details = new StringBuilder();
+                details.append(getString(R.string.knowledge_state_counts,
+                        result.getInt("record_count"), result.getInt("authoritative_count"),
+                        result.getInt("claim_count"), result.getInt("contradiction_count")));
+                if (unknowns != null) {
+                    details.append("\n\n").append(getString(R.string.knowledge_state_unknowns,
+                            jsonArrayLength(unknowns, "open_hypotheses"),
+                            jsonArrayLength(unknowns, "deferred_candidates"),
+                            jsonArrayLength(unknowns, "claims_not_reviewed")));
+                }
+                final JSONArray conflicts = result.optJSONArray("contradictions");
+                if (conflicts != null) {
+                    for (int i = 0; i < Math.min(conflicts.length(), 12); i++) {
+                        final JSONObject conflict = conflicts.optJSONObject(i);
+                        if (conflict == null) {
+                            continue;
+                        }
+                        details.append("\n\n").append(getString(R.string.knowledge_conflict_heading))
+                                .append(" #").append(i + 1).append("\n")
+                                .append(conflict.optJSONObject("positive")).append("\n")
+                                .append(conflict.optJSONObject("negative"));
+                    }
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_diagnostics)
+                                .setMessage(details.toString())
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                        if (snapshot != null && syncResult != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_query_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private static int jsonArrayLength(final JSONObject value, final String key) {
+        final JSONArray a = value.optJSONArray(key);
+        return a == null ? 0 : a.length();
     }
 
     @Override
