@@ -1,0 +1,136 @@
+name: Signed DP Knowledge Android prerelease
+
+on:
+  # Publish one opt-in milestone build after this workflow first lands on the
+  # integration branch. Future builds can be started explicitly from that ref.
+  push:
+    branches:
+      - feature/knowledge-android
+    paths:
+      - .github/workflows/knowledge-signed-prerelease.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-knowledge-preview
+  cancel-in-progress: false
+
+jobs:
+  sign-and-publish:
+    if: github.ref == 'refs/heads/feature/knowledge-android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout integration snapshot
+        uses: actions/checkout@v4
+
+      - name: Configure Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android platform and signing tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Test the knowledge core
+        run: python -m unittest discover -s tests -t .
+
+      - name: Build and test isolated Android preview package
+        working-directory: third_party/markor
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:testFlavorAtestDebugUnitTest :app:assembleFlavorAtestRelease --no-daemon --stacktrace
+
+      - name: Verify release signing secrets are present
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required signing secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Align, sign and independently verify preview APK
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          tools_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}/build-tools/35.0.0"
+          test -x "$tools_dir/zipalign"
+          test -x "$tools_dir/apksigner"
+
+          mapfile -d '' -t apks < <(find third_party/markor/app/build/outputs/apk/flavorAtest/release \
+            -maxdepth 1 -type f -name '*-unsigned.apk' -print0)
+          if [[ ${#apks[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one unsigned flavorAtest APK, found ${#apks[@]}"
+            exit 1
+          fi
+
+          keystore="$RUNNER_TEMP/knowledge-preview-key"
+          aligned="$RUNNER_TEMP/knowledge-preview-aligned.apk"
+          apk="$GITHUB_WORKSPACE/dp-knowledge-stage14-${GITHUB_RUN_NUMBER}-signed.apk"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          "$tools_dir/zipalign" -f 4 "${apks[0]}" "$aligned"
+          "$tools_dir/apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out "$apk" "$aligned"
+          "$tools_dir/apksigner" verify --min-sdk-version 24 "$apk" > /dev/null
+          sha256sum "$apk" > "$apk.sha256"
+          printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
+          echo 'Verified signed Android preview. No signing passwords were logged.'
+
+      - name: Publish signed Stage 14 APK and SHA-256 as prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:10}"
+          tag="knowledge-stage14-${GITHUB_RUN_NUMBER}-${short_sha}"
+          notes="$(printf '%s\n' \
+            'DP Knowledge System: промежуточный Android-пререлиз на базе форка Markor.' \
+            '' \
+            '- Пакет: net.gsantner.markor_test (устанавливается отдельно от обычного Markor).' \
+            '- Содержит редактор Markor, локальное ядро знаний, поиск, аудит и ручную интеграцию LLM/эмбеддингов.' \
+            '- Этап 14: добровольные длительные офлайн-проверки с WorkManager и необязательными уведомлениями только о количестве изменений.' \
+            '- Никакие личные заметки не включены в APK или GitHub release.' \
+            '- Проверены Python/Android unit tests и подпись APK; SHA-256 вложен отдельно.' \
+            '- Это предварительная сборка без испытаний на реальном устройстве; перед проверкой создайте резервную копию своих заметок.' \
+            '- Оригинал Markor: Gregor Santner и участники. Исходный код Markor — Apache-2.0; переводы и примеры — CC0-1.0.' \
+            '' \
+            "Исходный коммит: ${GITHUB_SHA}." \
+          )"
+          gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "DP Knowledge Android — Stage 14 preview #${GITHUB_RUN_NUMBER}" \
+            --notes "$notes" \
+            --prerelease
