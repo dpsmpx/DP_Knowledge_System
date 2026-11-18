@@ -70,6 +70,28 @@ validation remain open follow-up work. Android UI search is not yet connected
 to the deterministic Python `ksys` engine. A private index contains private
 note text: it must never be copied to Git, debug reports, or releases.
 
+## Stage 03 scope and limits
+
+The Android fork bundles the repository's existing `ksys/` Python sources
+through a build-time generated directory (not a maintained second copy).
+The Python interpreter is embedded with Chaquopy 17.2, with Python 3.11
+for 32-bit and 64-bit devices. The new Java-to-Python transport runs the
+original `ksys.source.markdown`, coverage and classifier/language-analyzer
+functions on a selected note, and shows fragment kinds, candidate counts,
+provenance locators and coverage as a **read-only preview**. The bridge
+contract is `dpksys.inspect.v1`; host Python tests compare exact fragment
+identities with the same code paths as Android.
+
+The native interface is intentionally a diagnostic first step: it does not
+yet expose authoritative journal acceptance, multi-note semantic inference
+or conversational retrieval. Those require the explicit user decisions and
+provenance UI in later PRs. Original sources are read via canonical-path
+checks, and plaintext is never included in the app logs or GitHub Actions.
+For offline embedding, the fork's minimum Android version changes from
+API 21 to **API 24** (Android 7.0). Android 11 and Android 15 remain supported.
+Chaquopy adds native runtime dependencies; APK size and device runtime
+performance need measurement during release QA.
+
 ## Integration branch and PR process
 
 1. Maintain `feature/knowledge-android` as the continuous integration line.

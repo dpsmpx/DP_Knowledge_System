@@ -28,7 +28,12 @@ import net.gsantner.markor.R;
 import net.gsantner.markor.activity.DocumentActivity;
 import net.gsantner.markor.activity.MarkorBaseActivity;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -95,7 +100,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < displayed.size()) {
-                showPossibleBacklinks(displayed.get(position).relativePath);
+                final String path = displayed.get(position).relativePath;
+                new AlertDialog.Builder(this)
+                        .setTitle(path)
+                        .setItems(new String[]{getString(R.string.knowledge_inspect_note),
+                                        getString(R.string.knowledge_possible_backlinks)},
+                                (dialog, which) -> {
+                                    if (which == 0) {
+                                        inspectWithCore(path);
+                                    } else {
+                                        showPossibleBacklinks(path);
+                                    }
+                                })
+                        .show();
             }
             return true;
         });
@@ -252,6 +269,85 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void inspectWithCore(final String relativePath) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_inspecting);
+        worker.submit(() -> {
+            try {
+                final String source = readSelectedNote(relativePath);
+                final JSONObject result = KnowledgePythonBridge.inspect(this, relativePath, source);
+                final String formatted = formatCoreResult(result);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_inspection_title)
+                                .setMessage(formatted)
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                        if (syncResult != null && snapshot != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                // Never print source text or engine exceptions into public logs.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_analysis_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private String readSelectedNote(final String relativePath) throws IOException {
+        if (notebook == null) {
+            throw new IOException("No notebook");
+        }
+        final File root = notebook.getCanonicalFile();
+        final File source = new File(root, relativePath).getCanonicalFile();
+        if (!source.getPath().startsWith(root.getPath() + File.separator)
+                || !source.isFile() || source.length() > 300_000) {
+            throw new IOException("Note absent, escaped root or oversized");
+        }
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        final byte[] buffer = new byte[8192];
+        try (FileInputStream in = new FileInputStream(source)) {
+            int n;
+            while ((n = in.read(buffer)) != -1) {
+                if (Thread.currentThread().isInterrupted() || bytes.size() + n > 300_000) {
+                    throw new IOException("Inspection cancelled or source too large");
+                }
+                bytes.write(buffer, 0, n);
+            }
+        }
+        return new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private String formatCoreResult(final JSONObject result) throws Exception {
+        final StringBuilder b = new StringBuilder();
+        b.append(getString(R.string.knowledge_core_version, result.getString("engine_version")))
+                .append('\n').append(getString(R.string.knowledge_core_coverage,
+                        result.getBoolean("coverage_ok")))
+                .append('\n').append(getString(R.string.knowledge_core_counts,
+                        result.getInt("block_count"), result.getInt("fragment_count")))
+                .append('\n').append(getString(R.string.knowledge_unconfirmed))
+                .append("\n\n");
+        final JSONArray fragments = result.getJSONArray("fragments");
+        for (int i = 0; i < fragments.length(); i++) {
+            final JSONObject fragment = fragments.getJSONObject(i);
+            b.append(fragment.getString("locator")).append(" · ")
+                    .append(fragment.getString("kind")).append(" / ")
+                    .append(fragment.getString("formalization")).append(" · ")
+                    .append(fragment.getInt("candidate_count"))
+                    .append('\n').append(fragment.getString("preview")).append("\n\n");
+        }
+        if (result.optBoolean("partial_display")) {
+            b.append(getString(R.string.knowledge_inspection_partial));
+        }
+        return b.toString();
     }
 
     @Override
