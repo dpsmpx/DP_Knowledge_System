@@ -8,6 +8,9 @@ package net.gsantner.markor.knowledge;
 
 import android.app.Activity;
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
@@ -87,11 +90,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService analysisWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService embeddingWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService deviceQaWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
     private final AtomicInteger analysisGeneration = new AtomicInteger();
     private final AtomicInteger auditGeneration = new AtomicInteger();
     private final AtomicInteger embeddingGeneration = new AtomicInteger();
+    private final AtomicInteger deviceQaGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
 
@@ -100,6 +105,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Future<?> runningAnalysis;
     private Future<?> runningAudit;
     private Future<?> runningEmbedding;
+    private Future<?> runningDeviceQa;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
@@ -110,6 +116,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Button analysisButton;
     private Button auditButton;
     private Button embeddingButton;
+    private Button qaQuickButton;
+    private Button qaStressButton;
+    private TextView qaStatus;
+    private ProgressBar qaProgress;
+    private boolean qaActive;
     private CheckBox automaticAnalysis;
     private CheckBox backgroundChecks;
     private CheckBox backgroundNotifications;
@@ -256,9 +267,77 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         showIndexHealth();
                                     }
                                 }).show());
+        qaQuickButton = findViewById(R.id.knowledge_qa_quick);
+        qaStressButton = findViewById(R.id.knowledge_qa_stress);
+        qaStatus = findViewById(R.id.knowledge_qa_status);
+        qaProgress = findViewById(R.id.knowledge_qa_progress);
+        qaQuickButton.setOnClickListener(view -> runDeviceQa(false));
+        qaStressButton.setOnClickListener(view -> runDeviceQa(true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         scanNotebook();
+    }
+
+    /** The foreground UI remains responsive, and every run owns only private cache fixtures. */
+    private void runDeviceQa(final boolean stress) {
+        if (qaActive) {
+            if (runningDeviceQa != null) {
+                runningDeviceQa.cancel(true);
+            }
+            qaStatus.setText(R.string.knowledge_qa_cancelling);
+            return;
+        }
+        final int generation = deviceQaGeneration.incrementAndGet();
+        qaActive = true;
+        qaQuickButton.setText(R.string.knowledge_qa_cancel);
+        qaStressButton.setText(R.string.knowledge_qa_cancel);
+        qaProgress.setVisibility(View.VISIBLE);
+        qaStatus.setText(getString(R.string.knowledge_qa_running_step, "starting"));
+        runningDeviceQa = deviceQaWorker.submit(() -> {
+            final String report = new KnowledgeDeviceQaRunner(this, notebook, index, stress,
+                    (phase, completed, total) -> runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed() || generation != deviceQaGeneration.get()) {
+                            return;
+                        }
+                        qaStatus.setText(total > 0
+                                ? getString(R.string.knowledge_qa_running, phase, completed, total)
+                                : getString(R.string.knowledge_qa_running_step, phase));
+                    }), () -> Thread.currentThread().isInterrupted()).run();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || generation != deviceQaGeneration.get()) {
+                    return;
+                }
+                qaActive = false;
+                runningDeviceQa = null;
+                qaQuickButton.setText(R.string.knowledge_qa_quick);
+                qaStressButton.setText(R.string.knowledge_qa_stress);
+                qaProgress.setVisibility(View.GONE);
+                qaStatus.setText(R.string.knowledge_qa_ready);
+                copyDeviceQaReport(report);
+                new AlertDialog.Builder(this)
+                        .setTitle(R.string.knowledge_qa_report_title)
+                        .setMessage(report)
+                        .setNegativeButton(android.R.string.ok, null)
+                        .setPositiveButton(R.string.knowledge_qa_copy,
+                                (dialog, which) -> copyDeviceQaReport(report))
+                        .show();
+            });
+        });
+    }
+
+    /** Copies the redacted report, never note names, file paths, excerpts or keys. */
+    private void copyDeviceQaReport(final String report) {
+        try {
+            final ClipboardManager clipboard =
+                    (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                throw new IllegalStateException("Clipboard service unavailable");
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText("DPKS device QA", report));
+            Toast.makeText(this, R.string.knowledge_qa_clipboard, Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException unavailable) {
+            Toast.makeText(this, R.string.knowledge_qa_clipboard_failed, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void setupBackgroundControls() {
@@ -1331,6 +1410,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void cancelEmbeddingBuild() {
         embeddingGeneration.incrementAndGet();
+        deviceQaGeneration.incrementAndGet();
+        if (runningDeviceQa != null) {
+            runningDeviceQa.cancel(true);
+        }
         if (runningEmbedding != null) {
             runningEmbedding.cancel(true);
         }
@@ -2331,6 +2414,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.shutdownNow();
         analysisWorker.shutdownNow();
         embeddingWorker.shutdownNow();
+        deviceQaWorker.shutdownNow();
         super.onDestroy();
     }
 }

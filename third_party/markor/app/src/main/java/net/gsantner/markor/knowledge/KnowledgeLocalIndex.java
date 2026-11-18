@@ -163,6 +163,16 @@ public final class KnowledgeLocalIndex {
         databaseFile = new File(context.getApplicationContext().getNoBackupFilesDir(), DB_NAME);
     }
 
+    /** Isolated synthetic QA index. Never point this constructor at a real vault index. */
+    KnowledgeLocalIndex(final File syntheticDatabaseFile) {
+        databaseFile = syntheticDatabaseFile;
+    }
+
+    /** Does not create or open the user's derived index. */
+    public boolean hasDerivedIndex() {
+        return databaseFile.isFile();
+    }
+
     public synchronized SyncResult synchronize(final File root,
                                                 final KnowledgeVaultScanner.Snapshot snapshot,
                                                 final KnowledgeVaultScanner.Cancellation cancellation)
