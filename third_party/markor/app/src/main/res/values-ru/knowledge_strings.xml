@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Added 2026 by DP Knowledge System contributors. SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="knowledge_hub_title">Библиотека знаний</string>
+    <string name="knowledge_menu">Библиотека знаний</string>
+    <string name="knowledge_root_label">Хранилище: %1$s</string>
+    <string name="knowledge_no_folder">Папка хранилища не выбрана</string>
+    <string name="knowledge_refresh">Обновить</string>
+    <string name="knowledge_filter_hint">Поиск Markdown по имени и пути</string>
+    <string name="knowledge_scanning">Поиск локальных Markdown-заметок…</string>
+    <string name="knowledge_count">Совпадений: %1$d / заметок: %2$d (показано: %3$d)</string>
+    <string name="knowledge_truncated">Достигнут предел сканирования; результаты неполные.</string>
+    <string name="knowledge_unreadable">Пропущено недоступных папок: %1$d.</string>
+    <string name="knowledge_unavailable">Хранилище недоступно или нет разрешения на чтение.</string>
+    <string name="knowledge_file_missing">Заметка больше недоступна.</string>
+</resources>

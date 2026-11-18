@@ -13,6 +13,13 @@
     tools:context="net.gsantner.markor.activity.MainActivity"
     tools:ignore="AlwaysShowAction">
 
+    <!-- DP Knowledge System: read-only vault browser entry point. -->
+    <item
+        android:id="@+id/action_knowledge_hub"
+        android:orderInCategory="90"
+        android:title="@string/knowledge_menu"
+        app:showAsAction="never" />
+
     <item
         android:id="@+id/action_settings"
         android:icon="@drawable/ic_settings_black_24dp"

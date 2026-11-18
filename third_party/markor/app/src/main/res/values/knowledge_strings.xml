@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Added 2026 by DP Knowledge System contributors. SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="knowledge_hub_title">Knowledge Library</string>
+    <string name="knowledge_menu">Knowledge Library</string>
+    <string name="knowledge_root_label">Notebook: %1$s</string>
+    <string name="knowledge_no_folder">No notebook folder selected</string>
+    <string name="knowledge_refresh">Refresh</string>
+    <string name="knowledge_filter_hint">Find Markdown by path or filename</string>
+    <string name="knowledge_scanning">Finding local Markdown notes…</string>
+    <string name="knowledge_count">%1$d matches / %2$d notes (showing %3$d)</string>
+    <string name="knowledge_truncated">Scan limit reached; results are incomplete.</string>
+    <string name="knowledge_unreadable">%1$d unreadable folders skipped.</string>
+    <string name="knowledge_unavailable">Notebook is unavailable or access is denied.</string>
+    <string name="knowledge_file_missing">This note is no longer available.</string>
+</resources>
