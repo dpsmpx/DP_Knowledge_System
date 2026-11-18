@@ -122,9 +122,11 @@
     <string name="knowledge_embedding_batch_check">Checking local index for missing embeddings…</string>
     <string name="knowledge_embedding_up_to_date">No pending eligible notes for this model. The semantic index is up to date for the accessible scan.</string>
     <string name="knowledge_embedding_consent_title">Authorize embedding of private notes</string>
-    <string name="knowledge_embedding_consent">EXPLICIT OPT-IN: This operation will send excerpts from %1$d selected private Markdown files to %2$s using %3$s. Up to 3 excerpts of 850 characters per note, in multiple network requests. The server may keep the contents; paths are listed below and never sent with embedding inputs. No automated uploads will be scheduled. Cancel sends nothing. %4$s</string>
-    <string name="knowledge_embedding_partial_warning">Only a bounded selection is indexed in each run; repeat Build embeddings for more notes. Sparse sampling of long notes is incomplete.</string>
+    <string name="knowledge_embedding_consent">EXPLICIT OPT-IN: This operation will send excerpts from %1$d selected private Markdown files to %2$s using %3$s. Up to 128 overlapping excerpts of at most 850 characters per note, in multiple network requests. The server may keep the contents; the first 40 paths are listed below and never sent with embedding inputs. No automated uploads will be scheduled. Cancel sends nothing. %4$s</string>
+    <string name="knowledge_embedding_partial_warning">Indexing is incremental and checkpoints after every batch of up to 6 excerpts. Very long notes exceeding the per-note cap are explicitly reported as partial.</string>
     <string name="knowledge_embedding_running">Creating embeddings: %1$d/%2$d notes processed. Press the button again to cancel.</string>
+    <string name="knowledge_embedding_chunk_progress">Note %1$d/%2$d: embedded %3$d/%4$d Markdown excerpts. Tap Build embeddings to cancel.</string>
+    <string name="knowledge_embedding_coverage">Long notes with incomplete coverage: %1$d.</string>
     <string name="knowledge_embedding_cancel">Cancel embeddings</string>
     <string name="knowledge_embedding_done">Embedding run finished: %1$d notes added, %2$d skipped. Previously indexed notes are reused.</string>
     <string name="knowledge_embedding_failed">Embedding service or source validation failed. Already completed notes remain indexed; no note was changed.</string>
@@ -137,7 +139,7 @@
     <string name="knowledge_embedding_send_query">Embed this question</string>
     <string name="knowledge_embedding_no_index">No current embedding index for this model. Build embeddings first.</string>
     <string name="knowledge_embedding_querying">Embedding question and ranking private source vectors…</string>
-    <string name="knowledge_embedding_results">Semantic matches (cosine scores, not facts)</string>
+    <string name="knowledge_embedding_results">Approximate semantic matches (exact cosine reranking, not facts)</string>
     <string name="knowledge_embedding_no_matches">No compatible indexed source vectors were found. Check the embedding model and build the index.</string>
     <string name="knowledge_embedding_choose_retrieval">Choose excerpts for LLM answer</string>
     <string name="knowledge_embedding_choose_retrieval_message">There is a local semantic index for your embedding service. Semantic retrieval sends the question to that service only after separate consent; lexical retrieval never sends a question during source selection.</string>

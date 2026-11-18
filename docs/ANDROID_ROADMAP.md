@@ -37,7 +37,8 @@ snapshot until the integrated application is ready.
 | 09 | Whole-library audit of contradictions, ambiguous and unresolved text, source errors, approved-knowledge gaps and journal integrity | Fresh local import, exact severity-separated counts, bounded source-provenanced pages, explicit completeness limits; no automatic repair |
 | 10 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
 | 11 | Optional embedding-based semantic search and LLM evidence selection; bounded incremental vector index | Ranked passage-level matches, strict per-action upload consent, local-only vector search, privacy-safe cache invalidation |
-| 12 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 12 | Heading/paragraph-aware overlapping Markdown passages, resumable fine-grained embedding checkpoints and indexed approximate vector candidates | Expanded long-note coverage, source-accurate spans, migrations that preserve old vectors, bounded candidate reranking |
+| 13 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -399,6 +400,61 @@ semantic proof, learned re-ranker, verified citations or zero-knowledge
 remote processing is claimed. Similarity is a **candidate relevance
 signal**, not evidence that source claims are true. End-to-end tests
 against actual Android hardware and embedding servers remain pending.
+
+## Stage 12 — broader passage coverage and indexed vector retrieval
+
+**Markdown chunker v2:** Instead of three sparse snippets sampled across a
+note, the manual embedding operation now walks its text in order. Each
+source passage is at most **850 characters**, with up to 80 characters of
+overlap. Headings and paragraph/line boundaries are preferred, and the
+segmenter avoids treating fenced-code newlines as semantic breakpoints.
+Original character offsets and exact passage lengths are preserved for
+later source inspection and for the LLM disclosure dialog.
+
+The per-document cap is **128 passages** (roughly 100k characters for long
+unbroken text); documents above that cap are **explicitly reported as
+partially covered**. The existing 2 MiB Markdown read bound remains.
+Large files therefore have much broader coverage than Stage 11, but a
+2 MiB file is **not guaranteed** complete semantic coverage. Empty or
+inaccessible notes are skipped. Running Build embeddings again continues
+with additional eligible notes, not magically beyond the 128-passage cap.
+
+The app uploads **at most six passages per network request** after the
+existing explicit batch confirmation. Within a single document, each
+successful network reply is committed to the disposable SQLite index
+in a transaction. Cancellation, application exit or a transient server
+error leaves an incomplete document unsearchable but **resumable from
+the last saved chunk** on the next authorized run. A complete document
+becomes searchable only when all its planned passages have been saved.
+No automatic background restart or unsanctioned uploads are introduced.
+The manual authorization UI now warns that a single document may disclose
+up to 128 separate passages; it shows the selected destination and first
+40 local source paths.
+
+**Faster retrieval:** Each normalized embedding is indexed into four
+deterministic, 10-bit locality-sensitive hash (LSH) tables. A question
+probes 44 buckets (exact plus one-bit neighbors) in SQLite and scores
+the resulting shortlist with **exact cosine similarity**; the best passage
+per Markdown note wins. Up to 45,000 candidates are evaluated. This avoids
+a hard alphabetical scan of the first 60,000 vectors but is still
+**approximate nearest-neighbor retrieval**. LSH can miss relevant neighbors,
+especially for dissimilar or poorly calibrated embedding vectors, and
+scores are never evidence that the underlying assertions are facts.
+Neither exhaustive recall nor performance on millions of passages has
+been demonstrated on real hardware yet.
+
+**Non-destructive migration:** Existing Stage 11 three-slice embeddings
+are retained during the private SQLite v2→v3 migration; their LSH buckets
+are reconstructed locally, without contacting a model server. Their
+chunker version remains v1 and they continue to be searchable. Rebuilding
+a document with chunker v2 requires the user to initiate and authorize
+another embedding batch. Only the selected note's obsolete derived
+vectors are replaced, not its Markdown source or approval journal.
+Clearing the vector index still requires deliberate long-press confirmation.
+
+The batch/text-size network bounds, HTTPS/private-network rules, API-key
+non-persistence, query-specific permission, and mandatory exact LLM
+chat-context disclosure from Stages 10–11 remain unchanged.
 
 ## Integration branch and PR process
 
