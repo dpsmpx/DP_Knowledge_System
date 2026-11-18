@@ -41,7 +41,7 @@ jobs:
             :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug \
             --no-daemon --no-parallel --max-workers=2 --stacktrace > "$log" 2>&1; then
             echo '::group::Compiler errors and failing Gradle tasks'
-            grep -nE 'error:|Compilation failed|FAILURE:|What went wrong|Execution failed|^> Task .*FAILED' \
+            grep -anE 'error:|Compilation failed|FAILURE:|What went wrong|Execution failed|^> Task .*FAILED' \
               "$log" | tail -n 90 || true
             echo '::endgroup::'
             echo '::group::Final Gradle lines'
