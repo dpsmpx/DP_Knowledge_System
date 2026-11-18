@@ -1,0 +1,37 @@
+name: One-time pinned Markor source import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/import-markor-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-time-markor-import
+  cancel-in-progress: false
+
+jobs:
+  copy-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Copy Markor files verbatim
+        shell: bash
+        run: |
+          set -euo pipefail
+          pinned_sha=7b15e66932f170c0b3f105c522111b0f32d6c73d
+          git clone --depth 1 --single-branch --branch master https://github.com/gsantner/markor.git "$RUNNER_TEMP/markor-upstream"
+          test "$(git -C "$RUNNER_TEMP/markor-upstream" rev-parse HEAD)" = "$pinned_sha"
+          test ! -e third_party/markor
+          mkdir -p third_party/markor
+          git -C "$RUNNER_TEMP/markor-upstream" archive HEAD | tar -xf - -C third_party/markor
+          test "$(git -C "$RUNNER_TEMP/markor-upstream" ls-files | wc -l)" -eq 873
+          git add -- third_party/markor
+          test "$(git diff --cached --name-only | wc -l)" -eq 873
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Vendor unchanged Markor sources at 7b15e669'
+          git push origin HEAD:main

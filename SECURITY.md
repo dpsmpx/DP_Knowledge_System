@@ -1,6 +1,6 @@
 # Publication and privacy boundary
 
-This repository contains only the reusable knowledge-system engine, technical documentation, and synthetic fixtures. It must not contain a personal vault, credentials, account identifiers, imported fragments, generated reports, journals, model memories, or full historical Git objects from private sources.
+This repository contains the reusable knowledge-system engine, technical documentation, synthetic fixtures, and an unchanged snapshot of the public Markor source in `third_party/markor/`. It must not contain a personal vault, credentials, account identifiers, imported fragments, generated reports, journals, model memories, or full historical Git objects from private sources.
 
 ## Rules for contributions
 
@@ -12,4 +12,4 @@ This repository contains only the reusable knowledge-system engine, technical do
 
 ## Boundaries
 
-This is a research prototype. The Android application is planned; no third-party application code is bundled in this migration. Automated pattern checks reduce accidental leaks but do not prove that arbitrary prose is non-sensitive. Human review remains required.
+This is a research prototype. The Android application is planned; the unchanged upstream Markor source is included but not yet integrated with the knowledge engine. Automated pattern checks reduce accidental leaks but do not prove that arbitrary prose is non-sensitive. Human review remains required.
