@@ -117,6 +117,27 @@ Manual editing of an interpretation, bulk intake and retraction UX remain
 future milestones. Inference and question-answering are likewise not yet
 present in the Android interface.
 
+## Stage 05 scope and limits
+
+The Knowledge Library now exposes a native **Ask knowledge core** dialog and
+a **Knowledge state** report. Both call the actual offline Python `Dialogue`,
+`Answerer` and inference/provenance engine through a constrained read-only
+bridge. Only query operations are admitted, and `Dialogue.handle` is always
+called with `yes=False`. There is no implicit knowledge acceptance or
+background reclassification.
+
+Responses retain epistemic status, evidence, derivations, contradictions,
+unknowns and provenance, with a bounded on-screen representation. A dedicated
+state panel summarizes approved records, claims, open hypotheses and
+contradictions. The authoritative layer remains separate from unconfirmed
+claims: unsupported questions return `UNKNOWN`, and contradictory accepted
+evidence can return `BOTH`. Synthetic tests verify all three properties and
+that questions do not modify the journal.
+
+This is not yet free-form AI chat. It is deterministic, limited by the
+existing controlled-language parser and the body of user-approved knowledge.
+No LLM invocation or external connection is part of this milestone.
+
 ## Integration branch and PR process
 
 1. Maintain `feature/knowledge-android` as the continuous integration line.

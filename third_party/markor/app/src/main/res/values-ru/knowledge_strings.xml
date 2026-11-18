@@ -44,5 +44,15 @@
     <string name="knowledge_decision_saved">Решение записано в локальный журнал знаний.</string>
     <string name="knowledge_decision_failed">Не записано: изменился источник, журнал, интерпретация либо произошла ошибка.</string>
     <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
-    <string name="knowledge_diagnostics">Сообщений проверки: %1$d</string>
+    <string name="knowledge_diagnostic_count">Сообщений проверки: %1$d</string>
+    <string name="knowledge_diagnostics">Состояние знаний</string>
+    <string name="knowledge_ask">Спросить ядро знаний</string>
+    <string name="knowledge_query_hint">Вопрос по подтверждённым знаниям</string>
+    <string name="knowledge_answer_title">Ответ с основаниями</string>
+    <string name="knowledge_query_status">Статус знания: %1$s</string>
+    <string name="knowledge_reasoning">Проверка принятых знаний и их происхождения…</string>
+    <string name="knowledge_query_failed">Не удалось получить ответ на вопрос. Журнал не изменён.</string>
+    <string name="knowledge_state_counts">Записей: %1$d\nПринято: %2$d\nЗаявлений: %3$d\nПротиворечий: %4$d</string>
+    <string name="knowledge_state_unknowns">Открытых гипотез: %1$d\nОтложено: %2$d\nЗаявлений без проверки: %3$d</string>
+    <string name="knowledge_conflict_heading">Противоречие</string>
 </resources>
