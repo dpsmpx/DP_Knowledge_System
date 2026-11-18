@@ -88,12 +88,12 @@ public final class KnowledgeBackgroundWorker extends Worker {
                 final int changed = KnowledgeBackgroundPolicy.changedNotes(
                         sync.indexed, sync.removed);
                 KnowledgeBackgroundScheduler.record(context,
-                        sync.incomplete ? KnowledgeBackgroundScheduler.LAST_PARTIAL
+                        sync.keptMissingEntries ? KnowledgeBackgroundScheduler.LAST_PARTIAL
                                 : KnowledgeBackgroundScheduler.LAST_OK,
                         snapshot.notes.size(), changed);
                 if (!isStopped() && KnowledgeBackgroundPolicy.shouldNotify(
                         KnowledgeBackgroundScheduler.notificationsEnabled(context),
-                        alreadyIndexed, !sync.incomplete, sync.indexed, sync.removed)) {
+                        alreadyIndexed, !sync.keptMissingEntries, sync.indexed, sync.removed)) {
                     showChangedNotification(changed);
                 }
                 return Result.success();

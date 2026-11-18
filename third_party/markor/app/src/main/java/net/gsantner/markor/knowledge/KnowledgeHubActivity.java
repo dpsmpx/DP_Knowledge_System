@@ -273,6 +273,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 new AlertDialog.Builder(this)
                         .setTitle(R.string.knowledge_background_enable)
                         .setMessage(R.string.knowledge_background_consent)
+                        .setOnCancelListener(dialog -> backgroundChecks.setChecked(false))
                         .setNegativeButton(android.R.string.cancel,
                                 (dialog, which) -> backgroundChecks.setChecked(false))
                         .setPositiveButton(android.R.string.ok, (dialog, which) -> {
