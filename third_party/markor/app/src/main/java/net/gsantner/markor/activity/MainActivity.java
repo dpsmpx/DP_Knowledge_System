@@ -40,6 +40,7 @@ import net.gsantner.markor.R;
 import net.gsantner.markor.format.FormatRegistry;
 import net.gsantner.markor.frontend.NewFileDialog;
 import net.gsantner.markor.frontend.filebrowser.MarkorFileBrowserFactory;
+import net.gsantner.markor.knowledge.KnowledgeHubActivity;
 import net.gsantner.markor.model.Document;
 import net.gsantner.markor.util.MarkorContextUtils;
 import net.gsantner.markor.widget.TodoWidgetProvider;
@@ -269,6 +270,10 @@ public class MainActivity extends MarkorBaseActivity implements GsFileBrowserFra
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         super.onOptionsItemSelected(item);
+        if (item.getItemId() == R.id.action_knowledge_hub) {
+            startActivity(new Intent(this, KnowledgeHubActivity.class));
+            return true;
+        }
         if (item.getItemId() == R.id.action_settings) {
             _cu.animateToActivity(this, SettingsActivity.class, false, null);
             return true;

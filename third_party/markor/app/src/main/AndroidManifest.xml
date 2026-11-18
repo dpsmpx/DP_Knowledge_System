@@ -76,6 +76,13 @@
             </intent-filter>
         </activity>
 
+        <!-- DP Knowledge System: internal, read-only Knowledge Library entry point. -->
+        <activity
+            android:name=".knowledge.KnowledgeHubActivity"
+            android:exported="false"
+            android:label="@string/knowledge_hub_title"
+            android:parentActivityName=".activity.MainActivity" />
+
         <activity
             android:name=".activity.SettingsActivity"
             android:exported="true"
