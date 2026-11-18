@@ -100,6 +100,53 @@
         android:paddingEnd="12dp">
 
         <Button
+            android:id="@+id/knowledge_qa_quick"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/knowledge_qa_quick" />
+
+        <Button
+            android:id="@+id/knowledge_qa_stress"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/knowledge_qa_stress" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <ProgressBar
+            android:id="@+id/knowledge_qa_progress"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/knowledge_qa_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="8dp"
+            android:text="@string/knowledge_qa_idle"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <Button
             android:id="@+id/knowledge_embedding_build"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
