@@ -20,6 +20,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ListView;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -45,9 +46,12 @@ import java.io.InterruptedIOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.MessageDigest;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -194,6 +198,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final Button refresh = findViewById(R.id.knowledge_refresh);
         refresh.setOnClickListener(view -> scanNotebook());
         findViewById(R.id.knowledge_ask).setOnClickListener(view -> promptKnowledgeQuery());
+        findViewById(R.id.knowledge_llm_ask).setOnClickListener(view -> promptLlmQuestion());
         findViewById(R.id.knowledge_diagnostics).setOnClickListener(view -> showKnowledgeDiagnostics());
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
@@ -1022,6 +1027,190 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void promptLlmQuestion() {
+        final EditText question = new EditText(this);
+        question.setHint(R.string.knowledge_llm_question);
+        question.setSingleLine(false);
+        question.setMinLines(2);
+        question.setMaxLines(4);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_llm_ask)
+                .setView(question)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_llm_continue,
+                        (dialog, which) -> promptLlmEndpoint(question.getText().toString()))
+                .show();
+    }
+
+    private void promptLlmEndpoint(final String question) {
+        if (question.trim().isEmpty() || question.length() > 1200) {
+            Toast.makeText(this, R.string.knowledge_llm_invalid, Toast.LENGTH_LONG).show();
+            return;
+        }
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(24, 8, 24, 8);
+        final EditText endpoint = new EditText(this);
+        endpoint.setSingleLine(true);
+        endpoint.setHint(R.string.knowledge_llm_endpoint_hint);
+        endpoint.setText(getPreferences(MODE_PRIVATE).getString("knowledge_llm_endpoint", ""));
+        final EditText model = new EditText(this);
+        model.setSingleLine(true);
+        model.setHint(R.string.knowledge_llm_model_hint);
+        model.setText(getPreferences(MODE_PRIVATE).getString("knowledge_llm_model", ""));
+        final EditText apiKey = new EditText(this);
+        apiKey.setSingleLine(true);
+        apiKey.setHint(R.string.knowledge_llm_key_hint);
+        apiKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        fields.addView(endpoint);
+        fields.addView(model);
+        fields.addView(apiKey);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_llm_settings)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_llm_continue, (dialog, which) -> {
+                    try {
+                        final URL selected = KnowledgeLlmClient.endpoint(endpoint.getText().toString());
+                        final String selectedModel = model.getText().toString().trim();
+                        if (selectedModel.isEmpty() || selectedModel.length() > 128) {
+                            throw new IllegalArgumentException("Missing model");
+                        }
+                        // Store only non-secret endpoint/model metadata. API keys
+                        // are session-only and never enter preferences or logs.
+                        getPreferences(MODE_PRIVATE).edit()
+                                .putString("knowledge_llm_endpoint", selected.toString())
+                                .putString("knowledge_llm_model", selectedModel).apply();
+                        prepareLlmEvidence(question, selected, selectedModel,
+                                apiKey.getText().toString());
+                    } catch (IllegalArgumentException invalid) {
+                        Toast.makeText(this, R.string.knowledge_llm_invalid,
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .show();
+    }
+
+    private void prepareLlmEvidence(final String question, final URL endpoint,
+                                    final String model, final String apiKey) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_llm_retrieving);
+        worker.submit(() -> {
+            try {
+                final List<KnowledgeLocalIndex.Hit> matches = index.evidenceSearch(question, 24);
+                final List<KnowledgeLlmEvidence.Item> excerpts = new ArrayList<>();
+                for (final KnowledgeLocalIndex.Hit match : matches) {
+                    if (Thread.currentThread().isInterrupted() || scanGeneration.get() != generation) {
+                        return;
+                    }
+                    if (excerpts.size() >= KnowledgeLlmClient.MAX_EVIDENCE) {
+                        break;
+                    }
+                    try {
+                        final String content = readSelectedNote(match.relativePath);
+                        final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);
+                        if (!excerpt.trim().isEmpty()) {
+                            excerpts.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
+                        }
+                    } catch (IOException ignored) {
+                        // An inaccessible or stale indexed note must not be sent.
+                    }
+                }
+                if (excerpts.isEmpty()) {
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                            status.setText(R.string.knowledge_llm_no_sources);
+                        }
+                    });
+                    return;
+                }
+                final String exactPreview = KnowledgeLlmClient.requestPreview(question, excerpts);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        requestLlmConsent(endpoint, model, apiKey, exactPreview, excerpts);
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        status.setText(R.string.knowledge_llm_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void requestLlmConsent(final URL endpoint, final String model,
+                                   final String apiKey, final String exactPreview,
+                                   final List<KnowledgeLlmEvidence.Item> excerpts) {
+        final String privacy = getString(R.string.knowledge_llm_privacy,
+                endpoint.getHost(), model, excerpts.size());
+        final String warning = "http".equals(endpoint.getProtocol())
+                ? "\n" + getString(R.string.knowledge_llm_plaintext_warning) : "";
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_llm_consent_title)
+                .setMessage(privacy + warning + "\n\n" + exactPreview)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_llm_send,
+                        (dialog, which) -> sendLlmQuestion(endpoint, model, apiKey,
+                                exactPreview, excerpts))
+                .show();
+    }
+
+    private void sendLlmQuestion(final URL endpoint, final String model,
+                                 final String apiKey, final String exactPreview,
+                                 final List<KnowledgeLlmEvidence.Item> excerpts) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_llm_requesting);
+        worker.submit(() -> {
+            try {
+                final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview);
+                final boolean cited = hasValidLlmCitation(answer, excerpts.size());
+                final StringBuilder display = new StringBuilder(
+                        getString(R.string.knowledge_llm_unverified));
+                if (!cited) {
+                    display.append("\n").append(getString(R.string.knowledge_llm_no_citations));
+                }
+                display.append("\n\n").append(answer).append("\n\n")
+                        .append(getString(R.string.knowledge_llm_sources)).append("\n");
+                for (int i = 0; i < excerpts.size(); i++) {
+                    display.append("[").append(i + 1).append("] ")
+                            .append(excerpts.get(i).path).append("\n");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_llm_answer)
+                                .setMessage(display.toString())
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                        if (snapshot != null && syncResult != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                // No question, excerpts, response bodies or API keys in logcat.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        status.setText(R.string.knowledge_llm_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    static boolean hasValidLlmCitation(final String answer, final int sourceCount) {
+        final Matcher citations = Pattern.compile("\\[(\\d{1,2})\\]").matcher(answer);
+        while (citations.find()) {
+            final int number = Integer.parseInt(citations.group(1));
+            if (number >= 1 && number <= sourceCount) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void promptKnowledgeQuery() {
