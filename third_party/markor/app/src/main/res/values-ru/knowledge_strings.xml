@@ -28,4 +28,21 @@
     <string name="knowledge_unconfirmed">Все интерпретации — предложения, а не подтверждённые факты.</string>
     <string name="knowledge_inspection_partial">Показаны только первые 24 фрагмента.</string>
     <string name="knowledge_analysis_failed">Не удалось проанализировать заметку или превышен предел размера.</string>
+    <string name="knowledge_review_fragments">Проверить фрагменты источника</string>
+    <string name="knowledge_no_interpretation">Формальная интерпретация не найдена</string>
+    <string name="knowledge_select_interpretation">Выберите интерпретацию (%1$s)</string>
+    <string name="knowledge_select_decision">Выберите своё решение</string>
+    <string name="knowledge_decision_claim">Записать как заявление (не подтверждённый факт)</string>
+    <string name="knowledge_decision_hypothesis">Записать как гипотезу</string>
+    <string name="knowledge_decision_fact">Подтвердить как авторитетный факт</string>
+    <string name="knowledge_decision_reject">Отклонить эту интерпретацию</string>
+    <string name="knowledge_decision_defer">Отложить решение (неизвестно)</string>
+    <string name="knowledge_cannot_accept">Неоднозначная или некорректная интерпретация не может быть принята.</string>
+    <string name="knowledge_decision_warning">Ваше решение будет записано в приватный журнал знаний. Исходный Markdown не изменится. Экспорт и восстановление журнала пока не реализованы: при удалении приложения журнал будет утрачен.</string>
+    <string name="knowledge_confirm_decision">Подтвердить решение</string>
+    <string name="knowledge_recording_decision">Проверка источника и запись решения…</string>
+    <string name="knowledge_decision_saved">Решение записано в локальный журнал знаний.</string>
+    <string name="knowledge_decision_failed">Не записано: изменился источник, журнал, интерпретация либо произошла ошибка.</string>
+    <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
+    <string name="knowledge_diagnostics">Сообщений проверки: %1$d</string>
 </resources>

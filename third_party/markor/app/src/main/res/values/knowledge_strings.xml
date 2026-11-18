@@ -28,4 +28,21 @@
     <string name="knowledge_unconfirmed">All extracted interpretations are suggestions, not confirmed facts.</string>
     <string name="knowledge_inspection_partial">Showing first 24 fragments only.</string>
     <string name="knowledge_analysis_failed">Note inspection failed or exceeds size limit.</string>
+    <string name="knowledge_review_fragments">Review source fragments</string>
+    <string name="knowledge_no_interpretation">No formal interpretation available</string>
+    <string name="knowledge_select_interpretation">Choose interpretation (%1$s)</string>
+    <string name="knowledge_select_decision">Choose your decision</string>
+    <string name="knowledge_decision_claim">Record as a claim (not an accepted fact)</string>
+    <string name="knowledge_decision_hypothesis">Record as a hypothesis</string>
+    <string name="knowledge_decision_fact">Approve as an authoritative fact</string>
+    <string name="knowledge_decision_reject">Reject this interpretation</string>
+    <string name="knowledge_decision_defer">Defer decision (unknown)</string>
+    <string name="knowledge_cannot_accept">This interpretation is unresolved or invalid and cannot be accepted.</string>
+    <string name="knowledge_decision_warning">Your decision will be appended to the private knowledge journal. Original Markdown will not change. This journal currently has no export or recovery interface; uninstalling the app will erase it.</string>
+    <string name="knowledge_confirm_decision">Confirm decision</string>
+    <string name="knowledge_recording_decision">Verifying source and recording your decision…</string>
+    <string name="knowledge_decision_saved">Decision recorded in the local knowledge journal.</string>
+    <string name="knowledge_decision_failed">Not recorded: source, journal or interpretation changed, or an error occurred.</string>
+    <string name="knowledge_conflicts">Potential conflicts: %1$d</string>
+    <string name="knowledge_diagnostics">Validation diagnostics: %1$d</string>
 </resources>

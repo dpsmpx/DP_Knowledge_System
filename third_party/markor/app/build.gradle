@@ -101,12 +101,19 @@ def stageKnowledgePython = tasks.register('stageKnowledgePython', Sync) {
     from("${rootProject.projectDir}/../../ksys") {
         include '**/*.py'
         exclude '**/__pycache__/**'
+        into 'ksys'
     }
-    into(layout.buildDirectory.dir('generated/python/ksys'))
+    from("${rootProject.projectDir}/../../schemas") {
+        include '**/*.json'
+        into 'schemas'
+    }
+    into(layout.buildDirectory.dir('generated/python'))
 }
 chaquopy {
     defaultConfig {
         version = '3.11'
+        // KnowledgeBase reads its own source for deterministic cache fingerprints.
+        extractPackages('ksys')
     }
     sourceSets {
         getByName('main') {

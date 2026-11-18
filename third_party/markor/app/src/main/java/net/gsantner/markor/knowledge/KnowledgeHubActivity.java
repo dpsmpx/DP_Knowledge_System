@@ -284,6 +284,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         new AlertDialog.Builder(this)
                                 .setTitle(R.string.knowledge_inspection_title)
                                 .setMessage(formatted)
+                                .setNeutralButton(R.string.knowledge_review_fragments,
+                                        (dialog, which) -> chooseFragment(relativePath, result))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
                         if (syncResult != null && snapshot != null) {
@@ -348,6 +350,189 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             b.append(getString(R.string.knowledge_inspection_partial));
         }
         return b.toString();
+    }
+
+    private String workspacePath() {
+        return new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath();
+    }
+
+    private void chooseFragment(final String relativePath, final JSONObject inspection) {
+        try {
+            final JSONArray fragments = inspection.getJSONArray("fragments");
+            final String[] names = new String[fragments.length()];
+            for (int i = 0; i < fragments.length(); i++) {
+                final JSONObject f = fragments.getJSONObject(i);
+                names[i] = f.getString("locator") + " · " + f.getString("preview");
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_review_fragments)
+                    .setItems(names, (dialog, which) -> {
+                        final JSONObject selected = fragments.optJSONObject(which);
+                        if (selected != null) {
+                            previewFragment(relativePath, selected.optString("id"));
+                        }
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        } catch (Exception ignored) {
+            Toast.makeText(this, R.string.knowledge_analysis_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void previewFragment(final String relativePath, final String fragmentId) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_inspecting);
+        worker.submit(() -> {
+            try {
+                final JSONObject preview = KnowledgePythonBridge.preview(this, workspacePath(),
+                        relativePath, readSelectedNote(relativePath), fragmentId);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        chooseReading(relativePath, fragmentId, preview);
+                        if (syncResult != null && snapshot != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_analysis_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void chooseReading(final String relativePath, final String fragmentId,
+                               final JSONObject packet) {
+        final JSONObject preview = packet.optJSONObject("preview");
+        if (preview == null) {
+            return;
+        }
+        final JSONArray options = preview.optJSONArray("options");
+        if (options == null || options.length() == 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_no_interpretation)
+                    .setMessage(preview.optString("reason", getString(R.string.knowledge_no_interpretation)))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        final String[] labels = new String[options.length()];
+        for (int i = 0; i < options.length(); i++) {
+            final JSONObject option = options.optJSONObject(i);
+            labels[i] = option == null ? "?" : option.optString("reading_id") + " · "
+                    + option.optString("paraphrase");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.knowledge_select_interpretation,
+                        preview.optString("status")))
+                .setItems(labels, (dialog, which) -> {
+                    final JSONObject option = options.optJSONObject(which);
+                    if (option != null) {
+                        chooseDecision(relativePath, fragmentId, packet, option);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void chooseDecision(final String relativePath, final String fragmentId,
+                                final JSONObject packet, final JSONObject option) {
+        final String[] roles = {"claim", "hypothesis", "fact", "reject", "defer"};
+        final String[] labels = {
+                getString(R.string.knowledge_decision_claim),
+                getString(R.string.knowledge_decision_hypothesis),
+                getString(R.string.knowledge_decision_fact),
+                getString(R.string.knowledge_decision_reject),
+                getString(R.string.knowledge_decision_defer)
+        };
+        final JSONObject preview = packet.optJSONObject("preview");
+        final String previewStatus = preview == null ? "" : preview.optString("status");
+        final JSONArray diagnostics = option.optJSONArray("diagnostics");
+        boolean errors = false;
+        if (diagnostics != null) {
+            for (int i = 0; i < diagnostics.length(); i++) {
+                final JSONObject d = diagnostics.optJSONObject(i);
+                if (d != null && "error".equalsIgnoreCase(d.optString("severity"))) {
+                    errors = true;
+                }
+            }
+        }
+        final boolean canAccept = !"UNRESOLVED".equals(previewStatus) && !errors;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_select_decision)
+                .setItems(labels, (dialog, which) -> {
+                    if (which < 3 && !canAccept) {
+                        Toast.makeText(this, R.string.knowledge_cannot_accept,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    confirmDecision(relativePath, fragmentId, packet, option, roles[which], labels[which]);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmDecision(final String relativePath, final String fragmentId,
+                                 final JSONObject packet, final JSONObject option,
+                                 final String role, final String roleLabel) {
+        final StringBuilder details = new StringBuilder();
+        details.append(getString(R.string.knowledge_unconfirmed)).append("\n\n")
+                .append(relativePath).append("\n")
+                .append(packet.optString("locator")).append("\n\n")
+                .append(packet.optString("source_text")).append("\n\n")
+                .append(option.optString("paraphrase")).append("\n\n")
+                .append(option.optJSONArray("ksf")).append("\n\n")
+                .append(getString(R.string.knowledge_conflicts,
+                        option.optJSONArray("conflicts") == null ? 0 :
+                                option.optJSONArray("conflicts").length())).append("\n")
+                .append(getString(R.string.knowledge_diagnostics,
+                        option.optJSONArray("diagnostics") == null ? 0 :
+                                option.optJSONArray("diagnostics").length())).append("\n\n")
+                .append(getString(R.string.knowledge_decision_warning));
+        new AlertDialog.Builder(this)
+                .setTitle(roleLabel)
+                .setMessage(details.toString())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_confirm_decision,
+                        (dialog, which) -> recordDecision(relativePath, fragmentId, packet,
+                                option.optString("reading_id"), role))
+                .show();
+    }
+
+    private void recordDecision(final String relativePath, final String fragmentId,
+                                final JSONObject packet, final String readingId, final String role) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_recording_decision);
+        worker.submit(() -> {
+            try {
+                final String head = packet.isNull("journal_head")
+                        ? null : packet.getString("journal_head");
+                final JSONObject result = KnowledgePythonBridge.decide(this, workspacePath(),
+                        relativePath, readSelectedNote(relativePath), fragmentId, readingId,
+                        role, packet.getString("source_hash"), head);
+                if (result.optJSONArray("journal_ids") == null) {
+                    throw new IllegalStateException("Missing knowledge journal identifier");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_decision_saved,
+                                Toast.LENGTH_LONG).show();
+                        if (syncResult != null && snapshot != null) {
+                            showIndexStatus(displayed.size());
+                        }
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_decision_failed);
+                    }
+                });
+            }
+        });
     }
 
     @Override
