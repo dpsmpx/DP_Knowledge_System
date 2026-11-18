@@ -558,7 +558,7 @@ testing:** device results and tuning remain the Stage 15 acceptance gate.
 
 **Signed prerelease:** `.github/workflows/knowledge-signed-prerelease.yml`
 tests the Python core and Android build, builds `flavorAtestRelease` with
-the separate `net.gsantner.markor_test` package, signs only after receiving
+the separate `com.dpsmpx.dpks` Android application ID, signs only after receiving
 repository signing secrets, verifies with `apksigner`, and attaches the
 APK plus its SHA-256 to a GitHub *prerelease*. The workflow is restricted to
 the `feature/knowledge-android` integration ref and is triggered once when

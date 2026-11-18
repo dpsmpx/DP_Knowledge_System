@@ -45,7 +45,10 @@ android {
     flavorDimensions = ["default"]
     productFlavors {
         flavorAtest {
-            applicationId "net.gsantner.markor_test"
+            // DP Knowledge System prerelease is independently installable.
+            // Java source namespace remains upstream Markor for attribution.
+            applicationId "com.dpsmpx.dpks"
+            resValue "string", "manifest_package_id", "com.dpsmpx.dpks"
             versionCode = Integer.parseInt(new Date().format('yyMMdd'))
             versionName = defaultConfig.versionName + "-" + new Date().format('HHmm')
             buildConfigField "boolean", "IS_TEST_BUILD", "true"
