@@ -145,12 +145,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 new AlertDialog.Builder(this)
                         .setTitle(path)
                         .setItems(new String[]{getString(R.string.knowledge_inspect_note),
-                                        getString(R.string.knowledge_possible_backlinks)},
+                                        getString(R.string.knowledge_possible_backlinks),
+                                        getString(R.string.knowledge_semantic_relations)},
                                 (dialog, which) -> {
                                     if (which == 0) {
                                         inspectWithCore(path);
-                                    } else {
+                                    } else if (which == 1) {
                                         showPossibleBacklinks(path);
+                                    } else {
+                                        showSemanticRelations(path);
                                     }
                                 })
                         .show();
@@ -442,6 +445,60 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && scanGeneration.get() == scan) {
                         Toast.makeText(this, R.string.knowledge_index_failed, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void showSemanticRelations(final String relativePath) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_semantic_working);
+        worker.submit(() -> {
+            try {
+                final JSONObject result = KnowledgePythonBridge.relationships(
+                        this, workspacePath(), relativePath);
+                final JSONArray matches = result.getJSONArray("matches");
+                final String[] labels = new String[matches.length()];
+                for (int i = 0; i < labels.length; i++) {
+                    final JSONObject match = matches.getJSONObject(i);
+                    final boolean conflict = "possible_conflict".equals(match.optString("kind"));
+                    labels[i] = getString(conflict ? R.string.knowledge_possible_conflict
+                                    : R.string.knowledge_possible_agreement)
+                            + " · " + match.optString("path")
+                            + "\n" + match.optString("predicate") + " · "
+                            + match.optString("source_locator") + " ↔ "
+                            + match.optString("other_locator");
+                }
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                            .setTitle(getString(R.string.knowledge_semantic_relations)
+                                    + (result.optBoolean("truncated")
+                                    ? " · " + getString(R.string.knowledge_semantic_limited) : ""))
+                            .setPositiveButton(android.R.string.ok, null);
+                    if (labels.length == 0) {
+                        dialog.setMessage(R.string.knowledge_no_semantic_relations);
+                    } else {
+                        dialog.setItems(labels, (d, position) -> {
+                            final JSONObject match = matches.optJSONObject(position);
+                            if (match != null) {
+                                openIndexedNote(match.optString("path"));
+                            }
+                        });
+                    }
+                    dialog.show();
+                    if (snapshot != null && syncResult != null) {
+                        showIndexStatus(displayed.size());
+                    }
+                });
+            } catch (Exception ignored) {
+                // Never include note paths or private source content in logs.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_semantic_failed);
                     }
                 });
             }

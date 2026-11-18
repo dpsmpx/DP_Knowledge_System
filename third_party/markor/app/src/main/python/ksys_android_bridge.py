@@ -18,6 +18,7 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
+from ksys.importer.relations import related_claims
 from ksys.store.db import connect
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
@@ -108,11 +109,33 @@ def review_queue(workspace_dir: str, offset: int = 0) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def note_relationships(workspace_dir: str, relative_path: str) -> str:
+    """Compare unapproved structured assertions between different notes.
+
+    A shared atom is evidence of a candidate relation, never evidence that
+    either original claim is true. No private note text leaves this process.
+    """
+    workspace = Path(workspace_dir)
+    if not workspace.is_absolute():
+        raise ValueError("Knowledge workspace must be absolute")
+    matches = related_claims(Workspace(workspace), relative_path)
+    return json.dumps({
+        "protocol": "dpksys.relations.v1",
+        "path": relative_path,
+        "matches": matches["matches"],
+        "truncated": matches["truncated"],
+        "source": "unapproved_candidate_assertions",
+        "read_only": True,
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def inspect_note(relative_path: str, markdown: str) -> str:
     if not isinstance(relative_path, str) or not isinstance(markdown, str):
         raise ValueError("Expected relative path and Markdown content")
     if not relative_path or relative_path.startswith("/") or "\\" in relative_path \
-            or ".." in relative_path.split("/") or not relative_path.endswith((".md", ".markdown")):
+            or ".." in relative_path.split("/") \
+            or not relative_path.lower().endswith((".md", ".markdown")):
         raise ValueError("Invalid relative Markdown path")
     if len(markdown) > MAX_CHARACTERS:
         raise ValueError("Note exceeds read-only inspection limit")
