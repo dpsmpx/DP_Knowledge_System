@@ -48,10 +48,13 @@ jobs:
 
       - name: Build and test isolated Android preview package
         working-directory: third_party/markor
+        env:
+          GRADLE_OPTS: -Xms128m -Xmx768m
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:testFlavorAtestDebugUnitTest :app:assembleFlavorAtestRelease --no-daemon --stacktrace
+          ./gradlew :app:testFlavorAtestDebugUnitTest :app:assembleFlavorAtestRelease \
+            --no-daemon --no-parallel --max-workers=2 --stacktrace
 
       - name: Verify release signing secrets are present
         shell: bash

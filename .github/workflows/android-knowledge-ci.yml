@@ -27,6 +27,10 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Unit tests and unsigned debug build
         working-directory: third_party/markor
+        env:
+          # gradlew defaults to a 64 MiB launcher heap; the Gradle protocol
+          # response for this multi-flavor build can exhaust that heap.
+          GRADLE_OPTS: -Xms128m -Xmx768m
         run: |
           set -euo pipefail
           chmod +x gradlew
@@ -35,7 +39,7 @@ jobs:
           log="$RUNNER_TEMP/dpks-gradle-ci.log"
           if ! ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
             :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug \
-            --no-daemon --stacktrace > "$log" 2>&1; then
+            --no-daemon --no-parallel --max-workers=2 --stacktrace > "$log" 2>&1; then
             echo '::group::Gradle failure details (last 160 lines)'
             tail -n 160 "$log"
             echo '::endgroup::'
