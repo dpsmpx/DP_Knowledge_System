@@ -18,6 +18,13 @@
     <string name="knowledge_partial_index">Часть путей может устареть из-за неполного сканирования.</string>
     <string name="knowledge_possible_backlinks">Возможные входящие ссылки (не подтверждены)</string>
     <string name="knowledge_no_backlinks">Возможные входящие ссылки не найдены.</string>
+    <string name="knowledge_semantic_relations">Связанные утверждения в заметках</string>
+    <string name="knowledge_semantic_working">Сопоставление локальных неподтверждённых интерпретаций…</string>
+    <string name="knowledge_possible_agreement">Возможное согласие</string>
+    <string name="knowledge_possible_conflict">Возможное противоречие</string>
+    <string name="knowledge_no_semantic_relations">Точных совпадений формализованных утверждений не найдено. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
+    <string name="knowledge_semantic_failed">Не удалось проверить смысловые связи. Заметки и журнал решений не изменены.</string>
+    <string name="knowledge_semantic_limited">только первые 60</string>
     <string name="knowledge_index_failed">Локальный индекс знаний недоступен.</string>
     <string name="knowledge_inspect_note">Проанализировать в ksys (только чтение)</string>
     <string name="knowledge_inspecting">Локальное ядро знаний анализирует заметку…</string>

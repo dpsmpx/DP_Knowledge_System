@@ -33,8 +33,9 @@ snapshot until the integrated application is ready.
 | 05 | Knowledge search, relationships, contradictions, explanations, hypotheses, and temporal queries | Inspectable evidence trees; `UNKNOWN` and `CONTESTED` correctly distinguished |
 | 06 | Explicit, encrypted journal export/import before wider release | User-chosen backup/restore, source hash-chain verified, existing journal never overwritten |
 | 07 | Automatic, local, whole-library semantic classification, candidate extraction, incremental indexing and review queue | All accessible Markdown notes processed without authorizing facts; cancellation, size bounds and partial-scan safety tested |
-| 08 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
-| 09 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
+| 08 | Conservative cross-note semantic relationships between independently extracted claims | Exact predicate/argument matching, opposite-negation candidates, paired provenance, no automatic factual authority |
+| 09 | Conversational assistant with explicit grounding and configurable optional local/remote LLM | Source-cited answers, no fabricated proofs, opt-in network and privacy controls |
+| 10 | Reliable large-vault UX: persistent background jobs, change notifications, diagnostics, Android tests and signed prereleases | Long-running realistic synthetic stress tests, crash-safe recovery and release QA |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -213,6 +214,35 @@ while the Knowledge Library screen is active and opt-in is enabled. Candidate
 pagination includes previously reviewed candidates; review-state filtering
 and priority ranking remain future work. APK/device validation and large
 real-world vault load testing remain required before production use.
+
+## Stage 08 — source-backed cross-note claim relationships
+
+The whole-library import now also builds a **disposable semantic atom index**
+from formalized candidates. For each unapproved assertion it records the
+canonical structured predicate and argument values, negation, source document,
+fragment ID and locator. This works incrementally alongside the Stage 07
+import, without a second walk of the vault. The private derived SQLite schema
+is upgraded from v3 to v4 (the disposable index rebuilds; authoritative
+journals and Markdown sources are not migrated or modified).
+
+Long-press any indexed note and choose **Related claims across notes**. The
+knowledge core finds other notes with *exactly the same structured predicate
+and arguments*, distinguishing a candidate **agreement** (same negation)
+from a candidate **conflict** (opposite negation). The results contain both
+source locators, both stable fragment IDs, the other relative Markdown path
+and the predicate. Tapping a result opens the referenced source with the
+original canonical-path safety check. At most the first 60 results are shown;
+the interface explicitly marks truncated results. All work remains local.
+
+This is intentionally **not entity resolution, semantic similarity or
+automated contradiction proof**. Only fully specified asserted claim atoms
+are compared; rules, unresolved variables, nonasserted modalities and
+unparsed text are excluded. Different names, paraphrases, context or hidden
+synonymy cannot be equated safely. Conflicts between two unapproved claims
+do not imply that either is false. Changed or temporarily missing sources
+may leave old candidate relations until the next successful semantic refresh;
+users must inspect current notes and explicitly approve any authoritative
+knowledge through the preexisting journal flow. No network service is used.
 
 ## Integration branch and PR process
 

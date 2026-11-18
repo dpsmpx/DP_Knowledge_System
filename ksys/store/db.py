@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-DB_SCHEMA_VERSION = "3"
+DB_SCHEMA_VERSION = "4"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -34,6 +34,20 @@ CREATE TABLE IF NOT EXISTS candidates (
     paraphrase TEXT NOT NULL, diagnostics TEXT NOT NULL, ambiguity TEXT NOT NULL,
     input_hash TEXT NOT NULL, ordinal INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS candidates_origin ON candidates(origin);
+
+-- Disposable, exact-match cross-document claims. Every row still belongs to
+-- an unapproved parser candidate and has its own source fragment provenance.
+CREATE TABLE IF NOT EXISTS candidate_atoms (
+    candidate_id TEXT NOT NULL,
+    fragment_id TEXT NOT NULL,
+    doc TEXT NOT NULL,
+    locator TEXT NOT NULL,
+    atom_key TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    negated INTEGER NOT NULL,
+    PRIMARY KEY (candidate_id, atom_key, negated));
+CREATE INDEX IF NOT EXISTS candidate_atoms_doc ON candidate_atoms(doc);
+CREATE INDEX IF NOT EXISTS candidate_atoms_key ON candidate_atoms(atom_key, doc);
 
 CREATE TABLE IF NOT EXISTS journal (
     seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, op TEXT NOT NULL, ts TEXT NOT NULL,
