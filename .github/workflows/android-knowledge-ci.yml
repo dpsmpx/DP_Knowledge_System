@@ -28,9 +28,20 @@ jobs:
       - name: Unit tests and unsigned debug build
         working-directory: third_party/markor
         run: |
+          set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
-            :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug --no-daemon --stacktrace
+          # Keep job logs compact enough for offline/mobile troubleshooting.
+          # Preserve the full Gradle log only on the ephemeral CI runner.
+          log="$RUNNER_TEMP/dpks-gradle-ci.log"
+          if ! ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
+            :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug \
+            --no-daemon --stacktrace > "$log" 2>&1; then
+            echo '::group::Gradle failure details (last 160 lines)'
+            tail -n 160 "$log"
+            echo '::endgroup::'
+            exit 1
+          fi
+          tail -n 24 "$log"
       - name: Confirm standalone DP Knowledge package ID
         run: |
           set -euo pipefail
