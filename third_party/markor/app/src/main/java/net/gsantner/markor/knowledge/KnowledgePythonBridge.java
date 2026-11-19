@@ -58,6 +58,13 @@ public final class KnowledgePythonBridge {
         return invoke(context, "inspect_note", relativePath, markdown);
     }
 
+    /** Saved-note context: accepted journal records plus tentative, read-only links. */
+    public static JSONObject editorContext(final Context context, final String workspace,
+                                           final String relativePath, final String savedMarkdown)
+            throws JSONException {
+        return invoke(context, "editor_note_context", workspace, relativePath, savedMarkdown);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,

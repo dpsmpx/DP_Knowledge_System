@@ -165,7 +165,7 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def inspect_note(relative_path: str, markdown: str) -> str:
+def _validate_note_input(relative_path: str, markdown: str) -> None:
     if not isinstance(relative_path, str) or not isinstance(markdown, str):
         raise ValueError("Expected relative path and Markdown content")
     if not relative_path or relative_path.startswith("/") or "\\" in relative_path \
@@ -175,6 +175,107 @@ def inspect_note(relative_path: str, markdown: str) -> str:
     if len(markdown) > MAX_CHARACTERS:
         raise ValueError("Note exceeds read-only inspection limit")
 
+
+def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
+    """Read-only, bounded note context from the *saved* source snapshot.
+
+    Approved journal records are distinct from unapproved, indexed lexical/
+    formal candidate relations. The index is opened strictly read-only and
+    candidate relations are hidden if this note's indexed SHA is stale.
+    """
+    _validate_note_input(relative_path, markdown)
+    kb = _kb(workspace_dir)
+    source_sha = _source_hash(markdown)
+    active, historical = [], 0
+    active_count, stale_count = 0, 0
+    for rec in sorted(kb.state.records.values(),
+                      key=lambda value: (value.updated_at, value.id), reverse=True):
+        source = next((p for p in reversed(rec.provenance)
+                       if p.get("document") == relative_path), None)
+        if source is None:
+            continue
+        if not kb.state.active(rec.id):
+            historical += 1
+            continue
+        active_count += 1
+        fresh = source.get("document_sha") == source_sha
+        if not fresh:
+            stale_count += 1
+        if len(active) >= 24:
+            continue
+        conflicts_available = True
+        try:
+            warnings = kb.conflicts_for([rec.node])
+            conflict_ids = sorted({str(c.get("conflicts_with"))
+                                   for c in warnings if c.get("conflicts_with")})[:8]
+        except Exception:
+            conflicts_available = False
+            conflict_ids = []
+        active.append({
+            "id": rec.id, "role": rec.role, "status": rec.status.value,
+            "statement": rec.node.ksf()[:350],
+            "locator": str(source.get("locator") or "")[:150],
+            "fragment_id": str(source.get("fragment_id") or "")[:150],
+            "source_excerpt": str(source.get("text") or "")[:240],
+            "source_current": fresh,
+            "provenance_kind": str(source.get("source_type") or "")[:70],
+            "conflicts_available": conflicts_available,
+            "conflict_count": len(conflict_ids) if conflicts_available else None,
+            "conflicts_with": conflict_ids,
+        })
+
+    relations, truncated, index_state = [], False, "absent"
+    con = _decision_index(Path(workspace_dir))
+    if con is not None:
+        try:
+            row = con.execute("SELECT sha256, status FROM documents WHERE path=?",
+                              (relative_path,)).fetchone()
+            if row is None or row[1] != "PARSED" or row[0] != source_sha:
+                index_state = "stale"
+            else:
+                index_state = "current"
+                rows = con.execute(
+                    "SELECT DISTINCT b.doc, a.locator, b.locator, a.fragment_id, "
+                    "b.fragment_id, a.negated, b.negated, a.predicate "
+                    "FROM candidate_atoms a JOIN candidate_atoms b ON a.atom_key=b.atom_key "
+                    "JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
+                    "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' "
+                    "WHERE a.doc=? AND b.doc<>? "
+                    "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator LIMIT ?",
+                    (relative_path, relative_path, 21),
+                ).fetchall()
+                truncated = len(rows) > 20
+                relations = [{
+                    "path": r[0], "source_locator": r[1],
+                    "other_locator": r[2], "source_fragment": r[3],
+                    "other_fragment": r[4],
+                    "kind": "possible_conflict" if r[5] != r[6]
+                            else "possible_agreement",
+                    "predicate": r[7],
+                } for r in rows[:20]]
+        except sqlite3.Error:
+            index_state, relations, truncated = "unavailable", [], False
+        finally:
+            con.close()
+
+    return json.dumps({
+        "protocol": "dpksys.editor_context.v1",
+        "path": relative_path, "source_hash": source_sha,
+        "journal_head": kb.journal.head, "read_only": True,
+        "source_snapshot": "saved_markdown",
+        "accepted_records": active, "accepted_total": active_count,
+        "accepted_truncated": active_count > len(active),
+        "stale_provenance_count": stale_count,
+        "historical_count": historical,
+        "candidate_relations": relations, "relations_truncated": truncated,
+        "relation_index_state": index_state,
+        "relations_are_unapproved": True,
+        "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def inspect_note(relative_path: str, markdown: str) -> str:
+    _validate_note_input(relative_path, markdown)
     parsed = parse_document(relative_path, markdown)
     coverage = check_coverage(markdown, parsed.fragments)
     analyzer = LanguageAnalyzer()

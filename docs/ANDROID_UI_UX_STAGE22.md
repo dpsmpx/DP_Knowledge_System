@@ -1,12 +1,14 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first four slices integrated**. The owner confirmed ordinary decision
+Status: **first five slices integrated**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
 **partial, scenario-specific device observations**, not a full QA-54/QA-59
-signoff. **Fifth slice: guided manual interpretation and explicit editor save
-are pending CI and device QA**. Markor still owns actual Markdown editing.
+signoff. The owner subsequently confirmed that Preview #16's updated flow
+works, but not the full QA-60 matrix. **Sixth slice: a read-only contextual
+knowledge panel inside the editor is pending CI and deferred device QA.**
+Markor still owns actual Markdown editing.
 
 ## Scope
 
@@ -135,6 +137,33 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   wording, preserved Markdown, absent journal during preview, rejected stale
   source/manual phrase/journal and explicit append-only approval.
 
+## Sixth slice — contextual knowledge panel (pending CI, device QA deferred)
+
+- An always-reachable **Knowledge** toggle expands a bounded, scrollable
+  panel directly above the Markor editing surface; no extra hub navigation
+  is needed for the first contextual read.
+- The panel keeps **active journal records** visibly separate from
+  **unapproved candidate relations**. Human claims, hypotheses, accepted
+  facts and stale provenance have distinct labels. Candidate agreements and
+  conflicts are explicitly *possible*, never proven evidence.
+- The bridge reads journal state and an *existing* semantic index without
+  writing or migrating anything. Tentative cross-note links are suppressed
+  if the selected note's index hash does not equal the saved Markdown hash.
+  Other notes' freshness is not guaranteed and is labeled as such.
+- The editor buffer is never silently saved: when it differs from the saved
+  source, the panel visibly states it is showing the **saved snapshot**.
+  Clicking a journal record reveals its source excerpt/formal statement;
+  navigation to a local excerpt requires an identical saved/editor hash
+  and an unambiguous text match. Clicking a candidate opens a selected-vault
+  Markdown note only after canonical path containment checks.
+- At most 24 active records and 20 tentative relations are shown. The panel
+  reports truncation, missing/stale indexes, obsolete-history counts and
+  unverified provenance. Workers run off the UI thread; obsolete responses
+  and dialogs are invalidated on navigation. No cloud API or telemetry.
+- This remains an initial contextual surface, **not** a full source-span
+  semantic diff, independent editor engine, or exhaustive contradiction
+  audit. Large-library speed and accessibility are recorded as QA-61 debt.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
@@ -186,9 +215,9 @@ On an Android 15 device with test notes (avoid private journal mutations):
 
 - A full independent DPKS editor and intelligent workspace replacing the
   remaining Markor note-editing engine/menu chrome, while retaining reliable
-  import/export and edit/preview workflows. The fourth slice adds visible
-  edit/preview and guarded review/link entry points, but not an inline
-  source-span diff, persistent sidebar or separate renderer.
+  import/export and edit/preview workflows. The sixth slice adds a bounded
+  context panel, but not an inline source-span diff, persistent tablet
+  sidebar or separate Markdown renderer.
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.
 - Inline source-span-aware diff, evidence, selective approval and reversible
