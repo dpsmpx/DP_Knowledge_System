@@ -104,7 +104,11 @@ deferred rather than required after every incremental PR.
 - **QA-66 / OPEN, DEFERRED:** eleventh-slice persistent inline knowledge dock,
   unsaved-stale reporting and bounded Back navigation await device checks.
 - **QA-67 / OPEN, DEFERRED:** twelfth-slice one-button Stage 22 synthetic
-  self-test and signed prerelease require a later in-app/device smoke check.
+  self-test had a concrete Preview #17 device failure: `EDITOR-22-SUITE`
+  threw `JSONException` while `ENV-01` passed. The Java protocol allowlist
+  omitted `dpksys.stage22_editor_selftest.v1`. A regression fix is in review;
+  the replacement APK still needs one follow-up button check, and the full UI
+  matrix remains deferred.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

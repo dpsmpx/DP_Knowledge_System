@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first eleven slices integrated; twelfth self-test/release slice under review**. The owner confirmed ordinary decision
+Status: **twelve slices integrated; protocol hotfix awaiting CI and a replacement signed preview**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -289,7 +289,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   [PR #63](https://github.com/dpsmpx/DP_Knowledge_System/pull/63);
   physical QA-66 is OPEN/DEFERRED at the owner's request.
 
-## Twelfth slice — one-button isolated editor self-test and signed preview (under review)
+## Twelfth slice — one-button isolated editor self-test and signed Preview #17 (device regression found)
 
 - The **Processes → QA** card gains a dedicated **Test Stage 22 editor**
   action alongside existing quick diagnostics and 20k synthetic stress.
@@ -314,6 +314,14 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   original note persistence was physically accepted. These remain **QA-67
   OPEN/DEFERRED** until batched on-device verification; do not use the
   automatic test as a substitute for the existing QA-59–66 matrix.
+- **Observed on Android 15 in Preview #17, 19 Nov 2026:** the first one-button
+  report was `PASS=1 WARN=0 FAIL=1 SKIP=1`; `ENV-01` passed, while
+  `EDITOR-22-SUITE` failed with `JSONException` before individual checks.
+  The Python self-test emitted `dpksys.stage22_editor_selftest.v1`, but
+  `KnowledgePythonBridge.invoke` rejected that name because its Java protocol
+  allowlist omitted it. The protocol hotfix adds the explicit allowlist entry
+  and regression coverage in both Android unit tests and Python wiring tests.
+  **Do not mark QA-67 PASS until the replacement APK is observed on-device.**
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee

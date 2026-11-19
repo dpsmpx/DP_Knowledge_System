@@ -263,15 +263,21 @@ public final class KnowledgePythonBridge {
                 .callAttr(method, arguments).toString();
         final JSONObject result = new JSONObject(output);
         final String protocol = result.optString("protocol");
-        if (!"dpksys.inspect.v1".equals(protocol)
-                && !"dpksys.decision.v1".equals(protocol)
-                && !"dpksys.query.v1".equals(protocol)
-                && !"dpksys.backup.v1".equals(protocol)
-                && !"dpksys.bulk.v1".equals(protocol)
-                && !"dpksys.relations.v1".equals(protocol)
-                && !"dpksys.audit.v1".equals(protocol)) {
+        if (!isSupportedProtocol(protocol)) {
             throw new JSONException("Unexpected knowledge core protocol");
         }
         return result;
+    }
+
+    /** Keep the Java transport allowlist in step with the Python bridge responses. */
+    static boolean isSupportedProtocol(final String protocol) {
+        return "dpksys.inspect.v1".equals(protocol)
+                || "dpksys.decision.v1".equals(protocol)
+                || "dpksys.query.v1".equals(protocol)
+                || "dpksys.backup.v1".equals(protocol)
+                || "dpksys.bulk.v1".equals(protocol)
+                || "dpksys.relations.v1".equals(protocol)
+                || "dpksys.audit.v1".equals(protocol)
+                || "dpksys.stage22_editor_selftest.v1".equals(protocol);
     }
 }
