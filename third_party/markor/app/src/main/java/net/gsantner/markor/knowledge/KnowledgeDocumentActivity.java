@@ -441,9 +441,9 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private int knowledgeHighlightColor(final View view, final String role) {
         final int attribute;
         switch (role) {
-            case "fact": attribute = com.google.android.material.R.attr.colorPrimary; break;
-            case "hypothesis": attribute = com.google.android.material.R.attr.colorTertiary; break;
-            case "claim": attribute = com.google.android.material.R.attr.colorSecondary; break;
+            case "fact": attribute = com.google.android.material.R.attr.colorPrimaryContainer; break;
+            case "hypothesis": attribute = com.google.android.material.R.attr.colorTertiaryContainer; break;
+            case "claim": attribute = com.google.android.material.R.attr.colorSecondaryContainer; break;
             default: attribute = com.google.android.material.R.attr.colorOutline; break;
         }
         return ColorUtils.setAlphaComponent(MaterialColors.getColor(view, attribute), 100);
