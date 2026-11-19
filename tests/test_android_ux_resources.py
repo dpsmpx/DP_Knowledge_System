@@ -361,6 +361,23 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_structural_disclaimer"):
                 self.assertIn(name, names)
 
+    def test_editor_has_responsive_keyboard_safe_workspace_with_permanent_rail(self):
+        root = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        workspace = next(x for x in root.iter() if x.get(ANDROID + "id") ==
+                         "@+id/knowledge_editor_workspace")
+        children = [x.get(ANDROID + "id") for x in workspace]
+        self.assertEqual(["@+id/knowledge_editor_context_panel",
+                          "@+id/document__placeholder_fragment"], children)
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        policy = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeEditorLayoutPolicy.java").read_text()
+        for marker in ("applyResponsiveEditorLayout()", "WindowInsetsCompat.Type.ime()",
+                       "setDockExpanded(false)", "DOCK_EXPANDED_STATE",
+                       "onSaveInstanceState(final Bundle state)",
+                       "onConfigurationChanged(final Configuration config)"):
+            self.assertIn(marker, editor)
+        self.assertIn("smallestDp >= 600 && width >= 720 && height >= 400", policy)
+        self.assertIn("Math.max(96, Math.min(200,", policy)
+
     def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
         shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
         ids = [element.get(ANDROID + "id", "") for element in shell.iter()]

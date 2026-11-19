@@ -118,6 +118,10 @@ deferred rather than required after every incremental PR.
   human-approved KSF assertion exists. Verify category wording, contrast,
   source/journal immutability and large-font/screen-reader behavior in the
   combined hardware QA.
+- **QA-70 / OPEN, DEFERRED:** fifteenth-slice side-dock policy and IME-aware
+  phone panel are covered by pure Java tests and static layout checks, but
+  actual Android tablet/foldable multi-window, keyboard, rotation, font scale
+  and TalkBack behavior require observation in the final combined run.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

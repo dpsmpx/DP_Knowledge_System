@@ -363,6 +363,20 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   stale provenance and source size bounds. **QA-69 physical UI signoff is
   deferred** until the owner's combined device test.
 
+## Fifteenth slice — responsive editor dock and keyboard safety (in review)
+
+- The Markdown surface and permanent DPKS knowledge rail share one workspace.
+  Phones use a bounded vertical panel; tablets with at least 600dp smallest
+  width, 720dp available width and 400dp height get a 280–360dp side dock.
+  Multi-window/landscape phones remain protected against narrow editors.
+- On phones, showing the keyboard collapses expanded knowledge details while
+  retaining the compact status/actions. Orientation recreation preserves the
+  user's expanded/collapsed choice and reapplies responsive measurements.
+- Pure Java layout policy tests cover narrow devices, landscape phones,
+  tablets and zero-size multi-window cases. Real keyboard, rotation, scroll,
+  large-font/TalkBack and tablet accessibility remain **QA-70 OPEN/DEFERRED**
+  for a single end-of-stage device acceptance run.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but

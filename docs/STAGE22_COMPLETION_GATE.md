@@ -11,7 +11,7 @@ and rendering internals; the user-facing workspace must belong to DPKS.
 | Decisions and provenance | All eight bounded queues, journal detail, guarded actions and history | Integrated, device QA deferred |
 | Context-aware editor | Edit/Preview/Save, exact source spans, review selection, links, dock and navigation | Integrated, device QA deferred |
 | Interpretation differences | Separate literal text diff and constrained field-by-field CNL/IR comparison; unknown stays unknown | Fourteenth slice in review |
-| Editor layout | Responsive phone/tablet layout, keyboard-safe dock, clear own toolbar/actions; editing/rendering parity with Markor | Open |
+| Editor layout | Responsive phone/tablet layout, keyboard-safe dock, clear own toolbar/actions; editing/rendering parity with Markor | Responsive dock in review; remaining chrome/accessibility open |
 | Library at scale | Bounded pages/search with repeatable ordering and accessible next/back; no 250-row dead end | Open |
 | Accessible workflow | Screen reader labels, focus, large text, reduced motion and adequate touch targets | Open |
 | Discoverability | Concise local-first onboarding/help with provenance/privacy and no automatic journal changes | Open |

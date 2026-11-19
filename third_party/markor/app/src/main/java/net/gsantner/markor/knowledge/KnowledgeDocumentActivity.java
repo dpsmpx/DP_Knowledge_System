@@ -7,6 +7,7 @@
 package net.gsantner.markor.knowledge;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.os.Bundle;
 import android.graphics.Typeface;
@@ -29,6 +30,8 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.graphics.ColorUtils;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
@@ -60,6 +63,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** A note opened from DPKS must return to the library, not destroy its task. */
 public final class KnowledgeDocumentActivity extends DocumentActivity {
     private static final int MAX_SOURCE_BYTES = 2_000_000;
+    private static final String DOCK_EXPANDED_STATE = "dpks.editor.dock.expanded";
     private static final String JUMP_PATH = "dpks.editor.source.path";
     private static final String JUMP_SHA = "dpks.editor.source.sha";
     private static final String JUMP_TEXT_SHA = "dpks.editor.source.text_sha";
@@ -85,6 +89,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private final List<DockPage> dockPageHistory = new ArrayList<>();
     private boolean incomingJumpStarted;
     private int incomingJumpAttempts;
+    private boolean sideDock;
 
     /** At most eight detached, read-only views; no journal/model data is persisted. */
     private static final class DockPage {
@@ -137,6 +142,22 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         findViewById(R.id.knowledge_editor_source_inspector).setOnClickListener(view -> inspectSourceKnowledge());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
         findViewById(R.id.knowledge_editor_backlinks).setOnClickListener(view -> showBacklinks());
+        applyResponsiveEditorLayout();
+        final View workspace = findViewById(R.id.knowledge_editor_workspace);
+        ViewCompat.setOnApplyWindowInsetsListener(workspace, (view, insets) -> {
+            // On a phone the IME must not leave a 200dp knowledge pane over
+            // the remaining editor. The permanent summary rail stays present.
+            if (!sideDock && insets.isVisible(WindowInsetsCompat.Type.ime())
+                    && findViewById(R.id.knowledge_editor_context_body)
+                    .getVisibility() == View.VISIBLE) {
+                setDockExpanded(false);
+            }
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(workspace);
+        if (state != null && state.getBoolean(DOCK_EXPANDED_STATE, false)) {
+            setDockExpanded(true);
+        }
         final Toolbar toolbar = findViewById(R.id.toolbar);
         if (toolbar != null) {
             toolbar.setNavigationIcon(R.drawable.ic_arrow_back_white_24dp);
@@ -713,6 +734,59 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         ((MaterialButton) findViewById(R.id.knowledge_editor_context_expand))
                 .setText(expanded ? R.string.knowledge_editor_dock_collapse
                         : R.string.knowledge_editor_dock_expand);
+    }
+
+    /** Tablet uses a side rail; phone preserves a bounded top rail above EditText. */
+    private void applyResponsiveEditorLayout() {
+        final Configuration config = getResources().getConfiguration();
+        final KnowledgeEditorLayoutPolicy policy = KnowledgeEditorLayoutPolicy.forWindow(
+                config.screenWidthDp, config.screenHeightDp, config.smallestScreenWidthDp);
+        sideDock = policy.sideDock;
+        final float density = getResources().getDisplayMetrics().density;
+        final LinearLayout workspace = findViewById(R.id.knowledge_editor_workspace);
+        final LinearLayout panel = findViewById(R.id.knowledge_editor_context_panel);
+        final LinearLayout body = findViewById(R.id.knowledge_editor_context_body);
+        final View editorSurface = findViewById(R.id.document__placeholder_fragment);
+        final ScrollView list = findViewById(R.id.knowledge_editor_context_list_scroll);
+        final ScrollView detail = findViewById(R.id.knowledge_editor_context_detail_scroll);
+        workspace.setOrientation(sideDock ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        if (sideDock) {
+            panel.setLayoutParams(new LinearLayout.LayoutParams(
+                    (int) (policy.dockWidthDp * density), ViewGroup.LayoutParams.MATCH_PARENT));
+            editorSurface.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+            body.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            list.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            detail.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        } else {
+            panel.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            editorSurface.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            body.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            final int scrollPx = (int) (policy.phoneScrollDp * density);
+            list.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, scrollPx));
+            detail.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, scrollPx));
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(final Configuration config) {
+        super.onConfigurationChanged(config);
+        applyResponsiveEditorLayout();
+    }
+
+    @Override
+    protected void onSaveInstanceState(final Bundle state) {
+        state.putBoolean(DOCK_EXPANDED_STATE,
+                findViewById(R.id.knowledge_editor_context_body).getVisibility() == View.VISIBLE);
+        super.onSaveInstanceState(state);
     }
 
     private void initializeContextDock() {
