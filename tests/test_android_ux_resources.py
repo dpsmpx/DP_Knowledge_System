@@ -306,6 +306,28 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                           "knowledge_editor_source_inspector_history_partial"):
                 self.assertIn(label, names)
 
+    def test_editor_evidence_links_stay_in_editor_and_recheck_cross_note_source(self):
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for marker in ("inspectRecordEvidence(", "renderRecordEvidence(",
+                       "openEvidenceOrigin(", "selectIncomingSource(",
+                       "verifiedEvidenceSpan(", "relative.equals(relativePath(target))",
+                       "docSha.equals(sha256(disk))", "sourceSha.equals(sha256(disk.substring(a, b)))",
+                       "saved.equals(current.getTextString())", "openAtSource(this, target,",
+                       "JUMP_PATH", "JUMP_TEXT_SHA", "knowledge_editor_evidence_open"):
+            self.assertIn(marker, java)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn('"editor_record_evidence"', bridge)
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('"only_journal_records": True, "read_only": True', python)
+        self.assertIn('"navigation_verified": False', python)
+        for folder in ("values", "values-ru"):
+            names = {e.get("name") for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for label in ("knowledge_editor_evidence_open", "knowledge_editor_evidence_origins",
+                          "knowledge_editor_evidence_unverified", "knowledge_editor_evidence_conflict",
+                          "knowledge_editor_evidence_unavailable", "knowledge_editor_evidence_truncated"):
+                self.assertIn(label, names)
+
     def test_decision_review_previews_are_comparison_panels(self):
         core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):

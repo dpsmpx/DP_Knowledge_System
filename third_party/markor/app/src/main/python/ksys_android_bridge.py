@@ -33,6 +33,9 @@ MAX_CHARACTERS = 2_000_000
 MAX_DISPLAYED = 24
 MAX_EDITOR_HIGHLIGHTS = 128
 MAX_EDITOR_SOURCE_RECORDS = 16
+MAX_EDITOR_EVIDENCE_ORIGINS = 12
+MAX_EDITOR_EVIDENCE_LINKS = 16
+MAX_EDITOR_EVIDENCE_EVENTS = 16
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_FILES = 200_000
 
@@ -344,6 +347,94 @@ def editor_source_records(workspace_dir: str, relative_path: str, markdown: str,
         "truncated": len(matched) > MAX_EDITOR_SOURCE_RECORDS,
         "unverified_origins": unverified_origins, "read_only": True,
         "only_verified_journal_sources": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def editor_record_evidence(workspace_dir: str, record_id: str) -> str:
+    """Bounded, read-only evidence graph for one *journal* record.
+
+    Provenance locations are intentionally **unverified** here: only the
+    Android editor may resolve a selected-vault note, re-read its current
+    saved bytes and check both the document and exact fragment hashes before
+    navigation. Never follow a stored provenance path inside this bridge.
+    """
+    if not isinstance(record_id, str) or not record_id or len(record_id) > 160:
+        raise ValueError("Invalid journal record ID")
+    kb = _kb(workspace_dir)
+    rec = kb.state.records.get(record_id)
+    if rec is None:
+        raise ValueError("Journal record not found")
+    origins = []
+    for source in rec.provenance[-MAX_EDITOR_EVIDENCE_ORIGINS:]:
+        if not isinstance(source, dict):
+            continue
+        text = source.get("text")
+        span = source.get("span")
+        valid_span = (isinstance(span, (list, tuple)) and len(span) == 2
+                      and all(isinstance(n, int) and not isinstance(n, bool) for n in span)
+                      and 0 <= span[0] < span[1])
+        origins.append({
+            "path": str(source.get("document") or "")[:500],
+            "document_sha": str(source.get("document_sha") or "")[:100],
+            "source_span": list(span) if valid_span else None,
+            "source_text_sha": _source_hash(text) if isinstance(text, str) else None,
+            "source_excerpt": text[:500] if isinstance(text, str) else "",
+            "source_text_truncated": isinstance(text, str) and len(text) > 500,
+            "source_type": str(source.get("source_type") or "")[:80],
+            "locator": str(source.get("locator") or "")[:150],
+            "navigation_verified": False,
+        })
+
+    linked = {}
+    def add_link(target_id, kind):
+        if target_id == rec.id or target_id not in kb.state.records:
+            return
+        target = kb.state.records[target_id]
+        if target_id not in linked:
+            linked[target_id] = {"id": target_id, "role": target.role,
+                                 "status": target.status.value,
+                                 "active": kb.state.active(target_id),
+                                 "statement": target.node.ksf()[:300], "kinds": []}
+        if kind not in linked[target_id]["kinds"]:
+            linked[target_id]["kinds"].append(kind)
+
+    for parent in rec.supersedes:
+        add_link(parent, "predecessor")
+    for successor in rec.superseded_by_many:
+        add_link(successor, "successor")
+    if rec.superseded_by:
+        add_link(rec.superseded_by, "successor")
+    conflicts_available = True
+    try:
+        conflicts = kb.conflicts_for([rec.node])
+        opposing = {str(row["conflicts_with"]) for row in conflicts
+                    if row.get("conflicts_with")}
+        for target in kb.state.records.values():
+            assertion = getattr(target.node, "assertion", None)
+            if (assertion is not None and assertion.id in opposing
+                    and kb.state.active(target.id)):
+                add_link(target.id, "possible_conflict")
+    except Exception:
+        conflicts_available = False
+    links = list(linked.values())
+    events_by_id = set(rec.journal)
+    events = [{"id": entry.id, "seq": entry.seq, "op": entry.op,
+               "time": entry.ts}
+              for entry in kb.state.entries if entry.id in events_by_id]
+    return json.dumps({
+        "protocol": "dpksys.editor_record_evidence.v1", "id": rec.id,
+        "role": rec.role, "status": rec.status.value,
+        "active": kb.state.active(rec.id), "statement": rec.node.ksf()[:1000],
+        "journal_head": kb.journal.head,
+        "origins": origins, "origins_total": len(rec.provenance),
+        "origins_truncated": len(rec.provenance) > MAX_EDITOR_EVIDENCE_ORIGINS,
+        "links": links[:MAX_EDITOR_EVIDENCE_LINKS], "links_total": len(links),
+        "links_truncated": len(links) > MAX_EDITOR_EVIDENCE_LINKS,
+        "conflicts_available": conflicts_available,
+        "events": events[-MAX_EDITOR_EVIDENCE_EVENTS:], "events_total": len(events),
+        "events_truncated": len(events) > MAX_EDITOR_EVIDENCE_EVENTS,
+        "only_journal_records": True, "read_only": True,
+        "navigation_verified": False,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 

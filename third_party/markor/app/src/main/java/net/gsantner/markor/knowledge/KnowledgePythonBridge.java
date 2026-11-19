@@ -81,6 +81,12 @@ public final class KnowledgePythonBridge {
                 savedMarkdown, codepointStart, codepointEnd);
     }
 
+    /** Bounded journal evidence/lineage. Stored source paths are not trusted until opened. */
+    public static JSONObject editorRecordEvidence(final Context context, final String workspace,
+                                                  final String recordId) throws JSONException {
+        return invoke(context, "editor_record_evidence", workspace, recordId);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,
