@@ -104,6 +104,7 @@
     <string name="knowledge_decision_actions">Изменить запись знаний</string>
     <string name="knowledge_revise_action">Исправить новым утверждением…</string>
     <string name="knowledge_split_action">Разделить на два самостоятельных утверждения…</string>
+    <string name="knowledge_merge_action">Объединить две записи в одно новое утверждение…</string>
     <string name="knowledge_retract_action">Просмотреть отзыв…</string>
     <string name="knowledge_revision_title">Ручной пересмотр знания</string>
     <string name="knowledge_revision_text_hint">Введите новое утверждение обычным языком</string>
@@ -125,6 +126,15 @@
     <string name="knowledge_split_warning">Оба новых утверждения — ваши самостоятельные решения, а не доказанные следствия старой записи. Старая запись станет устаревшей, две новые атомарно попадут в приватный журнал. Исходный Markdown не изменится. Предварительно сохраните резервную копию журнала.</string>
     <string name="knowledge_split_saved">Разделение записано. Две новые записи активны, история сохранена.</string>
     <string name="knowledge_split_failed">Разделение не записано. Утверждения или прочтения некорректны или совпадают, либо изменился журнал. Откройте запись и повторите просмотр.</string>
+    <string name="knowledge_merge_title">Ручное объединение двух записей знаний</string>
+    <string name="knowledge_merge_choose_partner">Выберите вторую активную запись той же роли</string>
+    <string name="knowledge_merge_no_partner">На этой странице нет другой активной записи той же роли.</string>
+    <string name="knowledge_merge_statement_hint">Введите одно новое самостоятельное утверждение</string>
+    <string name="knowledge_merge_choose_reading">Выберите формальное прочтение результата</string>
+    <string name="knowledge_merge_confirm">Подтвердить объединение двух записей</string>
+    <string name="knowledge_merge_warning">Объединение — ваше самостоятельное решение, а не доказательство эквивалентности исходных записей. Обе старые записи станут устаревшими, один новый преемник будет добавлен атомарно в приватный журнал с сохранением истории. Исходный Markdown не изменится. Предварительно сохраните резервную копию журнала.</string>
+    <string name="knowledge_merge_saved">Объединение записано. Новая запись активна, обе предыдущие сохранены в истории.</string>
+    <string name="knowledge_merge_failed">Объединение не записано. Записи, интерпретация или журнал могли измениться. Откройте и проверьте заново.</string>
     <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
     <string name="knowledge_diagnostic_count">Сообщений проверки: %1$d</string>
     <string name="knowledge_diagnostics">Состояние знаний</string>

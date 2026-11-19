@@ -1357,12 +1357,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setTitle(R.string.knowledge_decision_actions)
                 .setItems(new String[]{getString(R.string.knowledge_revise_action),
                                 getString(R.string.knowledge_split_action),
+                                getString(R.string.knowledge_merge_action),
                                 getString(R.string.knowledge_retract_action)},
                         (dialog, which) -> {
                             if (which == 0) {
                                 promptRevision(recordId);
                             } else if (which == 1) {
                                 promptSplit(recordId);
+                            } else if (which == 2) {
+                                chooseMergePartner(recordId, role, 0);
                             } else {
                                 showRetractionPreview(recordId);
                             }
@@ -1663,6 +1666,196 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_split_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Human selects an independently active, same-role second record; never auto-match. */
+    private void chooseMergePartner(final String firstId, final String role, final int offset) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject page = KnowledgePythonBridge.activeDecisions(this,
+                        workspacePath(), offset);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final JSONArray all = page.optJSONArray("records");
+                    final java.util.ArrayList<JSONObject> eligible = new java.util.ArrayList<>();
+                    if (all != null) {
+                        for (int i = 0; i < all.length(); i++) {
+                            final JSONObject item = all.optJSONObject(i);
+                            if (item != null && role.equals(item.optString("role"))
+                                    && !firstId.equals(item.optString("record_id"))) {
+                                eligible.add(item);
+                            }
+                        }
+                    }
+                    final int next = page.isNull("next_offset") ? -1
+                            : page.optInt("next_offset", -1);
+                    if (eligible.isEmpty() && next < 0) {
+                        Toast.makeText(this, R.string.knowledge_merge_no_partner,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final String[] labels = new String[eligible.size() + (next >= 0 ? 1 : 0)];
+                    for (int i = 0; i < eligible.size(); i++) {
+                        labels[i] = eligible.get(i).optString("role") + " · "
+                                + eligible.get(i).optString("summary");
+                    }
+                    if (next >= 0) {
+                        labels[eligible.size()] = getString(R.string.knowledge_decisions_next);
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_merge_choose_partner)
+                            .setItems(labels, (dialog, which) -> {
+                                if (which == eligible.size()) {
+                                    chooseMergePartner(firstId, role, next);
+                                } else {
+                                    promptMerge(firstId, eligible.get(which).optString("record_id"));
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_merge_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void promptMerge(final String firstId, final String secondId) {
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(24, 8, 24, 8);
+        final EditText statementEdit = new EditText(this);
+        statementEdit.setHint(R.string.knowledge_merge_statement_hint);
+        statementEdit.setMinLines(3);
+        statementEdit.setMaxLines(5);
+        statementEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        final EditText reasonEdit = new EditText(this);
+        reasonEdit.setHint(R.string.knowledge_revision_reason_hint);
+        reasonEdit.setMaxLines(3);
+        fields.addView(statementEdit);
+        fields.addView(reasonEdit);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_merge_title)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_revision_preview, (dialog, which) -> {
+                    final String statement = statementEdit.getText().toString();
+                    final String reason = reasonEdit.getText().toString();
+                    if (statement.trim().isEmpty() || statement.length() > 2000
+                            || reason.length() > 1000) {
+                        status.setText(R.string.knowledge_merge_failed);
+                    } else {
+                        showMergePreview(firstId, secondId, statement, reason);
+                    }
+                })
+                .show();
+    }
+
+    private void showMergePreview(final String firstId, final String secondId,
+                                  final String statement, final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject preview = KnowledgePythonBridge.previewMerge(this,
+                        workspacePath(), firstId, secondId, statement);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final JSONArray options = preview.optJSONArray("options");
+                    if (options == null || options.length() == 0) {
+                        status.setText(R.string.knowledge_merge_failed);
+                        return;
+                    }
+                    final String[] labels = new String[options.length()];
+                    for (int i = 0; i < options.length(); i++) {
+                        final JSONObject option = options.optJSONObject(i);
+                        labels[i] = option == null ? "?" : option.optString("reading_id")
+                                + " · " + option.optString("paraphrase");
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_merge_choose_reading)
+                            .setItems(labels, (dialog, which) -> {
+                                final JSONObject option = options.optJSONObject(which);
+                                if (option != null) {
+                                    confirmMerge(preview, option, statement, reason);
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_merge_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void confirmMerge(final JSONObject preview, final JSONObject option,
+                              final String statement, final String reason) {
+        final JSONArray old = preview.optJSONArray("old_summaries");
+        if (old == null || old.length() != 2) {
+            status.setText(R.string.knowledge_merge_failed);
+            return;
+        }
+        final StringBuilder details = new StringBuilder()
+                .append(preview.optString("role")).append("\n\n1. ")
+                .append(old.optString(0)).append("\n\n2. ")
+                .append(old.optString(1)).append("\n\n→\n")
+                .append(statement).append("\n")
+                .append(option.optString("new_summary")).append("\n\n")
+                .append(getString(R.string.knowledge_revision_conflicts,
+                        option.optInt("conflict_count"), option.optInt("diagnostic_count")))
+                .append("\n\n").append(getString(R.string.knowledge_merge_warning));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_merge_confirm)
+                .setMessage(details.toString())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_merge_confirm,
+                        (dialog, which) -> commitMerge(preview, option, statement, reason))
+                .show();
+    }
+
+    private void commitMerge(final JSONObject preview, final JSONObject option,
+                             final String statement, final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONArray ids = preview.getJSONArray("record_ids");
+                final String expectedHead = preview.isNull("journal_head") ? null
+                        : preview.getString("journal_head");
+                final JSONObject saved = KnowledgePythonBridge.mergeDecisions(this,
+                        workspacePath(), ids.getString(0), ids.getString(1), statement,
+                        option.getString("reading_id"), reason,
+                        preview.getString("statement_hash"), expectedHead);
+                if (!"merge".equals(saved.optString("decision"))
+                        || saved.getJSONArray("journal_ids").length() != 1) {
+                    throw new IllegalStateException("No atomic merge commit");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_merge_saved,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_merge_failed);
                     }
                 });
             }

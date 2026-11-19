@@ -42,7 +42,7 @@ snapshot until the integrated application is ready.
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 | 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
-| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** single-record human retraction/revision and atomic one-to-two split with previews and hash-chain head checks; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`; merge, batch, automation and manual device acceptance outstanding |
+| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge with previews and hash-chain head checks; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`; batch, automation and manual device acceptance outstanding |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -78,9 +78,17 @@ new records become active, and each successor refers back to its original.
 Neither successor is claimed to be a logically proven consequence of the old
 statement. A stale journal head, duplicate successor or changed source text
 blocks the append. `SPLIT-17` exercises this transition only on synthetic data.
+The two-to-one merge flow starts from a human-selected first record and asks
+the user to **independently select** another active record of the same role.
+One newly typed statement is formally analyzed and previewed beside both
+old canonical records. The user explicitly confirms a single atomic `merge`
+journal event: both sources become obsolete, the new successor links to both
+in history. Similarity never implies equivalence or automatically authorizes
+a merge; the new statement is a distinct human decision. `MERGE-17` exercises
+this exclusively on disposable synthetic fixtures.
 See `docs/ANDROID_DEVICE_QA_STAGE17.md`.
 
-**Still open:** revision/split edge cases, multi-record merge, batch acceptance, versioned strict
+**Still open:** revision/split/merge edge cases, batch acceptance, versioned strict
 automation policies, manual device lifecycle checks, full encrypted app backup
 and cloud synchronization. Stage 17 is **not fully complete**.
 

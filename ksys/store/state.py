@@ -150,6 +150,22 @@ class KnowledgeState:
             else:
                 self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
                                                    "split target inactive or successors invalid", location=e.id))
+        elif e.op == "merge":
+            targets = d["targets"]
+            node = node_from_dict(d["node"])
+            if len(targets) == 2 and len(set(targets)) == 2 \
+                    and all(self.active(target) for target in targets) \
+                    and len({self.records[target].role for target in targets}) == 1 \
+                    and node.TYPE == self.records[targets[0]].role \
+                    and node.id not in self.records and node.id not in self.rejected:
+                for target in targets:
+                    self._obsolete(target, e, ch, node.id)
+                    self.records[target].superseded_by_many = [node.id]
+                self._accept(node, d, e, ch)
+                self.records[node.id].supersedes.extend(targets)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "merge targets or successor invalid", location=e.id))
         elif e.op == "resolve":
             self.choices[d["origin"]] = d["reading_id"]
         elif e.op == "bind":

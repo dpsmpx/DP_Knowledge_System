@@ -7,7 +7,7 @@
             ничего из full не становится знанием без решения человека.
 
 Любое изменение — только через журнал (append-only) и только явным вызовом
-accept/reject/defer/retract/revise/split/resolve/bind/label/alias. Перед записью узлы
+accept/reject/defer/retract/revise/split/merge/resolve/bind/label/alias. Перед записью узлы
 проверяются структурно (ir.validate) и по схеме (validation.schema).
 """
 from __future__ import annotations
@@ -417,6 +417,29 @@ class KnowledgeBase:
         e, da, df = self._commit("split", {
             "target": target, "nodes": [node.to_dict() for node in new_nodes],
             "reason": reason, "provenance": provenance or {"source_type": "human_input"},
+        })
+        return CommitResult([e], da, df, self._decision_impact(da))
+
+    def merge_records(self, targets: list[str], new_node: Node, reason: str | None = None,
+                      provenance: dict | None = None) -> CommitResult:
+        """Two separately approved records → one explicitly human-reviewed successor."""
+        if len(targets) != 2 or targets[0] == targets[1]:
+            raise KSError(ErrorKind.LOGIC_ERROR, "merge requires two different records")
+        targets = [self.resolve_id(target) for target in targets]
+        if targets[0] == targets[1] or not all(self.state.active(target) for target in targets):
+            raise KSError(ErrorKind.LOGIC_ERROR, "merge requires two active records")
+        roles = {self.state.records[target].role for target in targets}
+        if len(roles) != 1 or roles.pop() not in ("fact", "claim", "hypothesis") \
+                or new_node.TYPE != self.state.records[targets[0]].role:
+            raise KSError(ErrorKind.LOGIC_ERROR, "merge requires one human-selected role")
+        if new_node.id in self.state.records or new_node.id in self.state.rejected:
+            raise KSError(ErrorKind.LOGIC_ERROR, "merge successor must be new and unrejected")
+        errors = [d for d in check_node(new_node) if d.severity == Severity.ERROR]
+        if errors:
+            raise KSError(errors[0].kind, errors[0].message)
+        e, da, df = self._commit("merge", {
+            "targets": targets, "node": new_node.to_dict(), "reason": reason,
+            "provenance": provenance or {"source_type": "human_input"},
         })
         return CommitResult([e], da, df, self._decision_impact(da))
 
