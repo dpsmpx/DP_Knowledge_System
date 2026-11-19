@@ -120,6 +120,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
+    private static final int REQUEST_EXPORT_PORTABLE = 40024;
+    private static final int REQUEST_INSPECT_PORTABLE = 40025;
+    private static final int REQUEST_RESTORE_PORTABLE = 40026;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -198,10 +201,17 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
     private KnowledgeProcessHistory processHistory;
     private char[] pendingExportPassword;
+    private char[] pendingPortablePassword;
+    private File pendingPortableStaging;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // A process kill during a preview must not retain decrypted private
+        // notes in the temporary cache until an unrelated cache eviction.
+        final File[] staleBackups = getCacheDir().listFiles(
+                (dir, name) -> name.startsWith(".dpks-verified-") && name.endsWith(".zip"));
+        if (staleBackups != null) for (final File file : staleBackups) file.delete();
         // This is deliberately scoped to the knowledge workspace: the legacy
         // Markor editor keeps its existing appearance and behavior.
         DynamicColors.applyToActivityIfAvailable(this);
@@ -390,6 +400,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
+        findViewById(R.id.knowledge_portable_export).setOnClickListener(view -> requestPortableExport());
+        findViewById(R.id.knowledge_portable_inspect).setOnClickListener(view -> requestPortableInspect());
+        findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
         processHistory = KnowledgeProcessHistory.fromStored(
                 getSharedPreferences(PROCESS_HISTORY_PREFERENCES, MODE_PRIVATE)
@@ -3699,6 +3712,295 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return input;
     }
 
+    private void requestPortableExport() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setPadding(24, 0, 24, 0);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final EditText password = passwordInput(this);
+        final EditText confirm = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        confirm.setHint(R.string.knowledge_backup_password_confirm);
+        fields.addView(password);
+        fields.addView(confirm);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_export)
+                .setMessage(R.string.knowledge_portable_privacy)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_export, (dialog, which) -> {
+                    final String first = password.getText().toString();
+                    if (first.length() < 12 || first.length() > 512
+                            || !first.equals(confirm.getText().toString())) {
+                        Toast.makeText(this, R.string.knowledge_backup_password_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (pendingPortablePassword != null) Arrays.fill(pendingPortablePassword, '\0');
+                    pendingPortablePassword = first.toCharArray();
+                    final Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("application/octet-stream");
+                    pick.putExtra(Intent.EXTRA_TITLE, "DPKS_Portable_Backup.dpksb");
+                    startActivityForResult(pick, REQUEST_EXPORT_PORTABLE);
+                }).show();
+    }
+
+    private void requestPortableInspect() {
+        final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("application/octet-stream");
+        startActivityForResult(pick, REQUEST_INSPECT_PORTABLE);
+    }
+
+    private void requestPortableRestore() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_restore)
+                .setMessage(R.string.knowledge_portable_restore_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_restore, (dialog, which) -> {
+                    final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("application/octet-stream");
+                    startActivityForResult(pick, REQUEST_RESTORE_PORTABLE);
+                }).show();
+    }
+
+    private byte[] portableSettingsSnapshot() throws Exception {
+        final JSONObject safe = new JSONObject();
+        // Only explicit, non-secret metadata. Neither API keys nor opaque
+        // inherited Markor preferences can enter a portable backup silently.
+        for (final String key : new String[]{"knowledge_embedding_endpoint",
+                "knowledge_embedding_model", "knowledge_llm_endpoint", "knowledge_llm_model"}) {
+            final String value = getPreferences(MODE_PRIVATE).getString(key, "");
+            if (!value.isEmpty() && value.length() <= 500) safe.put(key, value);
+        }
+        safe.put("schema", "dpks-safe-settings-v1");
+        safe.put("secrets_exported", false);
+        safe.put("derived_indexes_exported", false);
+        return safe.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Only an explicit SAF save, never background upload or automatic rewriting. */
+    private void exportPortableToUri(final Uri destination, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staging = null;
+            try {
+                final File vault = notebook;
+                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+                if (journal.isFile()) KnowledgePythonBridge.journalExportInfo(this, workspacePath());
+                final KnowledgePortableArchive.Summary exported;
+                try (OutputStream saf = getContentResolver().openOutputStream(destination, "w")) {
+                    if (saf == null) throw new IOException("Backup destination unavailable");
+                    exported = KnowledgePortableArchive.write(vault,
+                            journal.isFile() ? journal : null, portableSettingsSnapshot(),
+                            KnowledgePortableCipher.encrypt(saf, password),
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                // Re-read the SAF destination, verify AEAD tag and each ZIP SHA.
+                try (InputStream saf = getContentResolver().openInputStream(destination)) {
+                    if (saf == null) throw new IOException("Backup verification unavailable");
+                    staging = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary verified =
+                        KnowledgePortableArchive.verify(staging,
+                                () -> Thread.currentThread().isInterrupted());
+                if (exported.sources != verified.sources || exported.bytes != verified.bytes
+                        || exported.journal != verified.journal || !verified.settings) {
+                    throw new IOException("Written backup is incomplete");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        Toast.makeText(this, getString(R.string.knowledge_portable_exported,
+                                verified.sources), Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_failed);
+                });
+            } finally {
+                if (staging != null && staging.exists() && !staging.delete()) staging.deleteOnExit();
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
+    private void promptPortableInspectPassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_inspect)
+                .setMessage(R.string.knowledge_portable_inspect_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        inspectPortableFromUri(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void promptPortableRestorePassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_restore)
+                .setMessage(R.string.knowledge_portable_restore_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        previewPortableRestore(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void previewPortableRestore(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            boolean handedToDialog = false;
+            try {
+                try (InputStream saf = getContentResolver().openInputStream(source)) {
+                    if (saf == null) throw new IOException("Restore input unavailable");
+                    staged = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password, () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary summary =
+                        KnowledgePortableArchive.verify(staged,
+                                () -> Thread.currentThread().isInterrupted());
+                final String journalText = KnowledgePortableRestore.journalText(staged);
+                final JSONObject journalPreview = journalText == null ? null
+                        : KnowledgePythonBridge.journalRestorePreview(this,
+                                workspacePath(), journalText);
+                final File confirmedStaging = staged;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        confirmedStaging.delete();
+                        return;
+                    }
+                    pendingPortableStaging = confirmedStaging;
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_portable_restore)
+                            .setMessage(getString(R.string.knowledge_portable_restore_preview,
+                                    summary.sources, summary.bytes, summary.journal))
+                            .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
+                                confirmedStaging.delete();
+                                pendingPortableStaging = null;
+                            })
+                            .setOnCancelListener(dialog -> {
+                                confirmedStaging.delete();
+                                pendingPortableStaging = null;
+                            })
+                            .setPositiveButton(R.string.knowledge_backup_confirm_import,
+                                    (dialog, which) -> applyPortableRestore(confirmedStaging,
+                                            summary, journalPreview, generation))
+                            .show();
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_restore_failed);
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (!handedToDialog && staged != null) staged.delete();
+            }
+        });
+    }
+
+    private void applyPortableRestore(final File verifiedZip,
+                                      final KnowledgePortableArchive.Summary summary,
+                                      final JSONObject journalPreview, final int generation) {
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            try {
+                final File oldNotebook = notebook;
+                final File restored = KnowledgePortableRestore.restoreNewLibrary(
+                        verifiedZip, oldNotebook, journalText -> {
+                            if (journalPreview == null)
+                                throw new IOException("Missing journal validation");
+                            KnowledgePythonBridge.journalRestoreCommit(this, workspacePath(),
+                                    journalText, journalPreview.getString("sha256"));
+                        }, () -> Thread.currentThread().isInterrupted());
+                // Only after a successful journal commit may the active vault
+                // switch to the restored notes. Never overwrite old notebooks.
+                _appSettings.setNotebookDirectory(restored);
+                notebook = restored;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        ((TextView) findViewById(R.id.knowledge_root)).setText(
+                                getString(R.string.knowledge_root_label, restored.getAbsolutePath()));
+                        Toast.makeText(this,
+                                getString(R.string.knowledge_portable_restored,
+                                        summary.sources), Toast.LENGTH_LONG).show();
+                        recreate();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_restore_failed);
+                });
+            } finally {
+                verifiedZip.delete();
+                if (pendingPortableStaging == verifiedZip) pendingPortableStaging = null;
+            }
+        });
+    }
+
+    /** A read-only dry-run. No source or journal changes are authorized here. */
+    private void inspectPortableFromUri(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staging = null;
+            try {
+                try (InputStream saf = getContentResolver().openInputStream(source)) {
+                    if (saf == null) throw new IOException("Backup source unavailable");
+                    staging = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary summary =
+                        KnowledgePortableArchive.verify(staging,
+                                () -> Thread.currentThread().isInterrupted());
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_portable_inspect)
+                                .setMessage(getString(R.string.knowledge_portable_verified,
+                                        summary.sources, summary.bytes, summary.journal,
+                                        summary.settings))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_failed);
+                });
+            } finally {
+                if (staging != null && staging.exists() && !staging.delete()) staging.deleteOnExit();
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
     private void requestJournalExport() {
         final android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
         fields.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -3751,7 +4053,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     @Override
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_EXPORT_JOURNAL) {
+        if (requestCode == REQUEST_EXPORT_PORTABLE) {
+            final char[] password = pendingPortablePassword;
+            pendingPortablePassword = null;
+            if (password != null) {
+                if (resultCode == RESULT_OK && data != null && data.getData() != null)
+                    exportPortableToUri(data.getData(), password);
+                else Arrays.fill(password, '\0');
+            }
+        } else if (requestCode == REQUEST_INSPECT_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableInspectPassword(data.getData());
+        } else if (requestCode == REQUEST_RESTORE_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableRestorePassword(data.getData());
+        } else if (requestCode == REQUEST_EXPORT_JOURNAL) {
             final char[] password = pendingExportPassword;
             pendingExportPassword = null;
             if (password == null) {
@@ -3959,6 +4275,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (pendingExportPassword != null) {
             Arrays.fill(pendingExportPassword, '\0');
             pendingExportPassword = null;
+        }
+        if (pendingPortablePassword != null) {
+            Arrays.fill(pendingPortablePassword, '\0');
+            pendingPortablePassword = null;
+        }
+        if (pendingPortableStaging != null) {
+            pendingPortableStaging.delete();
+            pendingPortableStaging = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();
