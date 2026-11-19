@@ -126,6 +126,12 @@ deferred rather than required after every incremental PR.
   SQL-bounded and exercised by synthetic 20k index QA; real 760/20k scrolling,
   stale/partial index distinctions, keyboard, TalkBack and 200% fonts remain
   untested on device. Validate that tapping Next never opens/writes a note.
+- **QA-72 / OPEN, DEFERRED:** seventeenth-slice first-open guide is local, skippable,
+  and can be reopened from Settings. Synthetic XML wiring checks cover its five
+  epistemic categories, private seen-state, scrollable large-font content and
+  touch targets; no actual TalkBack reading order, rotation focus or 200% font
+  acceptance has occurred. Decision details now identify their accessibility
+  pane and lists reset without smooth-scroll motion. Test these on the final APK.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

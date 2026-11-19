@@ -14,6 +14,52 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_stage22_first_open_guide_is_private_and_accessible(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        buttons = [element for element in layout.iter()
+                   if element.get(ANDROID + "id") == "@+id/knowledge_open_guide"]
+        self.assertEqual(1, len(buttons))
+        self.assertEqual("@string/knowledge_guide_open", buttons[0].get(ANDROID + "text"))
+        self.assertEqual("48dp", buttons[0].get(ANDROID + "minHeight"))
+        guide = ET.parse(ROOT / "res/layout/knowledge__guide.xml").getroot()
+        self.assertEqual("ScrollView", guide.tag)
+        headings = [e.get(ANDROID + "text") for e in guide.iter()
+                    if e.get(ANDROID + "accessibilityHeading") == "true"]
+        self.assertEqual([f"@string/knowledge_guide_{section}_title" for section in
+                          ("markdown", "interpretation", "claim", "fact", "inference")], headings)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for needle in ("GUIDE_SEEN", "MODE_PRIVATE", "savedInstanceState == null",
+                       "showKnowledgeGuide()", "MaterialAlertDialogBuilder(this)",
+                       "R.layout.knowledge__guide"):
+            self.assertIn(needle, hub)
+        for folder in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for item in ("markdown", "interpretation", "claim", "fact", "inference"):
+                self.assertTrue(strings[f"knowledge_guide_{item}_title"])
+                self.assertTrue(strings[f"knowledge_guide_{item}_body"])
+            self.assertIn("journal" if folder == "values" else "журнал",
+                          strings["knowledge_guide_privacy"].lower())
+
+    def test_decision_detail_accessibility_and_reduced_motion(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        for name in ("knowledge_library_previous", "knowledge_library_next",
+                     "knowledge_decisions_previous", "knowledge_decisions_next",
+                     "knowledge_decisions_batch"):
+            element = next(e for e in layout.iter()
+                           if e.get(ANDROID + "id") == "@+id/" + name)
+            self.assertEqual("48dp", element.get(ANDROID + "minHeight"), name)
+        for name in ("knowledge_library_page_number", "knowledge_decisions_page_number"):
+            element = next(e for e in layout.iter()
+                           if e.get(ANDROID + "id") == "@+id/" + name)
+            self.assertEqual("polite", element.get(ANDROID + "accessibilityLiveRegion"))
+        detail = ET.parse(ROOT / "res/layout/knowledge__decision_detail.xml").getroot()
+        self.assertTrue(any(e.get(ANDROID + "accessibilityHeading") == "true"
+                            for e in detail.iter()))
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle", hub)
+        self.assertNotIn("smoothScrollToPosition", hub)
+
     def test_all_existing_actions_remain_available_and_unique(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         observed = [element.get(ANDROID + "id", "") for element in layout.iter()]

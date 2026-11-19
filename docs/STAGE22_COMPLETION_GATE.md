@@ -13,8 +13,8 @@ and rendering internals; the user-facing workspace must belong to DPKS.
 | Interpretation differences | Separate literal text diff and constrained field-by-field CNL/IR comparison; unknown stays unknown | Fourteenth slice in review |
 | Editor layout | Responsive phone/tablet layout, keyboard-safe dock, clear own toolbar/actions; editing/rendering parity with Markor | Responsive dock in review; remaining chrome/accessibility open |
 | Library at scale | Bounded pages/search with repeatable ordering and accessible next/back; no 250-row dead end | Paged SQL/UI + synthetic 20k checks in review |
-| Accessible workflow | Screen reader labels, focus, large text, reduced motion and adequate touch targets | Open |
-| Discoverability | Concise local-first onboarding/help with provenance/privacy and no automatic journal changes | Open |
+| Accessible workflow | Screen reader headings and pane identification, large text, reduced motion and adequate touch targets | Seventeenth slice in review, physical TalkBack/font QA deferred |
+| Discoverability | Concise local-first onboarding/help with provenance/privacy and no automatic journal changes | Seventeenth slice in review |
 | Automated regression | Synthetic contracts plus Android UI-state/component checks for navigation, editing and approval guards | Open |
 | Release | Green Python/Android CI, privacy check, signed APK, verified digest, one final consolidated device checklist | Open |
 

@@ -10,6 +10,21 @@ works, but not the full QA-60 matrix. The sixth-slice read-only contextual
 knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
 
+## Seventeenth slice — knowledge guide and accessible navigation (PR #72)
+
+- On first normal launch, a **dismissible, offline guide** explains five distinct
+  categories: original Markdown, machine interpretation, human assertion,
+  human-confirmed fact and derived inference. It warns that a fact label is a
+  human judgment rather than a guarantee of objective truth. A private app
+  preference remembers dismissal; **Settings → Read the guide again** remains
+  available without opening a journal, note or network connection.
+- The guide scrolls for large system fonts and exposes distinct accessibility
+  headings. Decisions detail is named as an accessibility pane, important page
+  counters announce polite changes, pagination buttons have 48dp minimum
+  targets, and decision pagination avoids animated scrolling.
+- Python resource tests check the wiring. **QA-72 is OPEN**: these tests do not
+  certify TalkBack, focus restoration, 200% font or rotation on actual Android.
+
 ## Scope
 
 - The DP Knowledge System screen has its own **Material 3 DayNight** theme

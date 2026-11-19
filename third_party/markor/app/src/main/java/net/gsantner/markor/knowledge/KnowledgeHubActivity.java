@@ -39,7 +39,9 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.view.ViewCompat;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.color.DynamicColors;
 import com.google.android.material.color.MaterialColors;
@@ -83,6 +85,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int LIBRARY_PAGE_SIZE = 60;
+    private static final String GUIDE_PREFERENCES = "dpks_knowledge_guide";
+    private static final String GUIDE_SEEN = "stage22_guide_seen_v1";
     private static final String EXTRA_EDITOR_REVIEW_PATH = "com.dpsmpx.dpks.editor.review_path";
     private static final String EXTRA_EDITOR_REVIEW_FRAGMENT = "com.dpsmpx.dpks.editor.fragment";
     private static final String EXTRA_EDITOR_SOURCE_HASH = "com.dpsmpx.dpks.editor.source_sha256";
@@ -376,6 +380,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
+        findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
         setupDecisionWorkspace();
         scanNotebook();
         final Intent launch = getIntent();
@@ -389,6 +394,33 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 previewFragment(path, fragmentId, sourceHash);
             }
         }
+        if (savedInstanceState == null
+                && (launch == null || !launch.hasExtra(EXTRA_EDITOR_REVIEW_PATH))
+                && !getSharedPreferences(GUIDE_PREFERENCES, MODE_PRIVATE)
+                .getBoolean(GUIDE_SEEN, false)) {
+            // Never inspect a vault or journal for onboarding. Posting also avoids
+            // showing a dialog before the four-destination shell is laid out.
+            findViewById(R.id.knowledge_open_guide).post(() -> {
+                if (!isFinishing() && !isDestroyed()) showKnowledgeGuide();
+            });
+        }
+    }
+
+    private void showKnowledgeGuide() {
+        final View guide = getLayoutInflater().inflate(R.layout.knowledge__guide, null);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_guide_title)
+                .setView(guide)
+                .setPositiveButton(R.string.knowledge_guide_understood, (dialog, which) ->
+                        markGuideSeen())
+                .setNegativeButton(R.string.knowledge_guide_later, (dialog, which) ->
+                        markGuideSeen())
+                .show();
+    }
+
+    private void markGuideSeen() {
+        getSharedPreferences(GUIDE_PREFERENCES, MODE_PRIVATE).edit()
+                .putBoolean(GUIDE_SEEN, true).apply();
     }
 
     @Override
@@ -547,7 +579,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     ((TextView) findViewById(R.id.knowledge_decisions_page_number)).setText(
                             total == 0 ? "0" : (offset / 30 + 1) + " / " + ((total + 29) / 30));
                     ((ListView) findViewById(R.id.knowledge_decisions_list))
-                            .smoothScrollToPosition(0);
+                            .setSelection(0);
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
@@ -568,6 +600,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
         findViewById(R.id.knowledge_page_decisions).setVisibility(View.GONE);
         findViewById(R.id.knowledge_decision_detail_screen).setVisibility(View.VISIBLE);
+        ViewCompat.setAccessibilityPaneTitle(findViewById(R.id.knowledge_decision_detail_screen),
+                getString(R.string.knowledge_decision_detail_title));
         navigation.setVisibility(View.GONE);
         final Toolbar toolbar = findViewById(R.id.toolbar);
         toolbar.setNavigationIcon(R.drawable.ic_arrow_back_white_24dp);
