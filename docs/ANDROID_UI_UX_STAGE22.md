@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first ten slices integrated; eleventh under review, device QA deferred**. The owner confirmed ordinary decision
+Status: **first eleven slices integrated; eleventh awaiting deferred device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -257,7 +257,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   [PR #60](https://github.com/dpsmpx/DP_Knowledge_System/pull/60);
   physical QA-65 is OPEN/DEFERRED at the owner's request.
 
-## Eleventh slice — persistent in-editor knowledge dock (under review)
+## Eleventh slice — persistent in-editor knowledge dock (integrated, QA deferred)
 
 - The editor has a **permanent, compact knowledge rail** with saved-note
   counts/status and explicit Expand, Collapse and Refresh actions. It stays
@@ -285,6 +285,9 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   keyboard/rotation, TalkBack/200% text, nested navigation, large vaults and
   source/journal invariants remain unverified physically. This remains a
   bounded dock, not a free-resizing independent Markdown IDE or proof engine.
+  Python and Android CI passed on
+  [PR #63](https://github.com/dpsmpx/DP_Knowledge_System/pull/63);
+  physical QA-66 is OPEN/DEFERRED at the owner's request.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
