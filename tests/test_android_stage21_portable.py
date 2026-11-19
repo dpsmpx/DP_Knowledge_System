@@ -47,6 +47,23 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("_appSettings.setNotebookDirectory(restored)", hub)
         self.assertNotIn("new FileOutputStream(currentLibrary)", restore)
 
+    def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
+        scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
+        worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
+        sealed = (JAVAS / "KnowledgeBackupKeyStore.java").read_text()
+        self.assertIn("24, TimeUnit.HOURS", scheduler)
+        self.assertIn("KnowledgeBackupKeyStore.save", scheduler)
+        self.assertIn("KnowledgeBackupKeyStore.clear", scheduler)
+        self.assertIn("AndroidKeyStore", sealed)
+        self.assertIn("KeyProperties.BLOCK_MODE_GCM", sealed)
+        self.assertIn("KeyProperties.ENCRYPTION_PADDING_NONE", sealed)
+        self.assertIn("KnowledgePortableArchive.write", worker)
+        self.assertIn("KnowledgePortableArchive.verify(stage", worker)
+        self.assertIn("if (!tmp.renameTo(permanent))", worker)
+        self.assertIn("while (names.size() > 3)", worker)
+        for forbidden in ("HttpURLConnection", "new URL(", "http://", "https://"):
+            self.assertNotIn(forbidden, worker)
+
 
 if __name__ == "__main__":
     unittest.main()

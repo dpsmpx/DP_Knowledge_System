@@ -403,6 +403,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_portable_export).setOnClickListener(view -> requestPortableExport());
         findViewById(R.id.knowledge_portable_inspect).setOnClickListener(view -> requestPortableInspect());
         findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
+        findViewById(R.id.knowledge_daily_backup_toggle).setOnClickListener(
+                view -> toggleDailyBackup());
+        findViewById(R.id.knowledge_daily_backup_now).setOnClickListener(view -> {
+            try {
+                KnowledgeDailyBackup.now(this);
+                Toast.makeText(this, R.string.knowledge_daily_backup_scheduled,
+                        Toast.LENGTH_LONG).show();
+            } catch (RuntimeException failure) {
+                Toast.makeText(this, R.string.knowledge_daily_backup_failed,
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+        refreshDailyBackupStatus();
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
         processHistory = KnowledgeProcessHistory.fromStored(
                 getSharedPreferences(PROCESS_HISTORY_PREFERENCES, MODE_PRIVATE)
@@ -3746,6 +3759,83 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     pick.setType("application/octet-stream");
                     pick.putExtra(Intent.EXTRA_TITLE, "DPKS_Portable_Backup.dpksb");
                     startActivityForResult(pick, REQUEST_EXPORT_PORTABLE);
+                }).show();
+    }
+
+    private void refreshDailyBackupStatus() {
+        final boolean enabled = KnowledgeDailyBackup.enabled(this);
+        ((Button) findViewById(R.id.knowledge_daily_backup_toggle)).setText(enabled
+                ? R.string.knowledge_daily_backup_disable
+                : R.string.knowledge_daily_backup_enable);
+        findViewById(R.id.knowledge_daily_backup_now).setEnabled(enabled);
+        final TextView notice = findViewById(R.id.knowledge_daily_backup_status);
+        if (!enabled) {
+            notice.setText(R.string.knowledge_daily_backup_unconfigured);
+        } else {
+            final android.content.SharedPreferences prefs = KnowledgeDailyBackup.prefs(this);
+            final long last = prefs.getLong(KnowledgeDailyBackup.LAST_AT, 0);
+            final String when = last == 0
+                    ? getString(R.string.knowledge_daily_backup_never)
+                    : DateFormat.getDateTimeInstance().format(new Date(last));
+            notice.setText(getString(R.string.knowledge_daily_backup_active, when,
+                    prefs.getInt(KnowledgeDailyBackup.LAST_COUNT, 0)));
+        }
+    }
+
+    private void toggleDailyBackup() {
+        if (KnowledgeDailyBackup.enabled(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_daily_backup_disable)
+                    .setMessage(R.string.knowledge_daily_backup_stopped)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.knowledge_daily_backup_disable,
+                            (dialog, which) -> {
+                                KnowledgeDailyBackup.stop(this);
+                                refreshDailyBackupStatus();
+                            }).show();
+            return;
+        }
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setPadding(24, 0, 24, 0);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final EditText pass = passwordInput(this);
+        final EditText repeated = passwordInput(this);
+        pass.setHint(R.string.knowledge_backup_password);
+        repeated.setHint(R.string.knowledge_backup_password_confirm);
+        fields.addView(pass);
+        fields.addView(repeated);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_daily_backup_enable)
+                .setMessage(R.string.knowledge_daily_backup_config)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_daily_backup_enable, (dialog, which) -> {
+                    final String first = pass.getText().toString();
+                    if (first.length() < 12 || first.length() > 512
+                            || !first.equals(repeated.getText().toString())) {
+                        Toast.makeText(this, R.string.knowledge_backup_password_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final char[] password = first.toCharArray();
+                    worker.submit(() -> {
+                        try {
+                            KnowledgeDailyBackup.start(this, password);
+                            runOnUiThread(() -> {
+                                if (!isDestroyed()) {
+                                    refreshDailyBackupStatus();
+                                    Toast.makeText(this, R.string.knowledge_daily_backup_scheduled,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        } catch (Exception failure) {
+                            runOnUiThread(() -> {
+                                if (!isDestroyed())
+                                    Toast.makeText(this, R.string.knowledge_daily_backup_failed,
+                                            Toast.LENGTH_LONG).show();
+                            });
+                        } finally { Arrays.fill(password, '\0'); }
+                    });
                 }).show();
     }
 

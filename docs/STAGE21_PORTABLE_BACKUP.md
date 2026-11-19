@@ -56,4 +56,20 @@ This is **not** Stage 21 acceptance. The remaining scope includes:
    accessibility and clean-device restore acceptance. These are **OPEN**, not PASS.
 6. Android CI must compile and run the new pure-Java unit tests before merge.
 
+## Second slice: local WorkManager schedule (pending CI)
+
+The user may explicitly opt into a 24-hour WorkManager schedule, which
+Android can delay. A recovery passphrase is stored *only* in authenticated
+Android Keystore-sealed preferences; it must be remembered separately for
+clean-device import. A background worker reads the notebook and authoritative
+journal, writes an encrypted temporary archive in app-specific external files,
+decrypts and checks the completed archive, then renames it to a known-good
+snapshot. Retention keeps up to three independently verified copies and never
+removes the last verified copy before a new one is accepted.
+
+These are **device-local** files, not off-device disaster recovery. Android
+may delete app-specific files on uninstall and an unrecoverable hardware failure
+loses them. Manual portable export to independent SAF storage is therefore
+still essential. Scheduled background uploads are not enabled by this slice.
+
 No private vaults or credentials are used in fixtures or CI.
