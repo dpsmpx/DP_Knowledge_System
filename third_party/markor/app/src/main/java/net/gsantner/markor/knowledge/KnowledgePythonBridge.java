@@ -87,6 +87,13 @@ public final class KnowledgePythonBridge {
         return invoke(context, "editor_record_evidence", workspace, recordId);
     }
 
+    /** Synthetic Stage 22 self-test in app-private cache, never the selected vault. */
+    public static JSONObject stage22EditorSelfTest(final Context context,
+                                                  final String privateCacheDirectory)
+            throws JSONException {
+        return invoke(context, "stage22_editor_selftest", privateCacheDirectory);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,

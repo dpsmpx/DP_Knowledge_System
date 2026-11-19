@@ -519,6 +519,23 @@
                                 android:text="@string/knowledge_qa_stress" />
                         </LinearLayout>
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/knowledge_qa_editor"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:minHeight="48dp"
+                            android:text="@string/knowledge_qa_editor" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="6dp"
+                            android:text="@string/knowledge_qa_editor_limits"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textSize="12sp" />
+
                         <ProgressBar
                             android:id="@+id/knowledge_qa_progress"
                             style="?android:attr/progressBarStyleHorizontal"

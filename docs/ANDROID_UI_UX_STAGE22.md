@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first eleven slices integrated; eleventh awaiting deferred device QA**. The owner confirmed ordinary decision
+Status: **first eleven slices integrated; twelfth self-test/release slice under review**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -288,6 +288,32 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   Python and Android CI passed on
   [PR #63](https://github.com/dpsmpx/DP_Knowledge_System/pull/63);
   physical QA-66 is OPEN/DEFERRED at the owner's request.
+
+## Twelfth slice — one-button isolated editor self-test and signed preview (under review)
+
+- The **Processes → QA** card gains a dedicated **Test Stage 22 editor**
+  action alongside existing quick diagnostics and 20k synthetic stress.
+  The button runs on a cancellable background worker and copies one redacted
+  PASS/WARN/FAIL/SKIP report, with a clear separate SKIP for physical UI QA.
+- Python `stage22_editor_selftest` creates a **temporary isolated journal and
+  artificial Markdown only under the app-private cache**. It exercises ten
+  separate contracts: empty journal, explicit acceptance, Unicode source
+  span/duplicate text, contained selection, role highlights, evidence origin,
+  opposing claims, stale-source refusal, historical retraction and read-only
+  hash integrity. The temporary directory is cleaned after every run.
+- The self-test **never receives the selected vault path, real journal or
+  derived index**. Java validates the machine-readable contract and prints
+  fixed codes/counts, not text/paths/exceptions. The existing real-index
+  diagnostics remain separate and read-only.
+- GitHub Actions runs Python and Android tests, builds the isolated
+  `com.dpsmpx.dpks` release, signs it only using configured GitHub secrets,
+  verifies the APK with `apksigner`, checks SHA-256 and publishes the signed
+  APK/checksum in a prerelease. No signing keys or passwords are committed.
+- A PASS means the *named synthetic bridge regression* passed, not that UI
+  tapping, orientation, IME, TalkBack, background lifecycle, performance or
+  original note persistence was physically accepted. These remain **QA-67
+  OPEN/DEFERRED** until batched on-device verification; do not use the
+  automatic test as a substitute for the existing QA-59–66 matrix.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee

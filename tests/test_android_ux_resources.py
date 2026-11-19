@@ -20,7 +20,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         required = (
             "knowledge_root", "knowledge_status", "knowledge_refresh", "knowledge_filter",
             "knowledge_list", "knowledge_progress", "knowledge_ask", "knowledge_llm_ask",
-            "knowledge_qa_quick", "knowledge_qa_stress", "knowledge_qa_progress",
+            "knowledge_qa_quick", "knowledge_qa_stress", "knowledge_qa_editor",
+            "knowledge_qa_progress",
             "knowledge_qa_status", "knowledge_embedding_build", "knowledge_semantic_search",
             "knowledge_full_audit", "knowledge_bulk_analyze", "knowledge_bulk_review",
             "knowledge_active_decisions", "knowledge_bulk_status", "knowledge_bulk_auto",
@@ -43,7 +44,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             "knowledge_page_decisions": ("knowledge_decision_categories",
                                          "knowledge_decisions_list", "knowledge_decisions_filter",
                                          "knowledge_decisions_batch"),
-            "knowledge_page_processes": ("knowledge_qa_quick", "knowledge_bulk_analyze",
+            "knowledge_page_processes": ("knowledge_qa_quick", "knowledge_qa_editor",
+                                         "knowledge_bulk_analyze",
                                          "knowledge_embedding_build"),
             "knowledge_page_manage": ("knowledge_active_decisions", "knowledge_backup_import",
                                       "knowledge_full_audit"),
@@ -70,6 +72,32 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_page_decisions", "knowledge_page_manage",
                          "knowledge_manage_backup_warning"):
                 self.assertIn(name, names)
+
+    def test_stage22_one_button_qa_is_synthetic_cancellable_and_honestly_scoped(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        editor_qa = next(x for x in layout.iter()
+                         if x.get(ANDROID + "id") == "@+id/knowledge_qa_editor")
+        self.assertEqual("@string/knowledge_qa_editor", editor_qa.get(ANDROID + "text"))
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        runner = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        transport = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("qaEditorButton.setOnClickListener", "runDeviceQa(false, true)",
+                       "runningDeviceQa.cancel(true)", "qaEditorButton.setText(",
+                       "copyDeviceQaReport(report)"):
+            self.assertIn(marker, hub)
+        for marker in ("checkSyntheticStage22Editor", "stage22EditorSelfTest(context,",
+                       "getCacheDir().getCanonicalPath()", '"EDITOR-22-UI"',
+                       "selectedVaultUntouched=true", "editorStage22"):
+            self.assertIn(marker, runner)
+        self.assertIn('"stage22_editor_selftest"', transport)
+        for marker in ("def stage22_editor_selftest(", "tempfile.TemporaryDirectory",
+                       '"used_selected_vault": False', '"requires_manual_ui_qa": True'):
+            self.assertIn(marker, python)
+        for folder in ("values", "values-ru"):
+            names = {e.get("name") for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            self.assertTrue({"knowledge_qa_editor", "knowledge_qa_editor_limits"} <= names)
 
     def test_full_screen_decision_review_has_separate_source_and_knowledge_sections(self):
         root = ET.parse(ROOT / "res/layout/knowledge__decision_detail.xml").getroot()
