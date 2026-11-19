@@ -91,6 +91,7 @@
             android:name=".knowledge.KnowledgeHubActivity"
             android:exported="false"
             android:label="@string/knowledge_hub_title"
+            android:theme="@style/Theme.Dpks.Knowledge"
             android:parentActivityName=".activity.MainActivity" />
 
         <activity
