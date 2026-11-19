@@ -279,4 +279,15 @@
     <string name="knowledge_backup_failed">Операция с архивом не удалась. Локальный журнал сохранён.</string>
     <string name="knowledge_backup_import_details">Проверено решений: %1$d\nГолова журнала: %2$s\n\nВосстановить эти записи? Восстановление допустимо только при пустом журнале.</string>
     <string name="knowledge_backup_confirm_import">Подтвердить восстановление</string>
+    <string name="knowledge_editor_title">Редактор заметки</string>
+    <string name="knowledge_editor_back">Вернуться в библиотеку знаний</string>
+    <string name="knowledge_editor_source_notice">Редактор исходного Markdown · Ручные изменения сохраняются в заметке. Решения знаний хранятся отдельно.</string>
+    <string name="knowledge_diff_before">До · принятые знания</string>
+    <string name="knowledge_diff_before_first">До · первая запись</string>
+    <string name="knowledge_diff_before_second">До · вторая запись</string>
+    <string name="knowledge_diff_after">После подтверждения · предлагаемые знания</string>
+    <string name="knowledge_diff_after_first">После подтверждения · первый результат</string>
+    <string name="knowledge_diff_after_second">После подтверждения · второй результат</string>
+    <string name="knowledge_diff_proposed">Исходная предлагаемая формулировка:</string>
+    <string name="knowledge_diff_retraction_outcome">Эта запись станет неактивной. История сохранится в журнале, исходный Markdown не изменится.</string>
 </resources>

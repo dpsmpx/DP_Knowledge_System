@@ -279,4 +279,15 @@
     <string name="knowledge_backup_failed">Backup operation failed. Local knowledge journal was preserved.</string>
     <string name="knowledge_backup_import_details">Verified decisions: %1$d\nJournal head: %2$s\n\nImport these records? Only an empty journal can be restored.</string>
     <string name="knowledge_backup_confirm_import">Confirm restore</string>
+    <string name="knowledge_editor_title">Note editor</string>
+    <string name="knowledge_editor_back">Return to Knowledge Library</string>
+    <string name="knowledge_editor_source_notice">Source Markdown editor · Manual edits change the note. Knowledge decisions are stored separately.</string>
+    <string name="knowledge_diff_before">Before · accepted knowledge</string>
+    <string name="knowledge_diff_before_first">Before · first record</string>
+    <string name="knowledge_diff_before_second">Before · second record</string>
+    <string name="knowledge_diff_after">After confirmation · proposed knowledge</string>
+    <string name="knowledge_diff_after_first">After confirmation · first result</string>
+    <string name="knowledge_diff_after_second">After confirmation · second result</string>
+    <string name="knowledge_diff_proposed">Original proposed wording:</string>
+    <string name="knowledge_diff_retraction_outcome">This record will be inactive. Its history remains in the journal; original Markdown will not change.</string>
 </resources>

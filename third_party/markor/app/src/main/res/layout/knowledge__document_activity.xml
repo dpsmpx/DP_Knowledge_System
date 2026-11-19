@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DP Knowledge System contributors, 2026. SPDX-License-Identifier: Apache-2.0 -->
+<!-- Only the chrome is new; DocumentEditAndViewFragment remains the Markor editor. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorSurface" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurfaceContainer"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
+        android:text="@string/knowledge_editor_source_notice"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="12sp" />
+
+    <FrameLayout
+        android:id="@+id/document__placeholder_fragment"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+</LinearLayout>

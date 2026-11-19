@@ -25,8 +25,11 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.FragmentManager;
 
+import com.google.android.material.color.DynamicColors;
+
 import net.gsantner.markor.R;
 import net.gsantner.markor.format.FormatRegistry;
+import net.gsantner.markor.knowledge.KnowledgeDocumentActivity;
 import net.gsantner.markor.frontend.textview.TextViewUtils;
 import net.gsantner.markor.model.AppSettings;
 import net.gsantner.markor.model.Document;
@@ -100,7 +103,8 @@ public class DocumentActivity extends MarkorBaseActivity {
         if (GsFileUtils.isDirectory(file)) {
             intent = new Intent(activity, MainActivity.class);
         } else {
-            intent = new Intent(activity, DocumentActivity.class);
+            intent = new Intent(activity, activity instanceof KnowledgeDocumentActivity
+                    ? KnowledgeDocumentActivity.class : DocumentActivity.class);
 
             final boolean lollipop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
             final boolean fromDocumentActivity = activity instanceof DocumentActivity;
@@ -148,7 +152,12 @@ public class DocumentActivity extends MarkorBaseActivity {
         super.onCreate(savedInstanceState);
         StoragePermissionActivity.requestPermissions(this);
         AppSettings.clearDebugLog();
-        setContentView(R.layout.document__activity);
+        if (this instanceof KnowledgeDocumentActivity) {
+            DynamicColors.applyToActivityIfAvailable(this);
+            setContentView(R.layout.knowledge__document_activity);
+        } else {
+            setContentView(R.layout.document__activity);
+        }
         _toolbar = findViewById(R.id.toolbar);
 
         if (_appSettings.isHideSystemStatusbar()) {

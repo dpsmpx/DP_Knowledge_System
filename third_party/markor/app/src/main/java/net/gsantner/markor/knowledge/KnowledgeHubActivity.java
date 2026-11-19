@@ -43,7 +43,6 @@ import com.google.android.material.color.DynamicColors;
 import com.google.android.material.color.MaterialColors;
 
 import net.gsantner.markor.R;
-import net.gsantner.markor.activity.DocumentActivity;
 import net.gsantner.markor.activity.MarkorBaseActivity;
 
 import org.json.JSONArray;
@@ -155,7 +154,6 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final ActionBar bar = getSupportActionBar();
         if (bar != null) {
             bar.setTitle(R.string.knowledge_hub_title);
-            bar.setDisplayHomeAsUpEnabled(true);
         }
         navigation = findViewById(R.id.knowledge_navigation);
         navigation.setOnItemSelectedListener(item -> {
@@ -1176,7 +1174,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             final String rootPath = notebook.getCanonicalPath() + File.separator;
             final File file = new File(notebook, relativePath).getCanonicalFile();
             if (file.getPath().startsWith(rootPath) && file.isFile()) {
-                DocumentActivity.launch(this, file, false, null);
+                KnowledgeDocumentActivity.open(this, file);
                 return;
             }
         } catch (IOException | SecurityException ignored) {
@@ -1698,27 +1696,26 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void confirmRevision(final JSONObject preview, final JSONObject option,
                                  final String statement, final String reason) {
+        final List<KnowledgeDecisionReviewDialog.Section> changes = Arrays.asList(
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_before,
+                        preview.optString("old_summary"), true),
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_after,
+                        option.optString("new_summary"), false));
         final StringBuilder details = new StringBuilder()
-                .append(preview.optString("record_id")).append("\n")
-                .append(preview.optString("role")).append("\n\n")
-                .append(preview.optString("old_summary")).append("\n\n→\n\n")
+                .append(getString(R.string.knowledge_diff_proposed)).append("\n")
                 .append(statement).append("\n\n")
-                .append(option.optString("new_summary")).append("\n\n");
+                .append(preview.optString("role")).append(" · ")
+                .append(preview.optString("record_id")).append("\n");
         if (preview.optBoolean("old_summary_truncated")
                 || option.optBoolean("new_summary_truncated")) {
-            details.append(getString(R.string.knowledge_retract_truncated)).append("\n\n");
+            details.append(getString(R.string.knowledge_retract_truncated)).append("\n");
         }
         details.append(getString(R.string.knowledge_revision_conflicts,
-                        option.optInt("conflict_count"), option.optInt("diagnostic_count")))
-                .append("\n\n")
-                .append(getString(R.string.knowledge_revision_warning));
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.knowledge_revision_confirm)
-                .setMessage(details.toString())
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.knowledge_revision_confirm,
-                        (dialog, which) -> commitRevision(preview, option, statement, reason))
-                .show();
+                        option.optInt("conflict_count"), option.optInt("diagnostic_count")));
+        KnowledgeDecisionReviewDialog.show(this, R.string.knowledge_revision_confirm,
+                R.string.knowledge_revision_confirm, changes, details.toString(),
+                getString(R.string.knowledge_revision_warning),
+                () -> commitRevision(preview, option, statement, reason));
     }
 
     private void commitRevision(final JSONObject preview, final JSONObject option,
@@ -1855,31 +1852,27 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             status.setText(R.string.knowledge_split_failed);
             return;
         }
+        final List<KnowledgeDecisionReviewDialog.Section> changes = Arrays.asList(
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_before,
+                        preview.optString("old_summary"), true),
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_after_first,
+                        firstOption.optString("new_summary"), false),
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_after_second,
+                        secondOption.optString("new_summary"), false));
         final StringBuilder details = new StringBuilder()
-                .append(preview.optString("role")).append("\n\n")
-                .append(preview.optString("old_summary"))
-                .append("\n\n→ 1\n")
-                .append(first).append("\n")
-                .append(firstOption.optString("new_summary"))
-                .append("\n\n→ 2\n")
-                .append(second).append("\n")
-                .append(secondOption.optString("new_summary"))
-                .append("\n\n")
+                .append(preview.optString("role")).append("\n")
+                .append(getString(R.string.knowledge_diff_proposed)).append("\n1. ")
+                .append(first).append("\n2. ").append(second).append("\n")
                 .append(getString(R.string.knowledge_split_diagnostics,
                         firstOption.optInt("conflict_count") + secondOption.optInt("conflict_count"),
-                        firstOption.optInt("diagnostic_count") + secondOption.optInt("diagnostic_count")))
-                .append("\n\n").append(getString(R.string.knowledge_split_warning));
+                        firstOption.optInt("diagnostic_count") + secondOption.optInt("diagnostic_count")));
         if (preview.optBoolean("old_summary_truncated")) {
             details.append("\n").append(getString(R.string.knowledge_retract_truncated));
         }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.knowledge_split_confirm)
-                .setMessage(details.toString())
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.knowledge_split_confirm,
-                        (dialog, which) -> commitSplit(preview, firstOption, secondOption,
-                                first, second, reason))
-                .show();
+        KnowledgeDecisionReviewDialog.show(this, R.string.knowledge_split_confirm,
+                R.string.knowledge_split_confirm, changes, details.toString(),
+                getString(R.string.knowledge_split_warning),
+                () -> commitSplit(preview, firstOption, secondOption, first, second, reason));
     }
 
     private void commitSplit(final JSONObject preview, final JSONObject firstOption,
@@ -2055,22 +2048,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             status.setText(R.string.knowledge_merge_failed);
             return;
         }
-        final StringBuilder details = new StringBuilder()
-                .append(preview.optString("role")).append("\n\n1. ")
-                .append(old.optString(0)).append("\n\n2. ")
-                .append(old.optString(1)).append("\n\n→\n")
-                .append(statement).append("\n")
-                .append(option.optString("new_summary")).append("\n\n")
-                .append(getString(R.string.knowledge_revision_conflicts,
-                        option.optInt("conflict_count"), option.optInt("diagnostic_count")))
-                .append("\n\n").append(getString(R.string.knowledge_merge_warning));
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.knowledge_merge_confirm)
-                .setMessage(details.toString())
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.knowledge_merge_confirm,
-                        (dialog, which) -> commitMerge(preview, option, statement, reason))
-                .show();
+        final List<KnowledgeDecisionReviewDialog.Section> changes = Arrays.asList(
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_before_first,
+                        old.optString(0), true),
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_before_second,
+                        old.optString(1), true),
+                new KnowledgeDecisionReviewDialog.Section(R.string.knowledge_diff_after,
+                        option.optString("new_summary"), false));
+        final String details = preview.optString("role") + "\n"
+                + getString(R.string.knowledge_diff_proposed) + "\n" + statement + "\n\n"
+                + getString(R.string.knowledge_revision_conflicts,
+                        option.optInt("conflict_count"), option.optInt("diagnostic_count"));
+        KnowledgeDecisionReviewDialog.show(this, R.string.knowledge_merge_confirm,
+                R.string.knowledge_merge_confirm, changes, details,
+                getString(R.string.knowledge_merge_warning),
+                () -> commitMerge(preview, option, statement, reason));
     }
 
     private void commitMerge(final JSONObject preview, final JSONObject option,
@@ -2115,26 +2107,27 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
                         return;
                     }
+                    final List<KnowledgeDecisionReviewDialog.Section> changes = Arrays.asList(
+                            new KnowledgeDecisionReviewDialog.Section(
+                                    R.string.knowledge_diff_before,
+                                    preview.optString("summary"), true),
+                            new KnowledgeDecisionReviewDialog.Section(
+                                    R.string.knowledge_diff_after,
+                                    getString(R.string.knowledge_diff_retraction_outcome), false));
                     final StringBuilder details = new StringBuilder()
                             .append(preview.optString("role")).append(" · ")
-                            .append(preview.optString("record_id")).append("\n\n")
-                            .append(preview.optString("summary")).append("\n\n");
+                            .append(preview.optString("record_id")).append("\n");
                     if (preview.optBoolean("summary_truncated")) {
                         details.append(getString(R.string.knowledge_retract_truncated))
-                                .append("\n\n");
+                                .append("\n");
                     }
                     details.append(getString(R.string.knowledge_retract_impact,
                                     preview.optInt("affected_derived"),
-                                    preview.optInt("rederived")))
-                            .append("\n\n")
-                            .append(getString(R.string.knowledge_retract_warning));
-                    new AlertDialog.Builder(this)
-                            .setTitle(R.string.knowledge_retract_preview)
-                            .setMessage(details.toString())
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .setPositiveButton(R.string.knowledge_retract_confirm,
-                                    (dialog, which) -> commitRetraction(preview))
-                            .show();
+                                    preview.optInt("rederived")));
+                    KnowledgeDecisionReviewDialog.show(this, R.string.knowledge_retract_preview,
+                            R.string.knowledge_retract_confirm, changes, details.toString(),
+                            getString(R.string.knowledge_retract_warning),
+                            () -> commitRetraction(preview));
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
