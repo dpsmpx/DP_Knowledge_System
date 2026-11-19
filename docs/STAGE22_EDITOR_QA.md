@@ -109,6 +109,9 @@ deferred rather than required after every incremental PR.
   omitted `dpksys.stage22_editor_selftest.v1`. A regression fix is in review;
   the replacement APK still needs one follow-up button check, and the full UI
   matrix remains deferred.
+- **QA-68 / OPEN, DEFERRED:** thirteenth-slice literal Markdown/KSF diff has
+  Java unit coverage but no observed on-device contrast, selectable text,
+  long-text or TalkBack verification. It is not a semantic equivalence test.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
@@ -266,3 +269,18 @@ include private text, filesystem paths or credentials in public CI/QA logs.
    every historical provenance edge case. Those stay in QA-59–66.
 4. Test on API 24 and Android 11 when possible. Do not turn QA-67 PASS from
    Python/Android CI alone; record observed device behavior later.
+
+## QA-68 — deferred literal source/KSF comparison checklist
+
+1. In an isolated synthetic journal, accept a short source statement and open
+   its record in the editor dock. Confirm the two separate selectable blocks
+   display the exact saved Markdown and accepted KSF text without mutation.
+2. Test an inserted `не`, repeated identical words, emoji and punctuation.
+   Highlighted UTF-16 spans must stay on the correct symbols, preserve copy
+   and keep the explicit **literal comparison is not semantic proof** text.
+3. For an unverified/stale provenance span, truncated source/statement or
+   oversized record, ensure highlighting is absent and the reason visible;
+   no fallback to a guessed repeated occurrence is permitted.
+4. Use 200% text, TalkBack, rotation, dark/light/dynamic theme and keyboard.
+   Measure contrast, scroll, source SHA and journal head without including
+   private contents in the report. Keep QA-68 OPEN until actually observed.

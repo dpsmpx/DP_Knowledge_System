@@ -407,6 +407,9 @@
     <string name="knowledge_editor_context_span_unavailable">Exact position is not verified. Navigation to source is disabled.</string>
     <string name="knowledge_editor_context_truncated_excerpt">Long source or formal statement: only its beginning is shown here.</string>
     <string name="knowledge_editor_context_comparison_disclaimer">These are different representations. This view does not prove that the interpretation matches the original meaning.</string>
+    <string name="knowledge_editor_text_diff_legend">Highlighted words and symbols differ literally between saved Markdown and accepted KSF. This is a textual comparison only; it does not establish equal or different meaning.</string>
+    <string name="knowledge_editor_text_diff_identical">The displayed words and symbols match literally. This does not prove that the underlying interpretation is correct.</string>
+    <string name="knowledge_editor_text_diff_unavailable">Literal comparison is unavailable for unverified, truncated, empty or oversized text. Both representations remain readable without guessed highlights.</string>
     <string name="knowledge_editor_context_provenance">Origin: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Open linked note</string>
     <string name="knowledge_editor_context_jump">Show source in editor</string>

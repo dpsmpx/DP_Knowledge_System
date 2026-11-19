@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **twelve slices integrated; protocol hotfix awaiting CI and a replacement signed preview**. The owner confirmed ordinary decision
+Status: **twelve slices integrated, Preview #18 published; thirteenth literal-comparison slice in development**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -323,6 +323,28 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   and regression coverage in both Android unit tests and Python wiring tests.
   **Do not mark QA-67 PASS until the replacement APK is observed on-device.**
 
+## Thirteenth slice — bounded literal source/KSF difference preview (in development)
+
+- The persistent editor knowledge dock now marks **literal word and punctuation
+  differences** between the saved Markdown excerpt and accepted canonical KSF
+  statement in two separately labeled, selectable, read-only blocks. Matched
+  tokens remain uncolored. This highlights differences in *representation*;
+  neither matches nor differences certify agreement, contradiction or truth.
+- The deterministic Java comparison walks Unicode code points and returns
+  **UTF-16-safe offsets**, using an ordered longest-common-subsequence of at
+  most 128 tokens per side and at most 1024 UTF-16 units per side. Larger
+  material, missing text, source spans lacking verified provenance and
+  explicitly truncated strings receive **no guessed highlighting** and a
+  visible explanation. No Python bridge call or source write is added.
+- Material theme container/on-container colors plus bold text distinguish
+  changes in both light/dark themes. The underlying journal and Markdown
+  strings are not modified. Local JUnit cases cover Cyrillic negation,
+  duplicate words, non-BMP emoji, punctuation, identical text and bounds.
+- **QA-68 OPEN/DEFERRED:** phone verification for contrast, selection/copy,
+  large fonts, RTL/TalkBack, rotation, stale and truncated records is pooled
+  with QA-59–67. This is a *lexical* comparison, not the still-open semantic
+  source-span diff or standalone Markdown editing engine.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
@@ -382,7 +404,8 @@ On an Android 15 device with test notes (avoid private journal mutations):
   filtering/chips, meaningful progress history and pause/resume controls.
 - Inline semantic diff, richer evidence, selective approval and reversible
   proposal preview; the Decisions screen covers navigation and provenance,
-  but explicit confirmation still uses the established dialogs.
+  but explicit confirmation still uses the established dialogs. The thirteenth
+  slice highlights only literal token differences, not semantic equivalence.
 - Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
   gesture navigation/edge-to-edge insets, instrumented UI tests and measured
   scrolling/rendering under 20k notes.

@@ -407,6 +407,9 @@
     <string name="knowledge_editor_context_span_unavailable">Точная позиция не подтверждена. Переход к фрагменту недоступен.</string>
     <string name="knowledge_editor_context_truncated_excerpt">Длинный фрагмент или утверждение: здесь показано только начало.</string>
     <string name="knowledge_editor_context_comparison_disclaimer">Это разные представления. Сравнение не доказывает смысловую эквивалентность интерпретации и оригинала.</string>
+    <string name="knowledge_editor_text_diff_legend">Подсвечены слова и символы, которые буквально различаются в сохранённом Markdown и принятом KSF. Это только текстовое сравнение, не доказательство совпадения или различия смысла.</string>
+    <string name="knowledge_editor_text_diff_identical">Показанные слова и символы буквально совпадают. Это не доказывает правильность интерпретации.</string>
+    <string name="knowledge_editor_text_diff_unavailable">Текстовое сравнение недоступно для непроверенного, сокращённого, пустого или слишком длинного текста. Обе версии видны без предположительной подсветки.</string>
     <string name="knowledge_editor_context_provenance">Происхождение: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Открыть связанную заметку</string>
     <string name="knowledge_editor_context_jump">Показать в редакторе</string>
