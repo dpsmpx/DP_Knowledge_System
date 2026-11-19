@@ -176,6 +176,29 @@ def _validate_note_input(relative_path: str, markdown: str) -> None:
         raise ValueError("Note exceeds read-only inspection limit")
 
 
+def _verified_source_span(source: dict, markdown: str, source_sha: str) -> dict:
+    """Locate approved provenance by its stored Unicode offsets, never text search.
+
+    A matching document SHA alone does not prove that historical/legacy span
+    metadata is usable. Do not manufacture an offset for a repeated excerpt.
+    """
+    if source.get("document_sha") != source_sha:
+        return {"source_span_state": "stale_source"}
+    span = source.get("span")
+    if (not isinstance(span, (tuple, list)) or len(span) != 2
+            or any(not isinstance(v, int) or isinstance(v, bool) for v in span)):
+        return {"source_span_state": "missing"}
+    start, end = span
+    if (start < 0 or end <= start or end > len(markdown)
+            or not isinstance(source.get("text"), str)
+            or markdown[start:end] != source["text"]):
+        return {"source_span_state": "mismatch"}
+    before = markdown[:start]
+    return {"source_span_state": "verified", "source_span": [start, end],
+            "source_line": before.count("\n") + 1,
+            "source_column": start - before.rfind("\n")}
+
+
 def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
     """Read-only, bounded note context from the *saved* source snapshot.
 
@@ -203,6 +226,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
             stale_count += 1
         if len(active) >= 24:
             continue
+        alignment = _verified_source_span(source, markdown, source_sha)
         conflicts_available = True
         try:
             warnings = kb.conflicts_for([rec.node])
@@ -211,17 +235,20 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         except Exception:
             conflicts_available = False
             conflict_ids = []
+        excerpt = str(source.get("text") or "")
+        statement = rec.node.ksf()
         active.append({
             "id": rec.id, "role": rec.role, "status": rec.status.value,
-            "statement": rec.node.ksf()[:350],
+            "statement": statement[:1000], "statement_truncated": len(statement) > 1000,
             "locator": str(source.get("locator") or "")[:150],
             "fragment_id": str(source.get("fragment_id") or "")[:150],
-            "source_excerpt": str(source.get("text") or "")[:240],
+            "source_excerpt": excerpt[:1000], "source_text_truncated": len(excerpt) > 1000,
             "source_current": fresh,
             "provenance_kind": str(source.get("source_type") or "")[:70],
             "conflicts_available": conflicts_available,
             "conflict_count": len(conflict_ids) if conflicts_available else None,
             "conflicts_with": conflict_ids,
+            **alignment,
         })
 
     relations, truncated, index_state = [], False, "absent"

@@ -93,10 +93,13 @@ deferred rather than required after every incremental PR.
   owner feedback in Preview #16, but full device checks remain open.
 - **QA-61 / OPEN, DEFERRED:** sixth-slice editor context panel must be checked
   in a later batched device acceptance run; automated tests are not a UI PASS.
+- **QA-62 / OPEN, DEFERRED:** seventh-slice source-span alignment and separate
+  source/KSF comparison have only synthetic CI coverage; no device PASS.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
-  editing/rendering and file persistence; contextual inline sidebar,
-  semantic backlinks and rich source-span comparison are not implemented.
+  editing/rendering and file persistence; a bounded contextual panel and
+  separate source/KSF view exist, but semantic backlinks, live highlighting
+  and full semantic diff are not implemented.
 - **QA-54 / PARTIAL USER FEEDBACK:** owner reports working decision review in
   Preview #14. This does not close unperformed TalkBack, stress or lifecycle
   acceptance checks in docs/STAGE22_DECISIONS_QA.md.
@@ -129,3 +132,20 @@ include private text, filesystem paths or credentials in public CI/QA logs.
 6. Defer 200% text, TalkBack, dark/dynamic theme, 760/20k-note latency,
    memory/battery and rapid repeated navigation measurements to a single
    later device QA session, with redacted evidence only.
+
+## QA-62 — deferred exact-source alignment and comparison checklist
+
+1. Accept the **second** of two identical synthetic source sentences in a
+   disposable journal. Open the in-editor knowledge panel, inspect its two
+   separately labeled source/KSF blocks and jump to the second occurrence,
+   not the first. Ensure the original Markdown is not edited by navigation.
+2. Put an emoji or another non-BMP Unicode character before that sentence.
+   Confirm the selection boundaries remain exact on Android (Python code
+   points mapped to Java UTF-16 offsets); long source/KSF blocks must declare
+   truncation and remain selectable for copying.
+3. Replace the source on disk, make an unsaved editor edit, or open a record
+   with missing/mismatched historical span. The view must show unverified
+   provenance, hide or refuse the jump, and never guess from matching text.
+4. Check back navigation, rotation, app stop/resume, font scale 200%, TalkBack,
+   light/dark theme and slow source reads. No unexpected journal/source write,
+   no personal text in logs; keep QA-62 OPEN until completed on-device.

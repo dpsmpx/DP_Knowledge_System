@@ -393,10 +393,16 @@
     <string name="knowledge_editor_context_agreement">Possible agreement</string>
     <string name="knowledge_editor_context_source">Saved source snapshot</string>
     <string name="knowledge_editor_context_statement">Knowledge record</string>
+    <string name="knowledge_editor_context_source_snapshot">Original Markdown · saved snapshot</string>
+    <string name="knowledge_editor_context_formal_statement">Accepted formal statement · KSF</string>
+    <string name="knowledge_editor_context_exact_location">Verified source position: line %1$d, column %2$d</string>
+    <string name="knowledge_editor_context_span_unavailable">Exact position is not verified. Navigation to source is disabled.</string>
+    <string name="knowledge_editor_context_truncated_excerpt">Long source or formal statement: only its beginning is shown here.</string>
+    <string name="knowledge_editor_context_comparison_disclaimer">These are different representations. This view does not prove that the interpretation matches the original meaning.</string>
     <string name="knowledge_editor_context_provenance">Origin: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Open linked note</string>
     <string name="knowledge_editor_context_jump">Show source in editor</string>
-    <string name="knowledge_editor_context_reload">Source changed or the excerpt is ambiguous. Refresh context before jumping.</string>
+    <string name="knowledge_editor_context_reload">Source or editor buffer changed. Refresh context before jumping.</string>
     <string name="knowledge_editor_context_failed">Could not load local knowledge context. No files or journal were changed.</string>
     <string name="knowledge_diff_before">Before · accepted knowledge</string>
     <string name="knowledge_diff_before_first">Before · first record</string>

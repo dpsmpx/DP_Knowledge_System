@@ -1,13 +1,13 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first five slices integrated**. The owner confirmed ordinary decision
+Status: **first six slices integrated; seventh pending CI and device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
 **partial, scenario-specific device observations**, not a full QA-54/QA-59
 signoff. The owner subsequently confirmed that Preview #16's updated flow
-works, but not the full QA-60 matrix. **Sixth slice: a read-only contextual
-knowledge panel inside the editor is pending CI and deferred device QA.**
+works, but not the full QA-60 matrix. The sixth-slice read-only contextual
+knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
 
 ## Scope
@@ -137,7 +137,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   wording, preserved Markdown, absent journal during preview, rejected stale
   source/manual phrase/journal and explicit append-only approval.
 
-## Sixth slice — contextual knowledge panel (pending CI, device QA deferred)
+## Sixth slice — contextual knowledge panel (integrated, device QA deferred)
 
 - An always-reachable **Knowledge** toggle expands a bounded, scrollable
   panel directly above the Markor editing surface; no extra hub navigation
@@ -163,6 +163,27 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
 - This remains an initial contextual surface, **not** a full source-span
   semantic diff, independent editor engine, or exhaustive contradiction
   audit. Large-library speed and accessibility are recorded as QA-61 debt.
+
+## Seventh slice — verified source-span alignment in the editor (pending CI)
+
+- The accepted-record detail now presents two separate selectable blocks:
+  **saved Markdown source** and **accepted canonical KSF statement**. Their
+  appearance does not assert semantic equivalence or change either text.
+- The Python bridge verifies the whole saved-note SHA, the stored provenance
+  Unicode span and its exact raw substring before reporting line/column and
+  source offsets. Missing, stale or mismatched legacy spans remain visible
+  as unverified, but cannot be jumped to. Repeated identical excerpts are
+  located by provenance offsets, not the first text occurrence.
+- Navigation converts Python Unicode code-point offsets to Android UTF-16
+  editor selections, then rechecks canonical vault membership, saved file
+  hash and unchanged editor buffer off the UI thread. A changed source or
+  unsaved edit refuses the jump. Long excerpt/KSF displays are bounded and
+  clearly labeled as truncated; the original Markdown is not rewritten.
+- Synthetic tests cover duplicate sentences, emoji offset conversion,
+  missing/malformed spans, stale sources, and the read-only contract.
+  **QA-62 physical checks are deferred** at the owner's request.
+- This is an evidence-location comparison, **not** a word-level semantic
+  diff, automated truth verification or a general-purpose diff editor.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
@@ -216,11 +237,11 @@ On an Android 15 device with test notes (avoid private journal mutations):
 - A full independent DPKS editor and intelligent workspace replacing the
   remaining Markor note-editing engine/menu chrome, while retaining reliable
   import/export and edit/preview workflows. The sixth slice adds a bounded
-  context panel, but not an inline source-span diff, persistent tablet
+  context panel and verified source navigation, but not an inline semantic diff, persistent tablet
   sidebar or separate Markdown renderer.
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.
-- Inline source-span-aware diff, evidence, selective approval and reversible
+- Inline semantic diff, richer evidence, selective approval and reversible
   proposal preview; the Decisions screen covers navigation and provenance,
   but explicit confirmation still uses the established dialogs.
 - Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
