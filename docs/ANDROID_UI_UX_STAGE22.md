@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first six slices integrated; seventh pending CI and device QA**. The owner confirmed ordinary decision
+Status: **first seven slices integrated; seventh awaiting device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -164,7 +164,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   semantic diff, independent editor engine, or exhaustive contradiction
   audit. Large-library speed and accessibility are recorded as QA-61 debt.
 
-## Seventh slice — verified source-span alignment in the editor (pending CI)
+## Seventh slice — verified source-span alignment in the editor (integrated, QA deferred)
 
 - The accepted-record detail now presents two separate selectable blocks:
   **saved Markdown source** and **accepted canonical KSF statement**. Their
@@ -181,7 +181,8 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   clearly labeled as truncated; the original Markdown is not rewritten.
 - Synthetic tests cover duplicate sentences, emoji offset conversion,
   missing/malformed spans, stale sources, and the read-only contract.
-  **QA-62 physical checks are deferred** at the owner's request.
+  Python and Android CI passed on PR #51. **QA-62 physical checks are deferred**
+  at the owner's request.
 - This is an evidence-location comparison, **not** a word-level semantic
   diff, automated truth verification or a general-purpose diff editor.
 
