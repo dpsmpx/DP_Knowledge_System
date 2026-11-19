@@ -417,9 +417,17 @@ public final class KnowledgeDeviceQaRunner {
                     vault, 10, this::isCancelled);
             final KnowledgeLocalIndex.SyncResult renamed = testIndex.synchronize(
                     vault, renamedScan, this::isCancelled);
+            boolean foundAlpha = false;
+            boolean foundGamma = false;
+            boolean foundObsoleteBeta = false;
+            for (final KnowledgeLocalIndex.Hit hit : testIndex.search("", 10)) {
+                foundAlpha |= "alpha.md".equals(hit.relativePath);
+                foundGamma |= "gamma.md".equals(hit.relativePath);
+                foundObsoleteBeta |= "beta.md".equals(hit.relativePath);
+            }
             if (renamed.indexed != 1 || renamed.reused != 1 || renamed.removed != 1
                     || renamed.unverified != 0 || renamed.keptMissingEntries
-                    || testIndex.search("", 10).size() != 2
+                    || !foundAlpha || !foundGamma || foundObsoleteBeta
                     || !testIndex.search("violet", 10).get(0).relativePath.equals("gamma.md")
                     || testIndex.possibleBacklinks("gamma.md", 10).size() != 0) {
                 throw new SyntheticMismatch("verdict=FULL_SCAN_RENAME_MISMATCH");
@@ -429,13 +437,15 @@ public final class KnowledgeDeviceQaRunner {
             final KnowledgeLocalIndex.SyncResult partial = testIndex.synchronize(
                     vault, partialScan, this::isCancelled);
             int unverifiedHits = 0;
-            for (final KnowledgeLocalIndex.Hit hit : testIndex.search("", 10)) {
+            final List<KnowledgeLocalIndex.Hit> partialHits = testIndex.search("", 10);
+            for (final KnowledgeLocalIndex.Hit hit : partialHits) {
                 if (!hit.confirmedInLastScan) {
                     unverifiedHits++;
                 }
             }
             if (!partial.keptMissingEntries || partial.removed != 0
                     || partial.unverified != 1 || unverifiedHits != 1
+                    || partialHits.size() != 2 || !partialHits.get(0).confirmedInLastScan
                     || testIndex.evidenceSearch("synthetic", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
             }
