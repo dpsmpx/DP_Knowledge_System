@@ -21,6 +21,7 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -32,9 +33,14 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.color.DynamicColors;
+import com.google.android.material.color.MaterialColors;
 
 import net.gsantner.markor.R;
 import net.gsantner.markor.activity.DocumentActivity;
@@ -72,6 +78,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
+    private static final String STATE_WORKSPACE_PAGE = "dpks_workspace_page";
     private static final int MAX_EMBED_NOTES_PER_RUN = 120;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
@@ -113,6 +120,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private ArrayAdapter<String> adapter;
     private TextView status;
     private TextView analysisStatus;
+    private TextView embeddingStatus;
     private Button analysisButton;
     private Button auditButton;
     private Button embeddingButton;
@@ -130,11 +138,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private boolean embeddingActive;
     private ProgressBar progress;
     private EditText filter;
+    private BottomNavigationView navigation;
+    private int workspacePage = R.id.knowledge_nav_library;
     private char[] pendingExportPassword;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // This is deliberately scoped to the knowledge workspace: the legacy
+        // Markor editor keeps its existing appearance and behavior.
+        DynamicColors.applyToActivityIfAvailable(this);
         setContentView(R.layout.knowledge__activity);
 
         final Toolbar toolbar = findViewById(R.id.toolbar);
@@ -144,6 +157,27 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             bar.setTitle(R.string.knowledge_hub_title);
             bar.setDisplayHomeAsUpEnabled(true);
         }
+        navigation = findViewById(R.id.knowledge_navigation);
+        navigation.setOnItemSelectedListener(item -> {
+            showWorkspacePage(item.getItemId());
+            return true;
+        });
+        final int initialPage = savedInstanceState == null
+                ? R.id.knowledge_nav_library
+                : savedInstanceState.getInt(STATE_WORKSPACE_PAGE, R.id.knowledge_nav_library);
+        showWorkspacePage(initialPage);
+        navigation.setSelectedItemId(workspacePage);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (workspacePage != R.id.knowledge_nav_library) {
+                    navigation.setSelectedItemId(R.id.knowledge_nav_library);
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                }
+            }
+        });
 
         notebook = _appSettings.getNotebookDirectory();
         index = new KnowledgeLocalIndex(this);
@@ -153,6 +187,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
         status = findViewById(R.id.knowledge_status);
         analysisStatus = findViewById(R.id.knowledge_bulk_status);
+        embeddingStatus = findViewById(R.id.knowledge_embedding_status);
         analysisButton = findViewById(R.id.knowledge_bulk_analyze);
         embeddingButton = findViewById(R.id.knowledge_embedding_build);
         embeddingButton.setOnClickListener(view -> {
@@ -215,9 +250,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
-        adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels);
+        adapter = new ArrayAdapter<>(this, R.layout.knowledge__note_row, labels);
         final ListView list = findViewById(R.id.knowledge_list);
         list.setAdapter(adapter);
+        list.setEmptyView(findViewById(R.id.knowledge_empty));
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < displayed.size()) {
                 openIndexedNote(displayed.get(position).relativePath);
@@ -280,6 +316,74 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         scanNotebook();
     }
 
+    @Override
+    protected void onSaveInstanceState(@NonNull final Bundle outState) {
+        outState.putInt(STATE_WORKSPACE_PAGE, workspacePage);
+        super.onSaveInstanceState(outState);
+    }
+
+    /** Switch destinations without recreating the activity or its active workers. */
+    private void showWorkspacePage(final int requested) {
+        final int page = requested == R.id.knowledge_nav_processes
+                || requested == R.id.knowledge_nav_manage
+                ? requested : R.id.knowledge_nav_library;
+        workspacePage = page;
+        if (page != R.id.knowledge_nav_library && filter != null && filter.hasFocus()) {
+            filter.clearFocus();
+            final InputMethodManager keyboard = (InputMethodManager)
+                    getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (keyboard != null) {
+                keyboard.hideSoftInputFromWindow(filter.getWindowToken(), 0);
+            }
+        }
+        findViewById(R.id.knowledge_page_library).setVisibility(
+                page == R.id.knowledge_nav_library ? View.VISIBLE : View.GONE);
+        findViewById(R.id.knowledge_page_processes).setVisibility(
+                page == R.id.knowledge_nav_processes ? View.VISIBLE : View.GONE);
+        findViewById(R.id.knowledge_page_manage).setVisibility(
+                page == R.id.knowledge_nav_manage ? View.VISIBLE : View.GONE);
+        final ActionBar bar = getSupportActionBar();
+        if (bar != null) {
+            bar.setTitle(page == R.id.knowledge_nav_library
+                    ? R.string.knowledge_hub_title
+                    : page == R.id.knowledge_nav_processes
+                    ? R.string.knowledge_page_processes : R.string.knowledge_page_manage);
+        }
+    }
+
+    /** Quiet, count-only indicator; long operations never seize navigation. */
+    private void updateProcessBadge() {
+        if (navigation == null) return;
+        final int running = (analysisActive ? 1 : 0) + (auditActive ? 1 : 0)
+                + (embeddingActive ? 1 : 0) + (qaActive ? 1 : 0)
+                + (progress != null && progress.getVisibility() == View.VISIBLE ? 1 : 0);
+        if (running == 0) {
+            navigation.removeBadge(R.id.knowledge_nav_processes);
+        } else {
+            navigation.getOrCreateBadge(R.id.knowledge_nav_processes).setNumber(running);
+        }
+    }
+
+    private void showEmbeddingStatus(final String text) {
+        status.setText(text);
+        embeddingStatus.setText(text);
+    }
+
+    private void showEmbeddingStatus(final int resource) {
+        showEmbeddingStatus(getString(resource));
+    }
+
+    @Override
+    public void applyActivityBarBackgroundColors() {
+        final Toolbar toolbar = findViewById(R.id.toolbar);
+        if (toolbar == null) return;
+        final int surface = MaterialColors.getColor(toolbar,
+                com.google.android.material.R.attr.colorSurface);
+        toolbar.setBackgroundColor(surface);
+        getWindow().setStatusBarColor(surface);
+        getWindow().setNavigationBarColor(surface);
+    }
+
     /** The foreground UI remains responsive, and every run owns only private cache fixtures. */
     private void runDeviceQa(final boolean stress) {
         if (qaActive) {
@@ -291,6 +395,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final int generation = deviceQaGeneration.incrementAndGet();
         qaActive = true;
+        updateProcessBadge();
         qaQuickButton.setText(R.string.knowledge_qa_cancel);
         qaStressButton.setText(R.string.knowledge_qa_cancel);
         qaProgress.setVisibility(View.VISIBLE);
@@ -310,6 +415,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     return;
                 }
                 qaActive = false;
+                updateProcessBadge();
                 runningDeviceQa = null;
                 qaQuickButton.setText(R.string.knowledge_qa_quick);
                 qaStressButton.setText(R.string.knowledge_qa_stress);
@@ -468,6 +574,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final File root = notebook;
         progress.setVisibility(View.VISIBLE);
+        updateProcessBadge();
         status.setText(R.string.knowledge_scanning);
 
         runningScan = worker.submit(() -> {
@@ -497,6 +604,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         snapshot = result;
                         syncResult = projection;
                         progress.setVisibility(View.GONE);
+                        updateProcessBadge();
                         refreshResults();
                         if (automaticAnalysis.isChecked()) {
                             startBulkAnalysis();
@@ -509,6 +617,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         progress.setVisibility(View.GONE);
+                        updateProcessBadge();
                         status.setText(R.string.knowledge_unavailable);
                         snapshot = null;
                         displayed.clear();
@@ -534,6 +643,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final int generation = analysisGeneration.incrementAndGet();
         analysisActive = true;
+        updateProcessBadge();
         analysisButton.setText(R.string.knowledge_bulk_cancel);
         analysisStatus.setText(getString(R.string.knowledge_bulk_running, 0));
         final String root = notebook.getAbsolutePath();
@@ -568,6 +678,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && analysisGeneration.get() == generation) {
                         analysisActive = false;
+                        updateProcessBadge();
                         analysisButton.setText(R.string.knowledge_bulk_analyze);
                         analysisStatus.setText(getString(R.string.knowledge_bulk_done,
                                 totals.optInt("files"), totals.optInt("fragments"),
@@ -581,6 +692,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && analysisGeneration.get() == generation) {
                         analysisActive = false;
+                        updateProcessBadge();
                         analysisButton.setText(R.string.knowledge_bulk_analyze);
                         analysisStatus.setText(R.string.knowledge_bulk_failed);
                     }
@@ -595,6 +707,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             runningAnalysis.cancel(true);
         }
         analysisActive = false;
+        updateProcessBadge();
         analysisButton.setText(R.string.knowledge_bulk_analyze);
         analysisStatus.setText(R.string.knowledge_bulk_stopped);
     }
@@ -610,6 +723,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final int generation = auditGeneration.incrementAndGet();
         auditActive = true;
+        updateProcessBadge();
         auditButton.setText(R.string.knowledge_audit_cancel);
         analysisStatus.setText(getString(R.string.knowledge_audit_running, 0));
         final String root = notebook.getAbsolutePath();
@@ -637,6 +751,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && auditGeneration.get() == generation) {
                         auditActive = false;
+                        updateProcessBadge();
                         auditButton.setText(R.string.knowledge_audit_start);
                         analysisStatus.setText(R.string.knowledge_audit_ready);
                         showAuditSummary(summary);
@@ -648,6 +763,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && auditGeneration.get() == generation) {
                         auditActive = false;
+                        updateProcessBadge();
                         auditButton.setText(R.string.knowledge_audit_start);
                         analysisStatus.setText(R.string.knowledge_audit_failed);
                     }
@@ -662,6 +778,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             runningAudit.cancel(true);
         }
         auditActive = false;
+        updateProcessBadge();
         auditButton.setText(R.string.knowledge_audit_start);
         analysisStatus.setText(R.string.knowledge_audit_cancelled);
     }
@@ -2181,19 +2298,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void cancelEmbeddingBuild() {
         embeddingGeneration.incrementAndGet();
-        deviceQaGeneration.incrementAndGet();
-        if (runningDeviceQa != null) {
-            runningDeviceQa.cancel(true);
-        }
         if (runningEmbedding != null) {
             runningEmbedding.cancel(true);
         }
         embeddingActive = false;
+        updateProcessBadge();
         if (embeddingButton != null) {
             embeddingButton.setText(R.string.knowledge_embedding_build);
         }
         if (status != null) {
-            status.setText(R.string.knowledge_embedding_cancelled);
+            showEmbeddingStatus(R.string.knowledge_embedding_cancelled);
         }
     }
 
@@ -2205,9 +2319,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             return;
         }
         embeddingActive = true;
+        updateProcessBadge();
         embeddingButton.setText(R.string.knowledge_embedding_cancel);
         final int operation = embeddingGeneration.incrementAndGet();
-        status.setText(getString(R.string.knowledge_embedding_running, 0, pending.size()));
+        showEmbeddingStatus(getString(R.string.knowledge_embedding_running, 0, pending.size()));
         runningEmbedding = embeddingWorker.submit(() -> {
             int completed = 0;
             int skipped = 0;
@@ -2275,7 +2390,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             runOnUiThread(() -> {
                                 if (!isFinishing() && !isDestroyed()
                                         && embeddingGeneration.get() == operation) {
-                                    status.setText(getString(R.string.knowledge_embedding_chunk_progress,
+                                    showEmbeddingStatus(getString(R.string.knowledge_embedding_chunk_progress,
                                             currentNote, pending.size(),
                                             indexedChunks, chunks.size()));
                                 }
@@ -2292,7 +2407,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     runOnUiThread(() -> {
                         if (!isFinishing() && !isDestroyed()
                                 && embeddingGeneration.get() == operation) {
-                            status.setText(getString(R.string.knowledge_embedding_running,
+                            showEmbeddingStatus(getString(R.string.knowledge_embedding_running,
                                     progressNow, pending.size()));
                         }
                     });
@@ -2304,8 +2419,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && embeddingGeneration.get() == operation) {
                         embeddingActive = false;
+                        updateProcessBadge();
                         embeddingButton.setText(R.string.knowledge_embedding_build);
-                        status.setText(getString(R.string.knowledge_embedding_done,
+                        showEmbeddingStatus(getString(R.string.knowledge_embedding_done,
                                 succeeded, missing) + " " + getString(
                                 R.string.knowledge_embedding_coverage, truncated));
                     }
@@ -2315,8 +2431,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && embeddingGeneration.get() == operation) {
                         embeddingActive = false;
+                        updateProcessBadge();
                         embeddingButton.setText(R.string.knowledge_embedding_build);
-                        status.setText(R.string.knowledge_embedding_failed);
+                        showEmbeddingStatus(R.string.knowledge_embedding_failed);
                     }
                 });
             }

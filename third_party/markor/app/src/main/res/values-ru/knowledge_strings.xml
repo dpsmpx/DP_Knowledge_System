@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Added 2026 by DP Knowledge System contributors. SPDX-License-Identifier: Apache-2.0 -->
 <resources>
+    <string name="knowledge_page_library">Библиотека</string>
+    <string name="knowledge_page_processes">Процессы</string>
+    <string name="knowledge_page_manage">Управление</string>
+    <string name="knowledge_library_empty">Пока нет заметок в индексе. Обновите библиотеку или измените поиск.</string>
+    <string name="knowledge_process_analysis">Анализ и поиск</string>
+    <string name="knowledge_process_analysis_description">Проверяйте смысловые предложения перед принятием решений. Исходные заметки не изменяются.</string>
+    <string name="knowledge_process_background">Фоновые проверки</string>
+    <string name="knowledge_process_qa">Диагностика устройства</string>
+    <string name="knowledge_manage_decisions">Решения и аудит знаний</string>
+    <string name="knowledge_manage_backup">Резервная копия журнала</string>
+    <string name="knowledge_manage_backup_warning">Это зашифрованная копия только журнала решений, а не полный бэкап заметок и настроек приложения.</string>
+    <string name="knowledge_embedding_idle">Обработка эмбеддингов не выполняется.</string>
     <string name="knowledge_hub_title">Библиотека знаний</string>
     <string name="knowledge_menu">Библиотека знаний</string>
     <string name="knowledge_root_label">Хранилище: %1$s</string>

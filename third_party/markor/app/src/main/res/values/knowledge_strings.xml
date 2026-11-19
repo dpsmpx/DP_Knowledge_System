@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Added 2026 by DP Knowledge System contributors. SPDX-License-Identifier: Apache-2.0 -->
 <resources>
+    <string name="knowledge_page_library">Library</string>
+    <string name="knowledge_page_processes">Processes</string>
+    <string name="knowledge_page_manage">Manage</string>
+    <string name="knowledge_library_empty">No indexed notes yet. Refresh the library or adjust your search.</string>
+    <string name="knowledge_process_analysis">Analysis and search</string>
+    <string name="knowledge_process_analysis_description">Review semantic suggestions before accepting any knowledge. Original notes remain unchanged.</string>
+    <string name="knowledge_process_background">Background checks</string>
+    <string name="knowledge_process_qa">Device diagnostics</string>
+    <string name="knowledge_manage_decisions">Knowledge decisions and audit</string>
+    <string name="knowledge_manage_backup">Journal backup</string>
+    <string name="knowledge_manage_backup_warning">This is an encrypted backup of the decisions journal only, not a complete backup of all notes or application settings.</string>
+    <string name="knowledge_embedding_idle">Embedding processing is idle.</string>
     <string name="knowledge_hub_title">Knowledge Library</string>
     <string name="knowledge_menu">Knowledge Library</string>
     <string name="knowledge_root_label">Notebook: %1$s</string>

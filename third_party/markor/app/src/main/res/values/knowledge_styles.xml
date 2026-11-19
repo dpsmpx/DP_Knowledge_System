@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DP Knowledge System contributors, 2026. SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <!-- A dedicated Material 3 theme prevents changing the legacy Markor editor. -->
+    <style name="Theme.Dpks.Knowledge" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="windowActionModeOverlay">true</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+</resources>
