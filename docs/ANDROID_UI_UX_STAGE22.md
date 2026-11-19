@@ -377,6 +377,22 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   large-font/TalkBack and tablet accessibility remain **QA-70 OPEN/DEFERRED**
   for a single end-of-stage device acceptance run.
 
+## Sixteenth slice — repeatable large-vault library pages (in review)
+
+- Replaced the fixed first-250 library result stop with **60-note pages**,
+  a visible source-count/range indicator and 48dp Previous/Next controls.
+  Search text changes reset to the first page. Rotation/restoration preserves
+  the current offset; shrinking indexes clamp invalid offsets safely.
+- The private SQLite FTS query returns a bounded page and a total; verified
+  current-scan rows remain ordered before preserved-but-unverified rows.
+  Case-insensitive paths receive a binary secondary sort to avoid unstable
+  ties across page boundaries. No selected Markdown file is opened during
+  pagination, and no index synchronization/rebuild is triggered by paging.
+- Quick/20k synthetic QA now checks first and clamped last pages, bounds,
+  stable consecutive pages and total counts on an isolated test index.
+  **QA-71 OPEN/DEFERRED** covers physical scrolling and selection, 20k latency,
+  TalkBack/large font, interrupted scan, IME and source-freshness behavior.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but

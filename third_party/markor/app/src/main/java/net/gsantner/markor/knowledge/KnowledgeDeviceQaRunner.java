@@ -394,6 +394,24 @@ public final class KnowledgeDeviceQaRunner {
             final long indexMillis = SystemClock.elapsedRealtime() - indexStart;
             ensureRunning();
             final List<KnowledgeLocalIndex.Hit> hits = testIndex.search("amber", 8);
+            final KnowledgeLocalIndex.SearchPage firstPage = testIndex.searchPage("", 0, 60);
+            final KnowledgeLocalIndex.SearchPage lastPage = testIndex.searchPage(
+                    "amber", total + 120, 60);
+            if (firstPage.total != total || firstPage.offset != 0
+                    || firstPage.hits.size() != Math.min(total, 60)
+                    || lastPage.total != total || lastPage.hits.isEmpty()
+                    || lastPage.nextOffset != -1
+                    || lastPage.offset != ((total - 1) / 60) * 60) {
+                throw new SyntheticMismatch("verdict=BOUNDED_FTS_PAGING_MISMATCH");
+            }
+            if (total > 60) {
+                final KnowledgeLocalIndex.SearchPage secondPage = testIndex.searchPage("", 60, 60);
+                if (secondPage.total != total || secondPage.hits.size() != 60
+                        || firstPage.hits.get(59).relativePath.equals(
+                                secondPage.hits.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=NONDETERMINISTIC_FTS_PAGING");
+                }
+            }
             final KnowledgeLocalIndex.IndexHealth readOnlyHealth = testIndex.healthReport();
             // This second connection is ONLY for a brand-new disposable QA DB.
             // The actual user index is never opened read/write by diagnostics.
@@ -415,7 +433,7 @@ public final class KnowledgeDeviceQaRunner {
                     + ", sqliteVersion=" + safeVersion(readOnlyHealth.sqliteVersion)
                     + ", quickCheckReadOnly=" + quickStatus(readOnlyHealth.quickCheck)
                     + ", quickCheckSyntheticReadWrite=" + quickStatus(comparisonHealth.quickCheck)
-                    + ", verdict=" + verdict.code;
+                    + ", paging=true, verdict=" + verdict.code;
             if (!verdict.passed) {
                 throw new SyntheticMismatch(counts);
             }

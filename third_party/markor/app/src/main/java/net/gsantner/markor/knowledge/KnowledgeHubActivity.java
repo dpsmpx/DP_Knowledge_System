@@ -82,7 +82,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * an app-private disposable text index, and open a chosen file in Markor.
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
-    private static final int MAX_VISIBLE = 250;
+    private static final int LIBRARY_PAGE_SIZE = 60;
     private static final String EXTRA_EDITOR_REVIEW_PATH = "com.dpsmpx.dpks.editor.review_path";
     private static final String EXTRA_EDITOR_REVIEW_FRAGMENT = "com.dpsmpx.dpks.editor.fragment";
     private static final String EXTRA_EDITOR_SOURCE_HASH = "com.dpsmpx.dpks.editor.source_sha256";
@@ -97,6 +97,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         activity.startActivity(intent);
     }
     private static final String STATE_WORKSPACE_PAGE = "dpks_workspace_page";
+    private static final String STATE_LIBRARY_OFFSET = "dpks_library_offset";
     private static final String STATE_DECISION_CATEGORY = "dpks_decision_category";
     private static final String[] DECISION_CATEGORIES = {
             "pending", "active", "facts", "hypotheses", "rejected", "deferred",
@@ -181,6 +182,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private String decisionCategory = "pending";
     private int decisionOffset;
     private int decisionNextOffset = -1;
+    private int libraryOffset;
+    private int libraryNextOffset = -1;
     private boolean decisionWorkspaceReady;
     private boolean decisionDetailShowing;
     private int workspacePage = R.id.knowledge_nav_library;
@@ -208,6 +211,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (savedInstanceState != null) {
             final String previous = savedInstanceState.getString(STATE_DECISION_CATEGORY, "pending");
             if (Arrays.asList(DECISION_CATEGORIES).contains(previous)) decisionCategory = previous;
+            libraryOffset = Math.max(0, savedInstanceState.getInt(STATE_LIBRARY_OFFSET, 0));
         }
         final int initialPage = savedInstanceState == null
                 ? R.id.knowledge_nav_library
@@ -303,6 +307,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final ListView list = findViewById(R.id.knowledge_list);
         list.setAdapter(adapter);
         list.setEmptyView(findViewById(R.id.knowledge_empty));
+        findViewById(R.id.knowledge_library_previous).setEnabled(false);
+        findViewById(R.id.knowledge_library_next).setEnabled(false);
+        findViewById(R.id.knowledge_library_previous).setOnClickListener(view ->
+                loadLibraryPage(Math.max(0, libraryOffset - LIBRARY_PAGE_SIZE)));
+        findViewById(R.id.knowledge_library_next).setOnClickListener(view -> {
+            if (libraryNextOffset >= 0) loadLibraryPage(libraryNextOffset);
+        });
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < displayed.size()) {
                 openIndexedNote(displayed.get(position).relativePath);
@@ -333,6 +344,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                libraryOffset = 0;
                 refreshResults();
             }
             @Override public void afterTextChanged(Editable s) { }
@@ -383,6 +395,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     protected void onSaveInstanceState(@NonNull final Bundle outState) {
         outState.putInt(STATE_WORKSPACE_PAGE, workspacePage);
         outState.putString(STATE_DECISION_CATEGORY, decisionCategory);
+        outState.putInt(STATE_LIBRARY_OFFSET, libraryOffset);
         super.onSaveInstanceState(outState);
     }
 
@@ -1497,22 +1510,33 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void refreshResults() {
+        loadLibraryPage(libraryOffset);
+    }
+
+    private void loadLibraryPage(final int requestedOffset) {
         if (snapshot == null) {
             return;
         }
         final String query = filter.getText().toString().trim();
         final int generation = queryGeneration.incrementAndGet();
+        findViewById(R.id.knowledge_library_previous).setEnabled(false);
+        findViewById(R.id.knowledge_library_next).setEnabled(false);
+        ((TextView) findViewById(R.id.knowledge_library_page_number)).setText(
+                R.string.knowledge_library_page_loading);
         if (runningSearch != null) {
             runningSearch.cancel(true);
         }
         runningSearch = worker.submit(() -> {
             try {
-                final List<KnowledgeLocalIndex.Hit> hits = index.search(query, MAX_VISIBLE);
+                final KnowledgeLocalIndex.SearchPage page = index.searchPage(
+                        query, requestedOffset, LIBRARY_PAGE_SIZE);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && queryGeneration.get() == generation) {
+                        libraryOffset = page.offset;
+                        libraryNextOffset = page.nextOffset;
                         displayed.clear();
                         labels.clear();
-                        for (final KnowledgeLocalIndex.Hit hit : hits) {
+                        for (final KnowledgeLocalIndex.Hit hit : page.hits) {
                             displayed.add(hit);
                             final String label = hit.title.equals(hit.relativePath)
                                     ? hit.relativePath : hit.title + " — " + hit.relativePath;
@@ -1520,13 +1544,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     : getString(R.string.knowledge_unverified_source) + " " + label);
                         }
                         adapter.notifyDataSetChanged();
-                        showIndexStatus(hits.size());
+                        ((ListView) findViewById(R.id.knowledge_list)).setSelection(0);
+                        findViewById(R.id.knowledge_library_previous).setEnabled(page.offset > 0);
+                        findViewById(R.id.knowledge_library_next).setEnabled(page.nextOffset >= 0);
+                        ((TextView) findViewById(R.id.knowledge_library_page_number)).setText(
+                                page.total == 0 ? getString(R.string.knowledge_library_page_empty)
+                                : getString(R.string.knowledge_library_page_range,
+                                        page.offset + 1, page.offset + page.hits.size(), page.total));
+                        showIndexStatus(page.hits.size());
                     }
                 });
             } catch (RuntimeException ignored) {
                 runOnUiThread(() -> {
                     if (queryGeneration.get() == generation && !isFinishing()) {
                         status.setText(R.string.knowledge_index_failed);
+                        ((TextView) findViewById(R.id.knowledge_library_page_number)).setText(
+                                R.string.knowledge_library_page_unavailable);
                     }
                 });
             }

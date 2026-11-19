@@ -378,6 +378,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("smallestDp >= 600 && width >= 720 && height >= 400", policy)
         self.assertIn("Math.max(96, Math.min(200,", policy)
 
+    def test_library_pagination_is_bounded_and_reaches_beyond_250_notes(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        ids = [x.get(ANDROID + "id") for x in shell.iter()]
+        for item in ("knowledge_library_pagination", "knowledge_library_previous",
+                     "knowledge_library_next", "knowledge_library_page_number"):
+            self.assertEqual(1, ids.count("@+id/" + item))
+        index = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeLocalIndex.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        device = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("SearchPage searchPage(", "LIMIT ? OFFSET ?",
+                       "path COLLATE NOCASE, path COLLATE BINARY",
+                       "SELECT COUNT(*)", "nextOffset"):
+            self.assertIn(marker, index)
+        for marker in ("LIBRARY_PAGE_SIZE = 60", "loadLibraryPage(",
+                       "libraryNextOffset", "knowledge_library_page_range",
+                       "STATE_LIBRARY_OFFSET", "queryGeneration.incrementAndGet()"):
+            self.assertIn(marker, hub)
+        self.assertIn('testIndex.searchPage("", 0, 60)', device)
+        self.assertIn('"amber", total + 120, 60)', device)
+
     def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
         shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
         ids = [element.get(ANDROID + "id", "") for element in shell.iter()]

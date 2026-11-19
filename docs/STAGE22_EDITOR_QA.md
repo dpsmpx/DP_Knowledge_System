@@ -122,6 +122,10 @@ deferred rather than required after every incremental PR.
   phone panel are covered by pure Java tests and static layout checks, but
   actual Android tablet/foldable multi-window, keyboard, rotation, font scale
   and TalkBack behavior require observation in the final combined run.
+- **QA-71 / OPEN, DEFERRED:** sixteenth-slice library pagination queries are
+  SQL-bounded and exercised by synthetic 20k index QA; real 760/20k scrolling,
+  stale/partial index distinctions, keyboard, TalkBack and 200% fonts remain
+  untested on device. Validate that tapping Next never opens/writes a note.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

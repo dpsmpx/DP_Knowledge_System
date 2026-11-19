@@ -421,6 +421,10 @@
     <string name="knowledge_editor_structural_modality">Модальность</string>
     <string name="knowledge_editor_structural_context">Контекст</string>
     <string name="knowledge_editor_structural_interval">Временной интервал</string>
+    <string name="knowledge_library_page_empty">0 из 0 заметок</string>
+    <string name="knowledge_library_page_range">%1$d–%2$d из %3$d заметок</string>
+    <string name="knowledge_library_page_loading">Загрузка заметок…</string>
+    <string name="knowledge_library_page_unavailable">Страница поиска недоступна</string>
     <string name="knowledge_editor_context_provenance">Происхождение: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Открыть связанную заметку</string>
     <string name="knowledge_editor_context_jump">Показать в редакторе</string>
