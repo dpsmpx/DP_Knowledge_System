@@ -248,6 +248,37 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_context_comparison_disclaimer"):
                 self.assertIn(name, names)
 
+    def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        ids = [element.get(ANDROID + "id", "") for element in shell.iter()]
+        for name in ("knowledge_editor_highlights", "knowledge_editor_highlight_legend"):
+            self.assertEqual(1, ids.count("@+id/" + name), name)
+        legend = next(x for x in shell.iter()
+                      if x.get(ANDROID + "id") == "@+id/knowledge_editor_highlight_legend")
+        self.assertEqual("gone", legend.get(ANDROID + "visibility"))
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn('"editor_note_highlights"', bridge)
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for marker in ("toggleEditorHighlights()", "BackgroundColorSpan",
+                       "snapshot.offsetByCodePoints(previousUtf16,",
+                       "snapshot.offsetByCodePoints(startUtf16, end - start)",
+                       "text.setSpan(span,", "buffer.removeSpan(span)",
+                       "addTextChangedListener(highlightWatcher)",
+                       "removeTextChangedListener(highlightWatcher)",
+                       "if (preview) clearEditorHighlights()",
+                       "onStop()", "only_approved_journal_sources"):
+            if marker == "only_approved_journal_sources":
+                self.assertIn(marker, (ROOT / "python/ksys_android_bridge.py").read_text())
+            else:
+                self.assertIn(marker, editor)
+        for folder in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for label in ("knowledge_editor_highlights", "knowledge_editor_highlights_hide",
+                          "knowledge_editor_highlights_summary", "knowledge_editor_highlights_mixed",
+                          "knowledge_editor_highlights_stale", "knowledge_editor_highlights_truncated"):
+                self.assertIn(label, names)
+
     def test_decision_review_previews_are_comparison_panels(self):
         core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):

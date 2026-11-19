@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first seven slices integrated; seventh awaiting device QA**. The owner confirmed ordinary decision
+Status: **first seven slices integrated; eighth pending CI/device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -186,6 +186,30 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
 - This is an evidence-location comparison, **not** a word-level semantic
   diff, automated truth verification or a general-purpose diff editor.
 
+## Eighth slice — temporary inline source highlights (pending CI)
+
+- A **Highlight knowledge** toggle in the DPKS editor temporarily marks
+  Markdown ranges referenced by active, human-approved journal records.
+  Fact, hypothesis, claim and mixed-role ranges have separate Material theme
+  colors and a text legend. Mixed/overlapping spans are deliberately grouped
+  and never arbitrarily colored as a single epistemic role.
+- The new `editor_note_highlights` Python bridge opens no index and reuses
+  strict saved-note SHA, exact Unicode provenance span and raw-text validation.
+  Unapproved analysis candidates and uncertain historical source locations
+  are **not** colored as knowledge. At most 128 distinct ranges are rendered;
+  truncation and the count of unverified origins are disclosed.
+- Decorations use transient Android `BackgroundColorSpan` objects, not
+  Markdown text replacements. They are removed on the next text edit, mode
+  switch to Preview, explicit Save, toggle-off or editor lifecycle stop.
+  Unsaved changes or a stale saved-file snapshot refuse highlighting.
+- Java converts Python code-point positions to UTF-16 before attaching spans.
+  Synthetic tests cover duplicate excerpts, non-BMP prefixes, the no-journal
+  case, unapproved-index separation, mixed overlaps and output bounds.
+  **QA-63 physical UI acceptance is deferred** at the owner's request.
+- Highlighting marks *where approved assertions came from*, not whether
+  those statements are true. It is not a live semantic annotation engine,
+  independent Markdown renderer or automatic proposal editor.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
@@ -238,7 +262,8 @@ On an Android 15 device with test notes (avoid private journal mutations):
 - A full independent DPKS editor and intelligent workspace replacing the
   remaining Markor note-editing engine/menu chrome, while retaining reliable
   import/export and edit/preview workflows. The sixth slice adds a bounded
-  context panel and verified source navigation, but not an inline semantic diff, persistent tablet
+  context panel, verified source navigation and temporary inline source marks,
+  but not an inline semantic diff, persistent tablet
   sidebar or separate Markdown renderer.
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.

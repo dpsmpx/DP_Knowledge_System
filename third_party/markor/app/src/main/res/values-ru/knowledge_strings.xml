@@ -404,6 +404,17 @@
     <string name="knowledge_editor_context_jump">Показать в редакторе</string>
     <string name="knowledge_editor_context_reload">Исходник или буфер редактора изменился. Обновите контекст перед переходом.</string>
     <string name="knowledge_editor_context_failed">Не удалось загрузить локальный контекст. Исходные файлы и журнал не изменены.</string>
+    <string name="knowledge_editor_highlights">Подсветить знания</string>
+    <string name="knowledge_editor_highlights_hide">Убрать подсветку</string>
+    <string name="knowledge_editor_highlights_loading">Проверка координат источников по локальному журналу…</string>
+    <string name="knowledge_editor_highlights_edit_mode">Для подсветки Markdown перейдите в режим «Правка». Режим просмотра не изменяется.</string>
+    <string name="knowledge_editor_highlights_stale">Исходник или текст редактора изменился; подсветка снята. Сохраните изменения и обновите подсветку.</string>
+    <string name="knowledge_editor_highlights_empty">Нет проверенных фрагментов принятых записей. Старые и устаревшие позиции не угадываются.</string>
+    <string name="knowledge_editor_highlights_off">Временная подсветка знаний скрыта.</string>
+    <string name="knowledge_editor_highlights_active">Отмечены лишь источники принятых записей журнала. Это не доказательство истинности и не изменение Markdown.</string>
+    <string name="knowledge_editor_highlights_summary">Подсвечено %1$d из %2$d участков · Непроверенных источников: %3$d\n</string>
+    <string name="knowledge_editor_highlights_mixed">несколько ролей</string>
+    <string name="knowledge_editor_highlights_truncated">Подсвечены только первые 128 участков. Это не весь журнал.</string>
     <string name="knowledge_diff_before">До · принятые знания</string>
     <string name="knowledge_diff_before_first">До · первая запись</string>
     <string name="knowledge_diff_before_second">До · вторая запись</string>

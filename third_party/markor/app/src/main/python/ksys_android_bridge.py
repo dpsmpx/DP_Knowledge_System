@@ -31,6 +31,7 @@ from ksys.core.enums import DialogueOp
 
 MAX_CHARACTERS = 2_000_000
 MAX_DISPLAYED = 24
+MAX_EDITOR_HIGHLIGHTS = 128
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_FILES = 200_000
 
@@ -176,7 +177,8 @@ def _validate_note_input(relative_path: str, markdown: str) -> None:
         raise ValueError("Note exceeds read-only inspection limit")
 
 
-def _verified_source_span(source: dict, markdown: str, source_sha: str) -> dict:
+def _verified_source_span(source: dict, markdown: str, source_sha: str,
+                          *, with_location: bool = True) -> dict:
     """Locate approved provenance by its stored Unicode offsets, never text search.
 
     A matching document SHA alone does not prove that historical/legacy span
@@ -193,10 +195,61 @@ def _verified_source_span(source: dict, markdown: str, source_sha: str) -> dict:
             or not isinstance(source.get("text"), str)
             or markdown[start:end] != source["text"]):
         return {"source_span_state": "mismatch"}
-    before = markdown[:start]
-    return {"source_span_state": "verified", "source_span": [start, end],
-            "source_line": before.count("\n") + 1,
-            "source_column": start - before.rfind("\n")}
+    aligned = {"source_span_state": "verified", "source_span": [start, end]}
+    if with_location:
+        before = markdown[:start]
+        aligned.update({"source_line": before.count("\n") + 1,
+                        "source_column": start - before.rfind("\n")})
+    return aligned
+
+
+def editor_note_highlights(workspace_dir: str, relative_path: str, markdown: str) -> str:
+    """Read only approved source offsets for ephemeral in-editor decoration.
+
+    Never mix unapproved indexed candidates into these highlights. Overlapping
+    approved spans form a single union: mixed roles must not inherit the color
+    of an arbitrary record. Legacy/stale provenance never supplies offsets.
+    """
+    _validate_note_input(relative_path, markdown)
+    kb = _kb(workspace_dir)
+    source_sha = _source_hash(markdown)
+    verified, unverified = [], 0
+    for record in kb.state.records.values():
+        if not kb.state.active(record.id):
+            continue
+        for source in record.provenance:
+            if source.get("document") != relative_path:
+                continue
+            alignment = _verified_source_span(source, markdown, source_sha,
+                                              with_location=False)
+            if alignment["source_span_state"] != "verified":
+                unverified += 1
+                continue
+            start, end = alignment["source_span"]
+            verified.append((start, end, record.role))
+
+    groups = []
+    for start, end, role in sorted(verified):
+        if groups and start < groups[-1]["end"]:
+            group = groups[-1]
+            group["end"] = max(group["end"], end)
+            group["roles"].add(role)
+            group["record_count"] += 1
+        else:
+            groups.append({"start": start, "end": end,
+                           "roles": {role}, "record_count": 1})
+    highlights = [{"start": group["start"], "end": group["end"],
+                   "role": next(iter(group["roles"])) if len(group["roles"]) == 1
+                           else "mixed", "record_count": group["record_count"]}
+                  for group in groups[:MAX_EDITOR_HIGHLIGHTS]]
+    return json.dumps({
+        "protocol": "dpksys.editor_highlights.v1", "path": relative_path,
+        "source_hash": source_sha, "source_snapshot": "saved_markdown",
+        "highlights": highlights, "highlight_total": len(groups),
+        "truncated": len(groups) > MAX_EDITOR_HIGHLIGHTS,
+        "unverified_origins": unverified, "read_only": True,
+        "only_approved_journal_sources": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
