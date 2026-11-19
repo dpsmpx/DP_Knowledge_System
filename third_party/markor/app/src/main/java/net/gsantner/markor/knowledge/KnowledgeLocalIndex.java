@@ -94,6 +94,7 @@ public final class KnowledgeLocalIndex {
     /** Read-only, count-only diagnostics; no source paths or private note text. */
     public static final class IndexHealth {
         public final String quickCheck;
+        public final String sqliteVersion;
         public final int sources;
         public final int textRows;
         public final int missingTextRows;
@@ -113,6 +114,9 @@ public final class KnowledgeLocalIndex {
         public final int unreadableDirectories;
 
         private IndexHealth(final SQLiteDatabase db) {
+            try (Cursor version = db.rawQuery("SELECT sqlite_version()", null)) {
+                sqliteVersion = version.moveToFirst() ? version.getString(0) : "unknown";
+            }
             String check = "unknown";
             try (Cursor c = db.rawQuery("PRAGMA quick_check(1)", null)) {
                 if (c.moveToFirst()) {
@@ -150,7 +154,12 @@ public final class KnowledgeLocalIndex {
         }
 
         public boolean isHealthy() {
-            return "ok".equals(quickCheck) && sources == textRows
+            return "ok".equals(quickCheck) && isStructurallyHealthy();
+        }
+
+        /** Independent relationships, without trusting the SQLite PRAGMA result. */
+        public boolean isStructurallyHealthy() {
+            return sources == textRows
                     && missingTextRows == 0 && orphanTextRows == 0
                     && orphanEmbeddingNotes == 0 && orphanChunks == 0 && orphanLsh == 0
                     && lshRows == (long) embeddedChunks * KnowledgeEmbeddingLsh.TABLES;
@@ -158,14 +167,17 @@ public final class KnowledgeLocalIndex {
     }
 
     private final File databaseFile;
+    private final boolean syntheticDatabase;
 
     public KnowledgeLocalIndex(final Context context) {
         databaseFile = new File(context.getApplicationContext().getNoBackupFilesDir(), DB_NAME);
+        syntheticDatabase = false;
     }
 
     /** Isolated synthetic QA index. Never point this constructor at a real vault index. */
     KnowledgeLocalIndex(final File syntheticDatabaseFile) {
         databaseFile = syntheticDatabaseFile;
+        syntheticDatabase = true;
     }
 
     /** Does not create or open the user's derived index. */
@@ -621,6 +633,28 @@ public final class KnowledgeLocalIndex {
         // Diagnostics must never change the index under investigation.
         final SQLiteDatabase db = SQLiteDatabase.openDatabase(databaseFile.getAbsolutePath(),
                 null, SQLiteDatabase.OPEN_READONLY);
+        try {
+            return new IndexHealth(db);
+        } finally {
+            db.close();
+        }
+    }
+
+    /**
+     * Compare SQLite PRAGMA behavior on the disposable QA database only.
+     * Some SQLite/FTS versions distinguish a read-only connection when checking
+     * virtual tables. This method executes SELECT/PRAGMA only, never writes.
+     * The real private index can NEVER be opened this way by diagnostics.
+     */
+    synchronized IndexHealth syntheticHealthOnReadWriteConnection() {
+        final File parent = databaseFile.getParentFile();
+        if (!syntheticDatabase || parent == null
+                || !parent.getName().startsWith("dpks-device-qa-")
+                || !"qa-index.sqlite".equals(databaseFile.getName())) {
+            throw new IllegalStateException("Read/write QA check requires synthetic database");
+        }
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(databaseFile.getAbsolutePath(),
+                null, SQLiteDatabase.OPEN_READWRITE);
         try {
             return new IndexHealth(db);
         } finally {

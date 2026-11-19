@@ -1,8 +1,8 @@
 name: Signed DP Knowledge Android prerelease
 
 on:
-  # Publish one opt-in milestone build after this workflow first lands on the
-  # integration branch. Future builds can be started explicitly from that ref.
+  # Publish QA fixes automatically when the signed workflow is updated;
+  # other milestones can still be started explicitly from integration.
   push:
     branches:
       - feature/knowledge-android
@@ -118,7 +118,7 @@ jobs:
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
           echo 'Verified signed Android preview. No signing passwords were logged.'
 
-      - name: Publish signed Stage 15 device-QA APK and SHA-256 as prerelease
+      - name: Publish signed Stage 15 SQLite-QA fix APK and SHA-256 as prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -133,6 +133,8 @@ jobs:
             '- Перенос данных из прежнего имени пакета автоматически не выполняется.' \
             '- Содержит редактор Markor, локальное ядро знаний, поиск, аудит и ручную интеграцию LLM/эмбеддингов.' \
             '- Этап 15: две встроенные кнопки для офлайн-диагностики устройства и нагрузочного теста 20 000 искусственных заметок.' \
+            '- Исправление диагностики Stage 15: точные синтетические счётчики/причины отказа, сравнение SQLite quick_check на двух режимах открытия только временной базы.' \
+            '- Реальный индекс диагностируется исключительно на чтение; сомнительный quick_check не вызывает автоматическое пересоздание.' \
             '- Прогресс на экране, проверка SQLite FTS/индекса, Python-ядра, эмбеддингов, шифрования и только чтение реального vault.' \
             '- После выполнения безопасный отчёт автоматически копируется в буфер обмена; личные пути, заметки и ключи в отчёт не попадают.' \
             '- Проверка 20k создаёт и удаляет только временные файлы в приватном кэше приложения; её можно отменить.' \
