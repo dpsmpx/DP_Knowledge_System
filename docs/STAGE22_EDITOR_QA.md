@@ -99,6 +99,8 @@ deferred rather than required after every incremental PR.
   synthetic checks only; the Markor editor lifecycle and colors need device QA.
 - **QA-64 / OPEN, DEFERRED:** ninth-slice cursor-linked accepted/historical
   journal drill-down has synthetic tests only, not physical-device signoff.
+- **QA-65 / OPEN, DEFERRED:** tenth-slice evidence sources, linked journal
+  records and cross-note verified jumps await batched Android acceptance.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
@@ -191,3 +193,25 @@ include private text, filesystem paths or credentials in public CI/QA logs.
    accessibility at 200% font, light/dark theme, long text selection and
    rapid open/cancel/rotation/Back. Keep notes/journal hashes unchanged while
    browsing; never include private content in reports or public CI.
+
+## QA-65 — deferred evidence-graph and cross-note navigation checklist
+
+1. In isolated synthetic notes `a.md` and `b.md`, accept opposing statements.
+   From the editor's journal record tap **Основания, связанные знания и
+   история решений**; see source origin, labeled *possible* conflicting
+   accepted record and its independent history. No index candidate is
+   displayed as an approved record. Verify the journal SHA stays constant.
+2. Tap the other record and its source: DPKS must open the actual source note
+   and select the exact Unicode span, including emoji prefixes and repeated
+   paragraphs. Back must return to the original editor; no Markdown may be
+   automatically saved or rewritten.
+3. Change the target file on disk, change its source text, remove it, switch
+   the selected vault, add an unsaved editor edit, and try a legacy record
+   missing span/hash. Refuse each unverified jump, never guess a matching
+   excerpt or follow a symlink outside the vault. Also change the target
+   between initial validation and its activity opening.
+4. Revise then retract synthetic records. Test lineage predecessors/successors,
+   event ordering, 12+ origins, 16+ links, 16+ journal events, repeated drill
+   downs, Back/rotation/process death, TalkBack and 200% font in light/dark
+   themes. Distinguish truncation from absence. Keep QA-65 OPEN until actual
+   device evidence exists.

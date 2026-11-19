@@ -57,6 +57,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** A note opened from DPKS must return to the library, not destroy its task. */
 public final class KnowledgeDocumentActivity extends DocumentActivity {
     private static final int MAX_SOURCE_BYTES = 2_000_000;
+    private static final String JUMP_PATH = "dpks.editor.source.path";
+    private static final String JUMP_SHA = "dpks.editor.source.sha";
+    private static final String JUMP_TEXT_SHA = "dpks.editor.source.text_sha";
+    private static final String JUMP_START = "dpks.editor.source.start";
+    private static final String JUMP_END = "dpks.editor.source.end";
     private final ExecutorService knowledgeWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger operationGeneration = new AtomicInteger();
     private final AtomicInteger highlightGeneration = new AtomicInteger();
@@ -66,11 +71,29 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private HighlightingEditor highlightedEditor;
     private TextWatcher highlightWatcher;
     private boolean highlightsRequested;
+    private AlertDialog evidenceDialog;
+    private boolean incomingJumpStarted;
+    private int incomingJumpAttempts;
 
     public static void open(final Activity activity, final File file) {
         final Intent intent = new Intent(activity, KnowledgeDocumentActivity.class);
         intent.putExtra(Document.EXTRA_FILE, file);
         intent.putExtra(Document.EXTRA_DO_PREVIEW, false);
+        activity.startActivity(intent);
+    }
+
+    /** Open a proven journal origin in a DPKS editor, not a generic file viewer. */
+    private static void openAtSource(final Activity activity, final File file,
+                                     final String relative, final String sha,
+                                     final String textSha, final int start, final int end) {
+        final Intent intent = new Intent(activity, KnowledgeDocumentActivity.class);
+        intent.putExtra(Document.EXTRA_FILE, file);
+        intent.putExtra(Document.EXTRA_DO_PREVIEW, false);
+        intent.putExtra(JUMP_PATH, relative);
+        intent.putExtra(JUMP_SHA, sha);
+        intent.putExtra(JUMP_TEXT_SHA, textSha);
+        intent.putExtra(JUMP_START, start);
+        intent.putExtra(JUMP_END, end);
         activity.startActivity(intent);
     }
 
@@ -141,6 +164,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     protected void onResume() {
         super.onResume();
         if (modeButtons != null) modeButtons.post(this::updateModeButtons);
+        if (modeButtons != null) modeButtons.post(this::selectIncomingSource);
     }
 
     /** Canonical vault-relative paths only. Never follow symlinks outside the vault. */
@@ -897,6 +921,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         detail.append("\n\n").append(getString(
                 R.string.knowledge_editor_context_comparison_disclaimer));
         body.addView(contextDetailText(detail.toString()));
+        if (!record.optString("id").isEmpty()) {
+            addContextRow(body, getString(R.string.knowledge_editor_evidence_open),
+                    view -> inspectRecordEvidence(record.optString("id")));
+        }
         final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                 .setTitle(editorKnowledgeRole(record.optString("role")))
                 .setView(scroll)
@@ -906,6 +934,261 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     (d, which) -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
         }
         dialog.show();
+    }
+
+    /** Navigate only among human-approved journal records; never index candidates. */
+    private void inspectRecordEvidence(final String recordId) {
+        if (recordId == null || recordId.isEmpty()) return;
+        final int generation = operationGeneration.incrementAndGet();
+        setKnowledgeStatus(R.string.knowledge_editor_working);
+        knowledgeWorker.submit(() -> {
+            try {
+                final JSONObject evidence = KnowledgePythonBridge.editorRecordEvidence(this,
+                        new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
+                        recordId);
+                if (!recordId.equals(evidence.optString("id"))
+                        || !evidence.optBoolean("only_journal_records")
+                        || !evidence.optBoolean("read_only")) {
+                    throw new IOException("Untrusted evidence response");
+                }
+                runOnUiThread(() -> {
+                    if (current(generation)) renderRecordEvidence(evidence);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation)) setKnowledgeStatus(R.string.knowledge_editor_evidence_failed);
+                });
+            }
+        });
+    }
+
+    private void renderRecordEvidence(final JSONObject evidence) {
+        final ScrollView scroll = new ScrollView(this);
+        final LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        final int inset = (int) (16 * getResources().getDisplayMetrics().density);
+        body.setPadding(inset, inset, inset, inset);
+        scroll.addView(body);
+        addComparisonBlock(body, R.string.knowledge_editor_context_formal_statement,
+                evidence.optString("statement"));
+        body.addView(contextDetailText(editorKnowledgeRole(evidence.optString("role")) + " · "
+                + evidence.optString("status") + " · " + getString(evidence.optBoolean("active")
+                ? R.string.knowledge_editor_source_inspector_active
+                : R.string.knowledge_editor_source_inspector_historical)));
+
+        final JSONArray origins = evidence.optJSONArray("origins");
+        addEvidenceHeading(body, getString(R.string.knowledge_editor_evidence_origins,
+                evidence.optInt("origins_total")));
+        if (origins != null) {
+            for (int i = 0; i < origins.length(); i++) {
+                final JSONObject origin = origins.optJSONObject(i);
+                if (origin == null) continue;
+                final String label = getString(R.string.knowledge_editor_evidence_unverified)
+                        + "\n" + origin.optString("path") + " · " + origin.optString("locator")
+                        + "\n" + origin.optString("source_excerpt");
+                addContextRow(body, label, view -> openEvidenceOrigin(origin));
+            }
+        }
+        if (origins == null || origins.length() == 0) {
+            addContextEmpty(body, R.string.knowledge_editor_evidence_no_origins);
+        }
+
+        final JSONArray links = evidence.optJSONArray("links");
+        addEvidenceHeading(body, getString(R.string.knowledge_editor_evidence_links,
+                evidence.optInt("links_total")));
+        if (links != null) {
+            for (int i = 0; i < links.length(); i++) {
+                final JSONObject link = links.optJSONObject(i);
+                if (link == null) continue;
+                final JSONArray kinds = link.optJSONArray("kinds");
+                final StringBuilder types = new StringBuilder();
+                if (kinds != null) {
+                    for (int k = 0; k < kinds.length(); k++) {
+                        if (types.length() > 0) types.append(" · ");
+                        types.append(evidenceLinkKind(kinds.optString(k)));
+                    }
+                }
+                final String title = types + " · " + editorKnowledgeRole(link.optString("role"))
+                        + "\n" + link.optString("statement");
+                addContextRow(body, title, view -> inspectRecordEvidence(link.optString("id")));
+            }
+        }
+        if (links == null || links.length() == 0) {
+            addContextEmpty(body, R.string.knowledge_editor_evidence_no_links);
+        }
+        if (!evidence.optBoolean("conflicts_available")) {
+            addContextEmpty(body, R.string.knowledge_editor_context_conflicts_unavailable);
+        }
+
+        final JSONArray events = evidence.optJSONArray("events");
+        addEvidenceHeading(body, getString(R.string.knowledge_editor_source_inspector_history,
+                evidence.optInt("events_total")));
+        if (events != null) {
+            for (int i = 0; i < events.length(); i++) {
+                final JSONObject event = events.optJSONObject(i);
+                if (event != null) body.addView(contextDetailText("#" + event.optInt("seq")
+                        + " · " + event.optString("op") + " · " + event.optString("time")));
+            }
+        }
+        if (evidence.optBoolean("origins_truncated") || evidence.optBoolean("links_truncated")
+                || evidence.optBoolean("events_truncated")) {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_evidence_truncated)));
+        }
+        body.addView(contextDetailText(getString(R.string.knowledge_editor_evidence_disclaimer)));
+        if (evidenceDialog != null) evidenceDialog.dismiss();
+        evidenceDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_editor_evidence_title)
+                .setView(scroll)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        evidenceDialog.show();
+    }
+
+    private void addEvidenceHeading(final LinearLayout body, final String title) {
+        final TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleSmall);
+        heading.setPadding(8, 16, 8, 8);
+        body.addView(heading);
+    }
+
+    private String evidenceLinkKind(final String kind) {
+        switch (kind) {
+            case "predecessor": return getString(R.string.knowledge_editor_evidence_predecessor);
+            case "successor": return getString(R.string.knowledge_editor_evidence_successor);
+            case "possible_conflict": return getString(R.string.knowledge_editor_evidence_conflict);
+            default: return getString(R.string.knowledge_editor_evidence_link);
+        }
+    }
+
+    /** An origin path in the journal is never a trusted file location. */
+    private void openEvidenceOrigin(final JSONObject origin) {
+        final String relative = origin.optString("path");
+        final String expectedSha = origin.optString("document_sha");
+        final String textSha = origin.optString("source_text_sha");
+        final JSONArray span = origin.optJSONArray("source_span");
+        if (span == null || span.length() != 2 || expectedSha.length() != 64
+                || textSha.length() != 64) {
+            evidenceOriginUnavailable();
+            return;
+        }
+        final int start = span.optInt(0, -1);
+        final int end = span.optInt(1, -1);
+        final File selectedVault;
+        final File target;
+        try {
+            selectedVault = _appSettings.getNotebookDirectory().getCanonicalFile();
+            target = new File(selectedVault, relative).getCanonicalFile();
+            if (!relative.equals(relativePath(target))) throw new IOException("Invalid origin path");
+        } catch (Exception ignored) {
+            evidenceOriginUnavailable();
+            return;
+        }
+        final int generation = operationGeneration.incrementAndGet();
+        setKnowledgeStatus(R.string.knowledge_editor_working);
+        knowledgeWorker.submit(() -> {
+            try {
+                if (!relative.equals(relativePath(target))) throw new IOException("Path changed");
+                final String disk = readSavedNote(target.getCanonicalFile());
+                if (!verifiedEvidenceSpan(disk, expectedSha, textSha, start, end)) {
+                    throw new IOException("Origin does not match current saved source");
+                }
+                runOnUiThread(() -> {
+                    if (!current(generation)) return;
+                    try {
+                        if (!_appSettings.getNotebookDirectory().getCanonicalFile().equals(selectedVault)
+                                || !relative.equals(relativePath(target))) {
+                            throw new IOException("Vault or path changed");
+                        }
+                        final DocumentEditAndViewFragment currentEditor = editor();
+                        if (currentEditor != null && target.getCanonicalFile().equals(
+                                currentEditor.getDocument().file.getCanonicalFile())) {
+                            final JSONObject destination = new JSONObject();
+                            destination.put("source_span_state", "verified");
+                            destination.put("source_span", new JSONArray().put(start).put(end));
+                            if (evidenceDialog != null) evidenceDialog.dismiss();
+                            jumpToSavedSource(destination, relative, expectedSha, disk);
+                        } else {
+                            if (evidenceDialog != null) evidenceDialog.dismiss();
+                            openAtSource(this, target, relative, expectedSha, textSha, start, end);
+                        }
+                    } catch (Exception ignored) {
+                        evidenceOriginUnavailable();
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation)) evidenceOriginUnavailable();
+                });
+            }
+        });
+    }
+
+    private void evidenceOriginUnavailable() {
+        setKnowledgeStatus(R.string.knowledge_editor_evidence_unavailable);
+        Toast.makeText(this, R.string.knowledge_editor_evidence_unavailable,
+                Toast.LENGTH_LONG).show();
+    }
+
+    private static boolean verifiedEvidenceSpan(final String disk, final String docSha,
+                                                final String sourceSha, final int start,
+                                                final int end) throws Exception {
+        final int count = disk.codePointCount(0, disk.length());
+        if (start < 0 || end <= start || end > count || !docSha.equals(sha256(disk))) return false;
+        final int a = disk.offsetByCodePoints(0, start);
+        final int b = disk.offsetByCodePoints(a, end - start);
+        return sourceSha.equals(sha256(disk.substring(a, b)));
+    }
+
+    /** Recheck a cross-note origin after its editor loads, not only before launch. */
+    private void selectIncomingSource() {
+        final Intent intent = getIntent();
+        if (incomingJumpStarted || !intent.hasExtra(JUMP_PATH)) return;
+        final DocumentEditAndViewFragment fragment = editor();
+        if (fragment == null) {
+            if (++incomingJumpAttempts < 12 && modeButtons != null) {
+                modeButtons.postDelayed(this::selectIncomingSource, 100);
+            } else {
+                incomingJumpStarted = true;
+                setKnowledgeStatus(R.string.knowledge_editor_evidence_unavailable);
+            }
+            return;
+        }
+        incomingJumpStarted = true;
+        final String path = intent.getStringExtra(JUMP_PATH);
+        final String docSha = intent.getStringExtra(JUMP_SHA);
+        final String textSha = intent.getStringExtra(JUMP_TEXT_SHA);
+        final int start = intent.getIntExtra(JUMP_START, -1);
+        final int end = intent.getIntExtra(JUMP_END, -1);
+        final File file = fragment.getDocument().file;
+        final int generation = operationGeneration.incrementAndGet();
+        knowledgeWorker.submit(() -> {
+            try {
+                if (path == null || !path.equals(relativePath(file)) || docSha == null
+                        || textSha == null) throw new IOException("Different source path");
+                final String saved = readSavedNote(file.getCanonicalFile());
+                if (!verifiedEvidenceSpan(saved, docSha, textSha, start, end)) {
+                    throw new IOException("Source changed before editor opened");
+                }
+                runOnUiThread(() -> {
+                    if (!current(generation)) return;
+                    final DocumentEditAndViewFragment current = editor();
+                    if (current == null || !saved.equals(current.getTextString())) {
+                        setKnowledgeStatus(R.string.knowledge_editor_context_reload);
+                        return;
+                    }
+                    setMode(false);
+                    current.getEditor().setSelection(saved.offsetByCodePoints(0, start),
+                            saved.offsetByCodePoints(0, end));
+                    current.getEditor().requestFocus();
+                    setKnowledgeStatus(R.string.knowledge_editor_evidence_verified);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation)) setKnowledgeStatus(R.string.knowledge_editor_evidence_unavailable);
+                });
+            }
+        });
     }
 
     private void addComparisonBlock(final LinearLayout parent, final int label,
@@ -1069,6 +1352,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         // Do not surface stale dialogs over the library or another editor.
         operationGeneration.incrementAndGet();
         clearEditorHighlights();
+        if (evidenceDialog != null) {
+            evidenceDialog.dismiss();
+            evidenceDialog = null;
+        }
         final View context = findViewById(R.id.knowledge_editor_context_panel);
         if (context != null) context.setVisibility(View.GONE);
         super.onStop();
