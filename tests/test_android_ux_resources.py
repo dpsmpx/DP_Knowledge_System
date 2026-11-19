@@ -317,6 +317,29 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_context_comparison_disclaimer"):
                 self.assertIn(name, names)
 
+    def test_editor_literal_diff_is_bounded_read_only_and_clearly_not_semantic(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        comparer = (folder / "KnowledgeTextDiff.java").read_text()
+        self.assertIn("KnowledgeTextDiff.compare(sourceExcerpt, formalStatement)", editor)
+        self.assertIn('"verified".equals(record.optString("source_span_state"))', editor)
+        self.assertIn('!record.optBoolean("source_text_truncated")', editor)
+        self.assertIn('!record.optBoolean("statement_truncated")', editor)
+        self.assertIn("new SpannableStringBuilder(content)", editor)
+        self.assertIn("value.setText(decorated, TextView.BufferType.SPANNABLE)", editor)
+        self.assertIn("MAX_LENGTH = 1024", comparer)
+        self.assertIn("MAX_TOKENS = 128", comparer)
+        self.assertIn("final int[][] suffix", comparer)
+        self.assertNotIn("KnowledgePythonBridge.", comparer)
+        for folder_name in ("values", "values-ru"):
+            xml = ET.parse(ROOT / f"res/{folder_name}/knowledge_strings.xml").getroot()
+            strings = {e.get("name"): e.text for e in xml}
+            for name in ("knowledge_editor_text_diff_legend",
+                         "knowledge_editor_text_diff_identical",
+                         "knowledge_editor_text_diff_unavailable"):
+                self.assertIn(name, strings)
+            self.assertTrue(strings["knowledge_editor_text_diff_legend"])
+
     def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
         shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
         ids = [element.get(ANDROID + "id", "") for element in shell.iter()]

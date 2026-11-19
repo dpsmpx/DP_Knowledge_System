@@ -9,11 +9,14 @@ package net.gsantner.markor.knowledge;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.graphics.Typeface;
 import android.text.Editable;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextWatcher;
 import android.text.style.BackgroundColorSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
@@ -991,15 +994,26 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         }
     }
 
-    /** Two separately labeled representations, not an inferred semantic diff. */
+    /** Only literal differences between two verified representations, never a semantic proof. */
     private void showContextRecord(final JSONObject record, final String path,
                                    final String savedHash, final String savedMarkdown) {
         final boolean verified = "verified".equals(record.optString("source_span_state"));
         final LinearLayout body = newDockContent();
+        final String sourceExcerpt = record.optString("source_excerpt");
+        final String formalStatement = record.optString("statement");
+        final KnowledgeTextDiff.Result comparison = verified
+                && !record.optBoolean("source_text_truncated")
+                && !record.optBoolean("statement_truncated")
+                ? KnowledgeTextDiff.compare(sourceExcerpt, formalStatement)
+                : KnowledgeTextDiff.unavailable();
         addComparisonBlock(body, R.string.knowledge_editor_context_source_snapshot,
-                record.optString("source_excerpt"));
+                sourceExcerpt, comparison.sourceChanges);
         addComparisonBlock(body, R.string.knowledge_editor_context_formal_statement,
-                record.optString("statement"));
+                formalStatement, comparison.formalChanges);
+        body.addView(contextDetailText(getString(!comparison.available
+                ? R.string.knowledge_editor_text_diff_unavailable
+                : comparison.hasChanges() ? R.string.knowledge_editor_text_diff_legend
+                : R.string.knowledge_editor_text_diff_identical)));
         final StringBuilder detail = new StringBuilder(getString(
                 R.string.knowledge_editor_context_provenance,
                 record.optString("provenance_kind"), record.optString("locator")));
@@ -1315,6 +1329,13 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
 
     private void addComparisonBlock(final LinearLayout parent, final int label,
                                     final String content) {
+        addComparisonBlock(parent, label, content, java.util.Collections.emptyList());
+    }
+
+    /** Transient selectable styling only: the source string and journal stay untouched. */
+    private void addComparisonBlock(final LinearLayout parent, final int label,
+                                    final String content,
+                                    final List<KnowledgeTextDiff.Range> changed) {
         final TextView title = new TextView(this);
         title.setText(label);
         title.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleSmall);
@@ -1323,6 +1344,25 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         final TextView value = contextDetailText(content);
         value.setBackgroundColor(MaterialColors.getColor(value,
                 com.google.android.material.R.attr.colorSurfaceContainer));
+        if (!changed.isEmpty()) {
+            final SpannableStringBuilder decorated = new SpannableStringBuilder(content);
+            final int background = MaterialColors.getColor(value,
+                    com.google.android.material.R.attr.colorTertiaryContainer);
+            final int foreground = MaterialColors.getColor(value,
+                    com.google.android.material.R.attr.colorOnTertiaryContainer);
+            for (final KnowledgeTextDiff.Range range : changed) {
+                if (range.start < 0 || range.end > content.length() || range.start >= range.end) {
+                    continue;
+                }
+                decorated.setSpan(new BackgroundColorSpan(background), range.start, range.end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                decorated.setSpan(new ForegroundColorSpan(foreground), range.start, range.end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                decorated.setSpan(new StyleSpan(Typeface.BOLD), range.start, range.end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            value.setText(decorated, TextView.BufferType.SPANNABLE);
+        }
         parent.addView(value);
     }
 
