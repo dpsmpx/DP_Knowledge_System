@@ -100,6 +100,14 @@
                 android:text="@string/knowledge_editor_highlights" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_source_inspector"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_source_inspector" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/knowledge_editor_review_selection"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"

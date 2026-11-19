@@ -415,6 +415,17 @@
     <string name="knowledge_editor_highlights_summary">Подсвечено %1$d из %2$d участков · Непроверенных источников: %3$d\n</string>
     <string name="knowledge_editor_highlights_mixed">несколько ролей</string>
     <string name="knowledge_editor_highlights_truncated">Подсвечены только первые 128 участков. Это не весь журнал.</string>
+    <string name="knowledge_editor_source_inspector">Знания фрагмента</string>
+    <string name="knowledge_editor_source_inspector_select">Поставьте курсор внутрь исходного фрагмента или выделите текст в пределах одного фрагмента.</string>
+    <string name="knowledge_editor_source_inspector_summary">Связанных записей: %1$d · Активных: %2$d · Исторических: %3$d</string>
+    <string name="knowledge_editor_source_inspector_warning">Непроверенных источников в других местах заметки: %1$d. Устаревшие позиции не угадываются.</string>
+    <string name="knowledge_editor_source_inspector_none">Нет записи журнала с проверенным источником, полностью содержащим выделение. Сузьте выделение на границе фрагментов или откройте панель знаний. Это не доказательство отсутствия связанных знаний.</string>
+    <string name="knowledge_editor_source_inspector_active">Активная принятая запись</string>
+    <string name="knowledge_editor_source_inspector_historical">Историческая / неактивная запись</string>
+    <string name="knowledge_editor_source_inspector_truncated">Показаны только первые 16 записей. Полный журнал доступен в разделе «Решения».</string>
+    <string name="knowledge_editor_source_inspector_changed">Сохранённый источник или буфер редактора изменился. Сохраните и повторите. Журнал не изменён.</string>
+    <string name="knowledge_editor_source_inspector_history">Связанных событий журнала: %1$d</string>
+    <string name="knowledge_editor_source_inspector_history_partial">Показаны лишь 8 последних событий.</string>
     <string name="knowledge_diff_before">До · принятые знания</string>
     <string name="knowledge_diff_before_first">До · первая запись</string>
     <string name="knowledge_diff_before_second">До · вторая запись</string>

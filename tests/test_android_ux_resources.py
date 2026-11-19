@@ -279,6 +279,33 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                           "knowledge_editor_highlights_stale", "knowledge_editor_highlights_truncated"):
                 self.assertIn(label, names)
 
+    def test_editor_source_inspector_uses_cursor_and_verified_journal_history(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        self.assertEqual(1, sum(x.get(ANDROID + "id") ==
+                                "@+id/knowledge_editor_source_inspector" for x in shell.iter()))
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for marker in ("inspectSourceKnowledge()", "editorSourceRecords(this,",
+                       "snapshot.codePointCount(0, Math.min(a, b))",
+                       "cutsSurrogate(snapshot, a)", "cutsSurrogate(snapshot, b)",
+                       "path.equals(relativePath(file))", "saved.equals(snapshot)",
+                       "showContextRecord(record, path,", "knowledge_editor_source_inspector_history",
+                       'record.optJSONArray("history")'):
+            self.assertIn(marker, java)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn('"editor_source_records"', bridge)
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('"only_verified_journal_sources": True', python)
+        self.assertIn('"historical_total": len(matched) - active_total', python)
+        for folder in ("values", "values-ru"):
+            names = {e.get("name") for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for label in ("knowledge_editor_source_inspector",
+                          "knowledge_editor_source_inspector_none",
+                          "knowledge_editor_source_inspector_summary",
+                          "knowledge_editor_source_inspector_historical",
+                          "knowledge_editor_source_inspector_history_partial"):
+                self.assertIn(label, names)
+
     def test_decision_review_previews_are_comparison_panels(self):
         core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):

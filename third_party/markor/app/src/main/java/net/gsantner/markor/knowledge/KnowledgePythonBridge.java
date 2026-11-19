@@ -72,6 +72,15 @@ public final class KnowledgePythonBridge {
         return invoke(context, "editor_note_highlights", workspace, relativePath, savedMarkdown);
     }
 
+    /** Read-only accepted and historical journal records covering one source selection. */
+    public static JSONObject editorSourceRecords(final Context context, final String workspace,
+                                                 final String relativePath, final String savedMarkdown,
+                                                 final int codepointStart, final int codepointEnd)
+            throws JSONException {
+        return invoke(context, "editor_source_records", workspace, relativePath,
+                savedMarkdown, codepointStart, codepointEnd);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,

@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first eight slices integrated; eighth awaiting device QA**. The owner confirmed ordinary decision
+Status: **first eight slices integrated; ninth pending CI and device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -211,6 +211,26 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   those statements are true. It is not a live semantic annotation engine,
   independent Markdown renderer or automatic proposal editor.
 
+## Ninth slice — source selection → knowledge journal inspection (pending CI)
+
+- The editor provides **Knowledge at cursor**: place the caret inside a
+  verified journal source or select text fully contained within one. The
+  detail links directly to matching active and historical/obsolete records,
+  with separate status labels, original Markdown vs KSF, provenance, possible
+  contradiction counts and up to eight associated journal events.
+- Python `editor_source_records` reuses strict saved-file SHA and raw
+  provenance span verification. It never guesses a record from a repeated
+  phrase or stale source, and never includes unapproved semantic candidates.
+  Results are bounded to 16 records and count excluded, unverified origins.
+- Android maps UTF-16 caret/selection to Unicode code points, rejects cuts
+  through surrogate pairs, checks canonical vault membership and compares
+  the **unsaved buffer** to the saved note before showing local journal data.
+  Re-entering the note's source from detail reuses the existing disk/buffer
+  freshness check. Neither preview nor navigation appends to the journal.
+- This is a read-only contextual drill-down. Full decision action flows,
+  exhaustive evidence graphs, semantic proof and independent editor engine
+  remain separate work. Physical QA-64 is deferred at owner request.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
@@ -263,7 +283,7 @@ On an Android 15 device with test notes (avoid private journal mutations):
 - A full independent DPKS editor and intelligent workspace replacing the
   remaining Markor note-editing engine/menu chrome, while retaining reliable
   import/export and edit/preview workflows. The sixth slice adds a bounded
-  context panel, verified source navigation and temporary inline source marks,
+  context panel, verified source navigation, cursor-based journal inspection and temporary inline source marks,
   but not an inline semantic diff, persistent tablet
   sidebar or separate Markdown renderer.
 - Accessible large-list navigation beyond the current 250 visible results,
