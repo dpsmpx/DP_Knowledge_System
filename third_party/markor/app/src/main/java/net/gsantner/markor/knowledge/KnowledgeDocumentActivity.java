@@ -13,6 +13,7 @@ import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -434,11 +435,15 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             if (item == null) continue;
             final String role = editorKnowledgeRole(item.optString("role"));
             final String statement = item.optString("statement");
+            final String spanState = item.optString("source_span_state");
             final String title = role + " · " + statement
-                    + (item.optBoolean("source_current") ? ""
-                    : " · " + getString(R.string.knowledge_editor_context_record_stale));
+                    + ("verified".equals(spanState) ? "" : " · " + getString(
+                    "stale_source".equals(spanState)
+                            ? R.string.knowledge_editor_context_record_stale
+                            : R.string.knowledge_editor_context_span_unavailable));
             addContextRow(accepted, title, view ->
-                    showContextRecord(item, context.optString("source_hash"), savedMarkdown));
+                    showContextRecord(item, context.optString("path"),
+                            context.optString("source_hash"), savedMarkdown));
         }
         if (recordCount == 0) {
             addContextEmpty(accepted, R.string.knowledge_editor_context_empty_records);
@@ -526,19 +531,33 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         }
     }
 
-    private void showContextRecord(final JSONObject record, final String savedHash,
-                                   final String savedMarkdown) {
-        final String excerpt = record.optString("source_excerpt");
-        final StringBuilder detail = new StringBuilder();
-        detail.append(getString(R.string.knowledge_editor_context_source)).append("\n")
-                .append(excerpt).append("\n\n")
-                .append(getString(R.string.knowledge_editor_context_statement)).append("\n")
-                .append(record.optString("statement")).append("\n\n")
-                .append(getString(R.string.knowledge_editor_context_provenance,
-                        record.optString("provenance_kind"), record.optString("locator")));
-        if (!record.optBoolean("source_current")) {
-            detail.append("\n\n")
-                    .append(getString(R.string.knowledge_editor_context_record_stale));
+    /** Two separately labeled representations, not an inferred semantic diff. */
+    private void showContextRecord(final JSONObject record, final String path,
+                                   final String savedHash, final String savedMarkdown) {
+        final boolean verified = "verified".equals(record.optString("source_span_state"));
+        final ScrollView scroll = new ScrollView(this);
+        final LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        final int inset = (int) (16 * getResources().getDisplayMetrics().density);
+        body.setPadding(inset, inset, inset, inset);
+        scroll.addView(body);
+        addComparisonBlock(body, R.string.knowledge_editor_context_source_snapshot,
+                record.optString("source_excerpt"));
+        addComparisonBlock(body, R.string.knowledge_editor_context_formal_statement,
+                record.optString("statement"));
+        final StringBuilder detail = new StringBuilder(getString(
+                R.string.knowledge_editor_context_provenance,
+                record.optString("provenance_kind"), record.optString("locator")));
+        if (verified) {
+            detail.append("\n").append(getString(R.string.knowledge_editor_context_exact_location,
+                    record.optInt("source_line"), record.optInt("source_column")));
+        } else {
+            detail.append("\n").append(getString(R.string.knowledge_editor_context_span_unavailable));
+        }
+        if (record.optBoolean("source_text_truncated")
+                || record.optBoolean("statement_truncated")) {
+            detail.append("\n").append(getString(
+                    R.string.knowledge_editor_context_truncated_excerpt));
         }
         if (!record.optBoolean("conflicts_available")) {
             detail.append("\n\n")
@@ -548,16 +567,31 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     .append(getString(R.string.knowledge_editor_context_conflict))
                     .append(" · ").append(record.optInt("conflict_count"));
         }
-        final TextView selectable = contextDetailText(detail.toString());
+        detail.append("\n\n").append(getString(
+                R.string.knowledge_editor_context_comparison_disclaimer));
+        body.addView(contextDetailText(detail.toString()));
         final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                 .setTitle(editorKnowledgeRole(record.optString("role")))
-                .setView(selectable)
+                .setView(scroll)
                 .setNegativeButton(android.R.string.cancel, null);
-        if (record.optBoolean("source_current") && !excerpt.isEmpty()) {
+        if (verified) {
             dialog.setPositiveButton(R.string.knowledge_editor_context_jump,
-                    (d, which) -> jumpToSavedSource(excerpt, savedHash, savedMarkdown));
+                    (d, which) -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
         }
         dialog.show();
+    }
+
+    private void addComparisonBlock(final LinearLayout parent, final int label,
+                                    final String content) {
+        final TextView title = new TextView(this);
+        title.setText(label);
+        title.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleSmall);
+        title.setPadding(6, 8, 6, 6);
+        parent.addView(title);
+        final TextView value = contextDetailText(content);
+        value.setBackgroundColor(MaterialColors.getColor(value,
+                com.google.android.material.R.attr.colorSurfaceContainer));
+        parent.addView(value);
     }
 
     private void showContextRelation(final JSONObject relation, final int title,
@@ -586,25 +620,51 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         return label;
     }
 
-    private void jumpToSavedSource(final String excerpt, final String expectedHash,
-                                   final String savedSnapshot) {
-        final DocumentEditAndViewFragment fragment = editor();
-        if (fragment == null) return;
-        final String currentText = fragment.getTextString();
-        try {
-            final int start = currentText.indexOf(excerpt);
-            if (!savedSnapshot.equals(currentText) || !expectedHash.equals(sha256(currentText))
-                    || start < 0 || currentText.indexOf(excerpt, start + 1) >= 0) {
-                throw new IOException("Source changed or ambiguous");
+    /** Unicode source offsets from verified provenance; disk is re-read before navigation. */
+    private void jumpToSavedSource(final JSONObject record, final String path,
+                                   final String expectedHash, final String savedSnapshot) {
+        final DocumentEditAndViewFragment initial = editor();
+        if (initial == null || !"verified".equals(record.optString("source_span_state"))) return;
+        final File file = initial.getDocument().file;
+        final JSONArray span = record.optJSONArray("source_span");
+        if (span == null || span.length() != 2) return;
+        final int start = span.optInt(0, -1);
+        final int end = span.optInt(1, -1);
+        final int generation = operationGeneration.incrementAndGet();
+        setKnowledgeStatus(R.string.knowledge_editor_working);
+        knowledgeWorker.submit(() -> {
+            try {
+                if (!path.equals(relativePath(file))) throw new IOException("Vault changed");
+                final String disk = readSavedNote(file.getCanonicalFile());
+                if (!savedSnapshot.equals(disk) || !expectedHash.equals(sha256(disk))) {
+                    throw new IOException("Source changed on disk");
+                }
+                runOnUiThread(() -> {
+                    if (!current(generation)) return;
+                    final DocumentEditAndViewFragment fragment = editor();
+                    if (fragment == null || !savedSnapshot.equals(fragment.getTextString())) {
+                        setKnowledgeStatus(R.string.knowledge_editor_context_reload);
+                        return;
+                    }
+                    final String buffer = fragment.getTextString();
+                    final int count = buffer.codePointCount(0, buffer.length());
+                    if (start < 0 || end <= start || end > count) {
+                        setKnowledgeStatus(R.string.knowledge_editor_context_reload);
+                        return;
+                    }
+                    setMode(false);
+                    fragment.getEditor().setSelection(buffer.offsetByCodePoints(0, start),
+                            buffer.offsetByCodePoints(0, end));
+                    fragment.getEditor().requestFocus();
+                    operationGeneration.incrementAndGet();
+                    findViewById(R.id.knowledge_editor_context_panel).setVisibility(View.GONE);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation)) setKnowledgeStatus(R.string.knowledge_editor_context_reload);
+                });
             }
-            setMode(false);
-            fragment.getEditor().setSelection(start, start + excerpt.length());
-            fragment.getEditor().requestFocus();
-            operationGeneration.incrementAndGet();
-            findViewById(R.id.knowledge_editor_context_panel).setVisibility(View.GONE);
-        } catch (Exception ignored) {
-            setKnowledgeStatus(R.string.knowledge_editor_context_reload);
-        }
+        });
     }
 
     private void openRelatedNote(final String relative, final File selectedVault) {

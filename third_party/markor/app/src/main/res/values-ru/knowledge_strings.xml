@@ -393,10 +393,16 @@
     <string name="knowledge_editor_context_agreement">Возможное совпадение</string>
     <string name="knowledge_editor_context_source">Сохранённый снимок источника</string>
     <string name="knowledge_editor_context_statement">Запись знаний</string>
+    <string name="knowledge_editor_context_source_snapshot">Исходный Markdown · сохранённый снимок</string>
+    <string name="knowledge_editor_context_formal_statement">Принятое формальное утверждение · KSF</string>
+    <string name="knowledge_editor_context_exact_location">Проверенная позиция источника: строка %1$d, столбец %2$d</string>
+    <string name="knowledge_editor_context_span_unavailable">Точная позиция не подтверждена. Переход к фрагменту недоступен.</string>
+    <string name="knowledge_editor_context_truncated_excerpt">Длинный фрагмент или утверждение: здесь показано только начало.</string>
+    <string name="knowledge_editor_context_comparison_disclaimer">Это разные представления. Сравнение не доказывает смысловую эквивалентность интерпретации и оригинала.</string>
     <string name="knowledge_editor_context_provenance">Происхождение: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Открыть связанную заметку</string>
     <string name="knowledge_editor_context_jump">Показать в редакторе</string>
-    <string name="knowledge_editor_context_reload">Исходник изменился или фрагмент неоднозначен. Обновите контекст перед переходом.</string>
+    <string name="knowledge_editor_context_reload">Исходник или буфер редактора изменился. Обновите контекст перед переходом.</string>
     <string name="knowledge_editor_context_failed">Не удалось загрузить локальный контекст. Исходные файлы и журнал не изменены.</string>
     <string name="knowledge_diff_before">До · принятые знания</string>
     <string name="knowledge_diff_before_first">До · первая запись</string>

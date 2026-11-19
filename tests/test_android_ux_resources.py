@@ -205,7 +205,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
                      "KnowledgePythonBridge.editorContext(", "relation_index_state",
-                     "accepted_records", "candidate_relations", "source_current",
+                     "accepted_records", "candidate_relations", "source_span_state",
                      "knowledge_editor_context_unsaved", "knowledge_editor_context_disclaimer",
                      "jumpToSavedSource(", "openRelatedNote(", "relativePath(candidate)"):
             self.assertIn(item, editor)
@@ -220,6 +220,32 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_context_index_stale",
                          "knowledge_editor_context_record_stale",
                          "knowledge_editor_context_conflict"):
+                self.assertIn(name, names)
+
+    def test_editor_source_alignment_uses_provenance_offsets_not_ambiguous_text(self):
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for marker in ("source_span_state", "source_span", "source_line", "source_column",
+                       "knowledge_editor_context_source_snapshot",
+                       "knowledge_editor_context_formal_statement",
+                       "savedSnapshot.equals(disk)", "path.equals(relativePath(file))",
+                       "buffer.offsetByCodePoints(0, start)",
+                       "buffer.offsetByCodePoints(0, end)",
+                       "knowledge_editor_context_span_unavailable"):
+            self.assertIn(marker, editor)
+        self.assertNotIn("currentText.indexOf(excerpt)", editor)
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("_verified_source_span", "markdown[start:end] != source[\"text\"]",
+                       '"source_span_state": "verified"', '"source_span": [start, end]'):
+            self.assertIn(marker, bridge)
+        for folder in ("values", "values-ru"):
+            names = {e.get("name") for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_editor_context_source_snapshot",
+                         "knowledge_editor_context_formal_statement",
+                         "knowledge_editor_context_exact_location",
+                         "knowledge_editor_context_span_unavailable",
+                         "knowledge_editor_context_truncated_excerpt",
+                         "knowledge_editor_context_comparison_disclaimer"):
                 self.assertIn(name, names)
 
     def test_decision_review_previews_are_comparison_panels(self):

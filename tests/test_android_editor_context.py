@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party/markor/app/src/main/python"))
 
 from ksys_android_bridge import (analyze_vault, editor_note_context, inspect_note,
-                                 preview_fragment, record_decision)
+                                 preview_fragment, record_decision, _verified_source_span)
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
 from ksys.store.workspace import Workspace
@@ -67,12 +67,18 @@ class EditorContextTests(unittest.TestCase):
         self.assertTrue(rec["locator"])
         self.assertEqual(frag, rec["fragment_id"])
         self.assertIn("Алекс", rec["source_excerpt"])
+        self.assertEqual("verified", rec["source_span_state"])
+        begin, finish = rec["source_span"]
+        self.assertEqual(note[begin:finish], rec["source_excerpt"])
+        self.assertEqual([2, 1], [rec["source_line"], rec["source_column"]])
         self.assertFalse(state["accepted_truncated"])
         self.assertEqual(0, state["stale_provenance_count"])
 
         changed = self.context(note + "Вторая строка.")
         self.assertEqual(1, changed["stale_provenance_count"])
         self.assertFalse(changed["accepted_records"][0]["source_current"])
+        self.assertEqual("stale_source", changed["accepted_records"][0]["source_span_state"])
+        self.assertNotIn("source_span", changed["accepted_records"][0])
         self.assertEqual([], Journal(self.workspace / "data/formal/journal.jsonl",
                                      FixedClock()).verify())
 
@@ -123,6 +129,41 @@ class EditorContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             editor_note_context(str(self.workspace), "a.md", "x" * 2_000_001)
         self.assertFalse(self.workspace.exists())
+
+    def test_duplicate_excerpt_uses_approved_span_not_first_text_match(self):
+        note = "# 😀\nАлекс является разработчиком.\nАлекс является разработчиком.\n"
+        fragments = json.loads(inspect_note("a.md", note))["fragments"]
+        target = fragments[2]["id"]
+        packet = json.loads(preview_fragment(str(self.workspace), "a.md", note, target))
+        record_decision(str(self.workspace), "a.md", note, target,
+                        packet["preview"]["options"][0]["reading_id"], "claim",
+                        packet["source_hash"], packet["journal_head"])
+        rec = self.context(note)["accepted_records"][0]
+        self.assertEqual(target, rec["fragment_id"])
+        self.assertEqual("verified", rec["source_span_state"])
+        self.assertEqual(note.rindex("Алекс является"), rec["source_span"][0])
+        self.assertEqual(3, rec["source_line"])
+        self.assertEqual(1, rec["source_column"])
+        # Python spans are Unicode code points, not Android UTF-16 indices.
+        self.assertNotEqual(len(note[:rec["source_span"][0]].encode("utf-16-le")) // 2,
+                            rec["source_span"][0])
+
+    def test_legacy_and_corrupt_provenance_never_guess_source_offset(self):
+        note = "Повтор. Повтор."
+        sha = hashlib.sha256(note.encode("utf-8")).hexdigest()
+        metadata = {"document_sha": sha, "text": "Повтор."}
+        self.assertEqual("missing", _verified_source_span(metadata, note, sha)["source_span_state"])
+        self.assertEqual("mismatch", _verified_source_span(
+            dict(metadata, span=[3, 10]), note, sha)["source_span_state"])
+        self.assertEqual("missing", _verified_source_span(
+            dict(metadata, span=[True, 7]), note, sha)["source_span_state"])
+        self.assertEqual("mismatch", _verified_source_span(
+            dict(metadata, span=[0, 999]), note, sha)["source_span_state"])
+        self.assertEqual("stale_source", _verified_source_span(
+            dict(metadata, span=[0, 7]), note, "0" * 64)["source_span_state"])
+        aligned = _verified_source_span(dict(metadata, span=[8, 15]), note, sha)
+        self.assertEqual({"source_span_state": "verified", "source_span": [8, 15],
+                          "source_line": 1, "source_column": 9}, aligned)
 
 
 if __name__ == "__main__":
