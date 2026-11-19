@@ -73,6 +73,22 @@ public final class KnowledgePythonBridge {
                 fragmentId, readingId, role, sourceHash, journalHead);
     }
 
+    public static JSONObject activeDecisions(final Context context, final String workspace,
+                                             final int offset) throws JSONException {
+        return invoke(context, "active_decisions", workspace, offset);
+    }
+
+    public static JSONObject previewRetraction(final Context context, final String workspace,
+                                               final String recordId) throws JSONException {
+        return invoke(context, "preview_retraction", workspace, recordId);
+    }
+
+    public static JSONObject retractDecision(final Context context, final String workspace,
+                                             final String recordId, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "retract_decision", workspace, recordId, expectedHead);
+    }
+
     public static JSONObject query(final Context context, final String workspace,
                                    final String question) throws JSONException {
         return invoke(context, "ask_knowledge", workspace, question);

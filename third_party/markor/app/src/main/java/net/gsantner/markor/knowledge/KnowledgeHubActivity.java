@@ -210,6 +210,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
         findViewById(R.id.knowledge_bulk_review).setOnClickListener(
                 view -> showCandidateQueue(0));
+        findViewById(R.id.knowledge_active_decisions).setOnClickListener(
+                view -> showActiveDecisions(0));
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -1283,6 +1285,129 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_decision_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Stage 17: human-only, read-only listing. No automatic or bulk retractions. */
+    private void showActiveDecisions(final int offset) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject page = KnowledgePythonBridge.activeDecisions(this,
+                        workspacePath(), offset);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final JSONArray records = page.optJSONArray("records");
+                    if (records == null || records.length() == 0) {
+                        Toast.makeText(this, R.string.knowledge_no_active_decisions,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final int next = page.isNull("next_offset") ? -1
+                            : page.optInt("next_offset", -1);
+                    final String[] labels = new String[records.length() + (next >= 0 ? 1 : 0)];
+                    for (int i = 0; i < records.length(); i++) {
+                        final JSONObject record = records.optJSONObject(i);
+                        labels[i] = record == null ? "?" : record.optString("role")
+                                + " · " + record.optString("summary");
+                    }
+                    if (next >= 0) {
+                        labels[records.length()] = getString(R.string.knowledge_decisions_next);
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(getString(R.string.knowledge_active_decisions) + " ("
+                                    + page.optInt("total") + ")")
+                            .setItems(labels, (dialog, position) -> {
+                                if (position == records.length()) {
+                                    showActiveDecisions(next);
+                                    return;
+                                }
+                                final JSONObject record = records.optJSONObject(position);
+                                if (record != null) {
+                                    showRetractionPreview(record.optString("record_id"));
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_retract_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showRetractionPreview(final String recordId) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject preview = KnowledgePythonBridge.previewRetraction(this,
+                        workspacePath(), recordId);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final StringBuilder details = new StringBuilder()
+                            .append(preview.optString("role")).append(" · ")
+                            .append(preview.optString("record_id")).append("\n\n")
+                            .append(preview.optString("summary")).append("\n\n");
+                    if (preview.optBoolean("summary_truncated")) {
+                        details.append(getString(R.string.knowledge_retract_truncated))
+                                .append("\n\n");
+                    }
+                    details.append(getString(R.string.knowledge_retract_impact,
+                                    preview.optInt("affected_derived"),
+                                    preview.optInt("rederived")))
+                            .append("\n\n")
+                            .append(getString(R.string.knowledge_retract_warning));
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_retract_preview)
+                            .setMessage(details.toString())
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_retract_confirm,
+                                    (dialog, which) -> commitRetraction(preview))
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_retract_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void commitRetraction(final JSONObject preview) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final String expectedHead = preview.isNull("journal_head") ? null
+                        : preview.getString("journal_head");
+                final JSONObject saved = KnowledgePythonBridge.retractDecision(this,
+                        workspacePath(), preview.getString("record_id"), expectedHead);
+                if (!"retract".equals(saved.optString("decision"))
+                        || saved.optJSONArray("journal_ids") == null) {
+                    throw new IllegalStateException("No retraction commit");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_retract_success,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_retract_failed);
                     }
                 });
             }

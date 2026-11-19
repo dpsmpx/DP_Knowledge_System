@@ -304,6 +304,79 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def active_decisions(workspace_dir: str, offset: int = 0) -> str:
+    """Read-only, bounded active-record browser for explicit human review.
+
+    No candidate or model is allowed to revoke knowledge via this endpoint.
+    Note text is displayed only in the local app UI, never in device QA logs.
+    """
+    if not isinstance(offset, int) or offset < 0 or offset > 1_000_000:
+        raise ValueError("Invalid decision page")
+    kb = _kb(workspace_dir)
+    records = [rec for rec in kb.state.records.values() if kb.state.active(rec.id)]
+    records.sort(key=lambda rec: (rec.updated_at, rec.id), reverse=True)
+    page = records[offset:offset + MAX_DISPLAYED]
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "journal_head": kb.journal.head,
+        "total": len(records),
+        "offset": offset,
+        "next_offset": offset + len(page) if offset + len(page) < len(records) else None,
+        "records": [{
+            "record_id": rec.id,
+            "role": rec.role,
+            "status": rec.status.value,
+            "summary": rec.node.ksf()[:220],
+        } for rec in page],
+        "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preview_retraction(workspace_dir: str, record_id: str) -> str:
+    """Non-mutating consequence preview, tied to the current journal head."""
+    kb = _kb(workspace_dir)
+    rec = kb.state.records.get(record_id)
+    if rec is None or not kb.state.active(record_id):
+        raise ValueError("Record is missing or no longer active")
+    delta = kb.what_if_retract(record_id)
+    full_summary = rec.node.ksf()
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "record_id": record_id,
+        "journal_head": kb.journal.head,
+        "role": rec.role,
+        "status": rec.status.value,
+        "summary": full_summary[:4000],
+        "summary_truncated": len(full_summary) > 4000,
+        "affected_derived": len(delta.removed),
+        "rederived": len(delta.rederived),
+        "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def retract_decision(workspace_dir: str, record_id: str, expected_head: str | None) -> str:
+    """Append an explicit human retraction; never erase journal or source notes."""
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed after retraction preview")
+    if record_id not in kb.state.records or not kb.state.active(record_id):
+        raise ValueError("Record is missing or no longer active")
+    kb.ws.init()
+    result = kb.retract(record_id, reason="explicit Android human retraction")
+    if kb.journal.verify():
+        raise ValueError("Journal failed integrity verification after retraction")
+    if kb.state.active(record_id):
+        raise ValueError("Retracted record remained active")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "record_id": record_id,
+        "journal_ids": [entry.id for entry in result.entries],
+        "journal_head": kb.journal.head,
+        "decision": "retract",
+        "affected_derived": len(result.auth.removed),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 _READ_ONLY_OPS = {
     DialogueOp.ASK, DialogueOp.VERIFY, DialogueOp.DEFINE, DialogueOp.HYPOTHESIZE,
     DialogueOp.EXPLAIN, DialogueOp.COMPARE, DialogueOp.FIND_CONTRADICTIONS,

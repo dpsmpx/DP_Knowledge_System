@@ -117,6 +117,7 @@ public final class KnowledgeDeviceQaRunner {
             step("CRYPTO-01", this::checkSyntheticCrypto);
             step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
             step("RECONCILE-16", this::checkSyntheticReconciliation);
+            step("DECISION-17", this::checkSyntheticDecisionLifecycle);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -474,6 +475,86 @@ public final class KnowledgeDeviceQaRunner {
             return "renamed=1, derivedOldRemoved=1, partialUnverified=1, "
                     + "partialRemoved=0, evidenceExcluded=true, "
                     + "cancelRollback=true, sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Exercise decision preview, append-only retraction and stale-head rejection. */
+    private String checkSyntheticDecisionLifecycle() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create decision sandbox");
+        }
+        try {
+            ensureRunning();
+            final String source = "# Synthetic test\nСтресс приводит к бессоннице.\n";
+            final String relativePath = "synthetic-decision.md";
+            final String workspace = new File(sandbox, "workspace").getAbsolutePath();
+            final JSONObject inspected = KnowledgePythonBridge.inspect(context,
+                    relativePath, source);
+            final String fragmentId = inspected.getJSONArray("fragments")
+                    .getJSONObject(1).getString("id");
+            final JSONObject preview = KnowledgePythonBridge.preview(context,
+                    workspace, relativePath, source, fragmentId);
+            final String reading = preview.getJSONObject("preview").getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            final String initialHead = preview.isNull("journal_head") ? null
+                    : preview.getString("journal_head");
+            final JSONObject committed = KnowledgePythonBridge.decide(context, workspace,
+                    relativePath, source, fragmentId, reading, "fact",
+                    preview.getString("source_hash"), initialHead);
+            final JSONObject listing = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (listing.getInt("total") != 1
+                    || listing.getJSONArray("records").length() != 1) {
+                throw new SyntheticMismatch("verdict=DECISION_LIST_MISMATCH");
+            }
+            final String recordId = listing.getJSONArray("records").getJSONObject(0)
+                    .getString("record_id");
+            final JSONObject retractionPreview = KnowledgePythonBridge.previewRetraction(
+                    context, workspace, recordId);
+            if (!retractionPreview.getBoolean("read_only")
+                    || !committed.getString("journal_head").equals(
+                            retractionPreview.getString("journal_head"))) {
+                throw new SyntheticMismatch("verdict=DECISION_PREVIEW_MISMATCH");
+            }
+            boolean staleRejected = false;
+            try {
+                KnowledgePythonBridge.retractDecision(context, workspace,
+                        recordId, "J:stale-head-for-device-qa");
+            } catch (Exception expected) {
+                staleRejected = true;
+            }
+            if (!staleRejected || KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0).getInt("total") != 1) {
+                throw new SyntheticMismatch("verdict=STALE_HEAD_NOT_REJECTED");
+            }
+            ensureRunning();
+            final JSONObject retracted = KnowledgePythonBridge.retractDecision(context,
+                    workspace, recordId, retractionPreview.getString("journal_head"));
+            if (!"retract".equals(retracted.getString("decision"))
+                    || retracted.getJSONArray("journal_ids").length() != 1
+                    || KnowledgePythonBridge.activeDecisions(context, workspace, 0)
+                            .getInt("total") != 0) {
+                throw new SyntheticMismatch("verdict=RETRACTION_MISMATCH");
+            }
+            boolean repeatedRejected = false;
+            try {
+                KnowledgePythonBridge.retractDecision(context, workspace, recordId,
+                        retracted.getString("journal_head"));
+            } catch (Exception expected) {
+                repeatedRejected = true;
+            }
+            if (!repeatedRejected || !preview.getString("source_hash").equals(
+                    KnowledgePythonBridge.preview(context, workspace, relativePath,
+                            source, fragmentId).getString("source_hash"))) {
+                throw new SyntheticMismatch("verdict=REPEAT_OR_SOURCE_MISMATCH");
+            }
+            return "syntheticAccepted=1, activeAfterRetract=0, journalAppended=true, "
+                    + "staleHeadRejected=true, repeatedRetractRejected=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);
         }

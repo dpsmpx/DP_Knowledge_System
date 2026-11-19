@@ -11,7 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
-from ksys_android_bridge import inspect_note, preview_fragment, record_decision
+from ksys_android_bridge import (active_decisions, inspect_note, preview_fragment,
+                                 preview_retraction, record_decision, retract_decision)
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
 
@@ -97,6 +98,70 @@ class MobileDecisionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             preview_fragment(str(self.root / "workspace"),
                              self.path, self.note, self.fragment)
+
+    def _accept_synthetic(self):
+        preview = self.preview()
+        rid = preview["preview"]["options"][0]["reading_id"]
+        result = json.loads(record_decision(
+            str(self.root / "workspace"), self.path, self.note, self.fragment,
+            rid, "fact", preview["source_hash"], preview["journal_head"]))
+        return result
+
+    def test_retraction_requires_explicit_head_and_preserves_history(self):
+        accepted = self._accept_synthetic()
+        workspace = str(self.root / "workspace")
+        listing = json.loads(active_decisions(workspace))
+        self.assertEqual(1, listing["total"])
+        self.assertTrue(listing["read_only"])
+        target = listing["records"][0]["record_id"]
+        preview = json.loads(preview_retraction(workspace, target))
+        self.assertEqual("fact", preview["role"])
+        self.assertTrue(preview["read_only"])
+        journal = Journal(self.root / "workspace/data/formal/journal.jsonl", FixedClock())
+        self.assertEqual(1, len(journal.entries()))
+        self.assertEqual(accepted["journal_head"], journal.head)
+        with self.assertRaises(ValueError):
+            retract_decision(workspace, target, "J:stale")
+        self.assertEqual(1, len(journal.entries()))
+        result = json.loads(retract_decision(workspace, target, preview["journal_head"]))
+        self.assertEqual("retract", result["decision"])
+        self.assertEqual(0, json.loads(active_decisions(workspace))["total"])
+        with self.assertRaises(ValueError):
+            retract_decision(workspace, target, result["journal_head"])
+        with self.assertRaises(ValueError):
+            preview_retraction(workspace, target)
+        journal = Journal(self.root / "workspace/data/formal/journal.jsonl", FixedClock())
+        self.assertEqual(["accept", "retract"], [e.op for e in journal.entries()])
+        self.assertEqual([], journal.verify())
+        self.assertEqual(self.note, "# Demo\nСтресс приводит к бессоннице.\n")
+
+    def test_retraction_browser_is_bounded_read_only_and_rejects_invalid_pages(self):
+        workspace = str(self.root / "workspace")
+        self.assertFalse((self.root / "workspace").exists())
+        listing = json.loads(active_decisions(workspace))
+        self.assertEqual([], listing["records"])
+        self.assertFalse((self.root / "workspace").exists())
+        for offset in (-1, 1_000_001, "0"):
+            with self.assertRaises(ValueError):
+                active_decisions(workspace, offset)
+        with self.assertRaises(ValueError):
+            preview_retraction(workspace, "F:missing")
+        with self.assertRaises(ValueError):
+            retract_decision(workspace, "F:missing", None)
+        self.assertFalse((self.root / "workspace").exists())
+
+    def test_retraction_rejects_tampered_journal_without_append(self):
+        self._accept_synthetic()
+        workspace = str(self.root / "workspace")
+        target = json.loads(active_decisions(workspace))["records"][0]["record_id"]
+        preview = json.loads(preview_retraction(workspace, target))
+        path = self.root / "workspace/data/formal/journal.jsonl"
+        original = path.read_text(encoding="utf-8")
+        path.write_text(original.replace('"actor":"human:me"', '"actor":"other"'),
+                        encoding="utf-8")
+        with self.assertRaises(ValueError):
+            retract_decision(workspace, target, preview["journal_head"])
+        self.assertEqual(1, len(path.read_text(encoding="utf-8").splitlines()))
 
 
 if __name__ == "__main__":
