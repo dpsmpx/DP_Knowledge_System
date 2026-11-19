@@ -1,8 +1,10 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first and second slices integrated; third (Decisions workspace)
-implemented in a separate development branch, pending CI and device QA**.
-This is *not* a complete replacement of the inherited Markor editor engine.
+Status: **first three slices integrated** (Preview #14 includes the dedicated
+Decisions destination); the owner reports that decision review works in
+their manual check. The full QA-54 checklist remains **OPEN**. **Fourth slice:
+DPKS editor workspace improvements are under development, pending CI and
+device QA**. This is *not* a replacement of the inherited Markor editor engine.
 
 ## Scope
 
@@ -51,7 +53,7 @@ This is *not* a complete replacement of the inherited Markor editor engine.
 This is a UX integration layer, **not** yet a fully independent DPKS editor,
 an audit-ready source-span diff or a replacement for the decision list dialogs.
 
-## Third slice — first full-screen Decisions destination (pending acceptance)
+## Third slice — first full-screen Decisions destination (initial feedback positive)
 
 - Four bottom destinations: **Library / Decisions / Processes / Settings**.
   The editor, background jobs, and the local-first journal policy are unchanged.
@@ -76,8 +78,37 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   accessible for 2–8 proposals; no journal append is made by browsing.
 - Python core tests use only disposable synthetic Markdown and assert the
   journal/source invariant; resource tests assert four destinations and detail
-  sections. Physical Android validation, large-list perf and TalkBack remain
-  open. See `docs/STAGE22_DECISIONS_QA.md`.
+  sections. The owner confirmed the ordinary decision review works after
+  Preview #14, but comprehensive physical Android validation, large-list
+  performance and TalkBack remain open. See `docs/STAGE22_DECISIONS_QA.md`.
+
+## Fourth slice — note editor intelligence and context (pending CI and QA)
+
+- The dedicated DPKS editor shell adds an explicit **Edit / Preview**
+  control, retaining Markor's renderer, formatting support and proven
+  file-save path. The control reflects existing Markor mode changes.
+- **Analyze** runs the local Python parser on the editor buffer without
+  source or journal writes, showing bounded fragment previews, semantic
+  candidate counts and coverage status; these are machine interpretations,
+  *not* accepted knowledge.
+- **Review selection** maps Android UTF-16 selection offsets to Python
+  Unicode code points, matches exactly one source fragment and opens the
+  existing guarded decision preview. Selections spanning multiple fragments
+  are refused rather than guessed.
+- **Save-before-review guard:** a selected fragment can only be passed to
+  decision review when the current editor text exactly equals the saved
+  Markdown file. The receiving library rechecks the SHA-256 of the saved
+  source before generating its normal preview, followed by existing
+  source/journal freshness checks at commit. The UI never silently saves,
+  changes the note or accepts an interpretation.
+- **Links** displays only *possible lexical backlinks* from the last
+  complete, vault-matched private index scan, opened read-only. Missing or
+  stale scans do not claim an absence of links; navigation rechecks that the
+  target stays inside the selected vault. This is not semantic backlink proof.
+- Analysis and backlink queries run off the UI thread with stale-result
+  suppression. No cloud request or telemetry is added. Synthetic Python
+  and resource tests assert selection mapping, boundaries and UI guardrails.
+  See `docs/STAGE22_EDITOR_QA.md` for the mandatory device checklist.
 
 **Still incomplete:** this third slice is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
@@ -93,7 +124,7 @@ sources, LLM permissions, APIs or the public data shipped with the APK**.
 
 On an Android 15 device with test notes (avoid private journal mutations):
 
-1. Open **DP Knowledge System**. Confirm the three bottom destinations,
+1. Open **DP Knowledge System**. Confirm the four bottom destinations,
    readable labels, color contrast in light/dark mode and wallpaper-driven
    color on Android 12+.
 2. In **Library**, verify 760-note search (or another disposable collection),
@@ -106,7 +137,7 @@ On an Android 15 device with test notes (avoid private journal mutations):
 4. Repeat the tab switch during synthetic 20k stress only if storage and
    battery allow. Verify cancellation uses its original action and the UI
    remains responsive. Note cold/warm navigation and memory if possible.
-5. In **Manage**, verify all review/audit/diagnostics/export/import controls
+5. In **Settings**, verify all review/audit/diagnostics/export/import controls
    are reachable. **Cancel** destructive or restorative dialogs. Do not
    import backup data into a real journal as a UI smoke test.
 6. Rotate the device or change system theme, check selected tab restoration,
@@ -130,13 +161,14 @@ On an Android 15 device with test notes (avoid private journal mutations):
 
 - A full independent DPKS editor and intelligent workspace replacing the
   remaining Markor note-editing engine/menu chrome, while retaining reliable
-  import/export and edit/preview workflows.
+  import/export and edit/preview workflows. The fourth slice adds visible
+  edit/preview and guarded review/link entry points, but not an inline
+  source-span diff, persistent sidebar or separate renderer.
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.
-- Full-screen decision queue and inline source-span-aware diff, evidence,
-  selective approval and reversible proposal preview; the Decisions screen now
-  covers navigation and provenance but explicit confirmation still uses the
-  established dialogs, without source-span diff.
+- Inline source-span-aware diff, evidence, selective approval and reversible
+  proposal preview; the Decisions screen covers navigation and provenance,
+  but explicit confirmation still uses the established dialogs.
 - Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
   gesture navigation/edge-to-edge insets, instrumented UI tests and measured
   scrolling/rendering under 20k notes.

@@ -58,6 +58,14 @@ public final class KnowledgePythonBridge {
         return invoke(context, "inspect_note", relativePath, markdown);
     }
 
+    /** Locate the single semantic fragment enclosing a manually selected span. */
+    public static JSONObject inspectSelection(final Context context, final String relativePath,
+                                              final String markdown, final int codepointStart,
+                                              final int codepointEnd) throws JSONException {
+        return invoke(context, "inspect_selection", relativePath, markdown,
+                codepointStart, codepointEnd);
+    }
+
     public static JSONObject preview(final Context context, final String workspace,
                                      final String relativePath, final String markdown,
                                      final String fragmentId) throws JSONException {

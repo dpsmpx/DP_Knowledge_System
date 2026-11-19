@@ -766,6 +766,49 @@ public final class KnowledgeLocalIndex {
         return sources;
     }
 
+    /**
+     * Editor-only backlink inspection: never create, migrate or write the
+     * private derived index. Refuse a different vault or incomplete scan.
+     * Results remain *possible* links, never verified semantic relations.
+     */
+    public synchronized List<String> verifiedPossibleBacklinksReadOnly(
+            final File root, final String relativePath, final int limit) throws IOException {
+        if (!databaseFile.isFile()) {
+            return Collections.emptyList();
+        }
+        if (root == null || relativePath == null || relativePath.isEmpty()
+                || limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Invalid backlink request");
+        }
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(databaseFile.getAbsolutePath(),
+                null, SQLiteDatabase.OPEN_READONLY);
+        try {
+            if (!root.getCanonicalPath().equals(getMeta(db, "root"))
+                    || parseLong(getMeta(db, "last_scan_ms")) <= 0
+                    || "1".equals(getMeta(db, "last_scan_incomplete"))) {
+                return Collections.emptyList();
+            }
+            final String full = KnowledgeMarkdownMetadata.linkKey(relativePath);
+            final String shortName = KnowledgeMarkdownMetadata.linkKey(
+                    KnowledgeMarkdownMetadata.filenameTitle(relativePath));
+            final List<String> sources = new ArrayList<>();
+            try (Cursor c = db.rawQuery("SELECT DISTINCT l.source_path FROM links l "
+                            + "JOIN notes n ON n.path=l.source_path "
+                            + "WHERE (l.target_key=? OR l.target_key=?) "
+                            + "AND n.generation=(SELECT value FROM meta "
+                            + "WHERE key='last_scan_generation') "
+                            + "ORDER BY l.source_path LIMIT ?",
+                    new String[]{full, shortName, Integer.toString(limit)})) {
+                while (c.moveToNext()) {
+                    sources.add(c.getString(0));
+                }
+            }
+            return sources;
+        } finally {
+            db.close();
+        }
+    }
+
     private static String readBounded(final File file,
                                       final KnowledgeVaultScanner.Cancellation cancellation)
             throws IOException {

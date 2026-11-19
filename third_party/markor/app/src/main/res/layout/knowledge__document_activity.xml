@@ -2,6 +2,7 @@
 <!-- DP Knowledge System contributors, 2026. SPDX-License-Identifier: Apache-2.0 -->
 <!-- Only the chrome is new; DocumentEditAndViewFragment remains the Markor editor. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/colorSurface"
@@ -23,6 +24,85 @@
         android:paddingTop="7dp"
         android:paddingBottom="7dp"
         android:text="@string/knowledge_editor_source_notice"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="12sp" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:fillViewport="false">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/knowledge_editor_modes"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleSelection="true"
+                app:selectionRequired="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/knowledge_editor_edit_button"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/knowledge_editor_edit" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/knowledge_editor_preview_button"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/knowledge_editor_preview" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_inspect"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_inspect" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_review_selection"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_review_selection" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_backlinks"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_backlinks" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <TextView
+        android:id="@+id/knowledge_editor_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="5dp"
+        android:accessibilityLiveRegion="polite"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:text="@string/knowledge_editor_ready"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
 

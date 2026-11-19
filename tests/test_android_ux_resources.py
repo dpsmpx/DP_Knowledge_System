@@ -135,6 +135,39 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         self.assertIn("KnowledgeDocumentActivity.open(this, file)", bridge)
 
+    def test_editor_review_and_link_controls_are_explicit_and_guarded(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        ids = [element.get(ANDROID + "id", "") for element in shell.iter()]
+        for name in ("knowledge_editor_modes", "knowledge_editor_edit_button",
+                     "knowledge_editor_preview_button", "knowledge_editor_inspect",
+                     "knowledge_editor_review_selection", "knowledge_editor_backlinks",
+                     "knowledge_editor_status"):
+            self.assertEqual(1, ids.count("@+id/" + name), name)
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for required in ("setViewModeVisibility(preview)", "inspectSelection(this,",
+                         "markdown.codePointCount(0, start)", "cutsSurrogate(markdown,",
+                         "reviewSavedFragment(", "readSavedNote(file.getCanonicalFile())",
+                         "saved.equals(editorSnapshot)", "relativePath(file)",
+                         "verifiedPossibleBacklinksReadOnly(", "onStop()"):
+            self.assertIn(required, editor)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn("JSONObject inspectSelection(", bridge)
+        index = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeLocalIndex.java").read_text()
+        self.assertIn("SQLiteDatabase.OPEN_READONLY", index)
+        self.assertIn("last_scan_incomplete", index)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("reviewFromEditor(", hub)
+        self.assertIn("expectedSourceHash.equals(", hub)
+        self.assertIn("previewFragment(path, fragmentId, sourceHash)", hub)
+        for folder in ("values", "values-ru"):
+            strings = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
+            names = {element.get("name") for element in strings}
+            for name in ("knowledge_editor_edit", "knowledge_editor_preview",
+                         "knowledge_editor_review_selection", "knowledge_editor_backlinks",
+                         "knowledge_editor_save_first", "knowledge_editor_selection_multiple",
+                         "knowledge_editor_source_invalid"):
+                self.assertIn(name, names)
+
     def test_decision_review_previews_are_comparison_panels(self):
         core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):

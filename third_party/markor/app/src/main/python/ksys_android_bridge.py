@@ -208,6 +208,37 @@ def inspect_note(relative_path: str, markdown: str) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def inspect_selection(relative_path: str, markdown: str,
+                      start: int, end: int) -> str:
+    """Locate one source fragment containing a user selection, read-only.
+
+    Offsets are Unicode code points, not Java UTF-16 indices or UTF-8 bytes.
+    A selection crossing fragment boundaries must never silently pick one.
+    The caller rechecks the saved file before offering journal review.
+    """
+    if (not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(end, int) or isinstance(end, bool)
+            or start < 0 or start >= end or end > len(markdown)):
+        raise ValueError("Invalid source selection")
+    inspect_note(relative_path, markdown)  # Paths, size and coverage rules.
+    fragments = [f for f in parse_document(relative_path, markdown).fragments
+                 if f.span[0] <= start and end <= f.span[1] and f.plain.strip()]
+    response = {"protocol": "dpksys.inspect.v1", "path": relative_path,
+                "source_hash": _source_hash(markdown),
+                "read_only": True, "matched": len(fragments) == 1}
+    if len(fragments) == 1:
+        frag = fragments[0]
+        analyzed = LanguageAnalyzer().analyze(frag, {"path": relative_path})
+        response.update({"fragment_id": frag.id, "locator": frag.locator,
+                         "preview": frag.plain[:400],
+                         "source_text": frag.text[:4000],
+                         "candidate_count": len(analyzed.candidates)})
+    else:
+        response["reason"] = "selection_crosses_fragments"
+    return json.dumps(response, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
 def _fragment(relative_path: str, markdown: str, fragment_id: str):
     # Reuse the same input bounds before allocating semantic structures.
     inspect_note(relative_path, markdown)
