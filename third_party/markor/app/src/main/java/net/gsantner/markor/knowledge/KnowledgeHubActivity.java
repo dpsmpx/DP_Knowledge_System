@@ -189,8 +189,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private int libraryOffset;
     private int libraryNextOffset = -1;
     private boolean decisionWorkspaceReady;
-    private boolean decisionDetailShowing;
-    private int workspacePage = R.id.knowledge_nav_library;
+    private final KnowledgeWorkspaceNavigation workspaceNavigation = new KnowledgeWorkspaceNavigation(
+            R.id.knowledge_nav_library, R.id.knowledge_nav_decisions,
+            R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
     private char[] pendingExportPassword;
 
     @Override
@@ -221,17 +222,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 ? R.id.knowledge_nav_library
                 : savedInstanceState.getInt(STATE_WORKSPACE_PAGE, R.id.knowledge_nav_library);
         showWorkspacePage(initialPage);
-        navigation.setSelectedItemId(workspacePage);
+        navigation.setSelectedItemId(workspaceNavigation.page());
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (decisionDetailShowing) {
-                    closeDecisionDetail();
-                } else if (workspacePage != R.id.knowledge_nav_library) {
-                    navigation.setSelectedItemId(R.id.knowledge_nav_library);
-                } else {
-                    setEnabled(false);
-                    getOnBackPressedDispatcher().onBackPressed();
+                switch (workspaceNavigation.backAction()) {
+                    case CLOSE_DETAIL:
+                        closeDecisionDetail();
+                        break;
+                    case LIBRARY:
+                        navigation.setSelectedItemId(R.id.knowledge_nav_library);
+                        break;
+                    case FINISH:
+                        setEnabled(false);
+                        getOnBackPressedDispatcher().onBackPressed();
+                        break;
                 }
             }
         });
@@ -425,7 +430,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     @Override
     protected void onSaveInstanceState(@NonNull final Bundle outState) {
-        outState.putInt(STATE_WORKSPACE_PAGE, workspacePage);
+        outState.putInt(STATE_WORKSPACE_PAGE, workspaceNavigation.page());
         outState.putString(STATE_DECISION_CATEGORY, decisionCategory);
         outState.putInt(STATE_LIBRARY_OFFSET, libraryOffset);
         super.onSaveInstanceState(outState);
@@ -433,11 +438,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     /** Switch destinations without recreating the activity or its active workers. */
     private void showWorkspacePage(final int requested) {
-        final int page = requested == R.id.knowledge_nav_processes
-                || requested == R.id.knowledge_nav_decisions
-                || requested == R.id.knowledge_nav_manage
-                ? requested : R.id.knowledge_nav_library;
-        workspacePage = page;
+        final int page = workspaceNavigation.select(requested);
         if (page != R.id.knowledge_nav_library && filter != null && filter.hasFocus()) {
             filter.clearFocus();
             final InputMethodManager keyboard = (InputMethodManager)
@@ -512,7 +513,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
         findViewById(R.id.knowledge_decisions_batch).setOnClickListener(view -> showCandidateQueue(0));
         decisionWorkspaceReady = true;
-        if (workspacePage == R.id.knowledge_nav_decisions) loadDecisionPage(0);
+        if (workspaceNavigation.page() == R.id.knowledge_nav_decisions) loadDecisionPage(0);
     }
 
     private void navigateToDecisions(final String category) {
@@ -520,7 +521,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         for (int i = 0; i < DECISION_CATEGORIES.length; i++) {
             ((Chip) decisionChips.getChildAt(i)).setChecked(category.equals(DECISION_CATEGORIES[i]));
         }
-        if (workspacePage == R.id.knowledge_nav_decisions) {
+        if (workspaceNavigation.page() == R.id.knowledge_nav_decisions) {
             loadDecisionPage(0);
         } else {
             navigation.setSelectedItemId(R.id.knowledge_nav_decisions);
@@ -595,7 +596,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final String kind = selected.optString("kind");
         final String recordId = selected.optString("id");
         if (kind.isEmpty() || recordId.isEmpty()) return;
-        decisionDetailShowing = true;
+        if (!workspaceNavigation.openDecisionDetail()) return;
         final int generation = decisionGeneration.incrementAndGet();
         if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
         findViewById(R.id.knowledge_page_decisions).setVisibility(View.GONE);
@@ -631,12 +632,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final JSONObject detail = KnowledgePythonBridge.decisionDetail(
                         this, workspacePath(), kind, recordId);
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && decisionDetailShowing
+                    if (!isFinishing() && !isDestroyed() && workspaceNavigation.detailOpen()
                             && decisionGeneration.get() == generation) renderDecisionDetail(detail);
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && decisionDetailShowing
+                    if (!isFinishing() && !isDestroyed() && workspaceNavigation.detailOpen()
                             && decisionGeneration.get() == generation) {
                         ((TextView) findViewById(R.id.knowledge_decision_detail_status))
                                 .setText(R.string.knowledge_decision_loading_failed);
@@ -729,7 +730,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void closeDecisionDetail() {
-        decisionDetailShowing = false;
+        workspaceNavigation.closeDecisionDetail();
         decisionGeneration.incrementAndGet();
         if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
         findViewById(R.id.knowledge_decision_detail_screen).setVisibility(View.GONE);
@@ -1852,7 +1853,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_analysis_failed);
-                        if (workspacePage == R.id.knowledge_nav_decisions) {
+                        if (workspaceNavigation.page() == R.id.knowledge_nav_decisions) {
                             ((TextView) findViewById(R.id.knowledge_decisions_status))
                                     .setText(R.string.knowledge_editor_save_first);
                         }

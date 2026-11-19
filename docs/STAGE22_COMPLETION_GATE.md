@@ -15,7 +15,7 @@ and rendering internals; the user-facing workspace must belong to DPKS.
 | Library at scale | Bounded pages/search with repeatable ordering and accessible next/back; no 250-row dead end | Paged SQL/UI + synthetic 20k checks in review |
 | Accessible workflow | Screen reader headings and pane identification, large text, reduced motion and adequate touch targets | Seventeenth slice in review, physical TalkBack/font QA deferred |
 | Discoverability | Concise local-first onboarding/help with provenance/privacy and no automatic journal changes | Seventeenth slice in review |
-| Automated regression | Synthetic contracts plus Android UI-state/component checks for navigation, editing and approval guards | Open |
+| Automated regression | Synthetic contracts plus Android UI-state/component checks for navigation, editing and approval guards | Eighteenth slice in review: pure Java navigation/source guards, one-button QA step and prior Python approval checks; real UI interactions deferred |
 | Release | Green Python/Android CI, privacy check, signed APK, verified digest, one final consolidated device checklist | Open |
 
 Stage 22 may be called *code complete* only after every code acceptance item

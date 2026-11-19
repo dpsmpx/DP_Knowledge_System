@@ -515,8 +515,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 runOnUiThread(() -> {
                     if (!current(generation)) return;
                     final DocumentEditAndViewFragment currentEditor = editor();
-                    if (!saved.equals(editorSnapshot) || currentEditor == null
-                            || !editorSnapshot.equals(currentEditor.getTextString())) {
+                    if (currentEditor == null || !KnowledgeEditorReviewGuard.matchesSavedSource(
+                            saved, editorSnapshot, currentEditor.getTextString())) {
                         setKnowledgeStatus(R.string.knowledge_editor_save_first);
                         return;
                     }

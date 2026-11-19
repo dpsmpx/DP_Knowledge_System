@@ -10,6 +10,20 @@ works, but not the full QA-60 matrix. The sixth-slice read-only contextual
 knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
 
+## Eighteenth slice — synthetic UI-state and save guards (PR #72)
+
+- A pure Java navigation model now drives the four DPKS tabs, the decision
+  detail screen and Back behavior. It rejects invalid restored destinations,
+  does not confuse Back-from-detail with app exit, and closes stale detail
+  state when destinations change. Android JVM unit tests cover transitions.
+- The editor handoff uses a separately tested guard that requires equality
+  of the saved Markdown, immutable selected snapshot and current buffer;
+  existing source-hash and journal-head validation continues at commit.
+- The existing **one-button Stage 22 editor QA** now adds `UI-STATE-22` on
+  device, validating navigation state and the save guard with purely synthetic
+  strings. `EDITOR-22-UI` remains **SKIP** for touch, keyboard, focus, rotation,
+  real editor widgets and accessibility. No vault, journal or network read.
+
 ## Seventeenth slice — knowledge guide and accessible navigation (PR #72)
 
 - On first normal launch, a **dismissible, offline guide** explains five distinct

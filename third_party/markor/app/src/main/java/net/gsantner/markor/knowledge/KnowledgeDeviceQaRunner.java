@@ -121,6 +121,7 @@ public final class KnowledgeDeviceQaRunner {
                         + ", batteryPct=" + batteryPercent();
             });
             if (editorStage22) {
+                step("UI-STATE-22", this::checkSyntheticWorkspaceNavigation);
                 step("EDITOR-22-SUITE", this::checkSyntheticStage22Editor);
                 report.add("SKIP", "EDITOR-22-UI", 0,
                         "real touch, keyboard, rotation, TalkBack, font scale and task lifecycle "
@@ -162,6 +163,34 @@ public final class KnowledgeDeviceQaRunner {
                     + safeErrorClass(failed));
         }
         return report.render(SystemClock.elapsedRealtime() - started);
+    }
+
+    /** Device-side pure transition checks; no touch automation or source/journal I/O. */
+    private String checkSyntheticWorkspaceNavigation() throws SyntheticMismatch {
+        final KnowledgeWorkspaceNavigation state = new KnowledgeWorkspaceNavigation(10, 20, 30, 40);
+        if (state.page() != 10 || state.backAction() != KnowledgeWorkspaceNavigation.BackAction.FINISH
+                || state.openDecisionDetail()) {
+            throw new SyntheticMismatch("verdict=UI_DEFAULT_INVALID");
+        }
+        state.select(20);
+        if (!state.openDecisionDetail()
+                || state.backAction() != KnowledgeWorkspaceNavigation.BackAction.CLOSE_DETAIL) {
+            throw new SyntheticMismatch("verdict=UI_DETAIL_BACK_INVALID");
+        }
+        state.closeDecisionDetail();
+        if (state.backAction() != KnowledgeWorkspaceNavigation.BackAction.LIBRARY
+                || state.select(30) != 30 || state.openDecisionDetail()
+                || state.select(-1) != 10) {
+            throw new SyntheticMismatch("verdict=UI_NAVIGATION_INVALID");
+        }
+        final String sample = "# Synthetic\n🎯 Марс является планетой.\n";
+        if (!KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample, sample)
+                || KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample + "!", sample)
+                || KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample, sample + "!")) {
+            throw new SyntheticMismatch("verdict=UI_SAVE_GUARD_INVALID");
+        }
+        return "synthetic tab/back/detail transitions and unsaved-source handoff guard pass; "
+                + "no touch or journal commit tested";
     }
 
     private void step(final String code, final Check check) throws InterruptedIOException {

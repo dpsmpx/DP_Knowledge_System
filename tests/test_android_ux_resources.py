@@ -60,6 +60,21 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("ViewCompat.setAccessibilityPaneTitle", hub)
         self.assertNotIn("smoothScrollToPosition", hub)
 
+    def test_android_navigation_and_unsaved_source_guards_have_executable_checks(self):
+        source = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (source / "KnowledgeHubActivity.java").read_text()
+        editor = (source / "KnowledgeDocumentActivity.java").read_text()
+        runner = (source / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("workspaceNavigation.backAction()", hub)
+        self.assertIn("workspaceNavigation.openDecisionDetail()", hub)
+        self.assertIn("workspaceNavigation.closeDecisionDetail()", hub)
+        self.assertIn("KnowledgeEditorReviewGuard.matchesSavedSource", editor)
+        self.assertIn('step("UI-STATE-22", this::checkSyntheticWorkspaceNavigation)', runner)
+        self.assertIn('report.add("SKIP", "EDITOR-22-UI"', runner)
+        unit = ROOT.parent / "test/java/net/gsantner/markor/knowledge"
+        for name in ("KnowledgeWorkspaceNavigationTest.java", "KnowledgeEditorReviewGuardTest.java"):
+            self.assertTrue((unit / name).exists(), name)
+
     def test_all_existing_actions_remain_available_and_unique(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         observed = [element.get(ANDROID + "id", "") for element in layout.iter()]

@@ -132,6 +132,12 @@ deferred rather than required after every incremental PR.
   touch targets; no actual TalkBack reading order, rotation focus or 200% font
   acceptance has occurred. Decision details now identify their accessibility
   pane and lists reset without smooth-scroll motion. Test these on the final APK.
+- **QA-73 / OPEN, DEFERRED:** eighteenth-slice Android JUnit tests exercise
+  library/decisions/processes/settings navigation, decision detail Back,
+  invalid restored destination, and the editor-versus-saved-source identity
+  guard. The one-button editor QA now runs these Java transitions on device as
+  `UI-STATE-22` before Python synthetic checks. This is a state-model test,
+  **not** a robot operating the actual screen; `EDITOR-22-UI` stays SKIP.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
