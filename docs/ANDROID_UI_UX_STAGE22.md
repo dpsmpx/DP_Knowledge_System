@@ -1,6 +1,7 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first slice integrated; second slice pending CI and device QA**.
+Status: **first and second slices integrated; third (Decisions workspace)
+implemented in a separate development branch, pending CI and device QA**.
 This is *not* a complete replacement of the inherited Markor editor engine.
 
 ## Scope
@@ -50,6 +51,41 @@ This is *not* a complete replacement of the inherited Markor editor engine.
 This is a UX integration layer, **not** yet a fully independent DPKS editor,
 an audit-ready source-span diff or a replacement for the decision list dialogs.
 
+## Third slice — first full-screen Decisions destination (pending acceptance)
+
+- Four bottom destinations: **Library / Decisions / Processes / Settings**.
+  The editor, background jobs, and the local-first journal policy are unchanged.
+- **Decisions** is accessible on every launch, even with an empty journal or
+  no analysis index. It has eight searchable, bounded, count-labeled lists:
+  pending interpretations, active records, fact records, hypothesis records,
+  rejection events, deferral events, obsolete records and journal history.
+- An interpretation counts as pending only if its source fragment has not
+  already produced a saved record/deferral, and its formalized nodes have not
+  all been explicitly rejected. Other readings of a partly rejected fragment
+  can still be pending. Because old rejection events do not persist a full
+  source snapshot, the **rejected/deferred tabs show journal events** rather
+  than pretending they are full accepted knowledge records.
+- Tapping an item opens a **full-height, scrollable, read-only detail screen**:
+  source excerpt (labeled snapshot), machine interpretation or human record,
+  formalized statement, available provenance, local diagnostics, available
+  conflicts and related journal events. Missing evidence is visibly missing,
+  not silently counted as zero. The original source is re-read and the journal
+  head revalidated before any later commit.
+- Existing guarded actions remain available via **Review interpretation** or
+  **Revise / Split / Merge / Retract**. Batch approval remains explicitly
+  accessible for 2–8 proposals; no journal append is made by browsing.
+- Python core tests use only disposable synthetic Markdown and assert the
+  journal/source invariant; resource tests assert four destinations and detail
+  sections. Physical Android validation, large-list perf and TalkBack remain
+  open. See `docs/STAGE22_DECISIONS_QA.md`.
+
+**Still incomplete:** this third slice is not a complete independent Markdown
+editor or inline evidence-linked diff. Indexed snippets are not a guarantee
+that original notes are still current; history displays journal events but
+does not yet model every historical source span. Deep audit findings must be
+opened through Settings. The old per-operation confirmation dialogs and
+Markor Markdown editing engine are retained during the migration.
+
 There are **no changes to authority, knowledge journal semantics, Markdown
 sources, LLM permissions, APIs or the public data shipped with the APK**.
 
@@ -98,8 +134,9 @@ On an Android 15 device with test notes (avoid private journal mutations):
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.
 - Full-screen decision queue and inline source-span-aware diff, evidence,
-  selective approval and reversible proposal preview; the current compared
-  cards cover only explicit confirmation dialogs.
+  selective approval and reversible proposal preview; the Decisions screen now
+  covers navigation and provenance but explicit confirmation still uses the
+  established dialogs, without source-span diff.
 - Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
   gesture navigation/edge-to-edge insets, instrumented UI tests and measured
   scrolling/rendering under 20k notes.

@@ -90,6 +90,19 @@ public final class KnowledgePythonBridge {
         return invoke(context, "active_decisions", workspace, offset);
     }
 
+    /** Bounded, read-only decision workspace; never updates the source or journal. */
+    public static JSONObject decisionOverview(final Context context, final String workspace,
+                                              final String category, final int offset,
+                                              final String search) throws JSONException {
+        return invoke(context, "decision_overview", workspace, category, offset, search);
+    }
+
+    public static JSONObject decisionDetail(final Context context, final String workspace,
+                                            final String kind, final String identifier)
+            throws JSONException {
+        return invoke(context, "decision_detail", workspace, kind, identifier);
+    }
+
     public static JSONObject previewRetraction(final Context context, final String workspace,
                                                final String recordId) throws JSONException {
         return invoke(context, "preview_retraction", workspace, recordId);

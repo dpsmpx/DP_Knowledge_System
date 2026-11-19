@@ -6,6 +6,10 @@
         android:icon="@drawable/ic_folder_gray_24dp"
         android:title="@string/knowledge_page_library" />
     <item
+        android:id="@+id/knowledge_nav_decisions"
+        android:icon="@drawable/ic_list_black_24dp"
+        android:title="@string/knowledge_page_decisions" />
+    <item
         android:id="@+id/knowledge_nav_processes"
         android:icon="@drawable/ic_list_black_24dp"
         android:title="@string/knowledge_page_processes" />
