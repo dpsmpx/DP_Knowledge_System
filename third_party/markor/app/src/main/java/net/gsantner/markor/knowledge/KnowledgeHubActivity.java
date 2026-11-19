@@ -64,6 +64,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.net.URL;
+import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -87,6 +88,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int LIBRARY_PAGE_SIZE = 60;
     private static final String GUIDE_PREFERENCES = "dpks_knowledge_guide";
     private static final String GUIDE_SEEN = "stage22_guide_seen_v1";
+    private static final String PROCESS_HISTORY_PREFERENCES = "dpks_process_events";
+    private static final String PROCESS_HISTORY_KEY = "redacted_events_v1";
     private static final String EXTRA_EDITOR_REVIEW_PATH = "com.dpsmpx.dpks.editor.review_path";
     private static final String EXTRA_EDITOR_REVIEW_FRAGMENT = "com.dpsmpx.dpks.editor.fragment";
     private static final String EXTRA_EDITOR_SOURCE_HASH = "com.dpsmpx.dpks.editor.source_sha256";
@@ -169,6 +172,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView qaStatus;
     private ProgressBar qaProgress;
     private boolean qaActive;
+    private boolean qaCancellationRequested;
     private CheckBox automaticAnalysis;
     private CheckBox backgroundChecks;
     private CheckBox backgroundNotifications;
@@ -192,6 +196,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private final KnowledgeWorkspaceNavigation workspaceNavigation = new KnowledgeWorkspaceNavigation(
             R.id.knowledge_nav_library, R.id.knowledge_nav_decisions,
             R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
+    private KnowledgeProcessHistory processHistory;
     private char[] pendingExportPassword;
 
     @Override
@@ -386,6 +391,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
+        processHistory = KnowledgeProcessHistory.fromStored(
+                getSharedPreferences(PROCESS_HISTORY_PREFERENCES, MODE_PRIVATE)
+                        .getString(PROCESS_HISTORY_KEY, ""));
+        renderProcessHistory();
         setupDecisionWorkspace();
         scanNotebook();
         final Intent launch = getIntent();
@@ -787,6 +796,52 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
+    /** UI-thread only: never persist paths, counts, note titles or arbitrary error text. */
+    private void recordProcessEvent(final KnowledgeProcessHistory.Operation operation,
+                                    final KnowledgeProcessHistory.Outcome outcome) {
+        if (processHistory == null) return;
+        processHistory.record(operation, outcome, System.currentTimeMillis());
+        getSharedPreferences(PROCESS_HISTORY_PREFERENCES, MODE_PRIVATE).edit()
+                .putString(PROCESS_HISTORY_KEY, processHistory.serialize()).apply();
+        renderProcessHistory();
+    }
+
+    private void renderProcessHistory() {
+        if (processHistory == null) return;
+        final List<KnowledgeProcessHistory.Entry> entries = processHistory.recent();
+        final TextView view = findViewById(R.id.knowledge_process_history);
+        if (entries.isEmpty()) {
+            view.setText(R.string.knowledge_process_history_empty);
+            return;
+        }
+        final DateFormat date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT);
+        final StringBuilder lines = new StringBuilder();
+        for (final KnowledgeProcessHistory.Entry entry : entries) {
+            final int operation;
+            switch (entry.operation) {
+                case SCAN: operation = R.string.knowledge_history_scan; break;
+                case ANALYSIS: operation = R.string.knowledge_history_analysis; break;
+                case AUDIT: operation = R.string.knowledge_history_audit; break;
+                case EMBEDDING: operation = R.string.knowledge_history_embedding; break;
+                case DEVICE_QA: operation = R.string.knowledge_history_qa; break;
+                default: throw new IllegalStateException("Unknown process category");
+            }
+            final int outcome;
+            switch (entry.outcome) {
+                case STARTED: outcome = R.string.knowledge_history_started; break;
+                case COMPLETED: outcome = R.string.knowledge_history_completed; break;
+                case PARTIAL: outcome = R.string.knowledge_history_partial; break;
+                case CANCELLED: outcome = R.string.knowledge_history_cancelled; break;
+                case FAILED: outcome = R.string.knowledge_history_failed; break;
+                default: throw new IllegalStateException("Unknown process outcome");
+            }
+            if (lines.length() != 0) lines.append('\n');
+            lines.append(date.format(new Date(entry.timestamp))).append(" · ")
+                    .append(getString(operation)).append(" · ").append(getString(outcome));
+        }
+        view.setText(lines.toString());
+    }
+
     private void showEmbeddingStatus(final String text) {
         status.setText(text);
         embeddingStatus.setText(text);
@@ -813,11 +868,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             if (runningDeviceQa != null) {
                 runningDeviceQa.cancel(true);
             }
+            if (!qaCancellationRequested) {
+                qaCancellationRequested = true;
+                recordProcessEvent(KnowledgeProcessHistory.Operation.DEVICE_QA,
+                        KnowledgeProcessHistory.Outcome.CANCELLED);
+            }
             qaStatus.setText(R.string.knowledge_qa_cancelling);
             return;
         }
         final int generation = deviceQaGeneration.incrementAndGet();
         qaActive = true;
+        qaCancellationRequested = false;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.DEVICE_QA,
+                KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
         qaQuickButton.setText(R.string.knowledge_qa_cancel);
         qaStressButton.setText(R.string.knowledge_qa_cancel);
@@ -847,6 +910,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 qaEditorButton.setText(R.string.knowledge_qa_editor);
                 qaProgress.setVisibility(View.GONE);
                 qaStatus.setText(R.string.knowledge_qa_ready);
+                if (!qaCancellationRequested) {
+                    final KnowledgeProcessHistory.Outcome outcome = !report.contains(" FAIL=0 ")
+                            ? KnowledgeProcessHistory.Outcome.FAILED
+                            : !report.contains(" WARN=0 ")
+                            ? KnowledgeProcessHistory.Outcome.PARTIAL
+                            : KnowledgeProcessHistory.Outcome.COMPLETED;
+                    recordProcessEvent(KnowledgeProcessHistory.Operation.DEVICE_QA, outcome);
+                }
                 copyDeviceQaReport(report);
                 new AlertDialog.Builder(this)
                         .setTitle(R.string.knowledge_qa_report_title)
@@ -993,6 +1064,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final int generation = scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
         if (runningScan != null) {
+            if (!runningScan.isDone()) {
+                recordProcessEvent(KnowledgeProcessHistory.Operation.SCAN,
+                        KnowledgeProcessHistory.Outcome.CANCELLED);
+            }
             runningScan.cancel(true);
         }
         if (runningSearch != null) {
@@ -1000,6 +1075,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final File root = notebook;
         progress.setVisibility(View.VISIBLE);
+        recordProcessEvent(KnowledgeProcessHistory.Operation.SCAN,
+                KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
         status.setText(R.string.knowledge_scanning);
 
@@ -1030,6 +1107,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         snapshot = result;
                         syncResult = projection;
                         progress.setVisibility(View.GONE);
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.SCAN,
+                                result.truncated || result.unreadableDirectories > 0
+                                        ? KnowledgeProcessHistory.Outcome.PARTIAL
+                                        : KnowledgeProcessHistory.Outcome.COMPLETED);
                         updateProcessBadge();
                         refreshResults();
                         if (automaticAnalysis.isChecked()) {
@@ -1043,6 +1124,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         progress.setVisibility(View.GONE);
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.SCAN,
+                                KnowledgeProcessHistory.Outcome.FAILED);
                         updateProcessBadge();
                         status.setText(R.string.knowledge_unavailable);
                         snapshot = null;
@@ -1069,6 +1152,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final int generation = analysisGeneration.incrementAndGet();
         analysisActive = true;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.ANALYSIS,
+                KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
         analysisButton.setText(R.string.knowledge_bulk_cancel);
         analysisStatus.setText(getString(R.string.knowledge_bulk_running, 0));
@@ -1104,6 +1189,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && analysisGeneration.get() == generation) {
                         analysisActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.ANALYSIS,
+                                partial ? KnowledgeProcessHistory.Outcome.PARTIAL
+                                        : KnowledgeProcessHistory.Outcome.COMPLETED);
                         updateProcessBadge();
                         analysisButton.setText(R.string.knowledge_bulk_analyze);
                         analysisStatus.setText(getString(R.string.knowledge_bulk_done,
@@ -1118,6 +1206,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && analysisGeneration.get() == generation) {
                         analysisActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.ANALYSIS,
+                                KnowledgeProcessHistory.Outcome.FAILED);
                         updateProcessBadge();
                         analysisButton.setText(R.string.knowledge_bulk_analyze);
                         analysisStatus.setText(R.string.knowledge_bulk_failed);
@@ -1133,6 +1223,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             runningAnalysis.cancel(true);
         }
         analysisActive = false;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.ANALYSIS,
+                KnowledgeProcessHistory.Outcome.CANCELLED);
         updateProcessBadge();
         analysisButton.setText(R.string.knowledge_bulk_analyze);
         analysisStatus.setText(R.string.knowledge_bulk_stopped);
@@ -1149,6 +1241,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final int generation = auditGeneration.incrementAndGet();
         auditActive = true;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.AUDIT,
+                KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
         auditButton.setText(R.string.knowledge_audit_cancel);
         analysisStatus.setText(getString(R.string.knowledge_audit_running, 0));
@@ -1177,6 +1271,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && auditGeneration.get() == generation) {
                         auditActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.AUDIT,
+                                KnowledgeProcessHistory.Outcome.COMPLETED);
                         updateProcessBadge();
                         auditButton.setText(R.string.knowledge_audit_start);
                         analysisStatus.setText(R.string.knowledge_audit_ready);
@@ -1189,6 +1285,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && auditGeneration.get() == generation) {
                         auditActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.AUDIT,
+                                KnowledgeProcessHistory.Outcome.FAILED);
                         updateProcessBadge();
                         auditButton.setText(R.string.knowledge_audit_start);
                         analysisStatus.setText(R.string.knowledge_audit_failed);
@@ -1204,6 +1302,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             runningAudit.cancel(true);
         }
         auditActive = false;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.AUDIT,
+                KnowledgeProcessHistory.Outcome.CANCELLED);
         updateProcessBadge();
         auditButton.setText(R.string.knowledge_audit_start);
         analysisStatus.setText(R.string.knowledge_audit_cancelled);
@@ -2849,6 +2949,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             runningEmbedding.cancel(true);
         }
         embeddingActive = false;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.EMBEDDING,
+                KnowledgeProcessHistory.Outcome.CANCELLED);
         updateProcessBadge();
         if (embeddingButton != null) {
             embeddingButton.setText(R.string.knowledge_embedding_build);
@@ -2866,6 +2968,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             return;
         }
         embeddingActive = true;
+        recordProcessEvent(KnowledgeProcessHistory.Operation.EMBEDDING,
+                KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
         embeddingButton.setText(R.string.knowledge_embedding_cancel);
         final int operation = embeddingGeneration.incrementAndGet();
@@ -2966,6 +3070,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && embeddingGeneration.get() == operation) {
                         embeddingActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.EMBEDDING,
+                                missing > 0 || truncated > 0
+                                        ? KnowledgeProcessHistory.Outcome.PARTIAL
+                                        : KnowledgeProcessHistory.Outcome.COMPLETED);
                         updateProcessBadge();
                         embeddingButton.setText(R.string.knowledge_embedding_build);
                         showEmbeddingStatus(getString(R.string.knowledge_embedding_done,
@@ -2978,6 +3086,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && embeddingGeneration.get() == operation) {
                         embeddingActive = false;
+                        recordProcessEvent(KnowledgeProcessHistory.Operation.EMBEDDING,
+                                KnowledgeProcessHistory.Outcome.FAILED);
                         updateProcessBadge();
                         embeddingButton.setText(R.string.knowledge_embedding_build);
                         showEmbeddingStatus(R.string.knowledge_embedding_failed);

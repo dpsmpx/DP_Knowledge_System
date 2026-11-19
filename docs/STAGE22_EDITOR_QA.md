@@ -138,6 +138,13 @@ deferred rather than required after every incremental PR.
   guard. The one-button editor QA now runs these Java transitions on device as
   `UI-STATE-22` before Python synthetic checks. This is a state-model test,
   **not** a robot operating the actual screen; `EDITOR-22-UI` stays SKIP.
+- **QA-74 / OPEN, DEFERRED:** nineteenth-slice Processes history persists at
+  most 32 code-only events (scan, analysis, audit, embeddings, QA), timestamp,
+  and enum outcome in private preferences. No path, excerpt, prompt, model
+  or API error is recorded. Android/JVM and the new `UI-HISTORY-22` synthetic
+  device check reject malformed entries. Test real cancellation races,
+  background recovery and screen readers together on the final APK. A
+  historical Start event must never be read as proof the job is still alive.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

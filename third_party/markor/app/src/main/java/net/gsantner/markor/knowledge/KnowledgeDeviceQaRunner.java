@@ -122,6 +122,7 @@ public final class KnowledgeDeviceQaRunner {
             });
             if (editorStage22) {
                 step("UI-STATE-22", this::checkSyntheticWorkspaceNavigation);
+                step("UI-HISTORY-22", this::checkSyntheticProcessHistory);
                 step("EDITOR-22-SUITE", this::checkSyntheticStage22Editor);
                 report.add("SKIP", "EDITOR-22-UI", 0,
                         "real touch, keyboard, rotation, TalkBack, font scale and task lifecycle "
@@ -191,6 +192,25 @@ public final class KnowledgeDeviceQaRunner {
         }
         return "synthetic tab/back/detail transitions and unsaved-source handoff guard pass; "
                 + "no touch or journal commit tested";
+    }
+
+    private String checkSyntheticProcessHistory() throws SyntheticMismatch {
+        final KnowledgeProcessHistory history = new KnowledgeProcessHistory();
+        for (int i = 1; i <= 40; i++) {
+            history.record(KnowledgeProcessHistory.Operation.SCAN,
+                    KnowledgeProcessHistory.Outcome.COMPLETED, i);
+        }
+        final KnowledgeProcessHistory restored =
+                KnowledgeProcessHistory.fromStored(history.serialize());
+        if (restored.recent().size() != KnowledgeProcessHistory.MAX_EVENTS
+                || restored.recent().get(0).timestamp != 40
+                || restored.recent().get(31).timestamp != 9
+                || KnowledgeProcessHistory.fromStored(
+                "123|/private/synthetic.md|STARTED\n").recent().size() != 0) {
+            throw new SyntheticMismatch("verdict=UI_EVENT_LOG_INVALID");
+        }
+        return "bounded code-only events, privacy filter and persisted order verified; "
+                + "actual long-running Android scheduling is not tested";
     }
 
     private void step(final String code, final Check check) throws InterruptedIOException {

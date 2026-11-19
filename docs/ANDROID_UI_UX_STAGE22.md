@@ -10,6 +10,20 @@ works, but not the full QA-60 matrix. The sixth-slice read-only contextual
 knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
 
+## Nineteenth slice — redacted process history (PR #72)
+
+- **Processes** adds a bounded recent-events list showing scan, knowledge
+  analysis, audit, embedding and device QA starts and results. It retains at
+  most 32 locally stored type/time/outcome tuples. The parser rejects unknown
+  event categories or arbitrary strings, so no user note text, paths, API
+  identifiers, prompts or diagnostics can enter the history.
+- Scan, analysis, audit and embedding worker success/partial/failure/cancel
+  paths emit only predefined event types. The cancelable device QA flow
+  records a cancel request but never mislabels that report as a completed run.
+- `UI-HISTORY-22` joins the one-button synthetic QA; Java JUnit verifies
+  persistence order, bounds and rejection of malformed records. No scheduler
+  or process resurrection is claimed; manual QA-74 remains open.
+
 ## Eighteenth slice — synthetic UI-state and save guards (PR #72)
 
 - A pure Java navigation model now drives the four DPKS tabs, the decision

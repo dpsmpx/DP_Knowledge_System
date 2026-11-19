@@ -75,6 +75,24 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         for name in ("KnowledgeWorkspaceNavigationTest.java", "KnowledgeEditorReviewGuardTest.java"):
             self.assertTrue((unit / name).exists(), name)
 
+    def test_stage22_process_timeline_only_persists_known_status_codes(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        processes = next(e for e in layout.iter()
+                         if e.get(ANDROID + "id") == "@+id/knowledge_page_processes")
+        self.assertTrue(any(e.get(ANDROID + "id") == "@+id/knowledge_process_history"
+                            for e in processes.iter()))
+        model = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeProcessHistory.java").read_text()
+        self.assertIn("MAX_EVENTS = 32", model)
+        self.assertIn("Operation.valueOf", model)
+        self.assertIn("Outcome.valueOf", model)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("MODE_PRIVATE", hub)
+        self.assertIn("recordProcessEvent(KnowledgeProcessHistory.Operation", hub)
+        runner = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('step("UI-HISTORY-22", this::checkSyntheticProcessHistory)', runner)
+        unit = ROOT.parent / "test/java/net/gsantner/markor/knowledge"
+        self.assertTrue((unit / "KnowledgeProcessHistoryTest.java").exists())
+
     def test_all_existing_actions_remain_available_and_unique(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         observed = [element.get(ANDROID + "id", "") for element in layout.iter()]
