@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.SystemClock;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -121,6 +122,7 @@ public final class KnowledgeDeviceQaRunner {
             step("REVISE-17", this::checkSyntheticRevision);
             step("SPLIT-17", this::checkSyntheticSplit);
             step("MERGE-17", this::checkSyntheticMerge);
+            step("BATCH-17", this::checkSyntheticClaimBatch);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -836,6 +838,98 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "syntheticMerges=1, activeAfterMerge=1, oldObsoleted=2, "
                     + "atomicJournalEntry=true, staleHeadRejected=true, replayRejected=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Two independently read synthetic sources, one bounded, human-only batch event. */
+    private String checkSyntheticClaimBatch() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Could not create batch sandbox");
+        try {
+            ensureRunning();
+            final String workspace = new File(sandbox, "workspace").getAbsolutePath();
+            final String[] paths = {"synthetic-batch-a.md", "synthetic-batch-b.md"};
+            final String[] sources = {"# Alpha\nСтресс приводит к бессоннице.\n",
+                    "# Beta\nКофе вызывает усталость.\n"};
+            final JSONArray selections = new JSONArray();
+            for (int i = 0; i < paths.length; i++) {
+                final String fragment = KnowledgePythonBridge.inspect(context, paths[i],
+                        sources[i]).getJSONArray("fragments").getJSONObject(1).getString("id");
+                final JSONObject preview = KnowledgePythonBridge.preview(context, workspace,
+                        paths[i], sources[i], fragment);
+                final String reading = preview.getJSONObject("preview").getJSONArray("options")
+                        .getJSONObject(0).getString("reading_id");
+                final JSONObject entry = new JSONObject();
+                entry.put("path", paths[i]);
+                entry.put("markdown", sources[i]);
+                entry.put("fragment_id", fragment);
+                entry.put("reading_id", reading);
+                selections.put(entry);
+            }
+            final JSONObject preview = KnowledgePythonBridge.previewClaimBatch(context,
+                    workspace, selections.toString());
+            if (!preview.getBoolean("read_only")
+                    || !preview.getBoolean("requires_human_confirmation")
+                    || preview.getJSONArray("items").length() != 2) {
+                throw new SyntheticMismatch("verdict=BATCH_PREVIEW_MISMATCH");
+            }
+            boolean staleRejected = false;
+            try {
+                KnowledgePythonBridge.acceptClaimBatch(context, workspace,
+                        selections.toString(), preview.getString("batch_hash"), "J:stale-head");
+            } catch (Exception expected) {
+                staleRejected = true;
+            }
+            final JSONObject changed = new JSONObject(selections.getJSONObject(1).toString());
+            changed.put("markdown", sources[1] + "\nchanged");
+            final JSONArray altered = new JSONArray();
+            altered.put(selections.getJSONObject(0));
+            altered.put(changed);
+            boolean sourceRejected = false;
+            try {
+                KnowledgePythonBridge.acceptClaimBatch(context, workspace,
+                        altered.toString(), preview.getString("batch_hash"), null);
+            } catch (Exception expected) {
+                sourceRejected = true;
+            }
+            if (!staleRejected || !sourceRejected
+                    || KnowledgePythonBridge.activeDecisions(context, workspace, 0)
+                            .getInt("total") != 0) {
+                throw new SyntheticMismatch("verdict=BATCH_GUARDS_MISMATCH");
+            }
+            ensureRunning();
+            final JSONObject accepted = KnowledgePythonBridge.acceptClaimBatch(context,
+                    workspace, selections.toString(), preview.getString("batch_hash"), null);
+            final JSONObject active = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            boolean unchanged = true;
+            for (int i = 0; i < paths.length; i++) {
+                final JSONObject original = preview.getJSONArray("items").getJSONObject(i);
+                final JSONObject after = KnowledgePythonBridge.preview(context, workspace,
+                        paths[i], sources[i], selections.getJSONObject(i).getString("fragment_id"));
+                unchanged &= original.getString("source_hash")
+                        .equals(after.getString("source_hash"));
+            }
+            if (!"batch_accept".equals(accepted.getString("decision"))
+                    || accepted.getInt("count") != 2
+                    || accepted.getJSONArray("journal_ids").length() != 1
+                    || active.getInt("total") != 2 || !unchanged) {
+                throw new SyntheticMismatch("verdict=BATCH_COMMIT_MISMATCH");
+            }
+            boolean replayRejected = false;
+            try {
+                KnowledgePythonBridge.acceptClaimBatch(context, workspace,
+                        selections.toString(), preview.getString("batch_hash"), null);
+            } catch (Exception expected) {
+                replayRejected = true;
+            }
+            if (!replayRejected) throw new SyntheticMismatch("verdict=BATCH_REPLAY_ALLOWED");
+            return "syntheticClaims=2, activeAfterBatch=2, atomicJournalEntry=true, "
+                    + "staleHeadRejected=true, changedSourceRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);

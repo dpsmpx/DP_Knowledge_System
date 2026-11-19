@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" 
 from ksys_android_bridge import (active_decisions, inspect_note, preview_fragment,
                                  preview_retraction, preview_revision, preview_split,
                                  preview_merge, merge_decisions, record_decision,
-                                 retract_decision, revise_decision, split_decision)
+                                 retract_decision, revise_decision, split_decision,
+                                 preview_claim_batch, accept_claim_batch)
 from ksys.core.clock import FixedClock
 from ksys.store.kb import KnowledgeBase
 from ksys.store.journal import Journal
@@ -33,6 +34,68 @@ class MobileDecisionTests(unittest.TestCase):
     def preview(self):
         return json.loads(preview_fragment(str(self.root / "workspace"),
                                           self.path, self.note, self.fragment))
+
+    def _batch_selections(self):
+        sources = [
+            ("batch-one.md", "# One\nСтресс приводит к бессоннице.\n"),
+            ("batch-two.md", "# Two\nКофе вызывает усталость.\n"),
+        ]
+        selections = []
+        for path, markdown in sources:
+            fragment = json.loads(inspect_note(path, markdown))["fragments"][1]["id"]
+            preview = json.loads(preview_fragment(str(self.root / "workspace"),
+                                                  path, markdown, fragment))
+            selections.append({"path": path, "markdown": markdown,
+                               "fragment_id": fragment,
+                               "reading_id": preview["preview"]["options"][0]["reading_id"]})
+        return selections
+
+    def test_batch_claim_preview_is_read_only_and_commit_is_single_journal_event(self):
+        selections = self._batch_selections()
+        workspace = str(self.root / "workspace")
+        packet = json.loads(preview_claim_batch(workspace, json.dumps(selections)))
+        self.assertFalse((self.root / "workspace").exists())
+        self.assertEqual("claim", packet["role"])
+        self.assertEqual(2, len(packet["items"]))
+        self.assertTrue(packet["requires_human_confirmation"])
+        result = json.loads(accept_claim_batch(workspace, json.dumps(selections),
+                                               packet["batch_hash"], packet["journal_head"]))
+        self.assertEqual("batch_accept", result["decision"])
+        self.assertEqual(2, result["count"])
+        journal = Journal(self.root / "workspace/data/formal/journal.jsonl", FixedClock())
+        self.assertEqual([], journal.verify())
+        self.assertEqual(["batch_accept"], [e.op for e in journal.entries()])
+        self.assertEqual(2, len(journal.entries()[0].data["items"]))
+        kb = KnowledgeBase(Workspace(self.root / "workspace"), FixedClock(), use_cache=False)
+        self.assertEqual(2, len(kb.state.claims()))
+        self.assertTrue(all(record.provenance[0]["source_type"] == "vault_note"
+                            for record in kb.state.claims()))
+        self.assertEqual(2, json.loads(active_decisions(workspace))["total"])
+        self.assertEqual("# One\nСтресс приводит к бессоннице.\n", selections[0]["markdown"])
+
+    def test_batch_aborts_all_on_stale_source_journal_duplicates_or_replay(self):
+        selections = self._batch_selections()
+        workspace = str(self.root / "workspace")
+        packet = json.loads(preview_claim_batch(workspace, json.dumps(selections)))
+        changed = json.loads(json.dumps(selections))
+        changed[1]["markdown"] += "\nnew text"
+        with self.assertRaises(ValueError):
+            accept_claim_batch(workspace, json.dumps(changed), packet["batch_hash"],
+                               packet["journal_head"])
+        with self.assertRaises(ValueError):
+            accept_claim_batch(workspace, json.dumps(selections), "incorrect", packet["journal_head"])
+        with self.assertRaises(ValueError):
+            preview_claim_batch(workspace, json.dumps([selections[0], selections[0]]))
+        with self.assertRaises(ValueError):
+            preview_claim_batch(workspace, json.dumps([selections[0]]))
+        self.assertFalse((self.root / "workspace").exists())
+        accept_claim_batch(workspace, json.dumps(selections), packet["batch_hash"],
+                           packet["journal_head"])
+        with self.assertRaises(ValueError):
+            accept_claim_batch(workspace, json.dumps(selections), packet["batch_hash"],
+                               packet["journal_head"])
+        self.assertEqual(1, len(Journal(self.root / "workspace/data/formal/journal.jsonl",
+                                        FixedClock()).entries()))
 
     def test_preview_does_not_initialize_journal(self):
         p = self.preview()

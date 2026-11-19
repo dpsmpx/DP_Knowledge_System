@@ -73,6 +73,18 @@ public final class KnowledgePythonBridge {
                 fragmentId, readingId, role, sourceHash, journalHead);
     }
 
+    public static JSONObject previewClaimBatch(final Context context, final String workspace,
+                                               final String selectionJson) throws JSONException {
+        return invoke(context, "preview_claim_batch", workspace, selectionJson);
+    }
+
+    public static JSONObject acceptClaimBatch(final Context context, final String workspace,
+                                              final String selectionJson, final String batchHash,
+                                              final String journalHead) throws JSONException {
+        return invoke(context, "accept_claim_batch", workspace,
+                selectionJson, batchHash, journalHead);
+    }
+
     public static JSONObject activeDecisions(final Context context, final String workspace,
                                              final int offset) throws JSONException {
         return invoke(context, "active_decisions", workspace, offset);

@@ -294,6 +294,29 @@ class KnowledgeBase:
             res.full.merge(df)
         return res
 
+    def batch_accept_claims(self, items: list[dict], *, note: str | None = None) -> CommitResult:
+        """One journal event for 2–8 explicitly reviewed, distinct claims.
+
+        Caller validates live Markdown and selected readings. No individual
+        accept entries may be written before the entire batch is validated.
+        """
+        if not 2 <= len(items) <= 8:
+            raise KSError(ErrorKind.LOGIC_ERROR, "batch requires 2..8 claims")
+        nodes = [convert_role(item["node"], "claim") for item in items]
+        if len({node.id for node in nodes}) != len(nodes):
+            raise KSError(ErrorKind.LOGIC_ERROR, "duplicate nodes in batch")
+        for node in nodes:
+            errors = [d for d in check_node(node) if d.severity == Severity.ERROR]
+            if errors or node.id in self.state.rejected or node.id in self.state.records:
+                raise KSError(ErrorKind.LOGIC_ERROR, "batch contains invalid/rejected/active claim")
+        payload = [
+            {"node": node.to_dict(), "role": "claim", "provenance": item["provenance"],
+             "confidence": None, "candidates": []}
+            for node, item in zip(nodes, items)
+        ]
+        e, da, df = self._commit("batch_accept", {"items": payload}, note)
+        return CommitResult([e], da, df, self._decision_impact(da))
+
     def accept_text(self, text: str, *, reading: str | None = None, role: str | None = None,
                     confidence: str | None = None, origin: str | None = None, note: str | None = None,
                     override_rejection: bool = False) -> CommitResult:

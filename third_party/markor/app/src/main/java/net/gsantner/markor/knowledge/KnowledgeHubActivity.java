@@ -847,16 +847,26 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 .setPositiveButton(android.R.string.ok, null).show();
                         return;
                     }
+                    final boolean[] selectedForBatch = new boolean[names.length];
                     final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                             .setTitle(getString(R.string.knowledge_bulk_queue_title,
                                     page.optInt("total")))
-                            .setItems(names, (view, selected) -> {
-                                final JSONObject item = candidates.optJSONObject(selected);
-                                if (item != null) {
-                                    previewFragment(item.optString("path"),
-                                            item.optString("fragment_id"));
+                            .setMultiChoiceItems(names, selectedForBatch, (view, which, checked) -> {
+                                if (checked) {
+                                    int count = 0;
+                                    for (final boolean value : selectedForBatch) {
+                                        if (value) count++;
+                                    }
+                                    if (count > 8) {
+                                        selectedForBatch[which] = false;
+                                        ((AlertDialog) view).getListView().setItemChecked(which, false);
+                                        Toast.makeText(this, R.string.knowledge_batch_limit,
+                                                Toast.LENGTH_LONG).show();
+                                    }
                                 }
                             })
+                            .setPositiveButton(R.string.knowledge_batch_preview,
+                                    (view, which) -> previewClaimBatch(candidates, selectedForBatch))
                             .setNegativeButton(android.R.string.cancel, null);
                     if (offset + names.length < page.optInt("total")) {
                         dialog.setNeutralButton(R.string.knowledge_bulk_queue_next,
@@ -869,6 +879,122 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && analysisGeneration.get() == generation) {
                         analysisStatus.setText(R.string.knowledge_bulk_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** The human selects every source/reading; the first bounded batch only accepts claims. */
+    private void previewClaimBatch(final JSONArray candidates, final boolean[] selected) {
+        int count = 0;
+        for (final boolean value : selected) if (value) count++;
+        if (count == 1) {
+            for (int i = 0; i < selected.length; i++) {
+                if (selected[i]) {
+                    final JSONObject item = candidates.optJSONObject(i);
+                    if (item != null) previewFragment(item.optString("path"),
+                            item.optString("fragment_id"));
+                    return;
+                }
+            }
+        }
+        if (count < 2 || count > 8) {
+            Toast.makeText(this, R.string.knowledge_batch_limit, Toast.LENGTH_LONG).show();
+            return;
+        }
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_inspecting);
+        worker.submit(() -> {
+            try {
+                final JSONArray selections = new JSONArray();
+                for (int i = 0; i < selected.length; i++) {
+                    if (!selected[i]) continue;
+                    final JSONObject item = candidates.getJSONObject(i);
+                    final String path = item.getString("path");
+                    final JSONObject source = new JSONObject();
+                    source.put("path", path);
+                    source.put("markdown", readSelectedNote(path));
+                    source.put("fragment_id", item.getString("fragment_id"));
+                    source.put("reading_id", item.getString("reading_id"));
+                    selections.put(source);
+                }
+                final String snapshot = selections.toString();
+                final JSONObject preview = KnowledgePythonBridge.previewClaimBatch(
+                        this, workspacePath(), snapshot);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) return;
+                    final StringBuilder details = new StringBuilder();
+                    details.append(getString(R.string.knowledge_batch_warning)).append("\n\n");
+                    final JSONArray items = preview.optJSONArray("items");
+                    if (items == null || items.length() != selections.length()) {
+                        status.setText(R.string.knowledge_decision_failed);
+                        return;
+                    }
+                    for (int i = 0; i < items.length(); i++) {
+                        final JSONObject item = items.optJSONObject(i);
+                        if (item != null) {
+                            details.append(i + 1).append(". ").append(item.optString("path"))
+                                    .append(" · ").append(item.optString("locator"))
+                                    .append("\n").append(item.optString("paraphrase"))
+                                    .append("\n").append(item.optString("ksf"))
+                                    .append("\n\n");
+                        }
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_batch_confirm)
+                            .setMessage(details.toString())
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_batch_confirm,
+                                    (d, which) -> commitClaimBatch(selections, preview, scan))
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_decision_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void commitClaimBatch(final JSONArray selections, final JSONObject preview,
+                                  final int scan) {
+        status.setText(R.string.knowledge_recording_decision);
+        worker.submit(() -> {
+            try {
+                // Re-read every source immediately before committing; a change
+                // aborts the entire batch through the preview fingerprint.
+                final JSONArray current = new JSONArray();
+                for (int i = 0; i < selections.length(); i++) {
+                    final JSONObject selected = selections.getJSONObject(i);
+                    final JSONObject item = new JSONObject();
+                    item.put("path", selected.getString("path"));
+                    item.put("markdown", readSelectedNote(selected.getString("path")));
+                    item.put("fragment_id", selected.getString("fragment_id"));
+                    item.put("reading_id", selected.getString("reading_id"));
+                    current.put(item);
+                }
+                final String head = preview.isNull("journal_head")
+                        ? null : preview.getString("journal_head");
+                final JSONObject saved = KnowledgePythonBridge.acceptClaimBatch(this,
+                        workspacePath(), current.toString(), preview.getString("batch_hash"), head);
+                if (!"batch_accept".equals(saved.optString("decision"))
+                        || saved.optInt("count") != selections.length()
+                        || saved.getJSONArray("journal_ids").length() != 1) {
+                    throw new IllegalStateException("No atomic batch commit");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_batch_saved, Toast.LENGTH_LONG).show();
+                        if (syncResult != null && snapshot != null) showIndexStatus(displayed.size());
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_decision_failed);
                     }
                 });
             }

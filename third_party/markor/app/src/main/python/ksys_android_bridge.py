@@ -304,6 +304,95 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _prepare_claim_batch(kb: KnowledgeBase, selection_json: str):
+    """Reparse each live note; only one selected, unambiguous claim per item."""
+    if not isinstance(selection_json, str) or len(selection_json) > 16_000_000:
+        raise ValueError("Invalid bounded batch input")
+    selections = json.loads(selection_json)
+    if not isinstance(selections, list) or not 2 <= len(selections) <= 8:
+        raise ValueError("Batch must contain 2..8 explicitly selected claims")
+    items = []
+    summary = []
+    unique_sources = set()
+    unique_nodes = set()
+    for selected in selections:
+        if not isinstance(selected, dict) or set(selected) != {"path", "markdown", "fragment_id", "reading_id"}:
+            raise ValueError("Unexpected batch item fields")
+        path, markdown = selected["path"], selected["markdown"]
+        fragment = _fragment(path, markdown, selected["fragment_id"])
+        origin = (path, fragment.id)
+        if origin in unique_sources:
+            raise ValueError("Duplicate batch source")
+        unique_sources.add(origin)
+        preview = kb.preview(fragment.plain, origin=fragment.id, mode="import")
+        if preview.formalization.status in ("NO_PARSE", "UNRESOLVED"):
+            raise ValueError("Batch source has unresolved interpretation")
+        option = next((o for o in preview.options
+                       if o["reading_id"] == selected["reading_id"]), None)
+        if option is None or len(option["nodes"]) != 1 or option["unresolved"]:
+            raise ValueError("Batch requires one explicitly selected valid reading")
+        if option["conflicts"] or option["known"] or option["rejected_before"] or any(
+                str(d.get("severity", "")).lower() == "error" for d in option["diagnostics"]):
+            raise ValueError("Batch contains conflicting, known or invalid candidate")
+        node = convert_role(option["nodes"][0], "claim")
+        if node.id in unique_nodes or node.id in kb.state.records or node.id in kb.state.rejected:
+            raise ValueError("Duplicate or previously resolved batch assertion")
+        unique_nodes.add(node.id)
+        source_hash = _source_hash(markdown)
+        provenance = {
+            "source_type": "vault_note", "document": path, "document_sha": source_hash,
+            "fragment_id": fragment.id, "locator": fragment.locator,
+            "span": list(fragment.span), "text": fragment.text,
+            "text_hash": fragment.text_hash,
+            "extraction": {"method": "cnl", "reading_id": option["reading_id"]},
+        }
+        items.append({"node": node, "provenance": provenance})
+        summary.append({"path": path, "locator": fragment.locator,
+                        "reading_id": option["reading_id"], "paraphrase": option["paraphrase"],
+                        "source_hash": source_hash, "fragment_id": fragment.id,
+                        "node_id": node.id, "ksf": node.ksf(),
+                        "diagnostic_count": len(option["diagnostics"])})
+    # Batch-wide consistency, in addition to individual checks above.
+    if any(d.severity.value == "error" for d in kb.check_candidate_nodes([i["node"] for i in items])):
+        raise ValueError("Combined batch fails semantic validation")
+    token = hashlib.sha256(json.dumps({"head": kb.journal.head, "items": summary},
+                                   sort_keys=True, ensure_ascii=False,
+                                   separators=(",", ":")).encode("utf-8")).hexdigest()
+    return items, summary, token
+
+
+def preview_claim_batch(workspace_dir: str, selection_json: str) -> str:
+    """Bounded human batch preview; never creates a workspace or journal."""
+    kb = _kb(workspace_dir)
+    _, summary, token = _prepare_claim_batch(kb, selection_json)
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "decision": "batch_accept",
+        "role": "claim", "items": summary, "batch_hash": token,
+        "journal_head": kb.journal.head, "read_only": True,
+        "requires_human_confirmation": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def accept_claim_batch(workspace_dir: str, selection_json: str, expected_batch_hash: str,
+                       expected_head: str | None) -> str:
+    """Explicit one-event commit; any stale note/journal/input aborts all."""
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed after batch preview")
+    items, summary, token = _prepare_claim_batch(kb, selection_json)
+    if token != expected_batch_hash:
+        raise ValueError("Batch source/reading changed after preview")
+    kb.ws.init()
+    result = kb.batch_accept_claims(items, note="Explicit batch of human-reviewed Android claims")
+    if len(result.entries) != 1 or kb.journal.verify():
+        raise ValueError("Atomic batch journal verification failed")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "decision": "batch_accept",
+        "role": "claim", "count": len(summary),
+        "journal_ids": [result.entries[0].id], "journal_head": kb.journal.head,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def active_decisions(workspace_dir: str, offset: int = 0) -> str:
     """Read-only, bounded active-record browser for explicit human review.
 

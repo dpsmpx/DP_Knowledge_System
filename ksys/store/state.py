@@ -116,6 +116,20 @@ class KnowledgeState:
                 self.rejected.pop(node.id, None)
                 for key, text in (d.get("surface") or {}).items():
                     self.auto_labels.setdefault(key, text)
+        elif e.op == "batch_accept":
+            # A single, human-authorized journal event activates the entire
+            # bounded batch. Each record retains its own source provenance.
+            items = d.get("items", [])
+            nodes = [node_from_dict(item["node"]) for item in items]
+            if (not 2 <= len(nodes) <= 8
+                    or len({node.id for node in nodes}) != len(nodes)
+                    or any(node.TYPE != "claim" or node.id in self.records
+                           or node.id in self.rejected for node in nodes)):
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid atomic batch acceptance", location=e.id))
+            else:
+                for node, item in zip(nodes, items):
+                    self._accept(node, item, e, ch)
         elif e.op == "reject":
             for cid in d.get("candidates", []):
                 self.rejected_candidates[cid] = e.id

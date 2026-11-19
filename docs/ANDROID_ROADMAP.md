@@ -42,7 +42,7 @@ snapshot until the integrated application is ready.
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 | 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
-| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge with previews and hash-chain head checks; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`; batch, automation and manual device acceptance outstanding |
+| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event and hash-checked preview; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -86,9 +86,15 @@ journal event: both sources become obsolete, the new successor links to both
 in history. Similarity never implies equivalence or automatically authorizes
 a merge; the new statement is a distinct human decision. `MERGE-17` exercises
 this exclusively on disposable synthetic fixtures.
+The bounded batch flow lets the user select 2–8 candidates from one queue
+page, inspect each current note-derived reading, and explicitly accept them
+**only as claims**. It rejects duplicates, conflicts, invalid readings, stale
+notes and journal changes before a single `batch_accept` event containing
+separate provenance per claim. Choosing one candidate still opens the older
+single-decision dialog. `BATCH-17` tests only disposable synthetic notes.
 See `docs/ANDROID_DEVICE_QA_STAGE17.md`.
 
-**Still open:** revision/split/merge edge cases, batch acceptance, versioned strict
+**Still open:** revision/split/merge edge cases, richer batch roles, versioned strict
 automation policies, manual device lifecycle checks, full encrypted app backup
 and cloud synchronization. Stage 17 is **not fully complete**.
 
