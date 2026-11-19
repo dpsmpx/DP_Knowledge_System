@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first seven slices integrated; eighth pending CI/device QA**. The owner confirmed ordinary decision
+Status: **first eight slices integrated; eighth awaiting device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -186,7 +186,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
 - This is an evidence-location comparison, **not** a word-level semantic
   diff, automated truth verification or a general-purpose diff editor.
 
-## Eighth slice — temporary inline source highlights (pending CI)
+## Eighth slice — temporary inline source highlights (integrated, QA deferred)
 
 - A **Highlight knowledge** toggle in the DPKS editor temporarily marks
   Markdown ranges referenced by active, human-approved journal records.
@@ -205,7 +205,8 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
 - Java converts Python code-point positions to UTF-16 before attaching spans.
   Synthetic tests cover duplicate excerpts, non-BMP prefixes, the no-journal
   case, unapproved-index separation, mixed overlaps and output bounds.
-  **QA-63 physical UI acceptance is deferred** at the owner's request.
+  Python and Android CI passed on PR #54. **QA-63 physical UI acceptance is
+  deferred** at the owner's request.
 - Highlighting marks *where approved assertions came from*, not whether
   those statements are true. It is not a live semantic annotation engine,
   independent Markdown renderer or automatic proposal editor.
