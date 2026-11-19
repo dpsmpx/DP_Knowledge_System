@@ -91,6 +91,16 @@
     <string name="knowledge_recording_decision">Проверка источника и запись решения…</string>
     <string name="knowledge_decision_saved">Решение записано в локальный журнал знаний.</string>
     <string name="knowledge_decision_failed">Не записано: изменился источник, журнал, интерпретация либо произошла ошибка.</string>
+    <string name="knowledge_active_decisions">Активные решения / отзыв</string>
+    <string name="knowledge_no_active_decisions">В журнале пока нет активных записей знаний.</string>
+    <string name="knowledge_decisions_next">Следующая страница…</string>
+    <string name="knowledge_retract_preview">Проверка перед отзывом</string>
+    <string name="knowledge_retract_confirm">Отозвать запись знаний</string>
+    <string name="knowledge_retract_warning">Действие добавит отзыв в приватный проверяемый журнал и может лишить зависимые знания обоснования. Исходные заметки останутся без изменений. История сохранится, автоматической отмены нет. Предварительно экспортируйте зашифрованную копию журнала.</string>
+    <string name="knowledge_retract_impact">Могут исчезнуть выводные утверждения: %1$d; пересчитаны: %2$d</string>
+    <string name="knowledge_retract_truncated">Текст записи в предварительном просмотре сокращён.</string>
+    <string name="knowledge_retract_success">Отзыв записан в приватный журнал.</string>
+    <string name="knowledge_retract_failed">Ничего не изменено: журнал мог обновиться или запись стала недоступна. Откройте список заново.</string>
     <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
     <string name="knowledge_diagnostic_count">Сообщений проверки: %1$d</string>
     <string name="knowledge_diagnostics">Состояние знаний</string>

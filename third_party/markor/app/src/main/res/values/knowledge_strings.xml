@@ -91,6 +91,16 @@
     <string name="knowledge_recording_decision">Verifying source and recording your decision…</string>
     <string name="knowledge_decision_saved">Decision recorded in the local knowledge journal.</string>
     <string name="knowledge_decision_failed">Not recorded: source, journal or interpretation changed, or an error occurred.</string>
+    <string name="knowledge_active_decisions">Active decisions / retract</string>
+    <string name="knowledge_no_active_decisions">No active knowledge records in the journal.</string>
+    <string name="knowledge_decisions_next">Next page…</string>
+    <string name="knowledge_retract_preview">Review retraction</string>
+    <string name="knowledge_retract_confirm">Retract knowledge record</string>
+    <string name="knowledge_retract_warning">This action appends a retraction to the private, verifiable journal and may invalidate dependent knowledge. Original notes stay unchanged. The history is preserved, and this action cannot be silently undone. Export an encrypted journal backup first.</string>
+    <string name="knowledge_retract_impact">Potentially removed derived assertions: %1$d; rederived: %2$d</string>
+    <string name="knowledge_retract_truncated">The record text is truncated in this preview.</string>
+    <string name="knowledge_retract_success">Retraction recorded in the private journal.</string>
+    <string name="knowledge_retract_failed">No change made: the journal may have changed or the requested record is unavailable. Reopen the list and retry.</string>
     <string name="knowledge_conflicts">Potential conflicts: %1$d</string>
     <string name="knowledge_diagnostic_count">Validation diagnostics: %1$d</string>
     <string name="knowledge_diagnostics">Knowledge state</string>

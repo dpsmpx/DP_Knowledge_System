@@ -42,6 +42,7 @@ snapshot until the integrated application is ready.
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 | 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
+| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** single-record human retraction with preview and hash-chain head check; Android synthetic QA `DECISION-17`; remaining lifecycle features and manual device acceptance outstanding |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
@@ -52,6 +53,21 @@ process/lifecycle and backup checks remain explicitly open in the
 [`main` technical-debt register](https://github.com/dpsmpx/DP_Knowledge_System/blob/main/docs/TECHNICAL_DEBT.md).
 The product roadmap after 15 is defined in `main/docs/DEVELOPMENT_PLAN.md`;
 Stage 16 is not approval to merge the draft integration PR into `main`.
+
+## Stage 17 partial implementation: explicit retraction
+
+The native Android UI now supports a bounded, read-only list of active
+knowledge records, a preview of retraction consequences (`what_if_retract`),
+and an explicit one-record confirmation. The Python core rechecks the current
+journal head and record status before appending a `retract` entry to the
+hash-chained human journal. The original markdown vault is untouched; neither
+the approval nor the retraction is automatic. The one-button synthetic
+`DECISION-17` check records count-only evidence within disposable app cache.
+See `docs/ANDROID_DEVICE_QA_STAGE17.md`.
+
+**Still open:** revision, split/merge, batch acceptance, versioned strict
+automation policies, manual device lifecycle checks, full encrypted app backup
+and cloud synchronization. Stage 17 is **not fully complete**.
 
 ## Stage 01 scope and limits
 
