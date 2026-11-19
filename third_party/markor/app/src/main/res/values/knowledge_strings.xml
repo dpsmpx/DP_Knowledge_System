@@ -50,6 +50,11 @@
     <string name="knowledge_bulk_queue_title">Candidates for human review (%1$d)</string>
     <string name="knowledge_bulk_queue_empty">No candidate interpretations indexed. Analyze the library first.</string>
     <string name="knowledge_bulk_queue_next">Next page</string>
+    <string name="knowledge_batch_preview">Review one / batch</string>
+    <string name="knowledge_batch_limit">Select one item for individual review, or 2–8 for a batch.</string>
+    <string name="knowledge_batch_confirm">Confirm all selected claims</string>
+    <string name="knowledge_batch_warning">All selected interpretations will be recorded as claims, NOT established facts. Verify each paraphrase and source before one explicit confirmation. One journal event will cover the whole batch; any stale source or journal aborts it.</string>
+    <string name="knowledge_batch_saved">Claims accepted in one journal event.</string>
     <string name="knowledge_bulk_queue_warning">These are machine-extracted interpretations, not accepted facts. Each must be verified against its current source before approval.</string>
     <string name="knowledge_audit_start">Audit the whole knowledge library</string>
     <string name="knowledge_audit_cancel">Stop audit</string>

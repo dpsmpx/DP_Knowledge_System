@@ -50,6 +50,11 @@
     <string name="knowledge_bulk_queue_title">Кандидаты для ручной проверки (%1$d)</string>
     <string name="knowledge_bulk_queue_empty">В индексе нет кандидатов. Сначала запустите анализ библиотеки.</string>
     <string name="knowledge_bulk_queue_next">Следующая страница</string>
+    <string name="knowledge_batch_preview">Проверить одну / пакет</string>
+    <string name="knowledge_batch_limit">Выберите одну запись для отдельной проверки или 2–8 для пакета.</string>
+    <string name="knowledge_batch_confirm">Подтвердить все выбранные утверждения</string>
+    <string name="knowledge_batch_warning">Все выбранные прочтения будут записаны как утверждения, НЕ как установленные факты. Проверьте каждое прочтение и источник перед общим подтверждением. В журнале будет одно событие для всего пакета; изменение источника или журнала отменит запись.</string>
+    <string name="knowledge_batch_saved">Утверждения приняты одним событием журнала.</string>
     <string name="knowledge_bulk_queue_warning">Это машинные интерпретации, а не подтверждённые факты. Каждая проверяется по актуальному источнику до утверждения.</string>
     <string name="knowledge_audit_start">Полный аудит базы знаний</string>
     <string name="knowledge_audit_cancel">Остановить аудит</string>

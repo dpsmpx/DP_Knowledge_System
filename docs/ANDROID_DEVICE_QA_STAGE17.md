@@ -1,8 +1,8 @@
 # Stage 17: Android device QA — human decision lifecycle slices
 
 This is a **partial Stage 17 implementation**. One-record retraction and
-revision, one-to-two split and two-to-one merge exist; batch review and strict
-automated policies are **not** complete.
+revision, one-to-two split, two-to-one merge and bounded human batch acceptance
+exist. Strict automated policies and broader multi-role batch approval are **not** complete.
 
 ## One-button synthetic acceptance check
 
@@ -10,7 +10,7 @@ automated policies are **not** complete.
    Verify the accompanying `.sha256` file after downloading both artifacts.
 2. Open the Knowledge System screen in the app and tap **Run device QA + copy**.
    The report is copied automatically. The synthetic `DECISION-17` and
-   `REVISE-17`, `SPLIT-17` and `MERGE-17` must all report `PASS`.
+   `REVISE-17`, `SPLIT-17`, `MERGE-17` and `BATCH-17` must all report `PASS`.
 3. Optionally tap **20k stress + copy** for the separate indexing load check.
 4. Send only the **redacted** report, not your real notes, API tokens, journal
    files, or vault paths. The diagnostic test creates and removes its own
@@ -52,6 +52,25 @@ automated policies are **not** complete.
 - Append **one** `merge` event, retire both originals and activate one new
   successor with links back to both source record IDs.
 - Reject replay on retired originals; preserve both synthetic source hashes.
+
+`BATCH-17` exercises a bounded two-claim operation:
+
+- Reparse two independent synthetic Markdown sources and select one reading each.
+- Preview both without initializing the journal.
+- Reject stale journal heads and altered note contents **without any acceptance**.
+- Append one `batch_accept` event activating two separate claims, retaining
+  source-specific provenance and the original read-only Markdown content.
+- Reject replay of a previously committed batch.
+
+In the actual UI, choose **Review candidates** and select one candidate to
+use the previous single-decision screen, or **2–8** candidates on the current
+page to preview a batch. Confirm only after inspecting all displayed readings
+and canonical statements. This intentionally narrow first batch **always uses
+the `claim` role**: neither facts nor hypotheses are promoted by bulk action.
+Contradictory, already active, duplicate, unresolved and invalid interpretations
+are blocked. The commit rereads the sources and checks the preview fingerprint
+and journal head. All changes belong to one journal event; the app never edits
+the original Markdown. Do not approve suggestions without reading their sources.
 
 All output is count/boolean only. Any unexpected exception is reported only
 by type, without a path, message or note text.
@@ -102,10 +121,12 @@ Original Markdown is never modified by this feature.
   Android/OEM restrictions, power management, interrupted operations.
 - `DEBT-01`: complete encrypted export/import, default daily backups, cloud
   synchronization and permission handling.
-- Full Stage 17: split/merge/revision edge-cases, versioned policy records, batch
-  acceptance and verifiably safe auto-approval; no automatic fact promotion.
+- Full Stage 17: split/merge/revision edge-cases, rich per-item batch roles and
+  approval controls, versioned policy records, verifiably safe auto-approval;
+  no automatic fact promotion.
 
 The previous Android 15 owner reports confirmed `DECISION-17`, `REVISE-17`
 and `SPLIT-17` in isolated synthetic tests, while two SQLite warnings and
-manual/future checks remained. **They do not validate the new `MERGE-17` test**;
-run the current APK on the actual device before marking that step passed.
+manual/future checks remained. **They do not validate either the `MERGE-17` or
+the new `BATCH-17` test**; run the current APK on an actual device before marking
+these steps passed.
