@@ -91,6 +91,11 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        "selectedVaultUntouched=true", "editorStage22"):
             self.assertIn(marker, runner)
         self.assertIn('"stage22_editor_selftest"', transport)
+        # Preview #17: Python emitted this protocol correctly, but Java's
+        # shared allowlist rejected it before ten per-check results appeared.
+        self.assertIn('"dpksys.stage22_editor_selftest.v1".equals(protocol)', transport)
+        self.assertIn('isSupportedProtocol(protocol)', transport)
+        self.assertIn('if (!isSupportedProtocol(protocol))', transport)
         for marker in ("def stage22_editor_selftest(", "tempfile.TemporaryDirectory",
                        '"used_selected_vault": False', '"requires_manual_ui_qa": True'):
             self.assertIn(marker, python)

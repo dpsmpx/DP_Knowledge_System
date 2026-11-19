@@ -45,6 +45,14 @@ snapshot until the integrated application is ready.
 | 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event and hash-checked preview; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
 | 22 | Full independent Android UI/UX with Dynamic Color, efficient note browsing, process dashboards, human decision/diff review and accessible navigation | **Eleven slices integrated; twelfth QA/release under review:** Material 3, direct launcher, Decisions workspace, guarded selection, manual reformulation/Save, exact source/KSF alignment, ephemeral highlights, cursor-linked journal records and [PR #60](https://github.com/dpsmpx/DP_Knowledge_System/pull/60) verified evidence/source navigation. [PR #63](https://github.com/dpsmpx/DP_Knowledge_System/pull/63) adds a permanently visible collapsible editor knowledge rail, inline record/evidence exploration, bounded Back stack, explicit refresh and unsaved/stale labeling. Earlier Python/Android CI passed; owner confirmed Preview #14 Decisions and Preview #16 improved review flow without full QA signoff. The twelfth adds a separate one-button ten-case synthetic Stage 22 editor test and signed prerelease workflow. Native editor replacement, semantic diff, 20k performance, accessibility and full device acceptance remain open; **QA-61–67 deferred**. See `docs/ANDROID_UI_UX_STAGE22.md` and `docs/STAGE22_EDITOR_QA.md`. |
 
+**Stage 22 delivery correction:** PR #66 / Preview #17 included the one-button
+test, but the first real Android 15 run on 19 Nov 2026 returned
+`EDITOR-22-SUITE: JSONException` (ENV PASS, UI SKIP). The Python bridge
+protocol was absent from the Java transport allowlist. A minimal protocol
+hotfix and direct Android regression test are being prepared; the synthetic
+test must pass on the **replacement** signed APK before QA-67 can progress.
+This does not close the deferred physical editor QA-59–66.
+
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
 
