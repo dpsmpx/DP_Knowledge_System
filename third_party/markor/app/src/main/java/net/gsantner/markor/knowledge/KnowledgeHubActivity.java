@@ -1356,10 +1356,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.knowledge_decision_actions)
                 .setItems(new String[]{getString(R.string.knowledge_revise_action),
+                                getString(R.string.knowledge_split_action),
                                 getString(R.string.knowledge_retract_action)},
                         (dialog, which) -> {
                             if (which == 0) {
                                 promptRevision(recordId);
+                            } else if (which == 1) {
+                                promptSplit(recordId);
                             } else {
                                 showRetractionPreview(recordId);
                             }
@@ -1497,6 +1500,169 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_revision_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Explicit single-record split: two separately selected readings, one atomic journal append. */
+    private void promptSplit(final String recordId) {
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(24, 8, 24, 8);
+        final EditText first = new EditText(this);
+        first.setHint(R.string.knowledge_split_first_hint);
+        first.setMinLines(2);
+        first.setMaxLines(4);
+        first.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        final EditText second = new EditText(this);
+        second.setHint(R.string.knowledge_split_second_hint);
+        second.setMinLines(2);
+        second.setMaxLines(4);
+        second.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        final EditText reason = new EditText(this);
+        reason.setHint(R.string.knowledge_revision_reason_hint);
+        reason.setMaxLines(3);
+        fields.addView(first);
+        fields.addView(second);
+        fields.addView(reason);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_split_title)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_revision_preview, (dialog, which) -> {
+                    final String firstText = first.getText().toString();
+                    final String secondText = second.getText().toString();
+                    final String reasonText = reason.getText().toString();
+                    if (firstText.trim().isEmpty() || secondText.trim().isEmpty()
+                            || firstText.length() > 2000 || secondText.length() > 2000
+                            || reasonText.length() > 1000) {
+                        status.setText(R.string.knowledge_split_failed);
+                    } else {
+                        showSplitPreview(recordId, firstText, secondText, reasonText);
+                    }
+                })
+                .show();
+    }
+
+    private void showSplitPreview(final String recordId, final String first,
+                                  final String second, final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject preview = KnowledgePythonBridge.previewSplit(this,
+                        workspacePath(), recordId, first, second);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    chooseSplitReading(preview, first, second, reason, true, null);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_split_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void chooseSplitReading(final JSONObject preview, final String first,
+                                    final String second, final String reason,
+                                    final boolean choosingFirst, final JSONObject firstOption) {
+        final JSONArray options = preview.optJSONArray(
+                choosingFirst ? "first_options" : "second_options");
+        if (options == null || options.length() == 0) {
+            status.setText(R.string.knowledge_split_failed);
+            return;
+        }
+        final String[] labels = new String[options.length()];
+        for (int i = 0; i < options.length(); i++) {
+            final JSONObject option = options.optJSONObject(i);
+            labels[i] = option == null ? "?" : option.optString("reading_id")
+                    + " · " + option.optString("paraphrase");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(choosingFirst ? R.string.knowledge_split_choose_first
+                        : R.string.knowledge_split_choose_second)
+                .setItems(labels, (dialog, which) -> {
+                    final JSONObject choice = options.optJSONObject(which);
+                    if (choice == null) {
+                        return;
+                    }
+                    if (choosingFirst) {
+                        chooseSplitReading(preview, first, second, reason, false, choice);
+                    } else {
+                        confirmSplit(preview, firstOption, choice, first, second, reason);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmSplit(final JSONObject preview, final JSONObject firstOption,
+                              final JSONObject secondOption, final String first,
+                              final String second, final String reason) {
+        if (firstOption == null || secondOption == null) {
+            status.setText(R.string.knowledge_split_failed);
+            return;
+        }
+        final StringBuilder details = new StringBuilder()
+                .append(preview.optString("role")).append("\n\n")
+                .append(preview.optString("old_summary"))
+                .append("\n\n→ 1\n")
+                .append(first).append("\n")
+                .append(firstOption.optString("new_summary"))
+                .append("\n\n→ 2\n")
+                .append(second).append("\n")
+                .append(secondOption.optString("new_summary"))
+                .append("\n\n")
+                .append(getString(R.string.knowledge_split_diagnostics,
+                        firstOption.optInt("conflict_count") + secondOption.optInt("conflict_count"),
+                        firstOption.optInt("diagnostic_count") + secondOption.optInt("diagnostic_count")))
+                .append("\n\n").append(getString(R.string.knowledge_split_warning));
+        if (preview.optBoolean("old_summary_truncated")) {
+            details.append("\n").append(getString(R.string.knowledge_retract_truncated));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_split_confirm)
+                .setMessage(details.toString())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_split_confirm,
+                        (dialog, which) -> commitSplit(preview, firstOption, secondOption,
+                                first, second, reason))
+                .show();
+    }
+
+    private void commitSplit(final JSONObject preview, final JSONObject firstOption,
+                             final JSONObject secondOption, final String first,
+                             final String second, final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final String expectedHead = preview.isNull("journal_head") ? null
+                        : preview.getString("journal_head");
+                final JSONObject saved = KnowledgePythonBridge.splitDecision(this,
+                        workspacePath(), preview.getString("record_id"), first, second,
+                        firstOption.getString("reading_id"), secondOption.getString("reading_id"),
+                        reason, preview.getString("split_hash"), expectedHead);
+                if (!"split".equals(saved.optString("decision"))
+                        || saved.getJSONArray("new_record_ids").length() != 2
+                        || saved.getJSONArray("journal_ids").length() != 1) {
+                    throw new IllegalStateException("No atomic split commit");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_split_saved,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_split_failed);
                     }
                 });
             }

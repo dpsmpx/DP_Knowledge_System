@@ -470,6 +470,84 @@ def revise_decision(workspace_dir: str, record_id: str, statement: str,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _split_hash(statements: list[str]) -> str:
+    return _source_hash(json.dumps(statements, ensure_ascii=False, separators=(",", ":")))
+
+
+def preview_split(workspace_dir: str, record_id: str,
+                  first_statement: str, second_statement: str) -> str:
+    """Preview both human-authored successors, without creating a journal."""
+    kb = _kb(workspace_dir)
+    first_rec, first_parse, first_options = _revision_preview(kb, record_id, first_statement)
+    second_rec, second_parse, second_options = _revision_preview(kb, record_id, second_statement)
+    if first_rec.id != second_rec.id or not any(
+            left.id != right.id for _, left in first_options for _, right in second_options):
+        raise ValueError("Split requires two different successor statements")
+
+    def summarize(options):
+        return [{
+            "reading_id": option["reading_id"],
+            "paraphrase": option["paraphrase"][:1000],
+            "new_summary": node.ksf()[:4000],
+            "conflict_count": len(option["conflicts"]),
+            "diagnostic_count": len(option["diagnostics"]),
+        } for option, node in options]
+
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "record_id": record_id,
+        "journal_head": kb.journal.head, "role": first_rec.role,
+        "old_summary": first_rec.node.ksf()[:4000],
+        "old_summary_truncated": len(first_rec.node.ksf()) > 4000,
+        "split_hash": _split_hash([first_statement, second_statement]),
+        "first_parse_status": first_parse.formalization.status,
+        "second_parse_status": second_parse.formalization.status,
+        "first_options": summarize(first_options),
+        "second_options": summarize(second_options),
+        "requires_human_confirmation": True, "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def split_decision(workspace_dir: str, record_id: str,
+                   first_statement: str, second_statement: str,
+                   first_reading_id: str, second_reading_id: str,
+                   reason: str, expected_hash: str, expected_head: str | None) -> str:
+    """Atomic append-only split after explicit review and fresh CAS verification."""
+    if _split_hash([first_statement, second_statement]) != expected_hash:
+        raise ValueError("Split statements changed after preview")
+    if not isinstance(reason, str) or len(reason) > 1000:
+        raise ValueError("Split reason is too long")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed after split preview")
+    _, _, first_options = _revision_preview(kb, record_id, first_statement)
+    _, _, second_options = _revision_preview(kb, record_id, second_statement)
+    first = next((node for opt, node in first_options
+                  if opt["reading_id"] == first_reading_id), None)
+    second = next((node for opt, node in second_options
+                   if opt["reading_id"] == second_reading_id), None)
+    if first is None or second is None or first.id == second.id:
+        raise ValueError("Split requires two distinct selected readings")
+    kb.ws.init()
+    result = kb.split(record_id, [first, second],
+                      reason=reason.strip() or "explicit manual Android split",
+                      provenance={
+                          "source_type": "human_input", "method": "manual_split",
+                          "previous_record": record_id, "statements_sha": expected_hash,
+                          "reading_ids": [first_reading_id, second_reading_id],
+                      })
+    if kb.journal.verify() or kb.state.active(record_id) \
+            or not kb.state.active(first.id) or not kb.state.active(second.id):
+        raise ValueError("Split journal state inconsistent")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "decision": "split",
+        "old_record_id": record_id,
+        "new_record_ids": [first.id, second.id],
+        "journal_ids": [e.id for e in result.entries],
+        "journal_head": kb.journal.head,
+        "affected_derived": len(result.auth.removed),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 _READ_ONLY_OPS = {
     DialogueOp.ASK, DialogueOp.VERIFY, DialogueOp.DEFINE, DialogueOp.HYPOTHESIZE,
     DialogueOp.EXPLAIN, DialogueOp.COMPARE, DialogueOp.FIND_CONTRADICTIONS,

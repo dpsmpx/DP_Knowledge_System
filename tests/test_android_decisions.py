@@ -12,10 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
 from ksys_android_bridge import (active_decisions, inspect_note, preview_fragment,
-                                 preview_retraction, preview_revision, record_decision,
-                                 retract_decision, revise_decision)
+                                 preview_retraction, preview_revision, preview_split, record_decision,
+                                 retract_decision, revise_decision, split_decision)
 from ksys.core.clock import FixedClock
+from ksys.store.kb import KnowledgeBase
 from ksys.store.journal import Journal
+from ksys.store.workspace import Workspace
 
 
 class MobileDecisionTests(unittest.TestCase):
@@ -223,6 +225,71 @@ class MobileDecisionTests(unittest.TestCase):
             revise_decision(workspace, old, statement,
                             preview["options"][0]["reading_id"], "tampered",
                             preview["statement_hash"], preview["journal_head"])
+        self.assertEqual(1, len(path.read_text(encoding="utf-8").splitlines()))
+
+    def test_explicit_split_is_atomic_append_only_and_replayable(self):
+        self._accept_synthetic()
+        workspace = str(self.root / "workspace")
+        old = json.loads(active_decisions(workspace))["records"][0]["record_id"]
+        first, second = "Стресс вызывает усталость.", "Шум вызывает бессонницу."
+        preview = json.loads(preview_split(workspace, old, first, second))
+        self.assertTrue(preview["requires_human_confirmation"])
+        self.assertTrue(preview["read_only"])
+        self.assertEqual(1, len(preview["first_options"]))
+        self.assertEqual(1, len(preview["second_options"]))
+        first_reading = preview["first_options"][0]["reading_id"]
+        second_reading = preview["second_options"][0]["reading_id"]
+        path = self.root / "workspace/data/formal/journal.jsonl"
+        self.assertEqual(1, len(path.read_text().splitlines()))
+        with self.assertRaises(ValueError):
+            split_decision(workspace, old, first, second, first_reading, second_reading,
+                           "test", preview["split_hash"], "J:stale")
+        with self.assertRaises(ValueError):
+            split_decision(workspace, old, first, second + "extra", first_reading,
+                           second_reading, "test", preview["split_hash"], preview["journal_head"])
+        self.assertEqual(1, len(path.read_text().splitlines()))
+        result = json.loads(split_decision(workspace, old, first, second, first_reading,
+                                           second_reading, "explicit human split",
+                                           preview["split_hash"], preview["journal_head"]))
+        self.assertEqual("split", result["decision"])
+        self.assertEqual(1, len(result["journal_ids"]))
+        self.assertEqual(2, len(set(result["new_record_ids"])))
+        self.assertEqual(set(result["new_record_ids"]), {
+            rec["record_id"] for rec in json.loads(active_decisions(workspace))["records"]})
+        journal = Journal(path, FixedClock())
+        self.assertEqual(["accept", "split"], [entry.op for entry in journal.entries()])
+        self.assertEqual([], journal.verify())
+        self.assertEqual("manual_split", journal.entries()[-1].data["provenance"]["method"])
+        kb = KnowledgeBase(Workspace(self.root / "workspace"), FixedClock(), use_cache=False)
+        self.assertFalse(kb.state.active(old))
+        self.assertEqual(set(result["new_record_ids"]),
+                         set(kb.state.records[old].superseded_by_many))
+        self.assertTrue(all(old in kb.state.records[nid].supersedes
+                            for nid in result["new_record_ids"]))
+        self.assertEqual([], kb.state.diagnostics)
+        self.assertEqual(self.note, "# Demo\nСтресс приводит к бессоннице.\n")
+        with self.assertRaises(ValueError):
+            split_decision(workspace, old, first, second, first_reading,
+                           second_reading, "repeat", preview["split_hash"], result["journal_head"])
+
+    def test_split_rejects_duplicate_successors_and_tampered_journal(self):
+        self._accept_synthetic()
+        workspace = str(self.root / "workspace")
+        old = json.loads(active_decisions(workspace))["records"][0]["record_id"]
+        first = "Стресс вызывает усталость."
+        with self.assertRaises(ValueError):
+            preview_split(workspace, old, first, first)
+        with self.assertRaises(ValueError):
+            preview_split(workspace, old, first, "nonsense not formalisable")
+        preview = json.loads(preview_split(workspace, old, first, "Шум вызывает бессонницу."))
+        path = self.root / "workspace/data/formal/journal.jsonl"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            '"actor":"human:me"', '"actor":"tampered"'), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            split_decision(workspace, old, first, "Шум вызывает бессонницу.",
+                           preview["first_options"][0]["reading_id"],
+                           preview["second_options"][0]["reading_id"], "no",
+                           preview["split_hash"], preview["journal_head"])
         self.assertEqual(1, len(path.read_text(encoding="utf-8").splitlines()))
 
 

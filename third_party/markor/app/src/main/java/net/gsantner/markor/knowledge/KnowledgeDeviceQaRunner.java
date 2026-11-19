@@ -119,6 +119,7 @@ public final class KnowledgeDeviceQaRunner {
             step("RECONCILE-16", this::checkSyntheticReconciliation);
             step("DECISION-17", this::checkSyntheticDecisionLifecycle);
             step("REVISE-17", this::checkSyntheticRevision);
+            step("SPLIT-17", this::checkSyntheticSplit);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -643,6 +644,93 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "syntheticRevisions=1, activeAfterRevise=1, oldObsoleted=true, "
                     + "staleHeadRejected=true, replayRejected=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** One atomic split in a private synthetic journal, with stale/replay protection. */
+    private String checkSyntheticSplit() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create split sandbox");
+        }
+        try {
+            ensureRunning();
+            final String source = "# Synthetic test\nСтресс приводит к бессоннице.\n";
+            final String firstStatement = "Стресс вызывает усталость.";
+            final String secondStatement = "Шум вызывает бессонницу.";
+            final String path = "synthetic-split.md";
+            final String workspace = new File(sandbox, "workspace").getAbsolutePath();
+            final String fragment = KnowledgePythonBridge.inspect(context, path, source)
+                    .getJSONArray("fragments").getJSONObject(1).getString("id");
+            final JSONObject initial = KnowledgePythonBridge.preview(context,
+                    workspace, path, source, fragment);
+            KnowledgePythonBridge.decide(context, workspace, path, source, fragment,
+                    initial.getJSONObject("preview").getJSONArray("options")
+                            .getJSONObject(0).getString("reading_id"), "fact",
+                    initial.getString("source_hash"), null);
+            final JSONObject listing = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (listing.getInt("total") != 1) {
+                throw new SyntheticMismatch("verdict=SPLIT_INITIAL_LIST_MISMATCH");
+            }
+            final String old = listing.getJSONArray("records").getJSONObject(0)
+                    .getString("record_id");
+            final JSONObject preview = KnowledgePythonBridge.previewSplit(context,
+                    workspace, old, firstStatement, secondStatement);
+            if (!preview.getBoolean("read_only")
+                    || !preview.getBoolean("requires_human_confirmation")
+                    || preview.getJSONArray("first_options").length() != 1
+                    || preview.getJSONArray("second_options").length() != 1) {
+                throw new SyntheticMismatch("verdict=SPLIT_PREVIEW_MISMATCH");
+            }
+            final String firstReading = preview.getJSONArray("first_options")
+                    .getJSONObject(0).getString("reading_id");
+            final String secondReading = preview.getJSONArray("second_options")
+                    .getJSONObject(0).getString("reading_id");
+            boolean staleRejected = false;
+            try {
+                KnowledgePythonBridge.splitDecision(context, workspace, old,
+                        firstStatement, secondStatement, firstReading, secondReading,
+                        "synthetic", preview.getString("split_hash"), "J:stale-head");
+            } catch (Exception expected) {
+                staleRejected = true;
+            }
+            if (!staleRejected || KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0).getInt("total") != 1) {
+                throw new SyntheticMismatch("verdict=SPLIT_STALE_HEAD_NOT_REJECTED");
+            }
+            ensureRunning();
+            final JSONObject split = KnowledgePythonBridge.splitDecision(context,
+                    workspace, old, firstStatement, secondStatement,
+                    firstReading, secondReading, "explicit synthetic split",
+                    preview.getString("split_hash"), preview.getString("journal_head"));
+            final JSONObject active = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (!"split".equals(split.getString("decision"))
+                    || split.getJSONArray("journal_ids").length() != 1
+                    || split.getJSONArray("new_record_ids").length() != 2
+                    || active.getInt("total") != 2) {
+                throw new SyntheticMismatch("verdict=SPLIT_COMMIT_MISMATCH");
+            }
+            boolean replayRejected = false;
+            try {
+                KnowledgePythonBridge.splitDecision(context, workspace, old,
+                        firstStatement, secondStatement, firstReading, secondReading,
+                        "repeat", preview.getString("split_hash"), split.getString("journal_head"));
+            } catch (Exception expected) {
+                replayRejected = true;
+            }
+            if (!replayRejected || !initial.getString("source_hash").equals(
+                    KnowledgePythonBridge.preview(context, workspace, path,
+                            source, fragment).getString("source_hash"))) {
+                throw new SyntheticMismatch("verdict=SPLIT_REPLAY_OR_SOURCE_MISMATCH");
+            }
+            return "syntheticSplits=1, activeAfterSplit=2, oldObsoleted=true, "
+                    + "atomicJournalEntry=true, staleHeadRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);

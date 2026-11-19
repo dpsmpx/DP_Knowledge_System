@@ -104,6 +104,24 @@ public final class KnowledgePythonBridge {
                 readingId, reason, sourceHash, expectedHead);
     }
 
+    public static JSONObject previewSplit(final Context context, final String workspace,
+                                          final String recordId, final String firstStatement,
+                                          final String secondStatement) throws JSONException {
+        return invoke(context, "preview_split", workspace, recordId,
+                firstStatement, secondStatement);
+    }
+
+    public static JSONObject splitDecision(final Context context, final String workspace,
+                                           final String recordId, final String firstStatement,
+                                           final String secondStatement, final String firstReading,
+                                           final String secondReading, final String reason,
+                                           final String expectedHash, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "split_decision", workspace, recordId,
+                firstStatement, secondStatement, firstReading, secondReading,
+                reason, expectedHash, expectedHead);
+    }
+
     public static JSONObject query(final Context context, final String workspace,
                                    final String question) throws JSONException {
         return invoke(context, "ask_knowledge", workspace, question);

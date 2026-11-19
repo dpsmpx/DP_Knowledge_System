@@ -7,7 +7,7 @@
             ничего из full не становится знанием без решения человека.
 
 Любое изменение — только через журнал (append-only) и только явным вызовом
-accept/reject/defer/retract/revise/resolve/bind/label/alias. Перед записью узлы
+accept/reject/defer/retract/revise/split/resolve/bind/label/alias. Перед записью узлы
 проверяются структурно (ir.validate) и по схеме (validation.schema).
 """
 from __future__ import annotations
@@ -397,6 +397,27 @@ class KnowledgeBase:
         e, da, df = self._commit("revise", {"target": target, "node": new_node.to_dict(), "reason": reason,
                                             "provenance": provenance or {"source_type": "human_input"},
                                             "confidence": confidence})
+        return CommitResult([e], da, df, self._decision_impact(da))
+
+    def split(self, target: str, new_nodes: list[Node], reason: str | None = None,
+              provenance: dict | None = None) -> CommitResult:
+        """One atomic, explicit journal transition: old active record → two successors."""
+        target = self.resolve_id(target)
+        old = self.state.records[target]
+        if not self.state.active(target) or old.role not in ("fact", "claim", "hypothesis"):
+            raise KSError(ErrorKind.LOGIC_ERROR, "split requires an active human-reviewed statement")
+        if len(new_nodes) != 2 or len({node.id for node in new_nodes}) != 2:
+            raise KSError(ErrorKind.LOGIC_ERROR, "split requires two distinct successors")
+        for node in new_nodes:
+            if node.TYPE != old.role or node.id in self.state.records or node.id in self.state.rejected:
+                raise KSError(ErrorKind.LOGIC_ERROR, "split successor is not new and role-matched")
+            errors = [d for d in check_node(node) if d.severity == Severity.ERROR]
+            if errors:
+                raise KSError(errors[0].kind, errors[0].message)
+        e, da, df = self._commit("split", {
+            "target": target, "nodes": [node.to_dict() for node in new_nodes],
+            "reason": reason, "provenance": provenance or {"source_type": "human_input"},
+        })
         return CommitResult([e], da, df, self._decision_impact(da))
 
     def resolve(self, origin: str, reading_id: str) -> Entry:

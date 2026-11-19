@@ -103,6 +103,7 @@
     <string name="knowledge_retract_failed">No change made: the journal may have changed or the requested record is unavailable. Reopen the list and retry.</string>
     <string name="knowledge_decision_actions">Change a knowledge record</string>
     <string name="knowledge_revise_action">Revise with a new statement…</string>
+    <string name="knowledge_split_action">Split into two independent statements…</string>
     <string name="knowledge_retract_action">Review retraction…</string>
     <string name="knowledge_revision_title">Manual knowledge revision</string>
     <string name="knowledge_revision_text_hint">Write a new, explicit statement in plain language</string>
@@ -114,6 +115,16 @@
     <string name="knowledge_revision_conflicts">Potential conflicts: %1$d; diagnostics: %2$d. Inspect before approving.</string>
     <string name="knowledge_revision_saved">Knowledge revision recorded. Previous journal history remains intact.</string>
     <string name="knowledge_revision_failed">Revision not saved: the journal or interpretation changed, or the text is invalid. Reopen and preview again.</string>
+    <string name="knowledge_split_title">Manual split of one knowledge record</string>
+    <string name="knowledge_split_first_hint">First successor statement</string>
+    <string name="knowledge_split_second_hint">Second successor statement</string>
+    <string name="knowledge_split_choose_first">Choose the first formal interpretation</string>
+    <string name="knowledge_split_choose_second">Choose the second formal interpretation</string>
+    <string name="knowledge_split_confirm">Confirm two-record split</string>
+    <string name="knowledge_split_diagnostics">Potential conflicts: %1$d; diagnostics: %2$d.</string>
+    <string name="knowledge_split_warning">Both new statements are your independent decisions, not proven consequences of the old record. The original becomes obsolete; two successors are added atomically to the private append-only journal. Original Markdown is untouched. Back up the journal before continuing.</string>
+    <string name="knowledge_split_saved">Split recorded. Two successors are active; history is preserved.</string>
+    <string name="knowledge_split_failed">No split recorded. Statements or readings may be invalid or duplicate; the journal may have changed. Reopen the record and preview again.</string>
     <string name="knowledge_conflicts">Potential conflicts: %1$d</string>
     <string name="knowledge_diagnostic_count">Validation diagnostics: %1$d</string>
     <string name="knowledge_diagnostics">Knowledge state</string>
