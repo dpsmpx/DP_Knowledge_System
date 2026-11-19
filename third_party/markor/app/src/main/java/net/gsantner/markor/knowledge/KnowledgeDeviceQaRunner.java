@@ -116,6 +116,7 @@ public final class KnowledgeDeviceQaRunner {
             step("EMBED-01", this::checkEmbeddingPrimitives);
             step("CRYPTO-01", this::checkSyntheticCrypto);
             step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
+            step("RECONCILE-16", this::checkSyntheticReconciliation);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -201,6 +202,7 @@ public final class KnowledgeDeviceQaRunner {
                 + ", structuralHealthy=" + health.isStructurallyHealthy()
                 + ", healthy=" + health.isHealthy()
                 + ", sources=" + health.sources + ", fts=" + health.textRows
+                + ", unverifiedSources=" + health.unverifiedSources
                 + ", missingFts=" + health.missingTextRows
                 + ", orphanFts=" + health.orphanTextRows
                 + ", embeddedNotes=" + health.embeddedNotes
@@ -375,6 +377,103 @@ public final class KnowledgeDeviceQaRunner {
                     + ", indexingMillis=" + indexMillis
                     + (stress ? ", 20k target exercised" : ", incremental reuse verified")
                     + "; synthetic source hash unchanged; all fixtures confined to app cache";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Synthetic rename, complete/partial scan and cancellation regression. */
+    private String checkSyntheticReconciliation() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create reconciliation sandbox");
+        }
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) {
+                throw new IOException("Could not create reconciliation fixture vault");
+            }
+            final File alpha = new File(vault, "alpha.md");
+            final File oldName = new File(vault, "beta.md");
+            final File newName = new File(vault, "gamma.md");
+            writeFixture(alpha, "# Alpha\nSynthetic amber source points to [[beta]].\n");
+            writeFixture(oldName, "# Beta\nSynthetic violet source.\n");
+            final byte[] unchangedHash = sha256(alpha);
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-reconciliation.sqlite"));
+            final KnowledgeVaultScanner.Snapshot firstScan = KnowledgeVaultScanner.scan(
+                    vault, 10, this::isCancelled);
+            final KnowledgeLocalIndex.SyncResult first = testIndex.synchronize(
+                    vault, firstScan, this::isCancelled);
+            if (first.indexed != 2 || first.removed != 0
+                    || testIndex.possibleBacklinks("beta.md", 10).size() != 1) {
+                throw new SyntheticMismatch("verdict=INITIAL_RECONCILIATION_MISMATCH");
+            }
+            if (!oldName.renameTo(newName)) {
+                throw new IOException("Synthetic rename failed");
+            }
+            final KnowledgeVaultScanner.Snapshot renamedScan = KnowledgeVaultScanner.scan(
+                    vault, 10, this::isCancelled);
+            final KnowledgeLocalIndex.SyncResult renamed = testIndex.synchronize(
+                    vault, renamedScan, this::isCancelled);
+            boolean foundAlpha = false;
+            boolean foundGamma = false;
+            boolean foundObsoleteBeta = false;
+            for (final KnowledgeLocalIndex.Hit hit : testIndex.search("", 10)) {
+                foundAlpha |= "alpha.md".equals(hit.relativePath);
+                foundGamma |= "gamma.md".equals(hit.relativePath);
+                foundObsoleteBeta |= "beta.md".equals(hit.relativePath);
+            }
+            if (renamed.indexed != 1 || renamed.reused != 1 || renamed.removed != 1
+                    || renamed.unverified != 0 || renamed.keptMissingEntries
+                    || !foundAlpha || !foundGamma || foundObsoleteBeta
+                    || !testIndex.search("violet", 10).get(0).relativePath.equals("gamma.md")
+                    || testIndex.possibleBacklinks("gamma.md", 10).size() != 0) {
+                throw new SyntheticMismatch("verdict=FULL_SCAN_RENAME_MISMATCH");
+            }
+            final KnowledgeVaultScanner.Snapshot partialScan = KnowledgeVaultScanner.scan(
+                    vault, 1, this::isCancelled);
+            final KnowledgeLocalIndex.SyncResult partial = testIndex.synchronize(
+                    vault, partialScan, this::isCancelled);
+            int unverifiedHits = 0;
+            final List<KnowledgeLocalIndex.Hit> partialHits = testIndex.search("", 10);
+            for (final KnowledgeLocalIndex.Hit hit : partialHits) {
+                if (!hit.confirmedInLastScan) {
+                    unverifiedHits++;
+                }
+            }
+            if (!partial.keptMissingEntries || partial.removed != 0
+                    || partial.unverified != 1 || unverifiedHits != 1
+                    || partialHits.size() != 2 || !partialHits.get(0).confirmedInLastScan
+                    || testIndex.evidenceSearch("synthetic", 10).size() != 1) {
+                throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
+            }
+            for (final KnowledgeLocalIndex.Hit evidence :
+                    testIndex.evidenceSearch("amber violet synthetic", 10)) {
+                if (!evidence.confirmedInLastScan) {
+                    throw new SyntheticMismatch("verdict=UNVERIFIED_EVIDENCE");
+                }
+            }
+            final KnowledgeLocalIndex.SyncResult restored = testIndex.synchronize(
+                    vault, renamedScan, this::isCancelled);
+            if (restored.reused != 2 || restored.unverified != 0) {
+                throw new SyntheticMismatch("verdict=FULL_RESCAN_MISMATCH");
+            }
+            boolean cancelled = false;
+            try {
+                testIndex.synchronize(vault, renamedScan, () -> true);
+            } catch (InterruptedIOException expected) {
+                cancelled = true;
+            }
+            if (!cancelled || testIndex.search("", 10).size() != 2
+                    || !testIndex.search("", 10).get(0).confirmedInLastScan
+                    || !Arrays.equals(unchangedHash, sha256(alpha))) {
+                throw new SyntheticMismatch("verdict=CANCELLATION_ROLLBACK_MISMATCH");
+            }
+            return "renamed=1, derivedOldRemoved=1, partialUnverified=1, "
+                    + "partialRemoved=0, evidenceExcluded=true, "
+                    + "cancelRollback=true, sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);
         }
