@@ -2,8 +2,8 @@ package com.dpsmpx.dpks.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import com.dpsmpx.dpks.domain.DiscoveredNote
 import com.dpsmpx.dpks.domain.NoteHit
@@ -11,6 +11,7 @@ import com.dpsmpx.dpks.domain.ScanSnapshot
 import com.dpsmpx.dpks.domain.SyncStats
 import kotlinx.coroutines.ensureActive
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -22,7 +23,59 @@ import kotlin.coroutines.coroutineContext
  */
 class NotesIndex(context: Context) {
     private val appContext = context.applicationContext
-    private val helper = Helper(appContext)
+    private val databaseFile: File =
+        File(appContext.noBackupFilesDir, DB_NAME)
+
+    private fun openWritable(): SQLiteDatabase {
+        val db = SQLiteDatabase.openOrCreateDatabase(databaseFile, null)
+        ensureSchema(db)
+        return db
+    }
+
+    private fun openReadable(): SQLiteDatabase {
+        if (!databaseFile.exists()) {
+            openWritable().close()
+        }
+        val db = SQLiteDatabase.openDatabase(
+            databaseFile.path,
+            null,
+            SQLiteDatabase.OPEN_READONLY,
+        )
+        return db
+    }
+
+    private fun ensureSchema(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS notes(
+              id INTEGER PRIMARY KEY,
+              path TEXT NOT NULL UNIQUE,
+              modified INTEGER NOT NULL,
+              size INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              oversized INTEGER NOT NULL DEFAULT 0,
+              generation TEXT NOT NULL,
+              doc_uri TEXT
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts4(" +
+                "path, title, body, tokenize=unicode61)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS links(
+              source_path TEXT NOT NULL,
+              target_key TEXT NOT NULL,
+              PRIMARY KEY(source_path, target_key)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        )
+    }
 
     suspend fun synchronize(
         treeUri: Uri,
@@ -30,7 +83,7 @@ class NotesIndex(context: Context) {
         onProgress: ((processed: Int, total: Int) -> Unit)? = null,
     ): SyncStats {
         val generation = UUID.randomUUID().toString()
-        val db = helper.writableDatabase
+        val db = openWritable()
         var indexed = 0
         var reused = 0
         var oversized = 0
@@ -153,73 +206,86 @@ class NotesIndex(context: Context) {
             return SyncStats(indexed, reused, oversized, removed, incomplete, unverified)
         } finally {
             db.endTransaction()
+            db.close()
         }
     }
 
     fun search(query: String, limit: Int = MAX_VISIBLE): List<NoteHit> {
-        val db = helper.readableDatabase
-        val generation = getMeta(db, "last_scan_generation").orEmpty()
-        val fts = MarkdownMeta.ftsQuery(query)
-        val hits = ArrayList<NoteHit>(limit)
+        val db = openReadable()
+        try {
+            val generation = getMeta(db, "last_scan_generation").orEmpty()
+            val fts = MarkdownMeta.ftsQuery(query)
+            val hits = ArrayList<NoteHit>(limit)
 
-        if (fts.isEmpty()) {
-            db.rawQuery(
-                """
-                SELECT path, title, modified, size, generation, oversized
-                FROM notes
-                ORDER BY CASE WHEN generation=? THEN 0 ELSE 1 END, path COLLATE NOCASE
-                LIMIT ?
-                """.trimIndent(),
-                arrayOf(generation, limit.toString()),
-            ).use { c ->
-                while (c.moveToNext()) {
-                    hits.add(c.toHit(generation))
+            if (fts.isEmpty()) {
+                db.rawQuery(
+                    """
+                    SELECT path, title, modified, size, generation, oversized
+                    FROM notes
+                    ORDER BY CASE WHEN generation=? THEN 0 ELSE 1 END, path COLLATE NOCASE
+                    LIMIT ?
+                    """.trimIndent(),
+                    arrayOf(generation, limit.toString()),
+                ).use { c ->
+                    while (c.moveToNext()) hits.add(c.toHit(generation))
+                }
+            } else {
+                db.rawQuery(
+                    """
+                    SELECT notes.path, notes.title, notes.modified, notes.size,
+                           notes.generation, notes.oversized
+                    FROM documents_fts
+                    JOIN notes ON documents_fts.docid = notes.id
+                    WHERE documents_fts MATCH ?
+                    ORDER BY CASE WHEN notes.generation=? THEN 0 ELSE 1 END,
+                             notes.path COLLATE NOCASE
+                    LIMIT ?
+                    """.trimIndent(),
+                    arrayOf(fts, generation, limit.toString()),
+                ).use { c ->
+                    while (c.moveToNext()) hits.add(c.toHit(generation))
                 }
             }
-        } else {
-            db.rawQuery(
-                """
-                SELECT notes.path, notes.title, notes.modified, notes.size,
-                       notes.generation, notes.oversized
-                FROM documents_fts
-                JOIN notes ON documents_fts.docid = notes.id
-                WHERE documents_fts MATCH ?
-                ORDER BY CASE WHEN notes.generation=? THEN 0 ELSE 1 END,
-                         notes.path COLLATE NOCASE
-                LIMIT ?
-                """.trimIndent(),
-                arrayOf(fts, generation, limit.toString()),
-            ).use { c ->
-                while (c.moveToNext()) {
-                    hits.add(c.toHit(generation))
-                }
-            }
+            return hits
+        } finally {
+            db.close()
         }
-        return hits
     }
 
     fun totalCount(): Int {
-        val db = helper.readableDatabase
-        return db.rawQuery("SELECT COUNT(*) FROM notes", null).use {
-            if (it.moveToFirst()) it.getInt(0) else 0
+        val db = openReadable()
+        try {
+            return db.rawQuery("SELECT COUNT(*) FROM notes", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+        } finally {
+            db.close()
         }
     }
 
     fun lastUnverified(): Int {
-        val db = helper.readableDatabase
-        val generation = getMeta(db, "last_scan_generation") ?: return totalCount()
-        return db.rawQuery(
-            "SELECT COUNT(*) FROM notes WHERE generation<>?",
-            arrayOf(generation),
-        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        val db = openReadable()
+        try {
+            val generation = getMeta(db, "last_scan_generation") ?: return totalCount()
+            return db.rawQuery(
+                "SELECT COUNT(*) FROM notes WHERE generation<>?",
+                arrayOf(generation),
+            ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        } finally {
+            db.close()
+        }
     }
 
     fun lastScanIncomplete(): Boolean {
-        val db = helper.readableDatabase
-        return getMeta(db, "last_scan_incomplete") == "1"
+        val db = openReadable()
+        try {
+            return getMeta(db, "last_scan_incomplete") == "1"
+        } finally {
+            db.close()
+        }
     }
 
-    private fun android.database.Cursor.toHit(generation: String): NoteHit {
+    private fun Cursor.toHit(generation: String): NoteHit {
         val gen = getString(4)
         return NoteHit(
             relativePath = getString(0),
@@ -265,54 +331,8 @@ class NotesIndex(context: Context) {
         )
     }
 
-    private class Helper(context: Context) : SQLiteOpenHelper(
-        context,
-        context.noBackupFilesDir.resolve(DB_NAME).absolutePath,
-        null,
-        SCHEMA,
-    ) {
-        override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL(
-                """
-                CREATE TABLE notes(
-                  id INTEGER PRIMARY KEY,
-                  path TEXT NOT NULL UNIQUE,
-                  modified INTEGER NOT NULL,
-                  size INTEGER NOT NULL,
-                  title TEXT NOT NULL,
-                  oversized INTEGER NOT NULL DEFAULT 0,
-                  generation TEXT NOT NULL,
-                  doc_uri TEXT
-                )
-                """.trimIndent(),
-            )
-            db.execSQL(
-                "CREATE VIRTUAL TABLE documents_fts USING fts4(
-                    path, title, body, tokenize=unicode61
-                )".trimIndent().replace("\n", " "),
-            )
-            db.execSQL(
-                "CREATE TABLE links(
-                    source_path TEXT NOT NULL,
-                    target_key TEXT NOT NULL,
-                    PRIMARY KEY(source_path, target_key)
-                )".trimIndent().replace("\n", " "),
-            )
-            db.execSQL("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        }
-
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            db.execSQL("DROP TABLE IF EXISTS links")
-            db.execSQL("DROP TABLE IF EXISTS documents_fts")
-            db.execSQL("DROP TABLE IF EXISTS notes")
-            db.execSQL("DROP TABLE IF EXISTS meta")
-            onCreate(db)
-        }
-    }
-
     companion object {
         private const val DB_NAME = "notes_index_v1.sqlite"
-        private const val SCHEMA = 1
         const val MAX_INDEX_BYTES = 2_000_000
         const val MAX_VISIBLE = 250
     }
