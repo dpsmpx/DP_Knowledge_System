@@ -906,10 +906,18 @@ public final class KnowledgeDeviceQaRunner {
                     workspace, selections.toString(), preview.getString("batch_hash"), null);
             final JSONObject active = KnowledgePythonBridge.activeDecisions(context,
                     workspace, 0);
+            boolean unchanged = true;
+            for (int i = 0; i < paths.length; i++) {
+                final JSONObject original = preview.getJSONArray("items").getJSONObject(i);
+                final JSONObject after = KnowledgePythonBridge.preview(context, workspace,
+                        paths[i], sources[i], selections.getJSONObject(i).getString("fragment_id"));
+                unchanged &= original.getString("source_hash")
+                        .equals(after.getString("source_hash"));
+            }
             if (!"batch_accept".equals(accepted.getString("decision"))
                     || accepted.getInt("count") != 2
                     || accepted.getJSONArray("journal_ids").length() != 1
-                    || active.getInt("total") != 2) {
+                    || active.getInt("total") != 2 || !unchanged) {
                 throw new SyntheticMismatch("verdict=BATCH_COMMIT_MISMATCH");
             }
             boolean replayRejected = false;
