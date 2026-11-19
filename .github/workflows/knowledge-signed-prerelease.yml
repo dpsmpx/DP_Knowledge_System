@@ -114,7 +114,10 @@ jobs:
           "$tools_dir/apksigner" verify --min-sdk-version 24 "$apk" > /dev/null
           signed_package="$("$tools_dir/aapt" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
           test "$signed_package" = 'com.dpsmpx.dpks'
-          sha256sum "$apk" > "$apk.sha256"
+          # Write a portable relative filename: users verify both downloaded
+          # files from one folder with `sha256sum -c dpks-*-signed.apk.sha256`.
+          (cd "$GITHUB_WORKSPACE" && sha256sum "$(basename "$apk")") > "$apk.sha256"
+          (cd "$GITHUB_WORKSPACE" && sha256sum -c "$(basename "$apk").sha256")
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
           echo 'Verified signed Android preview. No signing passwords were logged.'
 
