@@ -505,7 +505,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     findViewById(R.id.knowledge_decisions_next).setEnabled(decisionNextOffset >= 0);
                     ((TextView) findViewById(R.id.knowledge_decisions_page_number)).setText(
                             total == 0 ? "0" : (offset / 30 + 1) + " / " + ((total + 29) / 30));
-                    list.smoothScrollToPosition(0);
+                    ((ListView) findViewById(R.id.knowledge_decisions_list))
+                            .smoothScrollToPosition(0);
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
@@ -529,8 +530,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         navigation.setVisibility(View.GONE);
         final Toolbar toolbar = findViewById(R.id.toolbar);
         toolbar.setNavigationIcon(R.drawable.ic_arrow_back_white_24dp);
-        toolbar.setNavigationIconTint(MaterialColors.getColor(toolbar,
-                com.google.android.material.R.attr.colorOnSurface));
+        if (toolbar.getNavigationIcon() != null) {
+            toolbar.getNavigationIcon().mutate().setTint(MaterialColors.getColor(toolbar,
+                    com.google.android.material.R.attr.colorOnSurface));
+        }
         toolbar.setNavigationContentDescription(R.string.knowledge_editor_back);
         toolbar.setNavigationOnClickListener(view -> closeDecisionDetail());
         final ActionBar bar = getSupportActionBar();
