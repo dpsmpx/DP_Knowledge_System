@@ -87,7 +87,7 @@ final class KnowledgeDecisionReviewDialog {
             heading.setTextSize(13);
             heading.setTypeface(null, Typeface.BOLD);
             heading.setTextColor(MaterialColors.getColor(column,
-                    com.google.android.material.R.attr.colorPrimary));
+                    R.attr.colorPrimary));
             ViewCompat.setAccessibilityHeading(heading, true);
             body.addView(heading);
 
@@ -128,7 +128,7 @@ final class KnowledgeDecisionReviewDialog {
         addNotice(context, column, diagnostics,
                 com.google.android.material.R.attr.colorOnSurfaceVariant);
         addNotice(context, column, warning,
-                com.google.android.material.R.attr.colorError);
+                R.attr.colorError);
         new MaterialAlertDialogBuilder(context)
                 .setTitle(title)
                 .setView(scroll)
