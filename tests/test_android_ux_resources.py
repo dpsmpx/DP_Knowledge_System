@@ -66,6 +66,66 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_page_manage", "knowledge_manage_backup_warning"):
                 self.assertIn(name, names)
 
+    def test_dpks_launcher_is_primary_only_for_its_flavor(self):
+        manifest = ET.parse(ROOT / "AndroidManifest.xml").getroot()
+        aliases = {a.get(ANDROID + "name"): a for a in manifest.iter("activity-alias")}
+        self.assertTrue({".activity.MarkorLauncher", ".knowledge.KnowledgeLauncher"}
+                        .issubset(aliases))
+        for name, target, flag in (
+            (".activity.MarkorLauncher", ".activity.MainActivity",
+             "knowledge_markor_launcher_enabled"),
+            (".knowledge.KnowledgeLauncher", ".knowledge.KnowledgeHubActivity",
+             "knowledge_dpks_launcher_enabled"),
+        ):
+            alias = aliases[name]
+            self.assertEqual(target, alias.get(ANDROID + "targetActivity"))
+            self.assertEqual("@bool/" + flag, alias.get(ANDROID + "enabled"))
+            self.assertEqual("true", alias.get(ANDROID + "exported"))
+            self.assertTrue(any(x.get(ANDROID + "name") == "android.intent.action.MAIN"
+                                for x in alias.iter("action")))
+        for source, expected in (("main", {"knowledge_markor_launcher_enabled": "true",
+                                           "knowledge_dpks_launcher_enabled": "false"}),
+                                 ("flavorAtest", {"knowledge_markor_launcher_enabled": "false",
+                                                  "knowledge_dpks_launcher_enabled": "true"})):
+            folder = ROOT.parent / source / "res/values/knowledge_launcher.xml"
+            values = {v.get("name"): v.text for v in ET.parse(folder).getroot()}
+            self.assertEqual(expected, values)
+
+    def test_note_editor_has_separate_workspace_chrome(self):
+        manifest = ET.parse(ROOT / "AndroidManifest.xml").getroot()
+        activity = next(a for a in manifest.iter("activity")
+                        if a.get(ANDROID + "name") == ".knowledge.KnowledgeDocumentActivity")
+        self.assertEqual("false", activity.get(ANDROID + "exported"))
+        self.assertEqual("@style/Theme.Dpks.Knowledge", activity.get(ANDROID + "theme"))
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        ids = {x.get(ANDROID + "id") for x in shell.iter()}
+        self.assertIn("@+id/toolbar", ids)
+        self.assertIn("@+id/document__placeholder_fragment", ids)
+        editor = (ROOT / "java/net/gsantner/markor/activity/DocumentActivity.java").read_text()
+        self.assertIn("this instanceof KnowledgeDocumentActivity", editor)
+        self.assertIn("R.layout.knowledge__document_activity", editor)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("KnowledgeDocumentActivity.open(this, file)", bridge)
+
+    def test_decision_review_previews_are_comparison_panels(self):
+        core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):
+            start = core.find("private void " + method)
+            self.assertGreaterEqual(start, 0, method)
+            end = core.find("\n    private ", start + 1)
+            segment = core[start:end if end >= 0 else None]
+            self.assertIn("KnowledgeDecisionReviewDialog.show(", segment, method)
+        dialog = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDecisionReviewDialog.java").read_text()
+        for text in ("ScrollView", "MaterialCardView", "changedRanges", "setTextIsSelectable",
+                     "setNegativeButton", "setPositiveButton"):
+            self.assertIn(text, dialog)
+        for locale in ("values", "values-ru"):
+            elements = ET.parse(ROOT / f"res/{locale}/knowledge_strings.xml").getroot()
+            names = {element.get("name") for element in elements}
+            for label in ("knowledge_diff_before", "knowledge_diff_after", "knowledge_diff_proposed",
+                          "knowledge_editor_source_notice", "knowledge_editor_back"):
+                self.assertIn(label, names)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DP Knowledge System contributors, 2026. SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <bool name="knowledge_markor_launcher_enabled">false</bool>
+    <bool name="knowledge_dpks_launcher_enabled">true</bool>
+</resources>

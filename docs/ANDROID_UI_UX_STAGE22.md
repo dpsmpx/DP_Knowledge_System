@@ -1,7 +1,7 @@
-# Android UI/UX Stage 22 — first workspace shell slice
+# Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **implemented in integration branch, device UI acceptance pending**.
-This is *not* the full redesign of the inherited Markor editor.
+Status: **first slice integrated; second slice pending CI and device QA**.
+This is *not* a complete replacement of the inherited Markor editor engine.
 
 ## Scope
 
@@ -25,6 +25,30 @@ This is *not* the full redesign of the inherited Markor editor.
 - The existing actions and IDs are preserved and covered by static resource
   tests. Cancelling an embedding job no longer cancels an unrelated device QA
   run.
+
+## Second slice — direct launch and source/decision surfaces
+
+- In `com.dpsmpx.dpks` the launch icon opens **Knowledge Library directly**,
+  through a flavor-controlled activity alias. MainActivity no longer owns the
+  launcher intent. Non-DPKS Markor flavors retain their original launcher
+  through the opposite alias flags. The DPKS launcher label is now
+  **DP Knowledge System**, not the inherited test label.
+- Opening a note from the library starts `KnowledgeDocumentActivity`. It hosts
+  the existing Markor Markdown editor (editing, saving and preview functions
+  are unchanged) under a dedicated Material 3 toolbar with explicit **back to
+  library** navigation. Closing the note uses `finish()` so the library's
+  Android task is not removed by the inherited editor's `finishAndRemoveTask`.
+  A source-warning strip distinguishes *manual changes to Markdown* from
+  *knowledge-journal decisions*.
+- Confirmations for **revision, split, merge and retraction** now use a
+  scrollable Material 3 review with individually labeled **before/after**
+  blocks, selected text, change highlighting for one-to-one comparisons,
+  diagnostics, warnings and explicit confirmation. No preview itself writes
+  the source or the journal. The existing fingerprint, stale-head and
+  concurrency validation still runs at commit time.
+
+This is a UX integration layer, **not** yet a fully independent DPKS editor,
+an audit-ready source-span diff or a replacement for the decision list dialogs.
 
 There are **no changes to authority, knowledge journal semantics, Markdown
 sources, LLM permissions, APIs or the public data shipped with the APK**.
@@ -54,15 +78,28 @@ On an Android 15 device with test notes (avoid private journal mutations):
    small screen. Check accessibility labels with TalkBack if available.
 7. Re-run the original synthetic Stage 15/16/17 reports; previous SQLite
    WARN and unfinished external/device checks must not be recast as PASS.
+8. Cold-launch the **DP Knowledge System** icon, verify that **Library** opens
+   immediately and no Markor-first activity or second launcher icon appears.
+   Open an artificial `.md` note, switch Markdown edit/preview, save a manual
+   edit in the disposable file, navigate back to the **same** DPKS library and
+   confirm that Android Recents still contains DPKS. Test system Back and the
+   editor's toolbar back; preserve and back up private notes beforehand.
+9. In a **separate disposable knowledge journal**, review the Stage 17 revise,
+   split, merge and retract *preview* dialogs. Check all before/after cards,
+   long text, conflict warnings, Russian labels, font scaling, rotation and
+   TalkBack. Cancel without committing for the UX smoke test. Test actual
+   journal changes only with a verified backup and deliberately synthetic data.
 
 ## Remaining UI/UX work
 
 - A full independent DPKS editor and intelligent workspace replacing the
-  remaining Markor navigation and note-editing shell.
+  remaining Markor note-editing engine/menu chrome, while retaining reliable
+  import/export and edit/preview workflows.
 - Accessible large-list navigation beyond the current 250 visible results,
   filtering/chips, meaningful progress history and pause/resume controls.
-- Inline review/diff viewer with source spans and reversible proposal preview,
-  instead of cascading dialogs for Stage 17 decisions.
+- Full-screen decision queue and inline source-span-aware diff, evidence,
+  selective approval and reversible proposal preview; the current compared
+  cards cover only explicit confirmation dialogs.
 - Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
   gesture navigation/edge-to-edge insets, instrumented UI tests and measured
   scrolling/rendering under 20k notes.
