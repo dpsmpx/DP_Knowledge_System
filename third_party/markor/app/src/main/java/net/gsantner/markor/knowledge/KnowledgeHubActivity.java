@@ -160,6 +160,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Button embeddingButton;
     private Button qaQuickButton;
     private Button qaStressButton;
+    private Button qaEditorButton;
     private TextView qaStatus;
     private ProgressBar qaProgress;
     private boolean qaActive;
@@ -355,10 +356,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 }).show());
         qaQuickButton = findViewById(R.id.knowledge_qa_quick);
         qaStressButton = findViewById(R.id.knowledge_qa_stress);
+        qaEditorButton = findViewById(R.id.knowledge_qa_editor);
         qaStatus = findViewById(R.id.knowledge_qa_status);
         qaProgress = findViewById(R.id.knowledge_qa_progress);
-        qaQuickButton.setOnClickListener(view -> runDeviceQa(false));
-        qaStressButton.setOnClickListener(view -> runDeviceQa(true));
+        qaQuickButton.setOnClickListener(view -> runDeviceQa(false, false));
+        qaStressButton.setOnClickListener(view -> runDeviceQa(true, false));
+        qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         setupDecisionWorkspace();
@@ -757,7 +760,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     /** The foreground UI remains responsive, and every run owns only private cache fixtures. */
-    private void runDeviceQa(final boolean stress) {
+    private void runDeviceQa(final boolean stress, final boolean editorStage22) {
         if (qaActive) {
             if (runningDeviceQa != null) {
                 runningDeviceQa.cancel(true);
@@ -770,10 +773,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         updateProcessBadge();
         qaQuickButton.setText(R.string.knowledge_qa_cancel);
         qaStressButton.setText(R.string.knowledge_qa_cancel);
+        qaEditorButton.setText(R.string.knowledge_qa_cancel);
         qaProgress.setVisibility(View.VISIBLE);
         qaStatus.setText(getString(R.string.knowledge_qa_running_step, "starting"));
         runningDeviceQa = deviceQaWorker.submit(() -> {
             final String report = new KnowledgeDeviceQaRunner(this, notebook, index, stress,
+                    editorStage22,
                     (phase, completed, total) -> runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed() || generation != deviceQaGeneration.get()) {
                             return;
@@ -791,6 +796,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runningDeviceQa = null;
                 qaQuickButton.setText(R.string.knowledge_qa_quick);
                 qaStressButton.setText(R.string.knowledge_qa_stress);
+                qaEditorButton.setText(R.string.knowledge_qa_editor);
                 qaProgress.setVisibility(View.GONE);
                 qaStatus.setText(R.string.knowledge_qa_ready);
                 copyDeviceQaReport(report);

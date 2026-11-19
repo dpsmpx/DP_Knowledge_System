@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import hashlib
 import sqlite3
+import tempfile
 from ksys.store.journal import Entry, entry_id
 from pathlib import Path
 
@@ -435,6 +436,152 @@ def editor_record_evidence(workspace_dir: str, record_id: str) -> str:
         "events_truncated": len(events) > MAX_EDITOR_EVIDENCE_EVENTS,
         "only_journal_records": True, "read_only": True,
         "navigation_verified": False,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def stage22_editor_selftest(cache_dir: str) -> str:
+    """One-tap, count-only synthetic regression for the in-editor knowledge UI.
+
+    The caller passes *only* its own app-private cache folder. No selected
+    notebook, user journal, derived index, network endpoint or secret is read.
+    This tests the actual Python bridge contract; touchscreen layout, IME,
+    TalkBack, lifecycle/rotation and platform rendering are still manual QA.
+    """
+    cache = Path(cache_dir).resolve()
+    if not Path(cache_dir).is_absolute() or not cache.is_dir():
+        raise ValueError("Editor QA requires an existing private cache directory")
+    checks = []
+
+    def verify(code, check):
+        try:
+            check()
+            checks.append({"code": code, "passed": True, "detail": "synthetic assertions passed"})
+        except Exception as error:
+            # Never disclose source, local paths, journal data or tracebacks.
+            checks.append({"code": code, "passed": False,
+                           "detail": "synthetic mismatch (" + type(error).__name__ + ")"})
+
+    with tempfile.TemporaryDirectory(prefix="dpks-editor-qa-", dir=cache) as temp:
+        root = Path(temp)
+        vault = root / "synthetic_vault"
+        vault.mkdir()
+        ws = str(root / "private_journal")
+        source = ("# 😀\nАлекс является разработчиком.\n"
+                  "Алекс является разработчиком.\n")
+        negative = "Алекс не является разработчиком.\n"
+        note = vault / "a.md"
+        note.write_text(source, encoding="utf-8")
+        (vault / "b.md").write_text(negative, encoding="utf-8")
+        source_hash = _source_hash(source)
+        second = source.rindex("Алекс является")
+        first = source.index("Алекс является")
+        state = {}
+
+        def empty():
+            before = not Path(ws).exists()
+            context = json.loads(editor_note_context(ws, "a.md", source))
+            highlights = json.loads(editor_note_highlights(ws, "a.md", source))
+            records = json.loads(editor_source_records(ws, "a.md", source, second, second))
+            assert before and not Path(ws).exists()
+            assert context["accepted_total"] == 0
+            assert not highlights["highlights"] and not records["records"]
+        verify("EDITOR-EMPTY-22", empty)
+
+        def accept():
+            fragments = json.loads(inspect_note("a.md", source))["fragments"]
+            fragment_id = fragments[2]["id"]
+            preview = json.loads(preview_fragment(ws, "a.md", source, fragment_id))
+            assert preview["source_hash"] == source_hash
+            accepted = json.loads(record_decision(
+                ws, "a.md", source, fragment_id,
+                preview["preview"]["options"][0]["reading_id"], "claim",
+                source_hash, preview["journal_head"]))
+            result = json.loads(editor_source_records(ws, "a.md", source, second, second))
+            assert accepted["decision"] == "claim"
+            assert result["record_total"] == 1 and result["active_total"] == 1
+            state["record_id"] = result["records"][0]["id"]
+        verify("EDITOR-ACCEPT-22", accept)
+
+        def span():
+            result = json.loads(editor_source_records(ws, "a.md", source, second + 5, second + 5))
+            assert result["records"][0]["source_span"][0] == second
+            assert result["records"][0]["source_line"] == 3
+            assert not json.loads(editor_source_records(ws, "a.md", source, first, first))["records"]
+            assert second != len(source[:second].encode("utf-16-le")) // 2
+        verify("EDITOR-SPAN-22", span)
+
+        def selection():
+            assert json.loads(editor_source_records(ws, "a.md", source, second, second + 10))["record_total"] == 1
+            assert json.loads(editor_source_records(ws, "a.md", source, first, second + 10))["record_total"] == 0
+            end = json.loads(editor_source_records(ws, "a.md", source, second, second))["records"][0]["source_span"][1]
+            assert json.loads(editor_source_records(ws, "a.md", source, end, end))["record_total"] == 0
+        verify("EDITOR-SELECTION-22", selection)
+
+        def highlights():
+            result = json.loads(editor_note_highlights(ws, "a.md", source))
+            assert result["only_approved_journal_sources"]
+            assert result["highlight_total"] == 1
+            assert result["highlights"][0]["start"] == second
+            assert result["highlights"][0]["role"] == "claim"
+        verify("EDITOR-HIGHLIGHT-22", highlights)
+
+        def evidence():
+            result = json.loads(editor_record_evidence(ws, state["record_id"]))
+            origin = result["origins"][0]
+            assert result["only_journal_records"] and result["events_total"] == 1
+            assert not origin["navigation_verified"] and origin["path"] == "a.md"
+            assert origin["document_sha"] == source_hash
+            assert origin["source_span"][0] == second
+            assert origin["source_text_sha"] == _source_hash(source[second:origin["source_span"][1]])
+        verify("EDITOR-EVIDENCE-22", evidence)
+
+        def conflict():
+            fragment = json.loads(inspect_note("b.md", negative))["fragments"][0]["id"]
+            preview = json.loads(preview_fragment(ws, "b.md", negative, fragment))
+            record_decision(ws, "b.md", negative, fragment,
+                            preview["preview"]["options"][0]["reading_id"],
+                            "claim", preview["source_hash"], preview["journal_head"])
+            result = json.loads(editor_record_evidence(ws, state["record_id"]))
+            assert result["conflicts_available"]
+            assert any("possible_conflict" in link["kinds"] and link["active"]
+                       for link in result["links"])
+        verify("EDITOR-CONFLICT-22", conflict)
+
+        def stale():
+            changed = source + "Новая строка.\n"
+            result = json.loads(editor_source_records(ws, "a.md", changed, second, second))
+            highlights = json.loads(editor_note_highlights(ws, "a.md", changed))
+            assert not result["records"] and result["unverified_origins"] > 0
+            assert not highlights["highlights"]
+        verify("EDITOR-STALE-22", stale)
+
+        def history():
+            preview = json.loads(preview_retraction(ws, state["record_id"]))
+            retract_decision(ws, state["record_id"], preview["journal_head"])
+            selected = json.loads(editor_source_records(ws, "a.md", source, second, second))
+            assert selected["historical_total"] == 1 and selected["active_total"] == 0
+            events = json.loads(editor_record_evidence(ws, state["record_id"]))["events"]
+            assert [event["op"] for event in events] == ["accept", "retract"]
+        verify("EDITOR-HISTORY-22", history)
+
+        def read_only():
+            journal = Path(ws) / "data/formal/journal.jsonl"
+            journal_before = hashlib.sha256(journal.read_bytes()).hexdigest()
+            editor_source_records(ws, "a.md", source, second, second)
+            editor_note_context(ws, "a.md", source)
+            editor_note_highlights(ws, "a.md", source)
+            editor_record_evidence(ws, state["record_id"])
+            assert hashlib.sha256(journal.read_bytes()).hexdigest() == journal_before
+            assert hashlib.sha256(note.read_bytes()).hexdigest() == source_hash
+            assert _source_hash(note.read_text(encoding="utf-8")) == source_hash
+        verify("EDITOR-READONLY-22", read_only)
+
+    return json.dumps({
+        "protocol": "dpksys.stage22_editor_selftest.v1", "checks": checks,
+        "passed": sum(row["passed"] for row in checks),
+        "failed": sum(not row["passed"] for row in checks),
+        "synthetic_only": True, "used_selected_vault": False,
+        "requires_manual_ui_qa": True, "read_only_user_data": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 

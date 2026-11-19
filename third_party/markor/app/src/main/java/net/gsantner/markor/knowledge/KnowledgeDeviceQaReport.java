@@ -28,7 +28,10 @@ public final class KnowledgeDeviceQaReport {
                 .append("Version: ").append(version).append('\n')
                 .append("Android API: ").append(androidApi).append('\n')
                 .append("ABI: ").append(abi).append('\n')
-                .append("Privacy: synthetic fixtures only; vault counted read-only; ")
+                .append("Privacy: synthetic fixtures only; ")
+                .append(mode.startsWith("Stage22 editor")
+                        ? "selected vault, index and journal not opened; "
+                        : "vault counted read-only; ")
                 .append("no note text, vault paths, API keys or network requests.\n\n");
     }
 

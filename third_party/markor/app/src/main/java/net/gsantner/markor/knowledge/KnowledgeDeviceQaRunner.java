@@ -75,10 +75,18 @@ public final class KnowledgeDeviceQaRunner {
     private final Progress progress;
     private final Cancellation cancellation;
     private final boolean stress;
+    private final boolean editorStage22;
     private final KnowledgeDeviceQaReport report;
 
     public KnowledgeDeviceQaRunner(final Context context, final File notebook,
                                    final KnowledgeLocalIndex actualIndex, final boolean stress,
+                                   final Progress progress, final Cancellation cancellation) {
+        this(context, notebook, actualIndex, stress, false, progress, cancellation);
+    }
+
+    public KnowledgeDeviceQaRunner(final Context context, final File notebook,
+                                   final KnowledgeLocalIndex actualIndex, final boolean stress,
+                                   final boolean editorStage22,
                                    final Progress progress, final Cancellation cancellation) {
         this.context = context.getApplicationContext();
         this.notebook = notebook;
@@ -86,7 +94,9 @@ public final class KnowledgeDeviceQaRunner {
         this.progress = progress;
         this.cancellation = cancellation;
         this.stress = stress;
-        this.report = new KnowledgeDeviceQaReport(stress ? "20k synthetic stress" : "quick",
+        this.editorStage22 = editorStage22;
+        this.report = new KnowledgeDeviceQaReport(editorStage22 ? "Stage22 editor synthetic"
+                        : stress ? "20k synthetic stress" : "quick",
                 context.getPackageName(), packageVersion(context),
                 Build.VERSION.SDK_INT,
                 Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0]);
@@ -110,32 +120,39 @@ public final class KnowledgeDeviceQaRunner {
                                 - Runtime.getRuntime().freeMemory()) / 1024 / 1024
                         + ", batteryPct=" + batteryPercent();
             });
-            step("SCAN-01", this::checkRealVaultReadOnly);
-            step("INDEX-01", this::checkRealIndexReadOnly);
-            step("MD-01", this::checkMarkdown);
-            step("CORE-01", this::checkPythonCore);
-            step("EMBED-01", this::checkEmbeddingPrimitives);
-            step("CRYPTO-01", this::checkSyntheticCrypto);
-            step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
-            step("RECONCILE-16", this::checkSyntheticReconciliation);
-            step("DECISION-17", this::checkSyntheticDecisionLifecycle);
-            step("REVISE-17", this::checkSyntheticRevision);
-            step("SPLIT-17", this::checkSyntheticSplit);
-            step("MERGE-17", this::checkSyntheticMerge);
-            step("BATCH-17", this::checkSyntheticClaimBatch);
-            step("BG-01", () -> "scheduler preference readable; enabled="
-                    + KnowledgeBackgroundScheduler.isEnabled(context)
-                    + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
-                    + "; OEM delivery requires manual observation");
-            report.add("SKIP", "MANUAL-01", 0,
-                    "LLM provider, real embedding model and network privacy require consent/testing");
-            report.add("SKIP", "MANUAL-02", 0,
-                    "process death, reboot, notifications, battery and schedule timing need device observation");
-            report.add("SKIP", "DEBT-01", 0,
-                    "full app backup/restore, automated daily backups, cloud sync and permissions pending development");
-            if (!stress) {
-                report.add("SKIP", "STRESS-20K", 0,
-                        "run the separate 20k synthetic button to measure large-vault indexing");
+            if (editorStage22) {
+                step("EDITOR-22-SUITE", this::checkSyntheticStage22Editor);
+                report.add("SKIP", "EDITOR-22-UI", 0,
+                        "real touch, keyboard, rotation, TalkBack, font scale and task lifecycle "
+                                + "need observed device UI; synthetic bridge PASS is not UI signoff");
+            } else {
+                step("SCAN-01", this::checkRealVaultReadOnly);
+                step("INDEX-01", this::checkRealIndexReadOnly);
+                step("MD-01", this::checkMarkdown);
+                step("CORE-01", this::checkPythonCore);
+                step("EMBED-01", this::checkEmbeddingPrimitives);
+                step("CRYPTO-01", this::checkSyntheticCrypto);
+                step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
+                step("RECONCILE-16", this::checkSyntheticReconciliation);
+                step("DECISION-17", this::checkSyntheticDecisionLifecycle);
+                step("REVISE-17", this::checkSyntheticRevision);
+                step("SPLIT-17", this::checkSyntheticSplit);
+                step("MERGE-17", this::checkSyntheticMerge);
+                step("BATCH-17", this::checkSyntheticClaimBatch);
+                step("BG-01", () -> "scheduler preference readable; enabled="
+                        + KnowledgeBackgroundScheduler.isEnabled(context)
+                        + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
+                        + "; OEM delivery requires manual observation");
+                report.add("SKIP", "MANUAL-01", 0,
+                        "LLM provider, real embedding model and network privacy require consent/testing");
+                report.add("SKIP", "MANUAL-02", 0,
+                        "process death, reboot, notifications, battery and schedule timing need device observation");
+                report.add("SKIP", "DEBT-01", 0,
+                        "full app backup/restore, automated daily backups, cloud sync and permissions pending development");
+                if (!stress) {
+                    report.add("SKIP", "STRESS-20K", 0,
+                            "run the separate 20k synthetic button to measure large-vault indexing");
+                }
             }
         } catch (InterruptedIOException cancelled) {
             report.add("WARN", "RUN-CANCELLED", 0, "user cancelled; no full signoff");
@@ -166,6 +183,47 @@ public final class KnowledgeDeviceQaRunner {
                     "exception=" + safeErrorClass(error) + " (details withheld for privacy)");
         }
         ensureRunning();
+    }
+
+    /** Dedicated button: the selected vault/index/journal are never supplied. */
+    private String checkSyntheticStage22Editor() throws Exception {
+        ensureRunning();
+        final JSONObject result = KnowledgePythonBridge.stage22EditorSelfTest(context,
+                context.getCacheDir().getCanonicalPath());
+        if (!"dpksys.stage22_editor_selftest.v1".equals(result.getString("protocol"))
+                || !result.getBoolean("synthetic_only")
+                || result.getBoolean("used_selected_vault")
+                || !result.getBoolean("read_only_user_data")
+                || !result.getBoolean("requires_manual_ui_qa")) {
+            throw new SyntheticMismatch("verdict=UNTRUSTED_EDITOR_QA_CONTRACT");
+        }
+        final JSONArray checks = result.getJSONArray("checks");
+        if (checks.length() < 10 || checks.length() > 40
+                || result.getInt("passed") + result.getInt("failed") != checks.length()) {
+            throw new SyntheticMismatch("verdict=EDITOR_QA_COUNT_MISMATCH");
+        }
+        int passed = 0;
+        int failed = 0;
+        for (int i = 0; i < checks.length(); i++) {
+            ensureRunning();
+            final JSONObject row = checks.getJSONObject(i);
+            final String code = row.getString("code");
+            if (!code.matches("EDITOR-[A-Z0-9-]{4,28}")) {
+                throw new SyntheticMismatch("verdict=EDITOR_QA_CODE_MISMATCH");
+            }
+            final boolean ok = row.getBoolean("passed");
+            report.add(ok ? "PASS" : "FAIL", code, 0,
+                    ok ? "isolated synthetic bridge assertions passed"
+                            : "isolated synthetic bridge assertions failed; details withheld");
+            if (ok) passed++; else failed++;
+        }
+        if (passed != result.getInt("passed") || failed != result.getInt("failed")
+                || failed != 0) {
+            throw new SyntheticMismatch("syntheticChecks=" + checks.length()
+                    + ", failedChecks=" + failed);
+        }
+        return "syntheticChecks=" + passed
+                + ", failures=0, temporaryCacheCleaned=true, selectedVaultUntouched=true";
     }
 
     private String checkRealVaultReadOnly() throws Exception {

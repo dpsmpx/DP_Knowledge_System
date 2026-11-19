@@ -103,6 +103,8 @@ deferred rather than required after every incremental PR.
   records and cross-note verified jumps await batched Android acceptance.
 - **QA-66 / OPEN, DEFERRED:** eleventh-slice persistent inline knowledge dock,
   unsaved-stale reporting and bounded Back navigation await device checks.
+- **QA-67 / OPEN, DEFERRED:** twelfth-slice one-button Stage 22 synthetic
+  self-test and signed prerelease require a later in-app/device smoke check.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
@@ -242,3 +244,21 @@ include private text, filesystem paths or credentials in public CI/QA logs.
    and dynamic theme, large text, long statements and source-history limits.
    Record counts and timing without personal note text, paths or secrets.
    Keep QA-66 OPEN until observed on an Android device.
+
+## QA-67 — deferred one-button Stage 22 self-test and signed APK checklist
+
+1. Install the signed GitHub prerelease on Redmi Note 13 after independent
+   `apksigner` verification and compare SHA-256 with the release checksum.
+   Check package `com.dpsmpx.dpks`, cold launch and navigation to Processes.
+2. Press **Проверить редактор Stage 22 и скопировать**. Expect ten named
+   synthetic `EDITOR-*-22` subchecks and a suite check, plus an explicit
+   **SKIP for real UI interactions**. Confirm redacted report auto-copy,
+   cancel/retry behavior, no sensitive text/path, no network request, and
+   temporary cache fixtures removed after completion.
+3. With real private notes unopened, verify the selected vault/index/journal
+   timestamps and hashes are unchanged by the Stage 22-only self-test. A
+   successful synthetic report does **not** validate actual touch/IME,
+   orientation, TalkBack, background/OEM lifecycle, UI performance or
+   every historical provenance edge case. Those stay in QA-59–66.
+4. Test on API 24 and Android 11 when possible. Do not turn QA-67 PASS from
+   Python/Android CI alone; record observed device behavior later.
