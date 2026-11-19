@@ -18,6 +18,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.text.InputType;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.TextWatcher;
 import android.view.MenuItem;
 import android.view.View;
@@ -1796,9 +1797,17 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         final JSONArray options = preview.optJSONArray("options");
         if (options == null || options.length() == 0) {
+            final String reason = preview.optString("reason", "");
+            final int guidance = "unsupported punctuation".equals(reason)
+                    ? R.string.knowledge_manual_punctuation_help
+                    : R.string.knowledge_manual_no_parse_help;
             new AlertDialog.Builder(this)
                     .setTitle(R.string.knowledge_no_interpretation)
-                    .setMessage(preview.optString("reason", getString(R.string.knowledge_no_interpretation)))
+                    .setMessage(getString(guidance) + "\n\n"
+                            + getString(R.string.knowledge_manual_technical_reason, reason))
+                    .setNeutralButton(R.string.knowledge_manual_rephrase,
+                            (dialog, which) -> promptManualInterpretation(
+                                    relativePath, fragmentId, packet))
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
             return;
@@ -1818,8 +1827,78 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         chooseDecision(relativePath, fragmentId, packet, option);
                     }
                 })
+                .setNeutralButton(R.string.knowledge_manual_rephrase,
+                        (dialog, which) -> promptManualInterpretation(
+                                relativePath, fragmentId, packet))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    /**
+     * A user-authored alternative, not an edit to the Markdown source.
+     * Keep the original fragment and the user assertion visually distinct.
+     */
+    private void promptManualInterpretation(final String relativePath, final String fragmentId,
+                                            final JSONObject sourcePacket) {
+        final String original = sourcePacket.optString("source_text");
+        final String visibleSource = original.length() > 1000
+                ? original.substring(0, 1000) + "…" : original;
+        final EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setMaxLines(5);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4000)});
+        input.setHint(R.string.knowledge_manual_hint);
+        input.setText(sourcePacket.optString("manual_text", ""));
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_manual_title)
+                .setMessage(getString(R.string.knowledge_manual_source_label)
+                        + "\n" + visibleSource + "\n\n"
+                        + getString(R.string.knowledge_manual_separate_warning))
+                .setView(input)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_manual_preview, null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
+                    final String statement = input.getText().toString().trim();
+                    if (statement.isEmpty() || statement.contains("\n") || statement.contains("\r")) {
+                        input.setError(getString(R.string.knowledge_manual_one_statement));
+                        return;
+                    }
+                    dialog.dismiss();
+                    previewManualInterpretation(relativePath, fragmentId, sourcePacket, statement);
+                }));
+        dialog.show();
+    }
+
+    private void previewManualInterpretation(final String relativePath, final String fragmentId,
+                                              final JSONObject sourcePacket, final String statement) {
+        final int scan = scanGeneration.get();
+        status.setText(R.string.knowledge_inspecting);
+        worker.submit(() -> {
+            try {
+                final String saved = readSelectedNote(relativePath);
+                if (!sourcePacket.optString("source_hash").equals(
+                        sha256Hex(saved.getBytes(java.nio.charset.StandardCharsets.UTF_8)))) {
+                    throw new IOException("Source changed since original interpretation");
+                }
+                final JSONObject packet = KnowledgePythonBridge.previewManual(this,
+                        workspacePath(), relativePath, saved, fragmentId, statement);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        chooseReading(relativePath, fragmentId, packet);
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_manual_preview_failed);
+                    }
+                });
+            }
+        });
     }
 
     private void chooseDecision(final String relativePath, final String fragmentId,
@@ -1866,7 +1945,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         details.append(getString(R.string.knowledge_unconfirmed)).append("\n\n")
                 .append(relativePath).append("\n")
                 .append(packet.optString("locator")).append("\n\n")
-                .append(packet.optString("source_text")).append("\n\n")
+                .append(getString(R.string.knowledge_manual_source_label)).append("\n")
+                .append(packet.optString("source_text")).append("\n\n");
+        if (packet.optBoolean("manual_interpretation")) {
+            details.append(getString(R.string.knowledge_manual_statement_label)).append("\n")
+                    .append(packet.optString("manual_text")).append("\n\n")
+                    .append(getString(R.string.knowledge_manual_separate_warning)).append("\n\n");
+        }
+        details
                 .append(option.optString("paraphrase")).append("\n\n")
                 .append(option.optJSONArray("ksf")).append("\n\n")
                 .append(getString(R.string.knowledge_conflicts,
@@ -1894,9 +1980,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             try {
                 final String head = packet.isNull("journal_head")
                         ? null : packet.getString("journal_head");
-                final JSONObject result = KnowledgePythonBridge.decide(this, workspacePath(),
-                        relativePath, readSelectedNote(relativePath), fragmentId, readingId,
-                        role, packet.getString("source_hash"), head);
+                final String saved = readSelectedNote(relativePath);
+                final JSONObject result = packet.optBoolean("manual_interpretation")
+                        ? KnowledgePythonBridge.decideManual(this, workspacePath(),
+                                relativePath, saved, fragmentId,
+                                packet.getString("manual_text"),
+                                packet.getString("manual_text_hash"), readingId,
+                                role, packet.getString("source_hash"), head)
+                        : KnowledgePythonBridge.decide(this, workspacePath(),
+                                relativePath, saved, fragmentId, readingId,
+                                role, packet.getString("source_hash"), head);
                 if (result.optJSONArray("journal_ids") == null) {
                     throw new IllegalStateException("Missing knowledge journal identifier");
                 }

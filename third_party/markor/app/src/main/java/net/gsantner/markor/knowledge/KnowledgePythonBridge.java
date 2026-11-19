@@ -72,6 +72,26 @@ public final class KnowledgePythonBridge {
         return invoke(context, "preview_fragment", workspace, relativePath, markdown, fragmentId);
     }
 
+    /** A separate, user-authored statement linked to the exact source fragment. */
+    public static JSONObject previewManual(final Context context, final String workspace,
+                                           final String relativePath, final String markdown,
+                                           final String fragmentId, final String manualText)
+            throws JSONException {
+        return invoke(context, "preview_manual_fragment", workspace, relativePath, markdown,
+                fragmentId, manualText);
+    }
+
+    public static JSONObject decideManual(final Context context, final String workspace,
+                                          final String relativePath, final String markdown,
+                                          final String fragmentId, final String manualText,
+                                          final String manualTextHash, final String readingId,
+                                          final String role, final String sourceHash,
+                                          final String journalHead) throws JSONException {
+        return invoke(context, "record_manual_decision", workspace, relativePath, markdown,
+                fragmentId, manualText, manualTextHash, readingId, role,
+                sourceHash, journalHead);
+    }
+
     public static JSONObject decide(final Context context, final String workspace,
                                     final String relativePath, final String markdown,
                                     final String fragmentId, final String readingId,

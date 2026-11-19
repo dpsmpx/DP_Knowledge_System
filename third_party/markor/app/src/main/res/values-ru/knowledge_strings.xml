@@ -337,6 +337,8 @@
     <string name="knowledge_editor_source_notice">Редактор исходного Markdown · Ручные изменения сохраняются в заметке. Решения знаний хранятся отдельно.</string>
     <string name="knowledge_editor_edit">Правка</string>
     <string name="knowledge_editor_preview">Просмотр</string>
+    <string name="knowledge_editor_save">Сохранить</string>
+    <string name="knowledge_editor_saved">Markdown сохранён и совпадает с редактором. Проверка решений — отдельное действие.</string>
     <string name="knowledge_editor_inspect">Анализ</string>
     <string name="knowledge_editor_review_selection">Проверить выделенное</string>
     <string name="knowledge_editor_backlinks">Ссылки</string>
@@ -358,6 +360,18 @@
     <string name="knowledge_editor_backlinks_warning">Текстовые ссылки из последнего полного сканирования; они могут быть неоднозначными или устаревшими. Исходные файлы не изменяются.</string>
     <string name="knowledge_editor_backlinks_failed">Не удалось прочитать локальный индекс ссылок. Заметки не изменены.</string>
     <string name="knowledge_editor_source_invalid">Заметка не находится внутри выбранного Markdown-хранилища.</string>
+    <string name="knowledge_manual_punctuation_help">В предложении есть знаки, которые строгая грамматика знаний не может надёжно разобрать (например, скобки или точка с запятой). Вы можете отдельно сформулировать точное утверждение и просмотреть результат. Исходная заметка не изменится.</string>
+    <string name="knowledge_manual_no_parse_help">Локальная грамматика не смогла формально разобрать исходный фрагмент. Это не означает, что текст неверен. Можно написать свою отдельную интерпретацию простым русским утверждением и явно её проверить.</string>
+    <string name="knowledge_manual_technical_reason">Диагностика ядра: %1$s</string>
+    <string name="knowledge_manual_rephrase">Своя формулировка</string>
+    <string name="knowledge_manual_title">Интерпретация пользователя · не исходник</string>
+    <string name="knowledge_manual_source_label">Исходный фрагмент Markdown:</string>
+    <string name="knowledge_manual_statement_label">Ваше предлагаемое утверждение (не цитата):</string>
+    <string name="knowledge_manual_separate_warning">Ручная интерпретация — ваше утверждение, а не доказанный текстом факт. Она хранится отдельно только после явного подтверждения; Markdown не переписывается.</string>
+    <string name="knowledge_manual_hint">Например: Марс является планетой.</string>
+    <string name="knowledge_manual_preview">Просмотр интерпретации</string>
+    <string name="knowledge_manual_one_statement">Введите одно непустое утверждение в одну строку.</string>
+    <string name="knowledge_manual_preview_failed">Не удалось подготовить интерпретацию. Возможно, исходник изменился — откройте заметку заново. Никаких записей не сделано.</string>
     <string name="knowledge_diff_before">До · принятые знания</string>
     <string name="knowledge_diff_before_first">До · первая запись</string>
     <string name="knowledge_diff_before_second">До · вторая запись</string>

@@ -64,6 +64,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         modeButtons = findViewById(R.id.knowledge_editor_modes);
         findViewById(R.id.knowledge_editor_edit_button).setOnClickListener(view -> setMode(false));
         findViewById(R.id.knowledge_editor_preview_button).setOnClickListener(view -> setMode(true));
+        findViewById(R.id.knowledge_editor_save).setOnClickListener(view -> saveExplicitly());
         findViewById(R.id.knowledge_editor_inspect).setOnClickListener(view -> inspectDocument());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
         findViewById(R.id.knowledge_editor_backlinks).setOnClickListener(view -> showBacklinks());
@@ -136,6 +137,42 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
 
     private void setKnowledgeStatus(final int resource) {
         if (knowledgeStatus != null) knowledgeStatus.setText(resource);
+    }
+
+    /** A deliberate user save via Markor's existing file writer, never analysis. */
+    private void saveExplicitly() {
+        final DocumentEditAndViewFragment fragment = editor();
+        if (fragment == null) return;
+        final File file = fragment.getDocument().file;
+        final String path;
+        try {
+            path = relativePath(file);
+        } catch (IOException ignored) {
+            setKnowledgeStatus(R.string.knowledge_editor_source_invalid);
+            return;
+        }
+        final String snapshot = fragment.getTextString();
+        if (!fragment.saveDocument(false)) {
+            setKnowledgeStatus(R.string.knowledge_editor_save_first);
+            return;
+        }
+        final int generation = operationGeneration.incrementAndGet();
+        setKnowledgeStatus(R.string.knowledge_editor_working);
+        knowledgeWorker.submit(() -> {
+            try {
+                if (!path.equals(relativePath(file))
+                        || !snapshot.equals(readSavedNote(file.getCanonicalFile()))) {
+                    throw new IOException("Saved source does not match editor");
+                }
+                runOnUiThread(() -> {
+                    if (current(generation)) setKnowledgeStatus(R.string.knowledge_editor_saved);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation)) setKnowledgeStatus(R.string.knowledge_editor_save_first);
+                });
+            }
+        });
     }
 
     private void inspectDocument() {

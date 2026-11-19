@@ -140,11 +140,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         ids = [element.get(ANDROID + "id", "") for element in shell.iter()]
         for name in ("knowledge_editor_modes", "knowledge_editor_edit_button",
                      "knowledge_editor_preview_button", "knowledge_editor_inspect",
-                     "knowledge_editor_review_selection", "knowledge_editor_backlinks",
+                     "knowledge_editor_save", "knowledge_editor_review_selection",
+                     "knowledge_editor_backlinks",
                      "knowledge_editor_status"):
             self.assertEqual(1, ids.count("@+id/" + name), name)
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
-        for required in ("setViewModeVisibility(preview)", "inspectSelection(this,",
+        for required in ("setViewModeVisibility(preview)", "saveDocument(false)",
+                         "inspectSelection(this,",
                          "markdown.codePointCount(0, start)", "cutsSurrogate(markdown,",
                          "reviewSavedFragment(", "readSavedNote(file.getCanonicalFile())",
                          "saved.equals(editorSnapshot)", "relativePath(file)",
@@ -163,9 +165,30 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             strings = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
             names = {element.get("name") for element in strings}
             for name in ("knowledge_editor_edit", "knowledge_editor_preview",
+                         "knowledge_editor_save", "knowledge_editor_saved",
                          "knowledge_editor_review_selection", "knowledge_editor_backlinks",
                          "knowledge_editor_save_first", "knowledge_editor_selection_multiple",
                          "knowledge_editor_source_invalid"):
+                self.assertIn(name, names)
+
+    def test_manual_interpretation_does_not_masquerade_as_source_extraction(self):
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for item in ("knowledge_manual_punctuation_help",
+                     "promptManualInterpretation(", "previewManualInterpretation(",
+                     "packet.optBoolean(\"manual_interpretation\")",
+                     "KnowledgePythonBridge.decideManual", "knowledge_manual_source_label",
+                     "knowledge_manual_statement_label"):
+            self.assertIn(item, hub)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn("preview_manual_fragment", bridge)
+        self.assertIn("record_manual_decision", bridge)
+        for folder in ("values", "values-ru"):
+            strings = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
+            names = [element.get("name") for element in strings]
+            self.assertEqual(len(names), len(set(names)), folder)
+            for name in ("knowledge_manual_punctuation_help", "knowledge_manual_rephrase",
+                         "knowledge_manual_source_label", "knowledge_manual_statement_label",
+                         "knowledge_manual_separate_warning", "knowledge_manual_preview_failed"):
                 self.assertIn(name, names)
 
     def test_decision_review_previews_are_comparison_panels(self):

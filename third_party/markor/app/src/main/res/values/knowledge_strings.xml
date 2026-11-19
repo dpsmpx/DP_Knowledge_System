@@ -337,6 +337,8 @@
     <string name="knowledge_editor_source_notice">Source Markdown editor · Manual edits change the note. Knowledge decisions are stored separately.</string>
     <string name="knowledge_editor_edit">Edit</string>
     <string name="knowledge_editor_preview">Preview</string>
+    <string name="knowledge_editor_save">Save</string>
+    <string name="knowledge_editor_saved">Saved Markdown matches the editor. Review is still a separate, explicit action.</string>
     <string name="knowledge_editor_inspect">Analyze</string>
     <string name="knowledge_editor_review_selection">Review selection</string>
     <string name="knowledge_editor_backlinks">Links</string>
@@ -358,6 +360,18 @@
     <string name="knowledge_editor_backlinks_warning">Lexical links from the last complete index scan; they may be ambiguous or stale. The original files are not modified.</string>
     <string name="knowledge_editor_backlinks_failed">Unable to read the local link index. No notes were modified.</string>
     <string name="knowledge_editor_source_invalid">The note is not inside the selected Markdown vault.</string>
+    <string name="knowledge_manual_punctuation_help">This sentence contains punctuation the strict Russian knowledge grammar cannot interpret reliably (for example, parentheses or a semicolon). You can write your own separate, precise statement and preview it. The original note will not be changed.</string>
+    <string name="knowledge_manual_no_parse_help">The local knowledge grammar cannot formally interpret this source fragment. This does not mean that the source is incorrect. You may write a separate interpretation using a short, simple Russian statement and review it explicitly.</string>
+    <string name="knowledge_manual_technical_reason">Engine diagnostic: %1$s</string>
+    <string name="knowledge_manual_rephrase">Write interpretation</string>
+    <string name="knowledge_manual_title">Your interpretation · not source text</string>
+    <string name="knowledge_manual_source_label">Original Markdown fragment:</string>
+    <string name="knowledge_manual_statement_label">Your proposed statement (not a source quotation):</string>
+    <string name="knowledge_manual_separate_warning">A manual interpretation is your assertion, not a fact proven by this text. It is stored separately, only after explicit confirmation; Markdown is not rewritten.</string>
+    <string name="knowledge_manual_hint">For example: Mars is a planet. (Use Russian CNL: Марс является планетой.)</string>
+    <string name="knowledge_manual_preview">Preview interpretation</string>
+    <string name="knowledge_manual_one_statement">Enter one nonempty statement on a single line.</string>
+    <string name="knowledge_manual_preview_failed">The interpretation could not be previewed. The source may have changed; reopen the note and try again. No changes were made.</string>
     <string name="knowledge_diff_before">Before · accepted knowledge</string>
     <string name="knowledge_diff_before_first">Before · first record</string>
     <string name="knowledge_diff_before_second">Before · second record</string>

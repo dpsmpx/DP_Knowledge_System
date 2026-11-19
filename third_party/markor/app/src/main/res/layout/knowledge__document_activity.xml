@@ -66,6 +66,15 @@
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_save"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_save" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/knowledge_editor_inspect"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
