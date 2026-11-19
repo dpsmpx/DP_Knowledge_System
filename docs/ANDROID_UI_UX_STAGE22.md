@@ -1,10 +1,12 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first three slices integrated** (Preview #14 includes the dedicated
-Decisions destination); the owner reports that decision review works in
-their manual check. The full QA-54 checklist remains **OPEN**. **Fourth slice:
-DPKS editor workspace improvements are under development, pending CI and
-device QA**. This is *not* a replacement of the inherited Markor editor engine.
+Status: **first four slices integrated**. The owner confirmed ordinary decision
+review in Preview #14 and reported two observations in Preview #15:
+formalization of a selected fragment returned `unsupported punctuation`;
+the editor/saved-file mismatch guard fired on an unsaved edit. These are
+**partial, scenario-specific device observations**, not a full QA-54/QA-59
+signoff. **Fifth slice: guided manual interpretation and explicit editor save
+are pending CI and device QA**. Markor still owns actual Markdown editing.
 
 ## Scope
 
@@ -82,7 +84,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   Preview #14, but comprehensive physical Android validation, large-list
   performance and TalkBack remain open. See `docs/STAGE22_DECISIONS_QA.md`.
 
-## Fourth slice — note editor intelligence and context (pending CI and QA)
+## Fourth slice — note editor intelligence and context (Preview #15)
 
 - The dedicated DPKS editor shell adds an explicit **Edit / Preview**
   control, retaining Markor's renderer, formatting support and proven
@@ -110,7 +112,30 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   and resource tests assert selection mapping, boundaries and UI guardrails.
   See `docs/STAGE22_EDITOR_QA.md` for the mandatory device checklist.
 
-**Still incomplete:** this third slice is not a complete independent Markdown
+## Fifth slice — guided interpretation for unsupported source syntax
+
+- The local Russian CNL formalizer intentionally returns **NO_PARSE** for
+  syntax outside its strict grammar (e.g., internal semicolons/parentheses).
+  This must never be converted into a guessed, automatically accepted fact.
+- Instead of exposing only the opaque diagnostic `unsupported punctuation`,
+  the review screen explains the limitation and offers **Your statement**:
+  a separate editable one-line interpretation, visibly distinguished from
+  the read-only original Markdown fragment. A failed manual attempt can be
+  edited again. These are user assertions, not source quotations.
+- The manual preview is **read-only** and remains unpersisted until the
+  user selects an epistemic role, sees source/proposal/risks, and explicitly
+  confirms. Commit checks the exact manual-text SHA, current source SHA,
+  fragment identity, formal reading and journal head before appending.
+  The provenance is labeled `human_interpretation` with extraction method
+  `manual_reformulation`, retaining the original source span/hash/text.
+- An explicit **Save** action in the DPKS editor reuses Markor's existing
+  writer, then verifies that the persisted Markdown matches the editor
+  snapshot. Knowledge analysis never triggers saving by itself.
+- Synthetic tests cover unsupported punctuation, successful manual CNL
+  wording, preserved Markdown, absent journal during preview, rejected stale
+  source/manual phrase/journal and explicit append-only approval.
+
+**Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
 does not yet model every historical source span. Deep audit findings must be

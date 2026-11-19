@@ -280,6 +280,36 @@ def preview_fragment(workspace_dir: str, relative_path: str, markdown: str,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _checked_manual_text(value: str) -> str:
+    """An explicit human statement, never a rewrite of the source Markdown."""
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 4000 \
+            or "\n" in value or "\r" in value:
+        raise ValueError("Manual interpretation must be one statement of 1..4000 characters")
+    return value.strip()
+
+
+def preview_manual_fragment(workspace_dir: str, relative_path: str, markdown: str,
+                            fragment_id: str, manual_text: str) -> str:
+    """Preview a separately labeled human paraphrase of an unchanged source."""
+    statement = _checked_manual_text(manual_text)
+    fragment = _fragment(relative_path, markdown, fragment_id)
+    kb = _kb(workspace_dir)
+    preview = kb.preview(statement, origin=fragment.id, mode="import")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "source_hash": _source_hash(markdown),
+        "fragment_id": fragment.id,
+        "locator": fragment.locator,
+        "source_text": fragment.text,
+        "manual_text": statement,
+        "manual_text_hash": _source_hash(statement),
+        "manual_interpretation": True,
+        "preview": preview.to_dict(),
+        "journal_head": kb.journal.head,
+        "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def record_decision(workspace_dir: str, relative_path: str, markdown: str,
                     fragment_id: str, reading_id: str, role: str,
                     expected_hash: str, expected_head: str | None) -> str:
@@ -288,6 +318,27 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
     Recompute the interpretation from current source, checking for changed
     notes, modified journal or a different reading before authorizing a write.
     """
+    return _record_decision(workspace_dir, relative_path, markdown, fragment_id,
+                            reading_id, role, expected_hash, expected_head)
+
+
+def record_manual_decision(workspace_dir: str, relative_path: str, markdown: str,
+                           fragment_id: str, manual_text: str, expected_manual_hash: str,
+                           reading_id: str, role: str, expected_hash: str,
+                           expected_head: str | None) -> str:
+    """Commit only the exact manually previewed reading with bound source/head."""
+    statement = _checked_manual_text(manual_text)
+    if _source_hash(statement) != expected_manual_hash:
+        raise ValueError("Human statement changed after preview")
+    return _record_decision(workspace_dir, relative_path, markdown, fragment_id,
+                            reading_id, role, expected_hash, expected_head,
+                            statement)
+
+
+def _record_decision(workspace_dir: str, relative_path: str, markdown: str,
+                     fragment_id: str, reading_id: str, role: str,
+                     expected_hash: str, expected_head: str | None,
+                     manual_text: str | None = None) -> str:
     if role not in ("claim", "hypothesis", "fact", "reject", "defer"):
         raise ValueError("Unknown human decision")
     if _source_hash(markdown) != expected_hash:
@@ -296,7 +347,8 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
     kb = _kb(workspace_dir)
     if kb.journal.head != expected_head:
         raise ValueError("Journal changed after preview")
-    preview = kb.preview(fragment.plain, origin=fragment.id, mode="import")
+    statement = fragment.plain if manual_text is None else manual_text
+    preview = kb.preview(statement, origin=fragment.id, mode="import")
     option = next((o for o in preview.options if o["reading_id"] == reading_id), None)
     if option is None or preview.formalization.status in ("NO_PARSE", "UNRESOLVED"):
         raise ValueError("Reading is unavailable or unresolved")
@@ -315,7 +367,7 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
         entries = [e]
     else:
         provenance = {
-            "source_type": "vault_note",
+            "source_type": "vault_note" if manual_text is None else "human_interpretation",
             "document": relative_path,
             "document_sha": expected_hash,
             "fragment_id": fragment.id,
@@ -323,8 +375,14 @@ def record_decision(workspace_dir: str, relative_path: str, markdown: str,
             "span": list(fragment.span),
             "text": fragment.text,
             "text_hash": fragment.text_hash,
-            "extraction": {"method": "cnl", "reading_id": reading_id},
+            "extraction": {
+                "method": "cnl" if manual_text is None else "manual_reformulation",
+                "reading_id": reading_id,
+            },
         }
+        if manual_text is not None:
+            provenance["human_statement"] = manual_text
+            provenance["human_statement_hash"] = _source_hash(manual_text)
         result = kb.accept(option["nodes"], provenance=provenance, role=role,
                            note="Explicitly reviewed on Android")
         entries = result.entries

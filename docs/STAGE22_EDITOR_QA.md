@@ -4,6 +4,13 @@ Status: **OPEN**. This fourth slice has automated *synthetic* contract
 checks, not physical-device signoff. It does **not** replace the Markor
 editing engine or implement full independent Markdown rendering.
 
+Owner feedback on Preview #15 (19 November 2026): a selected fragment
+reached the formalizer but failed with **unsupported punctuation**; an
+unsaved edit produced **editor text differs from saved note**. The second
+result is an intended guard, not a failed attempt to write the journal.
+The first is strict CNL behavior with inadequate guidance. Both are
+scenario-specific observations, not a complete editor QA verdict.
+
 ## Expected scope
 
 - Separate DPKS editor toolbar with Edit / Preview, Analyze, Review selection
@@ -50,9 +57,35 @@ editing engine or implement full independent Markdown rendering.
    200%, gesture navigation, battery/process death and 20k-note performance.
    Record device model/Android build, APK hash, timing and redacted results.
 
+## Fifth-slice manual interpretation and Save regression (pending device test)
+
+1. Select one sentence from a disposable note with parentheses or a semicolon,
+   e.g. a statement the strict CNL cannot parse. The review must explain
+   why the formal interpretation is unavailable and offer the separate
+   human-authored interpretation action. The original Markdown must remain
+   visible and unchanged.
+2. Enter a simple valid one-line Russian CNL statement, for example
+   `Марс является планетой.`. Preview it: the original source and your
+   own statement must carry **different labels**. Cancel to confirm no
+   journal or Markdown changes. An invalid statement should allow revision,
+   not claim to have been formalized.
+3. On disposable backed-up journal only, explicitly accept one manually
+   reformulated claim. Confirm its provenance uses
+   `human_interpretation/manual_reformulation`, retains source identity
+   and journal replay succeeds. Test stale source and stale journal head.
+4. Edit a disposable note but do not save; selection review must continue to
+   refuse a mismatch. Press the new **Save** action deliberately, confirm
+   the saved-file success status, then retry review. This action must
+   preserve Markor's empty-file protection and must **never** auto-accept a
+   knowledge decision.
+5. Repeat after rotate/process stop, dark theme, font scale 200%, TalkBack,
+   and with more than one paragraph. No personal data in logs/screenshots.
+
 ## Known omissions, not PASS
 
 - **QA-59 / OPEN:** no complete hardware verification of the fourth slice.
+- **QA-60 / OPEN:** fifth-slice guided manual interpretation, separate
+  provenance, explicit Save and stale-source resistance are synthetic-only.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; contextual inline sidebar,
