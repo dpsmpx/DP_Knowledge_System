@@ -1,18 +1,60 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DP Knowledge</string>
-    <string name="nav_library">Library</string>
-    <string name="nav_review">Review</string>
-    <string name="nav_knowledge">Knowledge</string>
-    <string name="nav_assistant">Assistant</string>
+
+    <!-- Bottom navigation — keep short (≤12 chars visible) -->
+    <string name="nav_notes">Notes</string>
+    <string name="nav_inbox">Inbox</string>
+    <string name="nav_journal">Journal</string>
+    <string name="nav_ask">Ask</string>
     <string name="nav_more">More</string>
-    <string name="library_empty_title">No notebook yet</string>
-    <string name="library_empty_body">Choose a folder with Markdown notes. Files stay on your device; the app never rewrites them without your explicit approval.</string>
-    <string name="library_pick_folder">Choose folder</string>
-    <string name="review_placeholder">Candidate review will appear here after semantic analysis.</string>
-    <string name="knowledge_placeholder">Approved knowledge, contradictions and provenance will live here.</string>
-    <string name="assistant_placeholder">Ask the deterministic core offline. Optional LLM is opt-in and separate.</string>
-    <string name="more_title">Settings and tools</string>
-    <string name="process_idle">No background work</string>
-    <string name="shell_banner">UI shell 0.22.0 — knowledge core bridge lands in 22.1+</string>
+
+    <!-- Notes (library) -->
+    <string name="notes_title">Notes</string>
+    <string name="notes_empty_title">No notebook yet</string>
+    <string name="notes_empty_body">Pick a folder with your Markdown files. The app reads them; it never rewrites a note without your explicit approval and a backup path.</string>
+    <string name="notes_pick_folder">Choose folder</string>
+    <string name="notes_search_hint">Search notes</string>
+    <string name="notes_filter_all">All</string>
+    <string name="notes_filter_stale">Unverified</string>
+    <string name="notes_filter_recent">Recent</string>
+
+    <!-- Inbox (review candidates) -->
+    <string name="inbox_title">Inbox</string>
+    <string name="inbox_empty">No candidates yet. Run semantic analysis on the library when you are ready — suggestions stay unapproved until you decide.</string>
+    <string name="inbox_badge_claim">Claim</string>
+    <string name="inbox_badge_hypothesis">Hypothesis</string>
+
+    <!-- Journal (approved knowledge) -->
+    <string name="journal_title">Journal</string>
+    <string name="journal_empty">No active knowledge records. Approved claims, facts and hypotheses will appear here with full provenance.</string>
+    <string name="journal_role_fact">Fact</string>
+    <string name="journal_role_claim">Claim</string>
+    <string name="journal_role_hypothesis">Hypothesis</string>
+    <string name="journal_stale">Source changed</string>
+    <string name="journal_contested">Contested</string>
+
+    <!-- Ask -->
+    <string name="ask_title">Ask</string>
+    <string name="ask_core_tab">Core</string>
+    <string name="ask_llm_tab">LLM</string>
+    <string name="ask_core_hint">Deterministic offline answers from approved knowledge only.</string>
+    <string name="ask_llm_hint">Optional. Exact excerpts require your consent before any network send.</string>
+    <string name="ask_placeholder">Core and optional LLM share this space. Core never needs a model.</string>
+
+    <!-- More -->
+    <string name="more_title">More</string>
+    <string name="more_processes">Background work</string>
+    <string name="more_processes_idle">Nothing running</string>
+    <string name="more_backup">Backup &amp; export</string>
+    <string name="more_backup_sub">Encrypted journal · phase 22.5</string>
+    <string name="more_theme">Appearance</string>
+    <string name="more_theme_sub">System · light · dark · dynamic color</string>
+    <string name="more_about">About</string>
+    <string name="more_about_sub">UI shell 0.22.0 · core bridge in 22.1+</string>
+
+    <!-- Global chrome -->
+    <string name="process_strip_idle">Ready</string>
+    <string name="process_strip_hint">Index and analysis progress will show here without blocking the UI.</string>
+    <string name="shell_banner">UI shell 0.22.0 — knowledge core arrives in 22.1</string>
 </resources>

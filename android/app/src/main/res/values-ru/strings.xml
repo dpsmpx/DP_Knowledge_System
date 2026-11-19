@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DP Knowledge</string>
+
+    <string name="nav_notes">Заметки</string>
+    <string name="nav_inbox">Входящие</string>
+    <string name="nav_journal">Журнал</string>
+    <string name="nav_ask">Спросить</string>
+    <string name="nav_more">Ещё</string>
+
+    <string name="notes_title">Заметки</string>
+    <string name="notes_empty_title">Папка ещё не выбрана</string>
+    <string name="notes_empty_body">Укажите каталог с Markdown-файлами. Приложение только читает заметки и не переписывает их без вашего явного согласия и пути к резервной копии.</string>
+    <string name="notes_pick_folder">Выбрать папку</string>
+    <string name="notes_search_hint">Поиск по заметкам</string>
+    <string name="notes_filter_all">Все</string>
+    <string name="notes_filter_stale">Непроверенные</string>
+    <string name="notes_filter_recent">Недавние</string>
+
+    <string name="inbox_title">Входящие</string>
+    <string name="inbox_empty">Кандидатов пока нет. Запустите семантический разбор библиотеки, когда будете готовы — предложения не становятся фактами, пока вы их не подтвердите.</string>
+    <string name="inbox_badge_claim">Утверждение</string>
+    <string name="inbox_badge_hypothesis">Гипотеза</string>
+
+    <string name="journal_title">Журнал</string>
+    <string name="journal_empty">Активных записей знания нет. Подтверждённые утверждения, факты и гипотезы появятся здесь с полной трассой происхождения.</string>
+    <string name="journal_role_fact">Факт</string>
+    <string name="journal_role_claim">Утверждение</string>
+    <string name="journal_role_hypothesis">Гипотеза</string>
+    <string name="journal_stale">Источник изменился</string>
+    <string name="journal_contested">Спорное</string>
+
+    <string name="ask_title">Спросить</string>
+    <string name="ask_core_tab">Ядро</string>
+    <string name="ask_llm_tab">LLM</string>
+    <string name="ask_core_hint">Детерминированные ответы офлайн только по одобренному знанию.</string>
+    <string name="ask_llm_hint">По желанию. Точные фрагменты уходят в сеть только после вашего согласия.</string>
+    <string name="ask_placeholder">Здесь будут ядро и опциональный LLM. Ядру модель не нужна.</string>
+
+    <string name="more_title">Ещё</string>
+    <string name="more_processes">Фоновые задачи</string>
+    <string name="more_processes_idle">Ничего не выполняется</string>
+    <string name="more_backup">Резервные копии</string>
+    <string name="more_backup_sub">Шифрованный журнал · этап 22.5</string>
+    <string name="more_theme">Оформление</string>
+    <string name="more_theme_sub">Система · светлая · тёмная · динамический цвет</string>
+    <string name="more_about">О приложении</string>
+    <string name="more_about_sub">UI-оболочка 0.22.0 · мост к ядру в 22.1+</string>
+
+    <string name="process_strip_idle">Готово</string>
+    <string name="process_strip_hint">Прогресс индексации и анализа будет здесь, не блокируя интерфейс.</string>
+    <string name="shell_banner">UI-оболочка 0.22.0 — ядро знаний подключается в 22.1</string>
+</resources>
