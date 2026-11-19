@@ -101,6 +101,8 @@ deferred rather than required after every incremental PR.
   journal drill-down has synthetic tests only, not physical-device signoff.
 - **QA-65 / OPEN, DEFERRED:** tenth-slice evidence sources, linked journal
   records and cross-note verified jumps await batched Android acceptance.
+- **QA-66 / OPEN, DEFERRED:** eleventh-slice persistent inline knowledge dock,
+  unsaved-stale reporting and bounded Back navigation await device checks.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
@@ -215,3 +217,28 @@ include private text, filesystem paths or credentials in public CI/QA logs.
    downs, Back/rotation/process death, TalkBack and 200% font in light/dark
    themes. Distinguish truncation from absence. Keep QA-65 OPEN until actual
    device evidence exists.
+
+## QA-66 — deferred persistent in-editor dock checklist
+
+1. Open a synthetic Markdown note: the knowledge header must be visible even
+   while collapsed and must not obscure the editing surface. Expand, collapse
+   and refresh. On empty journal/index, show honest empty states, not facts.
+   Test portrait/landscape, IME keyboard, Edit/Preview and 200% font.
+2. Accept isolated synthetic claim/fact/hypothesis records. The expanded dock
+   must label roles and show accepted journal entries separately from
+   unapproved lexical/semantic suggestions. Tap a journal record, see separate
+   source/KSF blocks, tap Evidence, visit an opposite active record and return
+   through inline Back without opening a stack of modal dialogs.
+3. From the cursor inspector choose an exact Unicode provenance, then browse
+   source/evidence and return with system Back. Test more than eight nested
+   links, refresh mid-navigation, and a cross-note verified source jump.
+   Do not infer source equivalence from a repeated sentence.
+4. Type without saving: the summary must become visibly stale, while source
+   jumps refuse to use the buffer. Refresh must display *saved-note* context
+   explicitly. Check background/stop/resume, vault switch, disk changes and
+   long-running workers do not restore obsolete views or cancel a pending
+   source jump. Notes and journal hashes must remain unchanged by inspection.
+5. Repeat with 760/20k synthetic notes, slow storage, TalkBack, light/dark
+   and dynamic theme, large text, long statements and source-history limits.
+   Record counts and timing without personal note text, paths or secrets.
+   Keep QA-66 OPEN until observed on an Android device.

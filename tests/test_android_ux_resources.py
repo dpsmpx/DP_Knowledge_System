@@ -201,7 +201,10 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             self.assertEqual(1, ids.count("@+id/" + name), name)
         panel = next(x for x in shell.iter()
                      if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_panel")
-        self.assertEqual("gone", panel.get(ANDROID + "visibility"))
+        self.assertEqual("visible", panel.get(ANDROID + "visibility"))
+        body = next(x for x in shell.iter()
+                    if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_body")
+        self.assertEqual("gone", body.get(ANDROID + "visibility"))
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
                      "KnowledgePythonBridge.editorContext(", "relation_index_state",
@@ -220,6 +223,39 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_context_index_stale",
                          "knowledge_editor_context_record_stale",
                          "knowledge_editor_context_conflict"):
+                self.assertIn(name, names)
+
+    def test_editor_persistent_dock_expands_and_navigates_inline_with_stale_guard(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        ids = [x.get(ANDROID + "id", "") for x in shell.iter()]
+        for name in ("knowledge_editor_context_panel", "knowledge_editor_context_body",
+                     "knowledge_editor_context_refresh", "knowledge_editor_context_expand",
+                     "knowledge_editor_context_back", "knowledge_editor_context_navigation",
+                     "knowledge_editor_context_detail_scroll",
+                     "knowledge_editor_context_detail_content",
+                     "knowledge_editor_context_list_scroll"):
+            self.assertEqual(1, ids.count("@+id/" + name), name)
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for marker in ("initializeContextDock()", "refreshKnowledgeContext()",
+                       "setDockExpanded(", "showDockPage(", "navigateDockBack()",
+                       "resetDockNavigation()", "dockPageHistory.size() >= 8",
+                       "dockGeneration.incrementAndGet()", "currentDock(generation)",
+                       "stopWatchingDockEdits()", "knowledge_editor_dock_stale",
+                       "view -> inspectRecordEvidence(", "view -> openEvidenceOrigin(origin)",
+                       "showDockPage(getString(R.string.knowledge_editor_evidence_title), body)"):
+            self.assertIn(marker, java)
+        # Core journal and conflict navigation no longer spawn nested modals.
+        for section in ("showSourceKnowledge", "showContextRecord", "renderRecordEvidence"):
+            start = java.index("private void " + section + "(")
+            end = java.find("\n    private ", start + 1)
+            snippet = java[start:end if end != -1 else None]
+            self.assertNotIn("new AlertDialog.Builder", snippet, section)
+        for locale in ("values", "values-ru"):
+            names = {e.get("name") for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_editor_dock_initial", "knowledge_editor_dock_refresh",
+                         "knowledge_editor_dock_expand", "knowledge_editor_dock_collapse",
+                         "knowledge_editor_dock_back", "knowledge_editor_dock_stale"):
                 self.assertIn(name, names)
 
     def test_editor_source_alignment_uses_provenance_offsets_not_ambiguous_text(self):
