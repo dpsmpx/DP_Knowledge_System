@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
@@ -13,6 +14,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.work.ForegroundInfo;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
+import androidx.documentfile.provider.DocumentFile;
 
 import net.gsantner.markor.R;
 import net.gsantner.markor.model.AppSettings;
@@ -22,6 +24,8 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -105,6 +109,21 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                 // Never remove an old backup before a replacement has been
                 // fully written, decrypted, authenticated and hashed.
                 recordVerified(context, directory, filename, checked);
+                // The user may separately consent to a SAF destination. This
+                // can be a local disk or an Android cloud document provider:
+                // only the already-encrypted .dpksb is ever written there.
+                final Uri externalTree = KnowledgeExternalBackup.destination(context);
+                if (externalTree != null) {
+                    try {
+                        copyVerifiedToSaf(context, externalTree, permanent,
+                                filename, passphrase, checked, cancelled);
+                        KnowledgeExternalBackup.record(context, true);
+                    } catch (Exception unavailable) {
+                        // Independent states: the local verified backup is
+                        // successful even when cloud/SAF copy is unavailable.
+                        KnowledgeExternalBackup.record(context, false);
+                    }
+                }
                 return Result.success();
             } catch (Exception failed) {
                 return failed(context);
@@ -113,6 +132,54 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                 if (stage != null) stage.delete();
                 if (tmp != null) tmp.delete();
             }
+        }
+    }
+
+    private static void copyVerifiedToSaf(final Context context, final Uri folder,
+                                          final File encrypted, final String filename,
+                                          final char[] passphrase,
+                                          final KnowledgePortableArchive.Summary expected,
+                                          final KnowledgePortableArchive.Cancellation cancelled)
+            throws Exception {
+        final DocumentFile tree = DocumentFile.fromTreeUri(context, folder);
+        if (tree == null || !tree.isDirectory() || !tree.canWrite())
+            throw new IllegalStateException("SAF destination not writable");
+        final DocumentFile output = tree.createFile("application/octet-stream", filename);
+        if (output == null) throw new IllegalStateException("Cannot create SAF backup");
+        boolean confirmed = false;
+        File stage = null;
+        try {
+            try (InputStream from = new FileInputStream(encrypted);
+                 OutputStream to = context.getContentResolver().openOutputStream(
+                         output.getUri(), "w")) {
+                if (to == null) throw new IllegalStateException("SAF output unavailable");
+                final byte[] buffer = new byte[65536];
+                int n;
+                while ((n = from.read(buffer)) >= 0) {
+                    if (cancelled.cancelled()) throw new IllegalStateException("Copy cancelled");
+                    to.write(buffer, 0, n);
+                }
+                to.flush();
+            }
+            // SAF providers can claim success before durable upload. Re-open
+            // and authenticate the actual bytes returned by that provider.
+            try (InputStream from = context.getContentResolver().openInputStream(
+                    output.getUri())) {
+                if (from == null) throw new IllegalStateException("SAF readback unavailable");
+                stage = KnowledgePortableCipher.decryptToVerifiedStaging(
+                        from, context.getCacheDir(), passphrase, cancelled);
+            }
+            final KnowledgePortableArchive.Summary checked =
+                    KnowledgePortableArchive.verify(stage, cancelled);
+            if (checked.sources != expected.sources || checked.bytes != expected.bytes
+                    || checked.journal != expected.journal || !checked.settings)
+                throw new IllegalStateException("SAF backup verification mismatch");
+            confirmed = true;
+        } finally {
+            if (stage != null) stage.delete();
+            // Only this newly created unverified document can be removed.
+            // Previous verified SAF backups are never deleted automatically.
+            if (!confirmed) output.delete();
         }
     }
 

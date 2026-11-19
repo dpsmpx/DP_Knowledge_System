@@ -864,6 +864,22 @@
                                 android:layout_weight="1"
                                 android:text="@string/knowledge_daily_backup_now" />
                         </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/knowledge_external_backup_status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingTop="8dp"
+                            android:paddingBottom="4dp"
+                            android:text="@string/knowledge_external_backup_off"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/knowledge_external_backup_toggle"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/knowledge_external_backup_choose" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>

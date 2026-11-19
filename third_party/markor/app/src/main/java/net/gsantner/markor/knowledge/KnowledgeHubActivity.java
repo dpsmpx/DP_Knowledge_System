@@ -123,6 +123,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_EXPORT_PORTABLE = 40024;
     private static final int REQUEST_INSPECT_PORTABLE = 40025;
     private static final int REQUEST_RESTORE_PORTABLE = 40026;
+    private static final int REQUEST_EXTERNAL_BACKUP_TREE = 40027;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -415,6 +416,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         Toast.LENGTH_LONG).show();
             }
         });
+        findViewById(R.id.knowledge_external_backup_toggle).setOnClickListener(view ->
+                toggleExternalBackup());
         refreshDailyBackupStatus();
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
         processHistory = KnowledgeProcessHistory.fromStored(
@@ -3780,6 +3783,42 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             notice.setText(getString(R.string.knowledge_daily_backup_active, when,
                     prefs.getInt(KnowledgeDailyBackup.LAST_COUNT, 0)));
         }
+        final boolean external = KnowledgeExternalBackup.destination(this) != null;
+        ((Button) findViewById(R.id.knowledge_external_backup_toggle)).setText(external
+                ? R.string.knowledge_external_backup_disable
+                : R.string.knowledge_external_backup_choose);
+        final TextView externalStatus = findViewById(R.id.knowledge_external_backup_status);
+        externalStatus.setText(external
+                ? getString(R.string.knowledge_external_backup_on,
+                        KnowledgeExternalBackup.hasSuccessfulCopy(this))
+                : getString(R.string.knowledge_external_backup_off));
+    }
+
+    private void toggleExternalBackup() {
+        if (KnowledgeExternalBackup.destination(this) != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_external_backup_disable)
+                    .setMessage(R.string.knowledge_external_backup_removed)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.knowledge_external_backup_disable,
+                            (dialog, which) -> {
+                                KnowledgeExternalBackup.disable(this);
+                                refreshDailyBackupStatus();
+                            }).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_external_backup_choose)
+                .setMessage(R.string.knowledge_external_backup_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_external_backup_choose,
+                        (dialog, which) -> {
+                            final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                            startActivityForResult(intent, REQUEST_EXTERNAL_BACKUP_TREE);
+                        }).show();
     }
 
     private void toggleDailyBackup() {
@@ -4157,6 +4196,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         } else if (requestCode == REQUEST_RESTORE_PORTABLE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             promptPortableRestorePassword(data.getData());
+        } else if (requestCode == REQUEST_EXTERNAL_BACKUP_TREE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                KnowledgeExternalBackup.configure(this, data.getData(), data.getFlags());
+                refreshDailyBackupStatus();
+            } catch (RuntimeException denied) {
+                Toast.makeText(this, R.string.knowledge_external_backup_failed,
+                        Toast.LENGTH_LONG).show();
+            }
         } else if (requestCode == REQUEST_EXPORT_JOURNAL) {
             final char[] password = pendingExportPassword;
             pendingExportPassword = null;

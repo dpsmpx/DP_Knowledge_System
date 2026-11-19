@@ -388,6 +388,13 @@
     <string name="knowledge_daily_backup_scheduled">Ежедневная зашифрованная копия запланирована. Результат появится после первого успешного запуска.</string>
     <string name="knowledge_daily_backup_stopped">Ежедневные копии отключены. Уже созданные архивы сохранены.</string>
     <string name="knowledge_daily_backup_failed">Не удалось настроить копирование. Исходные заметки не изменены.</string>
+    <string name="knowledge_external_backup_choose">Выбрать внешнюю/облачную папку</string>
+    <string name="knowledge_external_backup_disable">Отключить внешний архив</string>
+    <string name="knowledge_external_backup_warning">Внешние шифрованные копии — только по вашему согласию. Выберите папку Android. Если это облачный провайдер (например Google Drive), он получит только шифротекст, но может использовать сеть. Не выбирайте общую публичную папку. Копирование выполняется по ежедневному расписанию после проверки локального архива; старые подтверждённые внешние копии автоматически не удаляются.</string>
+    <string name="knowledge_external_backup_off">Независимое внешнее хранилище не выбрано. Потеря устройства или удаление приложения уничтожит локальные копии.</string>
+    <string name="knowledge_external_backup_on">Внешняя папка разрешена. Шифрованный архив хотя бы раз проверен после обратного чтения: %1$b. Облачный провайдер может отложить фактическую загрузку.</string>
+    <string name="knowledge_external_backup_failed">Не удалось сохранить разрешение на доступ к папке. Внешнее копирование не включено.</string>
+    <string name="knowledge_external_backup_removed">Внешнее хранилище отключено. Существующие архивы там не удалены.</string>
     <string name="knowledge_editor_title">Редактор заметки</string>
     <string name="knowledge_editor_back">Вернуться в библиотеку знаний</string>
     <string name="knowledge_editor_source_notice">Редактор исходного Markdown · Ручные изменения сохраняются в заметке. Решения знаний хранятся отдельно.</string>

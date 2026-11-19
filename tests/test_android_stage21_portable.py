@@ -64,6 +64,21 @@ class Stage21PortableWiring(unittest.TestCase):
         for forbidden in ("HttpURLConnection", "new URL(", "http://", "https://"):
             self.assertNotIn(forbidden, worker)
 
+    def test_external_saf_is_opt_in_and_uploads_ciphertext_only(self):
+        external = (JAVAS / "KnowledgeExternalBackup.java").read_text()
+        worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        self.assertIn("takePersistableUriPermission", external)
+        self.assertIn("releasePersistableUriPermission", external)
+        self.assertIn("KnowledgeExternalBackup.destination(context)", worker)
+        self.assertIn("copyVerifiedToSaf(context", worker)
+        self.assertIn("KnowledgePortableCipher.decryptToVerifiedStaging", worker)
+        self.assertIn("if (!confirmed) output.delete()", worker)
+        self.assertIn("Intent.ACTION_OPEN_DOCUMENT_TREE", hub)
+        self.assertIn("R.string.knowledge_external_backup_warning", hub)
+        self.assertIn("KnowledgeExternalBackup.configure(this, data.getData()", hub)
+        self.assertNotIn("KnowledgeExternalBackup.configure(this, notebook", hub)
+
 
 if __name__ == "__main__":
     unittest.main()

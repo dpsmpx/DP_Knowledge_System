@@ -72,4 +72,21 @@ may delete app-specific files on uninstall and an unrecoverable hardware failure
 loses them. Manual portable export to independent SAF storage is therefore
 still essential. Scheduled background uploads are not enabled by this slice.
 
+## Third slice: opt-in external SAF destination (pending CI)
+
+The user can independently grant and revoke a persisted Android Storage Access
+Framework tree permission. After producing and verifying a local encrypted
+snapshot, the background job optionally copies **only ciphertext** to a newly
+created file through the selected document provider and authenticates the
+read-back bytes before reporting external success. Local and external success
+are recorded separately. A failed newly created external file may be removed,
+but previously verified external backups are never auto-deleted. This can work
+with SAF-integrated Google Drive providers when installed and authorized; it is
+**not** a native Google Drive OAuth integration and does not guarantee that a
+provider has uploaded the read-back bytes durably to its remote server.
+
+This differs from local daily backups: selecting an external provider is
+**separate explicit consent**, and the provider may use the network. Failure,
+revocation, quotas or missing provider support leave local backups intact.
+
 No private vaults or credentials are used in fixtures or CI.

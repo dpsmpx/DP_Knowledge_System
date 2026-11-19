@@ -388,6 +388,13 @@
     <string name="knowledge_daily_backup_scheduled">Daily encrypted backup scheduled. First successful result will appear later.</string>
     <string name="knowledge_daily_backup_stopped">Daily backup disabled. Existing encrypted archives are retained.</string>
     <string name="knowledge_daily_backup_failed">Could not schedule local backup. No original notes were changed.</string>
+    <string name="knowledge_external_backup_choose">Choose external / cloud folder</string>
+    <string name="knowledge_external_backup_disable">Disconnect external backup</string>
+    <string name="knowledge_external_backup_warning">Opt-in external encrypted backups: choose an Android folder provider. If it is cloud-backed (such as Google Drive), that provider will receive ciphertext only, but it may use the network. Never choose a shared public folder. Copies run on the daily schedule after a verified local copy; older verified external copies are never deleted automatically.</string>
+    <string name="knowledge_external_backup_off">No independent external destination selected. Device loss or uninstall may erase local copies.</string>
+    <string name="knowledge_external_backup_on">External destination authorized. Encrypted backup readback verified at least once: %1$b. The provider may still delay remote durability.</string>
+    <string name="knowledge_external_backup_failed">Could not save SAF permission. No external backup scheduled.</string>
+    <string name="knowledge_external_backup_removed">External destination disconnected. Previously saved archives were not deleted.</string>
     <string name="knowledge_editor_title">Note editor</string>
     <string name="knowledge_editor_back">Return to Knowledge Library</string>
     <string name="knowledge_editor_source_notice">Source Markdown editor · Manual edits change the note. Knowledge decisions are stored separately.</string>
