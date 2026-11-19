@@ -2,35 +2,33 @@
 
 Standalone Jetpack Compose application (`com.dpsmpx.dpks`).
 
-This module **replaces** the Markor-based Knowledge Hub as the product UI.
-`third_party/markor/` remains in the repository for license attribution and
-optional editor component extraction only.
-
 ## Status
 
 | Phase | State |
 |---|---|
-| 22.0 Shell (tabs, theme, navigation) | **this tree** |
-| 22.1 Library + local index adapters | next |
-| 22.2–22.5 Review / Knowledge / Assistant / More | planned |
+| 22.0 Shell (tabs, theme, navigation, EN/RU) | done |
+| **22.1 Notes + SAF + FTS index + LazyColumn** | **done** |
+| 22.2 Inbox / decisions | next |
+| 22.3–22.5 Journal / Ask / More | planned |
 
 Architecture: [`docs/UI_ARCHITECTURE.md`](../docs/UI_ARCHITECTURE.md).
 
-## Build
+## 22.1 behaviour
 
-Requires JDK 17+, Android SDK 35.
+- User picks a folder via **Storage Access Framework** (persistable read URI).
+- `VaultScanner` walks the tree (`.md` / `.markdown`), skips hidden names, caps at 200 000 notes.
+- `NotesIndex` stores a disposable SQLite FTS4 projection in `noBackupFilesDir`.
+- Incomplete / truncated scans **never delete** preserved rows; they are marked unverified.
+- Notes larger than 2 MiB are indexed by filename/title only.
+- UI shows up to 250 hits, filter chips (All / Unverified / Recent), cancellable refresh.
+
+Markdown files are **not** rewritten.
+
+## Build
 
 ```bash
 cd android
-# Once: generate wrapper if missing
-# gradle wrapper --gradle-version 8.11.1
 ./gradlew :app:assembleDebug
 ```
 
-Python `ksys` bridge is **not** wired in 22.0. Offline UI shell only.
-
-## Principles baked into empty states
-
-- Markdown notes are user-owned; the app does not rewrite them silently.
-- Candidates are not facts.
-- Core paths work without LLM or network.
+Requires JDK 17+, Android SDK 35. Gradle wrapper may need to be generated once on a machine with the Android SDK.

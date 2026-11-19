@@ -12,10 +12,16 @@
     <string name="notes_empty_title">Папка ещё не выбрана</string>
     <string name="notes_empty_body">Укажите каталог с Markdown-файлами. Приложение только читает заметки и не переписывает их без вашего явного согласия и пути к резервной копии.</string>
     <string name="notes_pick_folder">Выбрать папку</string>
+    <string name="notes_pick_folder_again">Сменить папку</string>
     <string name="notes_search_hint">Поиск по заметкам</string>
     <string name="notes_filter_all">Все</string>
     <string name="notes_filter_stale">Непроверенные</string>
     <string name="notes_filter_recent">Недавние</string>
+    <string name="notes_refresh">Обновить индекс</string>
+    <string name="notes_empty_indexed">В этой папке Markdown-заметок не найдено. Обновите индекс после добавления файлов.</string>
+    <string name="notes_no_matches">Ничего не найдено по этому запросу.</string>
+    <string name="notes_truncated_results">Показаны первые 250 результатов. Уточните поиск для большей точности.</string>
+    <string name="notes_unverified_badge">Не перепроверено</string>
 
     <string name="inbox_title">Входящие</string>
     <string name="inbox_empty">Кандидатов пока нет. Запустите семантический разбор библиотеки, когда будете готовы — предложения не становятся фактами, пока вы их не подтвердите.</string>
@@ -45,9 +51,9 @@
     <string name="more_theme">Оформление</string>
     <string name="more_theme_sub">Система · светлая · тёмная · динамический цвет</string>
     <string name="more_about">О приложении</string>
-    <string name="more_about_sub">UI-оболочка 0.22.0 · мост к ядру в 22.1+</string>
+    <string name="more_about_sub">UI 0.22.1 · индекс заметок · далее мост к ядру</string>
 
     <string name="process_strip_idle">Готово</string>
     <string name="process_strip_hint">Прогресс индексации и анализа будет здесь, не блокируя интерфейс.</string>
-    <string name="shell_banner">UI-оболочка 0.22.0 — ядро знаний подключается в 22.1</string>
+    <string name="shell_banner">UI 0.22.1 — индекс заметок подключён</string>
 </resources>

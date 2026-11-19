@@ -2,30 +2,32 @@
 <resources>
     <string name="app_name">DP Knowledge</string>
 
-    <!-- Bottom navigation — keep short (≤12 chars visible) -->
     <string name="nav_notes">Notes</string>
     <string name="nav_inbox">Inbox</string>
     <string name="nav_journal">Journal</string>
     <string name="nav_ask">Ask</string>
     <string name="nav_more">More</string>
 
-    <!-- Notes (library) -->
     <string name="notes_title">Notes</string>
     <string name="notes_empty_title">No notebook yet</string>
     <string name="notes_empty_body">Pick a folder with your Markdown files. The app reads them; it never rewrites a note without your explicit approval and a backup path.</string>
     <string name="notes_pick_folder">Choose folder</string>
+    <string name="notes_pick_folder_again">Change folder</string>
     <string name="notes_search_hint">Search notes</string>
     <string name="notes_filter_all">All</string>
     <string name="notes_filter_stale">Unverified</string>
     <string name="notes_filter_recent">Recent</string>
+    <string name="notes_refresh">Refresh index</string>
+    <string name="notes_empty_indexed">No Markdown notes found in this folder. Pull refresh after adding files.</string>
+    <string name="notes_no_matches">No notes match this search.</string>
+    <string name="notes_truncated_results">Showing first 250 results. Refine the search for more precision.</string>
+    <string name="notes_unverified_badge">Not rechecked</string>
 
-    <!-- Inbox (review candidates) -->
     <string name="inbox_title">Inbox</string>
     <string name="inbox_empty">No candidates yet. Run semantic analysis on the library when you are ready — suggestions stay unapproved until you decide.</string>
     <string name="inbox_badge_claim">Claim</string>
     <string name="inbox_badge_hypothesis">Hypothesis</string>
 
-    <!-- Journal (approved knowledge) -->
     <string name="journal_title">Journal</string>
     <string name="journal_empty">No active knowledge records. Approved claims, facts and hypotheses will appear here with full provenance.</string>
     <string name="journal_role_fact">Fact</string>
@@ -34,7 +36,6 @@
     <string name="journal_stale">Source changed</string>
     <string name="journal_contested">Contested</string>
 
-    <!-- Ask -->
     <string name="ask_title">Ask</string>
     <string name="ask_core_tab">Core</string>
     <string name="ask_llm_tab">LLM</string>
@@ -42,7 +43,6 @@
     <string name="ask_llm_hint">Optional. Exact excerpts require your consent before any network send.</string>
     <string name="ask_placeholder">Core and optional LLM share this space. Core never needs a model.</string>
 
-    <!-- More -->
     <string name="more_title">More</string>
     <string name="more_processes">Background work</string>
     <string name="more_processes_idle">Nothing running</string>
@@ -51,10 +51,9 @@
     <string name="more_theme">Appearance</string>
     <string name="more_theme_sub">System · light · dark · dynamic color</string>
     <string name="more_about">About</string>
-    <string name="more_about_sub">UI shell 0.22.0 · core bridge in 22.1+</string>
+    <string name="more_about_sub">UI 0.22.1 · Notes index live · core bridge next</string>
 
-    <!-- Global chrome -->
     <string name="process_strip_idle">Ready</string>
     <string name="process_strip_hint">Index and analysis progress will show here without blocking the UI.</string>
-    <string name="shell_banner">UI shell 0.22.0 — knowledge core arrives in 22.1</string>
+    <string name="shell_banner">UI 0.22.1 — Notes index connected</string>
 </resources>
