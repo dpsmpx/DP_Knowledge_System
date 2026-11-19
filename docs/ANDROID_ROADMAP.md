@@ -41,9 +41,17 @@ snapshot until the integrated application is ready.
 | 13 | Large-vault scan/index progress, private SQLite consistency diagnostics, user-authorized rebuild, reproducible cancellation/stress tests | Bounded count-only progress, transactional success markers, read-only health report, destructive derived-index repair requires consent |
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
+| 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
 
 The stages are medium-sized deliverables; if a stage proves too broad it is
 split into separate reviewable PRs rather than bypassing a review gate.
+
+Stage 15's embedded synthetic checks passed on Android 15 (20k index built in
+6.218 s), but SQLite read-only integrity warnings, provider consent, manual
+process/lifecycle and backup checks remain explicitly open in the
+[`main` technical-debt register](https://github.com/dpsmpx/DP_Knowledge_System/blob/main/docs/TECHNICAL_DEBT.md).
+The product roadmap after 15 is defined in `main/docs/DEVELOPMENT_PLAN.md`;
+Stage 16 is not approval to merge the draft integration PR into `main`.
 
 ## Stage 01 scope and limits
 

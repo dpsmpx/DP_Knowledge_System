@@ -15,7 +15,9 @@
     <string name="knowledge_file_missing">This note is no longer available.</string>
     <string name="knowledge_index_status">%1$d notes scanned · %2$d shown · %3$d indexed · %4$d unchanged</string>
     <string name="knowledge_oversized">%1$d large notes indexed by filename only.</string>
-    <string name="knowledge_partial_index">Some paths may be stale because the scan was incomplete.</string>
+    <string name="knowledge_partial_index">Incomplete scan: %1$d preserved sources not rechecked. They cannot serve as AI evidence or confirmed backlinks.</string>
+    <string name="knowledge_unverified_source">[Not rechecked]</string>
+    <string name="knowledge_index_unverified">Sources not rechecked in latest scan: %1$d (excluded from evidence).</string>
     <string name="knowledge_possible_backlinks">Possible incoming links (not verified)</string>
     <string name="knowledge_no_backlinks">No possible incoming links found.</string>
     <string name="knowledge_semantic_relations">Related claims across notes</string>

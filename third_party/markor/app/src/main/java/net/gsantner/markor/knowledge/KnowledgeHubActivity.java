@@ -891,8 +891,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         labels.clear();
                         for (final KnowledgeLocalIndex.Hit hit : hits) {
                             displayed.add(hit);
-                            labels.add(hit.title.equals(hit.relativePath) ? hit.relativePath
-                                    : hit.title + " — " + hit.relativePath);
+                            final String label = hit.title.equals(hit.relativePath)
+                                    ? hit.relativePath : hit.title + " — " + hit.relativePath;
+                            labels.add(hit.confirmedInLastScan ? label
+                                    : getString(R.string.knowledge_unverified_source) + " " + label);
                         }
                         adapter.notifyDataSetChanged();
                         showIndexStatus(hits.size());
@@ -915,7 +917,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             summary.append(' ').append(getString(R.string.knowledge_oversized, syncResult.oversized));
         }
         if (syncResult.keptMissingEntries) {
-            summary.append(' ').append(getString(R.string.knowledge_partial_index));
+            summary.append(' ').append(getString(R.string.knowledge_partial_index,
+                    syncResult.unverified));
         }
         status.setText(summary);
     }
@@ -2007,6 +2010,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         + "\n\n" + getString(R.string.knowledge_index_health_sources,
                         health.quickCheck, health.sources, health.textRows,
                         health.missingTextRows, health.orphanTextRows, health.links)
+                        + "\n" + getString(R.string.knowledge_index_unverified,
+                        health.unverifiedSources)
                         + "\n\n" + getString(R.string.knowledge_index_health_vectors,
                         health.embeddedNotes, health.embeddedChunks, health.lshRows,
                         health.incompleteEmbeddings, health.truncatedEmbeddings,

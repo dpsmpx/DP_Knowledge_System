@@ -15,7 +15,9 @@
     <string name="knowledge_file_missing">Заметка больше недоступна.</string>
     <string name="knowledge_index_status">Просканировано: %1$d · показано: %2$d · проиндексировано: %3$d · без изменений: %4$d</string>
     <string name="knowledge_oversized">Больших заметок только с индексом имени: %1$d.</string>
-    <string name="knowledge_partial_index">Часть путей может устареть из-за неполного сканирования.</string>
+    <string name="knowledge_partial_index">Неполный обход: %1$d сохранённых источников не проверены повторно; они исключены из доказательств ИИ и подтверждённых обратных ссылок.</string>
+    <string name="knowledge_unverified_source">[Не проверено повторно]</string>
+    <string name="knowledge_index_unverified">Не проверено повторно при последнем обходе: %1$d источников (исключены из доказательств).</string>
     <string name="knowledge_possible_backlinks">Возможные входящие ссылки (не подтверждены)</string>
     <string name="knowledge_no_backlinks">Возможные входящие ссылки не найдены.</string>
     <string name="knowledge_semantic_relations">Связанные утверждения в заметках</string>

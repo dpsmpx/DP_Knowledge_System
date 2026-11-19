@@ -45,10 +45,13 @@ public final class KnowledgeLocalIndex {
     public static final class Hit {
         public final String relativePath;
         public final String title;
+        /** False for a preserved row not seen in the most recent partial scan. */
+        public final boolean confirmedInLastScan;
 
-        private Hit(final String relativePath, final String title) {
+        private Hit(final String relativePath, final String title, final boolean confirmed) {
             this.relativePath = relativePath;
             this.title = title;
+            confirmedInLastScan = confirmed;
         }
     }
 
@@ -58,14 +61,17 @@ public final class KnowledgeLocalIndex {
         public final int oversized;
         public final int removed;
         public final boolean keptMissingEntries;
+        public final int unverified;
 
         private SyncResult(final int indexed, final int reused, final int oversized,
-                           final int removed, final boolean keptMissingEntries) {
+                           final int removed, final boolean keptMissingEntries,
+                           final int unverified) {
             this.indexed = indexed;
             this.reused = reused;
             this.oversized = oversized;
             this.removed = removed;
             this.keptMissingEntries = keptMissingEntries;
+            this.unverified = unverified;
         }
     }
 
@@ -108,6 +114,7 @@ public final class KnowledgeLocalIndex {
         public final int orphanEmbeddingNotes;
         public final int orphanChunks;
         public final int orphanLsh;
+        public final int unverifiedSources;
         public final long lastScanMillis;
         public final int lastScanCount;
         public final boolean lastScanIncomplete;
@@ -125,6 +132,16 @@ public final class KnowledgeLocalIndex {
             }
             quickCheck = check == null ? "unknown" : check;
             sources = count(db, "SELECT COUNT(*) FROM notes");
+            final String lastGeneration = getMeta(db, "last_scan_generation");
+            if (lastGeneration == null) {
+                unverifiedSources = sources;
+            } else {
+                try (Cursor c = db.rawQuery(
+                        "SELECT COUNT(*) FROM notes WHERE generation<>?",
+                        new String[]{lastGeneration})) {
+                    unverifiedSources = c.moveToFirst() ? c.getInt(0) : sources;
+                }
+            }
             textRows = count(db, "SELECT COUNT(*) FROM documents_fts");
             missingTextRows = count(db, "SELECT COUNT(*) FROM notes n "
                     + "LEFT JOIN documents_fts f ON f.docid=n.id WHERE f.docid IS NULL");
@@ -204,6 +221,7 @@ public final class KnowledgeLocalIndex {
         int reused = 0;
         int oversized = 0;
         int removed = 0;
+        int unverified = 0;
         db.beginTransaction();
         try {
             final String previousRoot = getMeta(db, "root");
@@ -221,6 +239,7 @@ public final class KnowledgeLocalIndex {
             int processed = 0;
             for (final KnowledgeVaultScanner.Note note : snapshot.notes) {
                 checkCancelled(cancellation);
+                checkNoteUnchanged(note);
                 processed++;
                 if (progress != null && (processed % 512 == 0
                         || processed == snapshot.notes.size())) {
@@ -244,6 +263,7 @@ public final class KnowledgeLocalIndex {
                 }
                 if (existingId >= 0 && existingModified == note.modifiedAtMillis
                         && existingSize == note.sizeBytes) {
+                    checkNoteUnchanged(note);
                     db.execSQL("UPDATE notes SET generation=? WHERE id=?",
                             new Object[]{generation, existingId});
                     reused++;
@@ -254,6 +274,7 @@ public final class KnowledgeLocalIndex {
                 // retain its filename and postpone content indexing to a rescan.
                 final String bounded = note.sizeBytes > MAX_INDEX_BYTES_PER_NOTE
                         ? null : readBounded(note.file, cancellation);
+                checkNoteUnchanged(note);
                 final boolean tooLarge = bounded == null;
                 final String text = tooLarge ? "" : bounded;
                 final KnowledgeMarkdownMetadata.Parsed parsed =
@@ -315,17 +336,26 @@ public final class KnowledgeLocalIndex {
                     db.delete("notes", "id=?", new String[]{Long.toString(ids.get(i))});
                     removed++;
                 }
+            } else {
+                // Retain unseen rows for eventual recovery, but never promote
+                // them as freshly confirmed sources or backlinks/evidence.
+                try (Cursor c = db.rawQuery(
+                        "SELECT COUNT(*) FROM notes WHERE generation<>?",
+                        new String[]{generation})) {
+                    unverified = c.moveToFirst() ? c.getInt(0) : 0;
+                }
             }
             checkCancelled(cancellation);
             // These markers share the index transaction: a killed process can
             // never claim a partially indexed scan completed successfully.
             setMeta(db, "last_scan_ms", Long.toString(System.currentTimeMillis()));
             setMeta(db, "last_scan_count", Integer.toString(snapshot.notes.size()));
+            setMeta(db, "last_scan_generation", generation);
             setMeta(db, "last_scan_incomplete", incomplete ? "1" : "0");
             setMeta(db, "last_scan_truncated", snapshot.truncated ? "1" : "0");
             setMeta(db, "last_scan_unreadable", Integer.toString(snapshot.unreadableDirectories));
             db.setTransactionSuccessful();
-            return new SyncResult(indexed, reused, oversized, removed, incomplete);
+            return new SyncResult(indexed, reused, oversized, removed, incomplete, unverified);
         } finally {
             db.endTransaction();
             db.close();
@@ -336,21 +366,31 @@ public final class KnowledgeLocalIndex {
         final List<Hit> hits = new ArrayList<>();
         final SQLiteDatabase db = open();
         try {
+            final String lastScanGeneration = getMeta(db, "last_scan_generation");
             final String safe = KnowledgeMarkdownMetadata.ftsQuery(input);
             final String sql;
             final String[] arguments;
             if (safe.isEmpty()) {
-                sql = "SELECT path, title FROM notes ORDER BY path COLLATE NOCASE LIMIT ?";
-                arguments = new String[]{Integer.toString(limit)};
+                sql = "SELECT path, title, generation FROM notes "
+                        + "ORDER BY CASE WHEN generation=? THEN 0 ELSE 1 END, "
+                        + "path COLLATE NOCASE LIMIT ?";
+                arguments = new String[]{lastScanGeneration == null ? "" : lastScanGeneration,
+                        Integer.toString(limit)};
             } else {
-                sql = "SELECT notes.path, notes.title FROM documents_fts JOIN notes "
+                sql = "SELECT notes.path, notes.title, notes.generation "
+                        + "FROM documents_fts JOIN notes "
                         + "ON documents_fts.docid=notes.id "
-                        + "WHERE documents_fts MATCH ? ORDER BY notes.path COLLATE NOCASE LIMIT ?";
-                arguments = new String[]{safe, Integer.toString(limit)};
+                        + "WHERE documents_fts MATCH ? "
+                        + "ORDER BY CASE WHEN notes.generation=? THEN 0 ELSE 1 END, "
+                        + "notes.path COLLATE NOCASE LIMIT ?";
+                arguments = new String[]{safe, lastScanGeneration == null ? "" : lastScanGeneration,
+                        Integer.toString(limit)};
             }
             try (Cursor c = db.rawQuery(sql, arguments)) {
                 while (c.moveToNext()) {
-                    hits.add(new Hit(c.getString(0), c.getString(1)));
+                    hits.add(new Hit(c.getString(0), c.getString(1),
+                            lastScanGeneration != null
+                                    && lastScanGeneration.equals(c.getString(2))));
                 }
             }
             return hits;
@@ -370,13 +410,20 @@ public final class KnowledgeLocalIndex {
             return result;
         }
         final SQLiteDatabase db = open();
-        try (Cursor c = db.rawQuery("SELECT notes.path, notes.title FROM documents_fts "
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return result;
+            }
+            try (Cursor c = db.rawQuery("SELECT notes.path, notes.title FROM documents_fts "
                         + "JOIN notes ON notes.id=documents_fts.docid "
                         + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
+                        + "AND notes.generation=? "
                         + "ORDER BY notes.path COLLATE NOCASE LIMIT ?",
-                new String[]{safe, Integer.toString(limit)})) {
-            while (c.moveToNext()) {
-                result.add(new Hit(c.getString(0), c.getString(1)));
+                    new String[]{safe, generation, Integer.toString(limit)})) {
+                while (c.moveToNext()) {
+                    result.add(new Hit(c.getString(0), c.getString(1), true));
+                }
             }
         } finally {
             db.close();
@@ -403,14 +450,21 @@ public final class KnowledgeLocalIndex {
     public synchronized Set<String> embeddedPaths(final String modelKey) {
         final Set<String> paths = new HashSet<>();
         final SQLiteDatabase db = open();
-        try (Cursor c = db.rawQuery("SELECT e.path FROM embedding_notes e "
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return paths;
+            }
+            try (Cursor c = db.rawQuery("SELECT e.path FROM embedding_notes e "
                         + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
                         + "AND n.size=e.size WHERE e.model_key=? AND e.completed=e.chunks "
-                        + "AND e.chunker_version=?",
-                new String[]{modelKey,
-                        Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION)})) {
-            while (c.moveToNext()) {
-                paths.add(c.getString(0));
+                        + "AND e.chunker_version=? AND n.generation=?",
+                    new String[]{modelKey,
+                            Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION),
+                            generation})) {
+                while (c.moveToNext()) {
+                    paths.add(c.getString(0));
+                }
             }
         } finally {
             db.close();
@@ -584,6 +638,7 @@ public final class KnowledgeLocalIndex {
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
                 + "WHERE l.bucket IN (" + placeholders + ") AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
+                + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
                 + "GROUP BY l.path, l.chunk LIMIT ?";
         final Map<String, SemanticHit> best = new HashMap<>();
         final SQLiteDatabase db = open();
@@ -695,8 +750,12 @@ public final class KnowledgeLocalIndex {
                 KnowledgeMarkdownMetadata.filenameTitle(relativePath));
         final List<String> sources = new ArrayList<>();
         final SQLiteDatabase db = open();
-        try (Cursor c = db.rawQuery("SELECT DISTINCT source_path FROM links "
-                        + "WHERE target_key=? OR target_key=? ORDER BY source_path LIMIT ?",
+        try (Cursor c = db.rawQuery("SELECT DISTINCT l.source_path FROM links l "
+                        + "JOIN notes n ON n.path=l.source_path "
+                        + "WHERE (l.target_key=? OR l.target_key=?) "
+                        + "AND n.generation=(SELECT value FROM meta "
+                        + "WHERE key='last_scan_generation') "
+                        + "ORDER BY l.source_path LIMIT ?",
                 new String[]{full, shortName, Integer.toString(limit)})) {
             while (c.moveToNext()) {
                 sources.add(c.getString(0));
@@ -723,6 +782,15 @@ public final class KnowledgeLocalIndex {
             }
         }
         return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    /** A disappearing or externally edited file cannot confirm a stale snapshot. */
+    private static void checkNoteUnchanged(final KnowledgeVaultScanner.Note note)
+            throws IOException {
+        if (!note.file.isFile() || note.file.length() != note.sizeBytes
+                || note.file.lastModified() != note.modifiedAtMillis) {
+            throw new IOException("Source changed during indexing; retry scan");
+        }
     }
 
     private SQLiteDatabase open() {
