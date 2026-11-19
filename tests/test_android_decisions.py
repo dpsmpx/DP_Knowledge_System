@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
 from ksys_android_bridge import (active_decisions, inspect_note, preview_fragment,
-                                 preview_retraction, preview_revision, preview_split, record_decision,
+                                 preview_retraction, preview_revision, preview_split,
+                                 preview_merge, merge_decisions, record_decision,
                                  retract_decision, revise_decision, split_decision)
 from ksys.core.clock import FixedClock
 from ksys.store.kb import KnowledgeBase
@@ -291,6 +292,79 @@ class MobileDecisionTests(unittest.TestCase):
                            preview["second_options"][0]["reading_id"], "no",
                            preview["split_hash"], preview["journal_head"])
         self.assertEqual(1, len(path.read_text(encoding="utf-8").splitlines()))
+
+    def _accept_second_synthetic(self, role="fact"):
+        workspace = str(self.root / "workspace")
+        path, note = "second.md", "# Second\nШум вызывает бессонницу.\n"
+        fragment = json.loads(inspect_note(path, note))["fragments"][1]["id"]
+        preview = json.loads(preview_fragment(workspace, path, note, fragment))
+        record_decision(workspace, path, note, fragment,
+                        preview["preview"]["options"][0]["reading_id"], role,
+                        preview["source_hash"], preview["journal_head"])
+        return note
+
+    def test_explicit_two_to_one_merge_atomic_and_provenanced(self):
+        self._accept_synthetic()
+        second_note = self._accept_second_synthetic()
+        workspace = str(self.root / "workspace")
+        old = [rec["record_id"] for rec in json.loads(active_decisions(workspace))["records"]]
+        self.assertEqual(2, len(old))
+        statement = "Кофе вызывает бессонницу."
+        preview = json.loads(preview_merge(workspace, old[0], old[1], statement))
+        self.assertTrue(preview["read_only"])
+        self.assertTrue(preview["requires_human_confirmation"])
+        self.assertEqual(1, len(preview["options"]))
+        choice = preview["options"][0]["reading_id"]
+        path = self.root / "workspace/data/formal/journal.jsonl"
+        self.assertEqual(2, len(path.read_text().splitlines()))
+        with self.assertRaises(ValueError):
+            merge_decisions(workspace, old[0], old[1], statement, choice, "stale",
+                            preview["statement_hash"], "J:stale")
+        with self.assertRaises(ValueError):
+            merge_decisions(workspace, old[0], old[1], statement + "extra", choice, "edit",
+                            preview["statement_hash"], preview["journal_head"])
+        self.assertEqual(2, len(path.read_text().splitlines()))
+        result = json.loads(merge_decisions(workspace, old[0], old[1], statement, choice,
+                                            "human rewording", preview["statement_hash"],
+                                            preview["journal_head"]))
+        self.assertEqual("merge", result["decision"])
+        self.assertEqual(1, len(result["journal_ids"]))
+        self.assertEqual(1, json.loads(active_decisions(workspace))["total"])
+        journal = Journal(path, FixedClock())
+        self.assertEqual(["accept", "accept", "merge"], [entry.op for entry in journal.entries()])
+        self.assertEqual([], journal.verify())
+        self.assertEqual("manual_merge", journal.entries()[-1].data["provenance"]["method"])
+        self.assertEqual(old, journal.entries()[-1].data["targets"])
+        kb = KnowledgeBase(Workspace(self.root / "workspace"), FixedClock(), use_cache=False)
+        self.assertEqual(set(old), set(kb.state.records[result["new_record_id"]].supersedes))
+        self.assertTrue(all(not kb.state.active(target)
+                            and kb.state.records[target].superseded_by == result["new_record_id"]
+                            for target in old))
+        self.assertEqual([], kb.state.diagnostics)
+        self.assertEqual(self.note, "# Demo\nСтресс приводит к бессоннице.\n")
+        self.assertEqual(second_note, "# Second\nШум вызывает бессонницу.\n")
+        with self.assertRaises(ValueError):
+            merge_decisions(workspace, old[0], old[1], statement, choice,
+                            "replay", preview["statement_hash"], result["journal_head"])
+
+    def test_merge_refuses_same_record_role_mismatch_and_tampering(self):
+        self._accept_synthetic()
+        workspace = str(self.root / "workspace")
+        first = json.loads(active_decisions(workspace))["records"][0]["record_id"]
+        with self.assertRaises(ValueError):
+            preview_merge(workspace, first, first, "Кофе вызывает бессонницу.")
+        self._accept_second_synthetic(role="claim")
+        records = json.loads(active_decisions(workspace))["records"]
+        second = next(rec["record_id"] for rec in records if rec["record_id"] != first)
+        with self.assertRaises(ValueError):
+            preview_merge(workspace, first, second, "Кофе вызывает бессонницу.")
+        # A tampered journal must fail before any new merge entry is appended.
+        path = self.root / "workspace/data/formal/journal.jsonl"
+        path.write_text(path.read_text().replace('"actor":"human:me"', '"actor":"tampered"'),
+                        encoding="utf-8")
+        with self.assertRaises(ValueError):
+            preview_merge(workspace, first, second, "Кофе вызывает бессонницу.")
+        self.assertEqual(2, len(path.read_text().splitlines()))
 
 
 if __name__ == "__main__":

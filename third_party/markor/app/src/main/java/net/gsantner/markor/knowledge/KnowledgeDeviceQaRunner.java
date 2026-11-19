@@ -120,6 +120,7 @@ public final class KnowledgeDeviceQaRunner {
             step("DECISION-17", this::checkSyntheticDecisionLifecycle);
             step("REVISE-17", this::checkSyntheticRevision);
             step("SPLIT-17", this::checkSyntheticSplit);
+            step("MERGE-17", this::checkSyntheticMerge);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -730,6 +731,110 @@ public final class KnowledgeDeviceQaRunner {
                 throw new SyntheticMismatch("verdict=SPLIT_REPLAY_OR_SOURCE_MISMATCH");
             }
             return "syntheticSplits=1, activeAfterSplit=2, oldObsoleted=true, "
+                    + "atomicJournalEntry=true, staleHeadRejected=true, replayRejected=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Two explicit synthetic records merged into one by a single private journal event. */
+    private String checkSyntheticMerge() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create merge sandbox");
+        }
+        try {
+            ensureRunning();
+            final String workspace = new File(sandbox, "workspace").getAbsolutePath();
+            final String firstText = "# Synthetic A\nСтресс приводит к бессоннице.\n";
+            final String secondText = "# Synthetic B\nШум вызывает бессонницу.\n";
+            final String firstPath = "synthetic-merge-a.md";
+            final String secondPath = "synthetic-merge-b.md";
+            final String firstFragment = KnowledgePythonBridge.inspect(context, firstPath,
+                    firstText).getJSONArray("fragments").getJSONObject(1).getString("id");
+            final JSONObject firstPreview = KnowledgePythonBridge.preview(context,
+                    workspace, firstPath, firstText, firstFragment);
+            final JSONObject accepted = KnowledgePythonBridge.decide(context, workspace,
+                    firstPath, firstText, firstFragment,
+                    firstPreview.getJSONObject("preview").getJSONArray("options")
+                            .getJSONObject(0).getString("reading_id"), "fact",
+                    firstPreview.getString("source_hash"), null);
+            final String secondFragment = KnowledgePythonBridge.inspect(context, secondPath,
+                    secondText).getJSONArray("fragments").getJSONObject(1).getString("id");
+            final JSONObject secondPreview = KnowledgePythonBridge.preview(context,
+                    workspace, secondPath, secondText, secondFragment);
+            KnowledgePythonBridge.decide(context, workspace, secondPath,
+                    secondText, secondFragment,
+                    secondPreview.getJSONObject("preview").getJSONArray("options")
+                            .getJSONObject(0).getString("reading_id"), "fact",
+                    secondPreview.getString("source_hash"), accepted.getString("journal_head"));
+            final JSONObject listing = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (listing.getInt("total") != 2) {
+                throw new SyntheticMismatch("verdict=MERGE_INITIAL_LIST_MISMATCH");
+            }
+            final String firstId = listing.getJSONArray("records")
+                    .getJSONObject(0).getString("record_id");
+            final String secondId = listing.getJSONArray("records")
+                    .getJSONObject(1).getString("record_id");
+            final String mergedText = "Кофе вызывает бессонницу.";
+            final JSONObject preview = KnowledgePythonBridge.previewMerge(context,
+                    workspace, firstId, secondId, mergedText);
+            if (!preview.getBoolean("read_only")
+                    || !preview.getBoolean("requires_human_confirmation")
+                    || preview.getJSONArray("old_summaries").length() != 2
+                    || preview.getJSONArray("options").length() != 1) {
+                throw new SyntheticMismatch("verdict=MERGE_PREVIEW_MISMATCH");
+            }
+            final String reading = preview.getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            boolean staleRejected = false;
+            try {
+                KnowledgePythonBridge.mergeDecisions(context, workspace,
+                        firstId, secondId, mergedText, reading, "synthetic",
+                        preview.getString("statement_hash"), "J:stale-head");
+            } catch (Exception expected) {
+                staleRejected = true;
+            }
+            if (!staleRejected || KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0).getInt("total") != 2) {
+                throw new SyntheticMismatch("verdict=MERGE_STALE_HEAD_NOT_REJECTED");
+            }
+            ensureRunning();
+            final JSONObject merged = KnowledgePythonBridge.mergeDecisions(context,
+                    workspace, firstId, secondId, mergedText, reading,
+                    "explicit synthetic merge", preview.getString("statement_hash"),
+                    preview.getString("journal_head"));
+            final JSONObject remaining = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (!"merge".equals(merged.getString("decision"))
+                    || merged.getJSONArray("journal_ids").length() != 1
+                    || remaining.getInt("total") != 1
+                    || !merged.getString("new_record_id").equals(
+                            remaining.getJSONArray("records").getJSONObject(0)
+                                    .getString("record_id"))) {
+                throw new SyntheticMismatch("verdict=MERGE_COMMIT_MISMATCH");
+            }
+            boolean replayRejected = false;
+            try {
+                KnowledgePythonBridge.mergeDecisions(context, workspace,
+                        firstId, secondId, mergedText, reading, "repeat",
+                        preview.getString("statement_hash"), merged.getString("journal_head"));
+            } catch (Exception expected) {
+                replayRejected = true;
+            }
+            if (!replayRejected || !firstPreview.getString("source_hash").equals(
+                    KnowledgePythonBridge.preview(context, workspace,
+                            firstPath, firstText, firstFragment).getString("source_hash"))
+                    || !secondPreview.getString("source_hash").equals(
+                            KnowledgePythonBridge.preview(context, workspace,
+                                    secondPath, secondText, secondFragment)
+                                    .getString("source_hash"))) {
+                throw new SyntheticMismatch("verdict=MERGE_REPLAY_OR_SOURCE_MISMATCH");
+            }
+            return "syntheticMerges=1, activeAfterMerge=1, oldObsoleted=2, "
                     + "atomicJournalEntry=true, staleHeadRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {

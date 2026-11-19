@@ -1,8 +1,8 @@
 # Stage 17: Android device QA — human decision lifecycle slices
 
-This is a **partial Stage 17 implementation**. Only one-record retraction,
-revision and one-to-two split exist; multi-record merge, batch review and
-strict automated policies are **not** complete.
+This is a **partial Stage 17 implementation**. One-record retraction and
+revision, one-to-two split and two-to-one merge exist; batch review and strict
+automated policies are **not** complete.
 
 ## One-button synthetic acceptance check
 
@@ -10,7 +10,7 @@ strict automated policies are **not** complete.
    Verify the accompanying `.sha256` file after downloading both artifacts.
 2. Open the Knowledge System screen in the app and tap **Run device QA + copy**.
    The report is copied automatically. The synthetic `DECISION-17` and
-   `REVISE-17` and `SPLIT-17` must all report `PASS`.
+   `REVISE-17`, `SPLIT-17` and `MERGE-17` must all report `PASS`.
 3. Optionally tap **20k stress + copy** for the separate indexing load check.
 4. Send only the **redacted** report, not your real notes, API tokens, journal
    files, or vault paths. The diagnostic test creates and removes its own
@@ -44,6 +44,15 @@ strict automated policies are **not** complete.
 - Reject repeating the split on an obsolete record.
 - Verify the synthetic source hash is unchanged.
 
+`MERGE-17` exercises an independent two-to-one transition:
+
+- Explicitly accept two different synthetic facts of the same role.
+- Preview one new, human-authored formally interpreted replacement.
+- Reject a stale journal head without changing either accepted record.
+- Append **one** `merge` event, retire both originals and activate one new
+  successor with links back to both source record IDs.
+- Reject replay on retired originals; preserve both synthetic source hashes.
+
 All output is count/boolean only. Any unexpected exception is reported only
 by type, without a path, message or note text.
 
@@ -75,6 +84,12 @@ enter two separate statements, choose each formal reading and inspect the final
 comparison; cancelling must not append. Test only with a backed-up disposable
 journal. This is not automatic knowledge derivation: the user independently
 stands behind both new statements. The old record and provenance remain in the journal.
+
+For manual merge, explicitly choose a second active record of the same role,
+enter a new standalone statement and select its formal reading. Compare both
+old canonical records to the new one before confirming. Cancel must leave
+both original records active; test only in a disposable backed-up journal.
+Do not interpret this as automatically proven semantic equivalence.
 Original Markdown is never modified by this feature.
 
 ## Outstanding QA and development debts
@@ -87,10 +102,10 @@ Original Markdown is never modified by this feature.
   Android/OEM restrictions, power management, interrupted operations.
 - `DEBT-01`: complete encrypted export/import, default daily backups, cloud
   synchronization and permission handling.
-- Full Stage 17: multi-record merge, split/revision edge-cases, versioned policy records, batch
+- Full Stage 17: split/merge/revision edge-cases, versioned policy records, batch
   acceptance and verifiably safe auto-approval; no automatic fact promotion.
 
-The previous Android 15 owner report confirmed `DECISION-17 PASS` and
-`REVISE-17 PASS` in isolated synthetic tests, while two SQLite warnings and
-manual/future checks remained. **It does not validate the new `SPLIT-17` test**;
+The previous Android 15 owner reports confirmed `DECISION-17`, `REVISE-17`
+and `SPLIT-17` in isolated synthetic tests, while two SQLite warnings and
+manual/future checks remained. **They do not validate the new `MERGE-17` test**;
 run the current APK on the actual device before marking that step passed.

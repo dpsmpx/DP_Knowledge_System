@@ -548,6 +548,81 @@ def split_decision(workspace_dir: str, record_id: str,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _merge_preview(kb: KnowledgeBase, first_id: str, second_id: str, statement: str):
+    if first_id == second_id:
+        raise ValueError("Merge requires two distinct records")
+    first, parsing, candidates = _revision_preview(kb, first_id, statement)
+    second = kb.state.records.get(second_id)
+    if second is None or not kb.state.active(second_id) or second.role != first.role:
+        raise ValueError("Merge requires two active records of the same role")
+    # Existing (even obsolete) record IDs must never be silently reactivated.
+    options = [(option, node) for option, node in candidates
+               if node.id not in kb.state.records]
+    if not options:
+        raise ValueError("No new safe merged interpretation available")
+    return first, second, parsing, options
+
+
+def preview_merge(workspace_dir: str, first_id: str, second_id: str, statement: str) -> str:
+    """Read-only two-to-one proposal; no similarity-based auto-merging."""
+    kb = _kb(workspace_dir)
+    first, second, parsing, options = _merge_preview(kb, first_id, second_id, statement)
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "record_ids": [first_id, second_id],
+        "journal_head": kb.journal.head, "role": first.role,
+        "statement_hash": _source_hash(statement),
+        "old_summaries": [first.node.ksf()[:4000], second.node.ksf()[:4000]],
+        "old_summaries_truncated": [len(first.node.ksf()) > 4000,
+                                    len(second.node.ksf()) > 4000],
+        "parse_status": parsing.formalization.status,
+        "options": [{
+            "reading_id": option["reading_id"],
+            "paraphrase": option["paraphrase"][:1000],
+            "new_summary": node.ksf()[:4000],
+            "conflict_count": len(option["conflicts"]),
+            "diagnostic_count": len(option["diagnostics"]),
+        } for option, node in options],
+        "read_only": True, "requires_human_confirmation": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def merge_decisions(workspace_dir: str, first_id: str, second_id: str,
+                    statement: str, reading_id: str, reason: str,
+                    expected_hash: str, expected_head: str | None) -> str:
+    """Atomically retire exactly two approved records after one explicit confirmation."""
+    if _source_hash(statement) != expected_hash:
+        raise ValueError("Merged statement changed after preview")
+    if not isinstance(reason, str) or len(reason) > 1000:
+        raise ValueError("Merge reason is too long")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed after merge preview")
+    _, _, _, options = _merge_preview(kb, first_id, second_id, statement)
+    merged = next((node for option, node in options
+                   if option["reading_id"] == reading_id), None)
+    if merged is None:
+        raise ValueError("Selected merged interpretation changed after preview")
+    kb.ws.init()
+    result = kb.merge_records([first_id, second_id], merged,
+                              reason=reason.strip() or "explicit manual Android merge",
+                              provenance={
+                                  "source_type": "human_input", "method": "manual_merge",
+                                  "merged_records": [first_id, second_id],
+                                  "statement_sha": expected_hash, "reading_id": reading_id,
+                              })
+    if kb.journal.verify() or kb.state.active(first_id) or kb.state.active(second_id) \
+            or not kb.state.active(merged.id):
+        raise ValueError("Merge journal state inconsistent")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "decision": "merge",
+        "old_record_ids": [first_id, second_id],
+        "new_record_id": merged.id,
+        "journal_ids": [e.id for e in result.entries],
+        "journal_head": kb.journal.head,
+        "affected_derived": len(result.auth.removed),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 _READ_ONLY_OPS = {
     DialogueOp.ASK, DialogueOp.VERIFY, DialogueOp.DEFINE, DialogueOp.HYPOTHESIZE,
     DialogueOp.EXPLAIN, DialogueOp.COMPARE, DialogueOp.FIND_CONTRADICTIONS,

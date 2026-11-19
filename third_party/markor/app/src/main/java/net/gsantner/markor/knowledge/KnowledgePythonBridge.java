@@ -122,6 +122,21 @@ public final class KnowledgePythonBridge {
                 reason, expectedHash, expectedHead);
     }
 
+    public static JSONObject previewMerge(final Context context, final String workspace,
+                                          final String firstId, final String secondId,
+                                          final String statement) throws JSONException {
+        return invoke(context, "preview_merge", workspace, firstId, secondId, statement);
+    }
+
+    public static JSONObject mergeDecisions(final Context context, final String workspace,
+                                            final String firstId, final String secondId,
+                                            final String statement, final String readingId,
+                                            final String reason, final String expectedHash,
+                                            final String expectedHead) throws JSONException {
+        return invoke(context, "merge_decisions", workspace, firstId, secondId,
+                statement, readingId, reason, expectedHash, expectedHead);
+    }
+
     public static JSONObject query(final Context context, final String workspace,
                                    final String question) throws JSONException {
         return invoke(context, "ask_knowledge", workspace, question);
