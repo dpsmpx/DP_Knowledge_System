@@ -415,6 +415,17 @@
     <string name="knowledge_editor_highlights_summary">Highlighted %1$d of %2$d source areas · Unverified origins: %3$d\n</string>
     <string name="knowledge_editor_highlights_mixed">multiple roles</string>
     <string name="knowledge_editor_highlights_truncated">Only the first 128 source areas are highlighted. This is not the full journal.</string>
+    <string name="knowledge_editor_source_inspector">Knowledge at cursor</string>
+    <string name="knowledge_editor_source_inspector_select">Place the cursor inside a source excerpt or select text within one excerpt.</string>
+    <string name="knowledge_editor_source_inspector_summary">Linked records: %1$d · Active: %2$d · Historical: %3$d</string>
+    <string name="knowledge_editor_source_inspector_warning">Unverified origins elsewhere in this note: %1$d. Older or changed sources are not guessed.</string>
+    <string name="knowledge_editor_source_inspector_none">No verified journal source fully covers this selection. Narrow a selection crossing fragments or review the knowledge panel. This does not prove that no related knowledge exists.</string>
+    <string name="knowledge_editor_source_inspector_active">Active accepted record</string>
+    <string name="knowledge_editor_source_inspector_historical">Historical/obsolete record</string>
+    <string name="knowledge_editor_source_inspector_truncated">Only the first 16 linked records are listed. Open Decisions to browse the full journal.</string>
+    <string name="knowledge_editor_source_inspector_changed">Saved source or editor buffer changed. Save and retry; no journal entry was modified.</string>
+    <string name="knowledge_editor_source_inspector_history">Related journal events: %1$d</string>
+    <string name="knowledge_editor_source_inspector_history_partial">Showing only the 8 most recent events.</string>
     <string name="knowledge_diff_before">Before · accepted knowledge</string>
     <string name="knowledge_diff_before_first">Before · first record</string>
     <string name="knowledge_diff_before_second">Before · second record</string>

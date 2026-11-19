@@ -97,10 +97,13 @@ deferred rather than required after every incremental PR.
   source/KSF comparison have only synthetic CI coverage; no device PASS.
 - **QA-63 / OPEN, DEFERRED:** eighth-slice temporary inline highlights have
   synthetic checks only; the Markor editor lifecycle and colors need device QA.
+- **QA-64 / OPEN, DEFERRED:** ninth-slice cursor-linked accepted/historical
+  journal drill-down has synthetic tests only, not physical-device signoff.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
-  separate source/KSF view and bounded temporary provenance highlights exist,
+  separate source/KSF view, bounded temporary provenance highlights and a
+  cursor-linked journal inspector exist,
   but semantic backlinks, editable inline review and full diff are not implemented.
 - **QA-54 / PARTIAL USER FEEDBACK:** owner reports working decision review in
   Preview #14. This does not close unperformed TalkBack, stress or lifecycle
@@ -170,3 +173,21 @@ include private text, filesystem paths or credentials in public CI/QA logs.
    disappear and must never enter persisted Markdown. Return to Edit and
    activate again explicitly. Assess keyboard, scrolling, TalkBack/200% text,
    20k performance and no personal content in telemetry or public QA logs.
+
+## QA-64 — deferred source cursor and journal history checklist
+
+1. In a disposable note with two identical sentences (preceded by emoji),
+   accept **only the second** and place the caret inside it. **Знания
+   фрагмента** must show exactly the linked accepted record with source/KSF,
+   provenance and history; caret inside the first sentence must not match.
+2. Select within the same sentence, then across two fragments. Only the
+   contained selection may match. Test cursor on source end boundary and
+   Unicode surrogate boundaries. Do not infer a record by lexical similarity.
+3. Retract a disposable claim explicitly through the existing Decisions UI:
+   the cursor inspector must show the historical/obsolete status with linked
+   journal events. Test a source changed on disk, unsaved edit, absent journal
+   and candidate-only index: no stale or unapproved match is treated as fact.
+4. Confirm graceful truncation beyond 16 records, eight journal events,
+   accessibility at 200% font, light/dark theme, long text selection and
+   rapid open/cancel/rotation/Back. Keep notes/journal hashes unchanged while
+   browsing; never include private content in reports or public CI.

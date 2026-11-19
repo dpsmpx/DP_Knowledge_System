@@ -85,6 +85,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         findViewById(R.id.knowledge_editor_inspect).setOnClickListener(view -> inspectDocument());
         findViewById(R.id.knowledge_editor_context).setOnClickListener(view -> toggleKnowledgeContext());
         findViewById(R.id.knowledge_editor_highlights).setOnClickListener(view -> toggleEditorHighlights());
+        findViewById(R.id.knowledge_editor_source_inspector).setOnClickListener(view -> inspectSourceKnowledge());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
         findViewById(R.id.knowledge_editor_backlinks).setOnClickListener(view -> showBacklinks());
         final Toolbar toolbar = findViewById(R.id.toolbar);
@@ -312,6 +313,116 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         return offset > 0 && offset < text.length()
                 && Character.isHighSurrogate(text.charAt(offset - 1))
                 && Character.isLowSurrogate(text.charAt(offset));
+    }
+
+    /** Inspect verified journal provenance at the edit caret or within one selection. */
+    private void inspectSourceKnowledge() {
+        final DocumentEditAndViewFragment fragment = editor();
+        if (fragment == null) return;
+        if (fragment.isViewModeVisibility()) {
+            setKnowledgeStatus(R.string.knowledge_editor_highlights_edit_mode);
+            return;
+        }
+        final String snapshot = fragment.getTextString();
+        final int a = fragment.getEditor().getSelectionStart();
+        final int b = fragment.getEditor().getSelectionEnd();
+        if (a < 0 || b < 0 || a > snapshot.length() || b > snapshot.length()
+                || cutsSurrogate(snapshot, a) || cutsSurrogate(snapshot, b)) {
+            setKnowledgeStatus(R.string.knowledge_editor_source_inspector_select);
+            return;
+        }
+        final int start = snapshot.codePointCount(0, Math.min(a, b));
+        final int end = snapshot.codePointCount(0, Math.max(a, b));
+        final File file = fragment.getDocument().file;
+        final String path;
+        try {
+            path = relativePath(file);
+        } catch (IOException ignored) {
+            setKnowledgeStatus(R.string.knowledge_editor_source_invalid);
+            return;
+        }
+        final int generation = operationGeneration.incrementAndGet();
+        setKnowledgeStatus(R.string.knowledge_editor_working);
+        knowledgeWorker.submit(() -> {
+            try {
+                if (!path.equals(relativePath(file))) throw new IOException("Vault changed");
+                final String saved = readSavedNote(file.getCanonicalFile());
+                if (!saved.equals(snapshot)) throw new IOException("Unsaved editor buffer");
+                final JSONObject result = KnowledgePythonBridge.editorSourceRecords(this,
+                        new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
+                        path, saved, start, end);
+                if (!sha256(saved).equals(result.optString("source_hash"))) {
+                    throw new IOException("Source inspector snapshot changed");
+                }
+                runOnUiThread(() -> {
+                    if (!current(generation)) return;
+                    final DocumentEditAndViewFragment now = editor();
+                    if (now == null || now.isViewModeVisibility()
+                            || !snapshot.equals(now.getTextString())) {
+                        setKnowledgeStatus(R.string.knowledge_editor_source_inspector_changed);
+                        return;
+                    }
+                    showSourceKnowledge(result, path, saved);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (current(generation))
+                        setKnowledgeStatus(R.string.knowledge_editor_source_inspector_changed);
+                });
+            }
+        });
+    }
+
+    private void showSourceKnowledge(final JSONObject result, final String path,
+                                     final String savedMarkdown) {
+        final JSONArray items = result.optJSONArray("records");
+        final int count = items == null ? 0 : items.length();
+        final String title = getString(R.string.knowledge_editor_source_inspector_summary,
+                result.optInt("record_total"), result.optInt("active_total"),
+                result.optInt("historical_total"));
+        final String suffix = getString(R.string.knowledge_editor_source_inspector_warning,
+                result.optInt("unverified_origins"));
+        knowledgeStatus.setText(suffix);
+        if (count == 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setView(contextDetailText(getString(
+                            R.string.knowledge_editor_source_inspector_none) + "\n\n" + suffix))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        if (count == 1) {
+            final JSONObject record = items.optJSONObject(0);
+            if (record != null) {
+                showContextRecord(record, path, result.optString("source_hash"), savedMarkdown);
+            }
+            return;
+        }
+        final String[] labels = new String[count];
+        for (int i = 0; i < count; i++) {
+            final JSONObject record = items.optJSONObject(i);
+            if (record == null) continue;
+            labels[i] = editorKnowledgeRole(record.optString("role")) + " · "
+                    + getString(record.optBoolean("active")
+                    ? R.string.knowledge_editor_source_inspector_active
+                    : R.string.knowledge_editor_source_inspector_historical)
+                    + " · " + record.optString("statement");
+            if (labels[i].length() > 180) labels[i] = labels[i].substring(0, 180) + "…";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setItems(labels, (dialog, index) -> {
+                    final JSONObject record = items.optJSONObject(index);
+                    if (record != null) showContextRecord(record, path,
+                            result.optString("source_hash"), savedMarkdown);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+        if (result.optBoolean("truncated")) {
+            Toast.makeText(this, R.string.knowledge_editor_source_inspector_truncated,
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     /** Revalidate the *saved* source; analysis of an unsaved buffer is never a commit. */
@@ -741,6 +852,12 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             detail.append("\n").append(getString(
                     R.string.knowledge_editor_context_truncated_excerpt));
         }
+        if (record.has("active")) {
+            detail.append("\n\n").append(getString(record.optBoolean("active")
+                    ? R.string.knowledge_editor_source_inspector_active
+                    : R.string.knowledge_editor_source_inspector_historical));
+            detail.append(" · ").append(record.optString("status"));
+        }
         if (!record.optBoolean("conflicts_available")) {
             detail.append("\n\n")
                     .append(getString(R.string.knowledge_editor_context_conflicts_unavailable));
@@ -748,6 +865,34 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             detail.append("\n\n")
                     .append(getString(R.string.knowledge_editor_context_conflict))
                     .append(" · ").append(record.optInt("conflict_count"));
+            final JSONArray conflicts = record.optJSONArray("conflict_records");
+            if (conflicts != null) {
+                for (int i = 0; i < conflicts.length(); i++) {
+                    final JSONObject opposing = conflicts.optJSONObject(i);
+                    if (opposing != null) {
+                        detail.append("\n• ")
+                                .append(editorKnowledgeRole(opposing.optString("role")))
+                                .append(" · ").append(opposing.optString("status"))
+                                .append(" · ").append(opposing.optString("statement"));
+                    }
+                }
+            }
+        }
+        final JSONArray history = record.optJSONArray("history");
+        if (history != null) {
+            detail.append("\n\n").append(getString(R.string.knowledge_editor_source_inspector_history,
+                    record.optInt("history_total")));
+            for (int i = 0; i < history.length(); i++) {
+                final JSONObject event = history.optJSONObject(i);
+                if (event != null) {
+                    detail.append("\n").append(event.optString("time"))
+                            .append(" · ").append(event.optString("op"));
+                }
+            }
+            if (record.optInt("history_total") > history.length()) {
+                detail.append("\n").append(getString(
+                        R.string.knowledge_editor_source_inspector_history_partial));
+            }
         }
         detail.append("\n\n").append(getString(
                 R.string.knowledge_editor_context_comparison_disclaimer));

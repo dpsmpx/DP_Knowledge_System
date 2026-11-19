@@ -32,6 +32,7 @@ from ksys.core.enums import DialogueOp
 MAX_CHARACTERS = 2_000_000
 MAX_DISPLAYED = 24
 MAX_EDITOR_HIGHLIGHTS = 128
+MAX_EDITOR_SOURCE_RECORDS = 16
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_FILES = 200_000
 
@@ -249,6 +250,100 @@ def editor_note_highlights(workspace_dir: str, relative_path: str, markdown: str
         "truncated": len(groups) > MAX_EDITOR_HIGHLIGHTS,
         "unverified_origins": unverified, "read_only": True,
         "only_approved_journal_sources": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def editor_source_records(workspace_dir: str, relative_path: str, markdown: str,
+                          start: int, end: int) -> str:
+    """Inspect one selected/cursor source location, never guess an old span.
+
+    Selection coordinates are Python Unicode code points. A nonempty selection
+    must fit entirely within an approved provenance span. A cursor must lie
+    inside one, not merely adjacent to it. Obsolete records are included only
+    if their original source snapshot remains byte-for-byte current.
+    """
+    _validate_note_input(relative_path, markdown)
+    if (not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(end, int) or isinstance(end, bool)
+            or start < 0 or end < start or end > len(markdown)):
+        raise ValueError("Invalid editor source selection")
+    kb = _kb(workspace_dir)
+    source_sha = _source_hash(markdown)
+    matched, unverified_origins = [], 0
+    for rec in kb.state.records.values():
+        origins = []
+        for source in rec.provenance:
+            if source.get("document") != relative_path:
+                continue
+            verified = _verified_source_span(source, markdown, source_sha,
+                                             with_location=False)
+            if verified["source_span_state"] != "verified":
+                unverified_origins += 1
+                continue
+            s, e = verified["source_span"]
+            if (s <= start < e if start == end else s <= start and end <= e):
+                origins.append((e - s, s, source))
+        if origins:
+            # If this record has multiple provenances covering the selection,
+            # show the narrowest source; ties resolve by stored Unicode offset.
+            _, _, origin = min(origins, key=lambda row: (row[0], row[1]))
+            matched.append((rec, origin))
+
+    matched.sort(key=lambda row: (kb.state.active(row[0].id),
+                                  row[0].updated_at, row[0].id), reverse=True)
+    active_total = sum(kb.state.active(rec.id) for rec, _ in matched)
+    entries = kb.state.entries
+    active_assertions = {}
+    for existing in kb.state.records.values():
+        assertion = getattr(existing.node, "assertion", None)
+        if assertion is not None and kb.state.active(existing.id):
+            active_assertions.setdefault(assertion.id, []).append(existing)
+    records = []
+    for rec, source in matched[:MAX_EDITOR_SOURCE_RECORDS]:
+        span = _verified_source_span(source, markdown, source_sha)
+        event_ids = set(rec.journal)
+        history = [dict(id=e.id, op=e.op, time=e.ts)
+                   for e in entries if e.id in event_ids]
+        conflicts_available = True
+        try:
+            conflicts = kb.conflicts_for([rec.node])
+            conflicts_with = sorted({str(c.get("conflicts_with"))
+                                     for c in conflicts if c.get("conflicts_with")})[:8]
+        except Exception:
+            conflicts_available, conflicts_with = False, []
+        conflict_records = []
+        for cid in conflicts_with:
+            for opposing in active_assertions.get(cid, ()):
+                if opposing.id != rec.id and len(conflict_records) < 8:
+                    conflict_records.append({"id": opposing.id, "role": opposing.role,
+                                             "status": opposing.status.value,
+                                             "statement": opposing.node.ksf()[:300]})
+        text = str(source.get("text") or "")
+        ksf = rec.node.ksf()
+        records.append({
+            "id": rec.id, "role": rec.role, "status": rec.status.value,
+            "active": kb.state.active(rec.id), "statement": ksf[:1000],
+            "statement_truncated": len(ksf) > 1000,
+            "source_excerpt": text[:1000], "source_text_truncated": len(text) > 1000,
+            "locator": str(source.get("locator") or "")[:150],
+            "fragment_id": str(source.get("fragment_id") or "")[:150],
+            "provenance_kind": str(source.get("source_type") or "")[:70],
+            "source_current": True, "conflicts_available": conflicts_available,
+            "conflict_count": len(conflicts_with) if conflicts_available else None,
+            "conflicts_with": conflicts_with,
+            "conflict_records": conflict_records,
+            "history": history[-8:], "history_total": len(history),
+            **span,
+        })
+    return json.dumps({
+        "protocol": "dpksys.editor_source_records.v1", "path": relative_path,
+        "source_hash": source_sha, "journal_head": kb.journal.head,
+        "selection": [start, end], "records": records,
+        "record_total": len(matched), "active_total": active_total,
+        "historical_total": len(matched) - active_total,
+        "truncated": len(matched) > MAX_EDITOR_SOURCE_RECORDS,
+        "unverified_origins": unverified_origins, "read_only": True,
+        "only_verified_journal_sources": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
