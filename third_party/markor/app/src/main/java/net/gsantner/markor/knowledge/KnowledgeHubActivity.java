@@ -1329,7 +1329,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 }
                                 final JSONObject record = records.optJSONObject(position);
                                 if (record != null) {
-                                    showRetractionPreview(record.optString("record_id"));
+                                    chooseKnowledgeAction(record.optString("record_id"),
+                                            record.optString("role"));
                                 }
                             })
                             .setNegativeButton(android.R.string.cancel, null)
@@ -1339,6 +1340,163 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_retract_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void chooseKnowledgeAction(final String recordId, final String role) {
+        final boolean revisable = "claim".equals(role) || "hypothesis".equals(role)
+                || "fact".equals(role);
+        if (!revisable) {
+            showRetractionPreview(recordId);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_decision_actions)
+                .setItems(new String[]{getString(R.string.knowledge_revise_action),
+                                getString(R.string.knowledge_retract_action)},
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                promptRevision(recordId);
+                            } else {
+                                showRetractionPreview(recordId);
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void promptRevision(final String recordId) {
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(24, 8, 24, 8);
+        final EditText statementEdit = new EditText(this);
+        statementEdit.setHint(R.string.knowledge_revision_text_hint);
+        statementEdit.setSingleLine(false);
+        statementEdit.setMinLines(3);
+        statementEdit.setMaxLines(5);
+        statementEdit.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        final EditText reasonEdit = new EditText(this);
+        reasonEdit.setHint(R.string.knowledge_revision_reason_hint);
+        reasonEdit.setSingleLine(false);
+        reasonEdit.setMaxLines(3);
+        fields.addView(statementEdit);
+        fields.addView(reasonEdit);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_revision_title)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_revision_preview,
+                        (dialog, which) -> {
+                            final String statement = statementEdit.getText().toString();
+                            final String reason = reasonEdit.getText().toString();
+                            if (statement.trim().isEmpty() || statement.length() > 2000
+                                    || reason.length() > 1000) {
+                                status.setText(R.string.knowledge_revision_failed);
+                            } else {
+                                showRevisionPreview(recordId, statement, reason);
+                            }
+                        })
+                .show();
+    }
+
+    private void showRevisionPreview(final String recordId, final String statement,
+                                     final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final JSONObject preview = KnowledgePythonBridge.previewRevision(this,
+                        workspacePath(), recordId, statement);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
+                        return;
+                    }
+                    final JSONArray options = preview.optJSONArray("options");
+                    if (options == null || options.length() == 0) {
+                        status.setText(R.string.knowledge_revision_failed);
+                        return;
+                    }
+                    final String[] labels = new String[options.length()];
+                    for (int i = 0; i < options.length(); i++) {
+                        final JSONObject option = options.optJSONObject(i);
+                        labels[i] = option == null ? "?" : option.optString("reading_id")
+                                + " · " + option.optString("paraphrase");
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_revision_choose)
+                            .setItems(labels, (dialog, which) -> {
+                                final JSONObject selected = options.optJSONObject(which);
+                                if (selected != null) {
+                                    confirmRevision(preview, selected, statement, reason);
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_revision_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void confirmRevision(final JSONObject preview, final JSONObject option,
+                                 final String statement, final String reason) {
+        final StringBuilder details = new StringBuilder()
+                .append(preview.optString("record_id")).append("\n")
+                .append(preview.optString("role")).append("\n\n")
+                .append(preview.optString("old_summary")).append("\n\n→\n\n")
+                .append(statement).append("\n\n")
+                .append(option.optString("new_summary")).append("\n\n");
+        if (preview.optBoolean("old_summary_truncated")
+                || option.optBoolean("new_summary_truncated")) {
+            details.append(getString(R.string.knowledge_retract_truncated)).append("\n\n");
+        }
+        details.append(getString(R.string.knowledge_revision_conflicts,
+                        option.optInt("conflict_count"), option.optInt("diagnostic_count")))
+                .append("\n\n")
+                .append(getString(R.string.knowledge_revision_warning));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_revision_confirm)
+                .setMessage(details.toString())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_revision_confirm,
+                        (dialog, which) -> commitRevision(preview, option, statement, reason))
+                .show();
+    }
+
+    private void commitRevision(final JSONObject preview, final JSONObject option,
+                                final String statement, final String reason) {
+        final int scan = scanGeneration.get();
+        worker.submit(() -> {
+            try {
+                final String expectedHead = preview.isNull("journal_head") ? null
+                        : preview.getString("journal_head");
+                final JSONObject saved = KnowledgePythonBridge.reviseDecision(this,
+                        workspacePath(), preview.getString("record_id"), statement,
+                        option.getString("reading_id"), reason,
+                        preview.getString("statement_hash"), expectedHead);
+                if (!"revise".equals(saved.optString("decision"))
+                        || saved.optJSONArray("journal_ids") == null) {
+                    throw new IllegalStateException("No revision commit");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        Toast.makeText(this, R.string.knowledge_revision_saved,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                        status.setText(R.string.knowledge_revision_failed);
                     }
                 });
             }

@@ -118,6 +118,7 @@ public final class KnowledgeDeviceQaRunner {
             step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
             step("RECONCILE-16", this::checkSyntheticReconciliation);
             step("DECISION-17", this::checkSyntheticDecisionLifecycle);
+            step("REVISE-17", this::checkSyntheticRevision);
             step("BG-01", () -> "scheduler preference readable; enabled="
                     + KnowledgeBackgroundScheduler.isEnabled(context)
                     + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -554,6 +555,94 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "syntheticAccepted=1, activeAfterRetract=0, journalAppended=true, "
                     + "staleHeadRejected=true, repeatedRetractRejected=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** One accepted synthetic statement, explicit one-node revision, no source writes. */
+    private String checkSyntheticRevision() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create revision sandbox");
+        }
+        try {
+            ensureRunning();
+            final String source = "# Synthetic test\nСтресс приводит к бессоннице.\n";
+            final String replacement = "Стресс вызывает усталость.";
+            final String relativePath = "synthetic-revision.md";
+            final String workspace = new File(sandbox, "workspace").getAbsolutePath();
+            final String fragment = KnowledgePythonBridge.inspect(context,
+                    relativePath, source).getJSONArray("fragments")
+                    .getJSONObject(1).getString("id");
+            final JSONObject first = KnowledgePythonBridge.preview(context,
+                    workspace, relativePath, source, fragment);
+            final JSONObject accepted = KnowledgePythonBridge.decide(context,
+                    workspace, relativePath, source, fragment,
+                    first.getJSONObject("preview").getJSONArray("options")
+                            .getJSONObject(0).getString("reading_id"),
+                    "fact", first.getString("source_hash"), null);
+            final JSONObject listing = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (listing.getInt("total") != 1) {
+                throw new SyntheticMismatch("verdict=INITIAL_REVISION_LIST_MISMATCH");
+            }
+            final String oldId = listing.getJSONArray("records").getJSONObject(0)
+                    .getString("record_id");
+            final JSONObject preview = KnowledgePythonBridge.previewRevision(context,
+                    workspace, oldId, replacement);
+            if (!preview.getBoolean("read_only")
+                    || !preview.getBoolean("requires_human_confirmation")
+                    || preview.getJSONArray("options").length() != 1
+                    || !preview.getString("journal_head").equals(
+                            accepted.getString("journal_head"))) {
+                throw new SyntheticMismatch("verdict=REVISION_PREVIEW_MISMATCH");
+            }
+            final String reading = preview.getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            boolean staleRejected = false;
+            try {
+                KnowledgePythonBridge.reviseDecision(context, workspace, oldId,
+                        replacement, reading, "synthetic", preview.getString("statement_hash"),
+                        "J:stale-head-for-device-qa");
+            } catch (Exception expected) {
+                staleRejected = true;
+            }
+            if (!staleRejected || KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0).getInt("total") != 1) {
+                throw new SyntheticMismatch("verdict=REVISION_STALE_HEAD_NOT_REJECTED");
+            }
+            ensureRunning();
+            final JSONObject revised = KnowledgePythonBridge.reviseDecision(context,
+                    workspace, oldId, replacement, reading, "synthetic manual correction",
+                    preview.getString("statement_hash"), preview.getString("journal_head"));
+            final JSONObject active = KnowledgePythonBridge.activeDecisions(context,
+                    workspace, 0);
+            if (!"revise".equals(revised.getString("decision"))
+                    || revised.getJSONArray("journal_ids").length() != 1
+                    || oldId.equals(revised.getString("new_record_id"))
+                    || active.getInt("total") != 1
+                    || !revised.getString("new_record_id").equals(active
+                            .getJSONArray("records").getJSONObject(0).getString("record_id"))) {
+                throw new SyntheticMismatch("verdict=REVISION_COMMIT_MISMATCH");
+            }
+            boolean replayRejected = false;
+            try {
+                KnowledgePythonBridge.reviseDecision(context, workspace, oldId,
+                        replacement, reading, "again", preview.getString("statement_hash"),
+                        revised.getString("journal_head"));
+            } catch (Exception expected) {
+                replayRejected = true;
+            }
+            if (!replayRejected || !first.getString("source_hash").equals(
+                    KnowledgePythonBridge.preview(context, workspace, relativePath,
+                            source, fragment).getString("source_hash"))) {
+                throw new SyntheticMismatch("verdict=REVISION_REPLAY_OR_SOURCE_MISMATCH");
+            }
+            return "syntheticRevisions=1, activeAfterRevise=1, oldObsoleted=true, "
+                    + "staleHeadRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);
