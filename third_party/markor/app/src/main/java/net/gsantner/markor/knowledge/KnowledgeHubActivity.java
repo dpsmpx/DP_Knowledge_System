@@ -29,6 +29,7 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.SimpleAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -41,6 +42,8 @@ import androidx.appcompat.widget.Toolbar;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.color.DynamicColors;
 import com.google.android.material.color.MaterialColors;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
 
 import net.gsantner.markor.R;
 import net.gsantner.markor.activity.MarkorBaseActivity;
@@ -63,6 +66,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -78,6 +83,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
     private static final String STATE_WORKSPACE_PAGE = "dpks_workspace_page";
+    private static final String STATE_DECISION_CATEGORY = "dpks_decision_category";
+    private static final String[] DECISION_CATEGORIES = {
+            "pending", "active", "facts", "hypotheses", "rejected", "deferred",
+            "obsolete", "history"
+    };
+    private static final int[] DECISION_CATEGORY_LABELS = {
+            R.string.knowledge_decisions_pending, R.string.knowledge_decisions_active,
+            R.string.knowledge_decisions_facts, R.string.knowledge_decisions_hypotheses,
+            R.string.knowledge_decisions_rejected, R.string.knowledge_decisions_deferred,
+            R.string.knowledge_decisions_obsolete, R.string.knowledge_decisions_history
+    };
     private static final int MAX_EMBED_NOTES_PER_RUN = 120;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
@@ -97,14 +113,18 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private final ExecutorService analysisWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService embeddingWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService deviceQaWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService decisionWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
     private final AtomicInteger analysisGeneration = new AtomicInteger();
     private final AtomicInteger auditGeneration = new AtomicInteger();
     private final AtomicInteger embeddingGeneration = new AtomicInteger();
     private final AtomicInteger deviceQaGeneration = new AtomicInteger();
+    private final AtomicInteger decisionGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
+    private final List<JSONObject> decisionItems = new ArrayList<>();
+    private final List<Map<String, String>> decisionRows = new ArrayList<>();
 
     private Future<?> runningScan;
     private Future<?> runningSearch;
@@ -112,6 +132,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Future<?> runningAudit;
     private Future<?> runningEmbedding;
     private Future<?> runningDeviceQa;
+    private Future<?> runningDecisionLoad;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
@@ -138,6 +159,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private ProgressBar progress;
     private EditText filter;
     private BottomNavigationView navigation;
+    private SimpleAdapter decisionAdapter;
+    private EditText decisionFilter;
+    private ChipGroup decisionChips;
+    private TextView decisionStatus;
+    private String decisionCategory = "pending";
+    private int decisionOffset;
+    private int decisionNextOffset = -1;
+    private boolean decisionWorkspaceReady;
+    private boolean decisionDetailShowing;
     private int workspacePage = R.id.knowledge_nav_library;
     private char[] pendingExportPassword;
 
@@ -160,6 +190,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             showWorkspacePage(item.getItemId());
             return true;
         });
+        if (savedInstanceState != null) {
+            final String previous = savedInstanceState.getString(STATE_DECISION_CATEGORY, "pending");
+            if (Arrays.asList(DECISION_CATEGORIES).contains(previous)) decisionCategory = previous;
+        }
         final int initialPage = savedInstanceState == null
                 ? R.id.knowledge_nav_library
                 : savedInstanceState.getInt(STATE_WORKSPACE_PAGE, R.id.knowledge_nav_library);
@@ -168,7 +202,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (workspacePage != R.id.knowledge_nav_library) {
+                if (decisionDetailShowing) {
+                    closeDecisionDetail();
+                } else if (workspacePage != R.id.knowledge_nav_library) {
                     navigation.setSelectedItemId(R.id.knowledge_nav_library);
                 } else {
                     setEnabled(false);
@@ -242,9 +278,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             }
         });
         findViewById(R.id.knowledge_bulk_review).setOnClickListener(
-                view -> showCandidateQueue(0));
+                view -> navigateToDecisions("pending"));
         findViewById(R.id.knowledge_active_decisions).setOnClickListener(
-                view -> showActiveDecisions(0));
+                view -> navigateToDecisions("active"));
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -311,18 +347,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaStressButton.setOnClickListener(view -> runDeviceQa(true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
+        setupDecisionWorkspace();
         scanNotebook();
     }
 
     @Override
     protected void onSaveInstanceState(@NonNull final Bundle outState) {
         outState.putInt(STATE_WORKSPACE_PAGE, workspacePage);
+        outState.putString(STATE_DECISION_CATEGORY, decisionCategory);
         super.onSaveInstanceState(outState);
     }
 
     /** Switch destinations without recreating the activity or its active workers. */
     private void showWorkspacePage(final int requested) {
         final int page = requested == R.id.knowledge_nav_processes
+                || requested == R.id.knowledge_nav_decisions
                 || requested == R.id.knowledge_nav_manage
                 ? requested : R.id.knowledge_nav_library;
         workspacePage = page;
@@ -338,14 +377,321 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 page == R.id.knowledge_nav_library ? View.VISIBLE : View.GONE);
         findViewById(R.id.knowledge_page_processes).setVisibility(
                 page == R.id.knowledge_nav_processes ? View.VISIBLE : View.GONE);
+        findViewById(R.id.knowledge_page_decisions).setVisibility(
+                page == R.id.knowledge_nav_decisions ? View.VISIBLE : View.GONE);
         findViewById(R.id.knowledge_page_manage).setVisibility(
                 page == R.id.knowledge_nav_manage ? View.VISIBLE : View.GONE);
         final ActionBar bar = getSupportActionBar();
         if (bar != null) {
             bar.setTitle(page == R.id.knowledge_nav_library
                     ? R.string.knowledge_hub_title
+                    : page == R.id.knowledge_nav_decisions
+                    ? R.string.knowledge_page_decisions
                     : page == R.id.knowledge_nav_processes
                     ? R.string.knowledge_page_processes : R.string.knowledge_page_manage);
+        }
+        if (page == R.id.knowledge_nav_decisions && decisionWorkspaceReady) {
+            loadDecisionPage(0);
+        }
+    }
+
+    private void setupDecisionWorkspace() {
+        decisionChips = findViewById(R.id.knowledge_decision_categories);
+        decisionFilter = findViewById(R.id.knowledge_decisions_filter);
+        decisionStatus = findViewById(R.id.knowledge_decisions_status);
+        for (int i = 0; i < DECISION_CATEGORIES.length; i++) {
+            final String category = DECISION_CATEGORIES[i];
+            final Chip chip = new Chip(this);
+            chip.setCheckable(true);
+            chip.setText(DECISION_CATEGORY_LABELS[i]);
+            chip.setChecked(category.equals(decisionCategory));
+            chip.setOnClickListener(view -> {
+                decisionCategory = category;
+                loadDecisionPage(0);
+            });
+            decisionChips.addView(chip);
+        }
+        decisionAdapter = new SimpleAdapter(this, decisionRows,
+                R.layout.knowledge__decision_row,
+                new String[]{"heading", "summary"},
+                new int[]{android.R.id.text1, android.R.id.text2});
+        final ListView list = findViewById(R.id.knowledge_decisions_list);
+        list.setAdapter(decisionAdapter);
+        list.setEmptyView(findViewById(R.id.knowledge_decisions_empty));
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            if (position >= 0 && position < decisionItems.size()) {
+                openDecisionDetail(decisionItems.get(position));
+            }
+        });
+        decisionFilter.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                loadDecisionPage(0);
+            }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+        findViewById(R.id.knowledge_decisions_reload).setOnClickListener(view ->
+                loadDecisionPage(decisionOffset));
+        findViewById(R.id.knowledge_decisions_previous).setOnClickListener(view ->
+                loadDecisionPage(Math.max(0, decisionOffset - 30)));
+        findViewById(R.id.knowledge_decisions_next).setOnClickListener(view -> {
+            if (decisionNextOffset >= 0) loadDecisionPage(decisionNextOffset);
+        });
+        findViewById(R.id.knowledge_decisions_batch).setOnClickListener(view -> showCandidateQueue(0));
+        decisionWorkspaceReady = true;
+        if (workspacePage == R.id.knowledge_nav_decisions) loadDecisionPage(0);
+    }
+
+    private void navigateToDecisions(final String category) {
+        decisionCategory = category;
+        for (int i = 0; i < DECISION_CATEGORIES.length; i++) {
+            ((Chip) decisionChips.getChildAt(i)).setChecked(category.equals(DECISION_CATEGORIES[i]));
+        }
+        if (workspacePage == R.id.knowledge_nav_decisions) {
+            loadDecisionPage(0);
+        } else {
+            navigation.setSelectedItemId(R.id.knowledge_nav_decisions);
+        }
+    }
+
+    /** Never block the UI thread while replaying the journal or paging the local index. */
+    private void loadDecisionPage(final int offset) {
+        if (!decisionWorkspaceReady) return;
+        final int generation = decisionGeneration.incrementAndGet();
+        if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
+        final String category = decisionCategory;
+        final String search = decisionFilter.getText().toString().trim();
+        decisionStatus.setText(R.string.knowledge_decisions_loading);
+        runningDecisionLoad = decisionWorker.submit(() -> {
+            try {
+                final JSONObject response = KnowledgePythonBridge.decisionOverview(
+                        this, workspacePath(), category, offset, search);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || decisionGeneration.get() != generation) return;
+                    decisionOffset = offset;
+                    decisionNextOffset = response.isNull("next_offset") ? -1
+                            : response.optInt("next_offset", -1);
+                    decisionItems.clear();
+                    decisionRows.clear();
+                    final JSONArray items = response.optJSONArray("items");
+                    if (items != null) {
+                        for (int i = 0; i < items.length(); i++) {
+                            final JSONObject item = items.optJSONObject(i);
+                            if (item == null) continue;
+                            decisionItems.add(item);
+                            final Map<String, String> row = new HashMap<>();
+                            row.put("heading", decisionRoleLabel(item.optString("role")) + " · "
+                                    + decisionStatusLabel(item.optString("status"))
+                                    + (item.optString("locator").isEmpty() ? ""
+                                    : " · " + item.optString("locator")));
+                            final String path = item.optString("path");
+                            row.put("summary", (path.isEmpty() ? "" : path + "\n")
+                                    + item.optString("summary"));
+                            decisionRows.add(row);
+                        }
+                    }
+                    decisionAdapter.notifyDataSetChanged();
+                    final JSONObject counts = response.optJSONObject("counts");
+                    for (int i = 0; i < DECISION_CATEGORIES.length; i++) {
+                        final Chip chip = (Chip) decisionChips.getChildAt(i);
+                        final int count = counts == null ? 0 : counts.optInt(DECISION_CATEGORIES[i]);
+                        chip.setText(getString(DECISION_CATEGORY_LABELS[i]) + " · " + count);
+                    }
+                    final int total = response.optInt("total");
+                    decisionStatus.setText(total == 0 ? getString(R.string.knowledge_decisions_empty)
+                            : getString(R.string.knowledge_decisions_count, total,
+                                    offset + 1, offset + decisionItems.size()));
+                    findViewById(R.id.knowledge_decisions_previous).setEnabled(offset > 0);
+                    findViewById(R.id.knowledge_decisions_next).setEnabled(decisionNextOffset >= 0);
+                    ((TextView) findViewById(R.id.knowledge_decisions_page_number)).setText(
+                            total == 0 ? "0" : (offset / 30 + 1) + " / " + ((total + 29) / 30));
+                    list.smoothScrollToPosition(0);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && decisionGeneration.get() == generation) {
+                        decisionStatus.setText(R.string.knowledge_decisions_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void openDecisionDetail(final JSONObject selected) {
+        final String kind = selected.optString("kind");
+        final String recordId = selected.optString("id");
+        if (kind.isEmpty() || recordId.isEmpty()) return;
+        decisionDetailShowing = true;
+        final int generation = decisionGeneration.incrementAndGet();
+        if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
+        findViewById(R.id.knowledge_page_decisions).setVisibility(View.GONE);
+        findViewById(R.id.knowledge_decision_detail_screen).setVisibility(View.VISIBLE);
+        navigation.setVisibility(View.GONE);
+        final Toolbar toolbar = findViewById(R.id.toolbar);
+        toolbar.setNavigationIcon(R.drawable.ic_arrow_back_white_24dp);
+        toolbar.setNavigationIconTint(MaterialColors.getColor(toolbar,
+                com.google.android.material.R.attr.colorOnSurface));
+        toolbar.setNavigationContentDescription(R.string.knowledge_editor_back);
+        toolbar.setNavigationOnClickListener(view -> closeDecisionDetail());
+        final ActionBar bar = getSupportActionBar();
+        if (bar != null) bar.setTitle(R.string.knowledge_decision_detail_title);
+        ((TextView) findViewById(R.id.knowledge_decision_detail_status))
+                .setText(R.string.knowledge_decisions_loading);
+        for (final int id : new int[]{R.id.knowledge_decision_detail_source,
+                R.id.knowledge_decision_detail_interpretation,
+                R.id.knowledge_decision_detail_formal,
+                R.id.knowledge_decision_detail_provenance,
+                R.id.knowledge_decision_detail_conflicts,
+                R.id.knowledge_decision_detail_history}) {
+            ((TextView) findViewById(id)).setText("");
+        }
+        findViewById(R.id.knowledge_decision_open_source).setEnabled(false);
+        findViewById(R.id.knowledge_decision_review_action).setVisibility(View.GONE);
+        findViewById(R.id.knowledge_decision_manage_action).setVisibility(View.GONE);
+        runningDecisionLoad = decisionWorker.submit(() -> {
+            try {
+                final JSONObject detail = KnowledgePythonBridge.decisionDetail(
+                        this, workspacePath(), kind, recordId);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && decisionDetailShowing
+                            && decisionGeneration.get() == generation) renderDecisionDetail(detail);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && decisionDetailShowing
+                            && decisionGeneration.get() == generation) {
+                        ((TextView) findViewById(R.id.knowledge_decision_detail_status))
+                                .setText(R.string.knowledge_decision_loading_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void renderDecisionDetail(final JSONObject item) {
+        final String kind = item.optString("kind");
+        final String role = item.optString("role");
+        final String path = item.optString("path");
+        ((TextView) findViewById(R.id.knowledge_decision_detail_status)).setText(
+                decisionRoleLabel(role) + " · " + decisionStatusLabel(item.optString("status")));
+        final String source = item.optString("source_text");
+        ((TextView) findViewById(R.id.knowledge_decision_detail_source)).setText(
+                source.isEmpty() ? getString(R.string.knowledge_decision_not_available) : source);
+        final String interpretation = item.optString("interpretation");
+        ((TextView) findViewById(R.id.knowledge_decision_detail_interpretation)).setText(
+                interpretation.isEmpty() ? getString(R.string.knowledge_decision_not_available)
+                        : interpretation);
+        final String formal = item.optString("formalization");
+        ((TextView) findViewById(R.id.knowledge_decision_detail_formal)).setText(
+                formal.isEmpty() ? getString(R.string.knowledge_decision_not_available) : formal);
+        final StringBuilder provenance = new StringBuilder();
+        if (!path.isEmpty()) provenance.append(path).append(" · ")
+                .append(item.optString("locator")).append('\n');
+        if (!item.optString("source_hash").isEmpty()) provenance.append("SHA-256: ")
+                .append(item.optString("source_hash")).append('\n');
+        if (!item.optString("verifier").isEmpty()) provenance.append(item.optString("verifier"))
+                .append(" · ").append(item.optString("verified_at")).append('\n');
+        final JSONArray targets = item.optJSONArray("targets");
+        if (targets != null && targets.length() > 0) {
+            provenance.append(getString(R.string.knowledge_decisions_targets)).append(":\n");
+            for (int i = 0; i < targets.length() && i < 10; i++) {
+                provenance.append("• ").append(targets.optString(i)).append('\n');
+            }
+        }
+        ((TextView) findViewById(R.id.knowledge_decision_detail_provenance)).setText(
+                provenance.length() == 0 ? getString(R.string.knowledge_decision_not_available)
+                        : provenance.toString().trim());
+        final StringBuilder diagnostics = new StringBuilder();
+        if (item.optBoolean("conflicts_available")) {
+            final JSONArray conflicts = item.optJSONArray("conflicts");
+            if (conflicts == null || conflicts.length() == 0) {
+                diagnostics.append(getString(R.string.knowledge_decision_zero_conflicts));
+            } else {
+                for (int i = 0; i < conflicts.length(); i++) {
+                    diagnostics.append("• ").append(conflicts.optString(i)).append('\n');
+                }
+            }
+        } else {
+            diagnostics.append(getString(R.string.knowledge_decision_not_audited));
+        }
+        final JSONArray alerts = item.optJSONArray("diagnostics");
+        if (alerts != null && alerts.length() > 0) {
+            diagnostics.append("\n");
+            for (int i = 0; i < alerts.length(); i++) {
+                final JSONObject alert = alerts.optJSONObject(i);
+                if (alert != null) diagnostics.append("• ").append(alert.optString("severity"))
+                        .append(": ").append(alert.optString("message")).append('\n');
+            }
+        }
+        ((TextView) findViewById(R.id.knowledge_decision_detail_conflicts))
+                .setText(diagnostics.toString().trim());
+        final JSONArray history = item.optJSONArray("history");
+        final StringBuilder historyText = new StringBuilder();
+        if (history != null) {
+            for (int i = 0; i < history.length(); i++) {
+                final JSONObject change = history.optJSONObject(i);
+                if (change != null) historyText.append(change.optString("time")).append(" · ")
+                        .append(change.optString("op")).append('\n')
+                        .append(change.optString("id")).append("\n\n");
+            }
+        }
+        historyText.append(getString(R.string.knowledge_decision_more_history));
+        ((TextView) findViewById(R.id.knowledge_decision_detail_history))
+                .setText(historyText.toString());
+        final View openSource = findViewById(R.id.knowledge_decision_open_source);
+        openSource.setEnabled(!path.isEmpty());
+        openSource.setOnClickListener(view -> openIndexedNote(path));
+        final View review = findViewById(R.id.knowledge_decision_review_action);
+        review.setVisibility("candidate".equals(kind) ? View.VISIBLE : View.GONE);
+        review.setOnClickListener(view -> previewFragment(path, item.optString("fragment_id")));
+        final View manage = findViewById(R.id.knowledge_decision_manage_action);
+        manage.setVisibility("record".equals(kind) && !"OBSOLETE".equals(item.optString("status"))
+                ? View.VISIBLE : View.GONE);
+        manage.setOnClickListener(view -> chooseKnowledgeAction(item.optString("id"), role));
+    }
+
+    private void closeDecisionDetail() {
+        decisionDetailShowing = false;
+        decisionGeneration.incrementAndGet();
+        if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
+        findViewById(R.id.knowledge_decision_detail_screen).setVisibility(View.GONE);
+        findViewById(R.id.knowledge_page_decisions).setVisibility(View.VISIBLE);
+        navigation.setVisibility(View.VISIBLE);
+        final Toolbar toolbar = findViewById(R.id.toolbar);
+        toolbar.setNavigationIcon(null);
+        toolbar.setNavigationOnClickListener(null);
+        final ActionBar bar = getSupportActionBar();
+        if (bar != null) bar.setTitle(R.string.knowledge_page_decisions);
+        loadDecisionPage(decisionOffset);
+    }
+
+    private String decisionRoleLabel(final String role) {
+        switch (role) {
+            case "interpretation": return getString(R.string.knowledge_decisions_role_interpretation);
+            case "claim": return getString(R.string.knowledge_decisions_role_claim);
+            case "fact": return getString(R.string.knowledge_decisions_role_fact);
+            case "hypothesis": return getString(R.string.knowledge_decisions_role_hypothesis);
+            case "reject": return getString(R.string.knowledge_decisions_role_reject);
+            case "defer": return getString(R.string.knowledge_decisions_role_defer);
+            case "retract": return getString(R.string.knowledge_decisions_role_retract);
+            case "revise": return getString(R.string.knowledge_decisions_role_revise);
+            case "split": return getString(R.string.knowledge_decisions_role_split);
+            case "merge": return getString(R.string.knowledge_decisions_role_merge);
+            case "accept": return getString(R.string.knowledge_decisions_role_accept);
+            case "batch_accept": return getString(R.string.knowledge_decisions_role_batch_accept);
+            default: return role;
+        }
+    }
+
+    private String decisionStatusLabel(final String status) {
+        switch (status) {
+            case "PENDING": return getString(R.string.knowledge_decisions_status_pending);
+            case "HUMAN_ACCEPTED": return getString(R.string.knowledge_decisions_status_accepted);
+            case "CLAIMED": return getString(R.string.knowledge_decisions_status_claimed);
+            case "UNKNOWN": return getString(R.string.knowledge_decisions_status_unknown);
+            case "OBSOLETE": return getString(R.string.knowledge_decisions_status_obsolete);
+            case "JOURNAL": return getString(R.string.knowledge_decisions_status_journal);
+            default: return status;
         }
     }
 
@@ -3275,6 +3621,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         analysisGeneration.incrementAndGet();
         auditGeneration.incrementAndGet();
         embeddingGeneration.incrementAndGet();
+        decisionGeneration.incrementAndGet();
+        if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
         if (runningAudit != null) {
             runningAudit.cancel(true);
         }
@@ -3298,6 +3646,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         analysisWorker.shutdownNow();
         embeddingWorker.shutdownNow();
         deviceQaWorker.shutdownNow();
+        decisionWorker.shutdownNow();
         super.onDestroy();
     }
 }

@@ -31,14 +31,18 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         for name in required:
             self.assertEqual(1, observed.count("@+id/" + name), name)
 
-    def test_navigation_separates_library_processes_and_sensitive_actions(self):
+    def test_navigation_separates_library_decisions_processes_and_settings(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         menu = ET.parse(ROOT / "res/menu/knowledge_navigation.xml").getroot()
-        expected = ["knowledge_nav_library", "knowledge_nav_processes", "knowledge_nav_manage"]
+        expected = ["knowledge_nav_library", "knowledge_nav_decisions",
+                    "knowledge_nav_processes", "knowledge_nav_manage"]
         actual = [e.get(ANDROID + "id", "").removeprefix("@+id/") for e in menu]
         self.assertEqual(expected, actual)
         expected_ownership = {
             "knowledge_page_library": ("knowledge_list", "knowledge_filter"),
+            "knowledge_page_decisions": ("knowledge_decision_categories",
+                                         "knowledge_decisions_list", "knowledge_decisions_filter",
+                                         "knowledge_decisions_batch"),
             "knowledge_page_processes": ("knowledge_qa_quick", "knowledge_bulk_analyze",
                                          "knowledge_embedding_build"),
             "knowledge_page_manage": ("knowledge_active_decisions", "knowledge_backup_import",
@@ -63,7 +67,31 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             strings = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
             names = {element.get("name") for element in strings}
             for name in ("knowledge_page_library", "knowledge_page_processes",
-                         "knowledge_page_manage", "knowledge_manage_backup_warning"):
+                         "knowledge_page_decisions", "knowledge_page_manage",
+                         "knowledge_manage_backup_warning"):
+                self.assertIn(name, names)
+
+    def test_full_screen_decision_review_has_separate_source_and_knowledge_sections(self):
+        root = ET.parse(ROOT / "res/layout/knowledge__decision_detail.xml").getroot()
+        ids = [e.get(ANDROID + "id", "") for e in root.iter()]
+        for name in ("knowledge_decision_detail_screen", "knowledge_decision_detail_source",
+                     "knowledge_decision_detail_interpretation", "knowledge_decision_detail_formal",
+                     "knowledge_decision_detail_provenance", "knowledge_decision_detail_conflicts",
+                     "knowledge_decision_detail_history", "knowledge_decision_review_action",
+                     "knowledge_decision_manage_action", "knowledge_decision_open_source"):
+            self.assertEqual(1, ids.count("@+id/" + name), name)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        for method in ("decisionOverview", "decisionDetail"):
+            self.assertIn("JSONObject " + method + "(", bridge)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("navigation.setVisibility(View.GONE)", hub)
+        self.assertIn("private void closeDecisionDetail()", hub)
+        for folder in ("values", "values-ru"):
+            root = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
+            names = [e.get("name") for e in root]
+            self.assertEqual(len(names), len(set(names)), folder)
+            for name in ("knowledge_decisions_pending", "knowledge_decisions_rejected",
+                         "knowledge_decisions_history", "knowledge_decision_source_warning"):
                 self.assertIn(name, names)
 
     def test_dpks_launcher_is_primary_only_for_its_flavor(self):

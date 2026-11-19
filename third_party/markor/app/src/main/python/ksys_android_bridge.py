@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import sqlite3
 from ksys.store.journal import Entry, entry_id
 from pathlib import Path
 
@@ -20,8 +21,8 @@ from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
 from ksys.importer.relations import related_claims
 from ksys.audit.library import audit_summary, audit_page
-from ksys.store.db import connect
 from ksys.store.kb import KnowledgeBase, convert_role
+from ksys.ir.nodes import node_from_dict
 from ksys.store.workspace import Workspace
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
@@ -111,31 +112,34 @@ def review_queue(workspace_dir: str, offset: int = 0) -> str:
     if not workspace.is_absolute() or not isinstance(offset, int) \
             or offset < 0 or offset > 1_000_000:
         raise ValueError("Invalid workspace or queue offset")
-    db_path = Workspace(workspace).db_path
-    if not db_path.is_file():
+    con = _decision_index(workspace)
+    if con is None:
         return json.dumps({"protocol": "dpksys.bulk.v1", "total": 0, "offset": offset,
                            "candidates": [], "requires_human_review": True})
-    con = connect(db_path)
+    kb = _kb(workspace_dir)
+    resolved = _resolved_fragments(kb)
+    total = 0
+    candidates = []
     try:
-        total = con.execute(
-            "SELECT COUNT(*) FROM candidates c JOIN fragments f ON f.id=c.origin "
-            "JOIN documents d ON d.path=f.doc WHERE d.status='PARSED'"
-        ).fetchone()[0]
         rows = con.execute(
-            "SELECT f.doc, f.id, f.locator, c.paraphrase, c.reading_id "
+            "SELECT c.id, f.doc, f.id, f.locator, c.paraphrase, c.reading_id, c.nodes "
             "FROM candidates c JOIN fragments f ON f.id=c.origin "
             "JOIN documents d ON d.path=f.doc WHERE d.status='PARSED' "
-            "ORDER BY f.doc COLLATE NOCASE, f.ordinal, c.id LIMIT 80 OFFSET ?",
-            (offset,)
-        ).fetchall()
+            "ORDER BY f.doc COLLATE NOCASE, f.ordinal, c.id")
+        for row in rows:
+            if not _candidate_pending(row, resolved, kb.state.rejected):
+                continue
+            if offset <= total < offset + 80:
+                candidates.append({"path": row[1], "fragment_id": row[2],
+                                   "locator": row[3], "preview": row[4][:180],
+                                   "reading_id": row[5]})
+            total += 1
     finally:
         con.close()
     return json.dumps({
         "protocol": "dpksys.bulk.v1",
         "total": total, "offset": offset,
-        "candidates": [{"path": row[0], "fragment_id": row[1],
-                        "locator": row[2], "preview": row[3][:180],
-                        "reading_id": row[4]} for row in rows],
+        "candidates": candidates,
         "requires_human_review": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -419,6 +423,230 @@ def active_decisions(workspace_dir: str, offset: int = 0) -> str:
         } for rec in page],
         "read_only": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+# Stage 22: a read-only, navigable decision workspace. The source index is
+# *disposable*; the verified journal is authoritative. Never treat a candidate
+# as a fact or assume an indexed source fragment is still current on disk.
+DECISION_CATEGORIES = ("pending", "active", "facts", "hypotheses",
+                       "rejected", "deferred", "obsolete", "history")
+DECISION_PAGE_SIZE = 30
+
+
+def _decision_index(workspace: Path):
+    """Open only an existing index, without connect() migrations or WAL writes."""
+    db_path = Workspace(workspace).db_path
+    if not db_path.is_file():
+        return None
+    con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+    con.execute("PRAGMA query_only=ON")
+    return con
+
+
+def _resolved_fragments(kb: KnowledgeBase) -> set[str]:
+    resolved = set(kb.state.deferred)
+    for record in kb.state.records.values():
+        for source in record.provenance:
+            if source.get("fragment_id"):
+                resolved.add(source["fragment_id"])
+    return resolved
+
+
+def _candidate_pending(row, resolved: set[str], rejected: set[str]) -> bool:
+    if row[2] in resolved:
+        return False
+    try:
+        nodes = json.loads(row[6])
+    except (TypeError, ValueError):
+        return True  # Invalid interpretations must remain visible for inspection.
+    return not nodes or not all(node.get("id") in rejected for node in nodes)
+
+
+def _journal_label(entry: Entry) -> str:
+    data = entry.data
+    if entry.op in ("reject", "defer"):
+        return (data.get("reason") or entry.op)[:220]
+    if entry.op in ("retract", "revise", "split"):
+        return str(data.get("target") or entry.op)[:220]
+    if entry.op == "merge":
+        return ", ".join(data.get("targets", []))[:220]
+    return (entry.note or entry.op)[:220]
+
+
+def decision_overview(workspace_dir: str, category: str = "pending",
+                      offset: int = 0, search: str = "") -> str:
+    """Bounded pages across proposals, records and journal events.
+
+    Counts are for the *entire* category; `total` is the filtered count. An
+    explicit empty state is returned even when there is no workspace yet.
+    """
+    if category not in DECISION_CATEGORIES or not isinstance(offset, int) \
+            or offset < 0 or offset > 1_000_000 or not isinstance(search, str) \
+            or len(search) > 120:
+        raise ValueError("Invalid decision view query")
+    kb = _kb(workspace_dir)
+    records = sorted(kb.state.records.values(),
+                     key=lambda r: (r.updated_at, r.id), reverse=True)
+    events = list(reversed(kb.state.entries))
+    rejected = [e for e in events if e.op == "reject"]
+    deferred = [e for e in events if e.op == "defer"]
+    active = [r for r in records if kb.state.active(r.id)]
+    obsolete = [r for r in records if not kb.state.active(r.id)]
+    counts = {
+        "pending": 0, "active": len(active),
+        "facts": sum(r.role == "fact" for r in active),
+        "hypotheses": sum(r.role == "hypothesis" for r in active),
+        "rejected": len(rejected), "deferred": len(deferred),
+        "obsolete": len(obsolete), "history": len(events),
+    }
+    needle = search.casefold().strip()
+    filtered = []
+    total = 0
+
+    def add(row):
+        nonlocal total
+        if needle and needle not in " ".join(str(v) for v in row.values()).casefold():
+            return
+        if offset <= total < offset + DECISION_PAGE_SIZE:
+            filtered.append(row)
+        total += 1
+
+    if category == "pending":
+        resolved = _resolved_fragments(kb)
+        con = _decision_index(Path(workspace_dir))
+        if con is not None:
+            try:
+                rows = con.execute(
+                    "SELECT c.id, f.doc, f.id, f.locator, c.paraphrase, c.reading_id, c.nodes "
+                    "FROM candidates c JOIN fragments f ON f.id=c.origin "
+                    "JOIN documents d ON d.path=f.doc WHERE d.status='PARSED' "
+                    "ORDER BY f.doc COLLATE NOCASE, f.ordinal, c.id"
+                )
+                for candidate in rows:
+                    if _candidate_pending(candidate, resolved, kb.state.rejected):
+                        counts["pending"] += 1
+                        add({"kind": "candidate", "id": candidate[0],
+                             "role": "interpretation", "status": "PENDING",
+                             "path": candidate[1], "locator": candidate[3],
+                             "summary": candidate[4][:220]})
+            finally:
+                con.close()
+    else:
+        groups = {
+            "active": active, "facts": [r for r in active if r.role == "fact"],
+            "hypotheses": [r for r in active if r.role == "hypothesis"],
+            "obsolete": obsolete,
+        }
+        if category in groups:
+            for rec in groups[category]:
+                provenance = rec.provenance[-1] if rec.provenance else {}
+                add({"kind": "record", "id": rec.id, "role": rec.role,
+                     "status": rec.status.value, "path": provenance.get("document", ""),
+                     "locator": provenance.get("locator", ""),
+                     "summary": rec.node.ksf()[:220]})
+        else:
+            for event in {"rejected": rejected, "deferred": deferred,
+                          "history": events}[category]:
+                add({"kind": "journal", "id": event.id, "role": event.op,
+                     "status": "JOURNAL", "time": event.ts,
+                     "summary": _journal_label(event)})
+
+    return json.dumps({
+        "protocol": "dpksys.decision.v1", "category": category,
+        "journal_head": kb.journal.head, "offset": offset,
+        "total": total, "counts": counts, "items": filtered,
+        "next_offset": offset + len(filtered) if offset + DECISION_PAGE_SIZE < total else None,
+        "read_only": True, "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def decision_detail(workspace_dir: str, kind: str, identifier: str) -> str:
+    """Full decision context, strictly read-only; source snippets are snapshots."""
+    if kind not in ("candidate", "record", "journal") or not isinstance(identifier, str) \
+            or not identifier or len(identifier) > 200:
+        raise ValueError("Invalid decision selection")
+    kb = _kb(workspace_dir)
+    detail = {"protocol": "dpksys.decision.v1", "kind": kind, "id": identifier,
+              "journal_head": kb.journal.head, "read_only": True,
+              "requires_human_review": True}
+    if kind == "candidate":
+        con = _decision_index(Path(workspace_dir))
+        if con is None:
+            raise ValueError("No semantic analysis available")
+        try:
+            row = con.execute(
+                "SELECT f.doc, f.id, f.locator, f.text, c.paraphrase, c.reading_id, "
+                "c.nodes, c.diagnostics, d.sha256, f.plain "
+                "FROM candidates c JOIN fragments f ON f.id=c.origin "
+                "JOIN documents d ON d.path=f.doc "
+                "WHERE c.id=? AND d.status='PARSED'", (identifier,)).fetchone()
+        finally:
+            con.close()
+        if row is None:
+            raise ValueError("Interpretation no longer indexed")
+        nodes = json.loads(row[6])
+        diagnostics = json.loads(row[7])
+        conflicts = []
+        conflicts_available = False
+        try:
+            preview = kb.preview(row[9], origin=row[1], mode="import")
+            reading = next((item for item in preview.options
+                            if item["reading_id"] == row[5]), None)
+            if reading is not None:
+                conflicts_available = True
+                conflicts = [str(value)[:300] for value in reading["conflicts"][:8]]
+        except (ValueError, KeyError, TypeError):
+            # The persisted index and active journal may no longer agree.
+            # Do not invent a zero-conflict verdict in that situation.
+            pass
+        detail.update({"role": "interpretation", "status": "PENDING",
+                       "path": row[0], "fragment_id": row[1], "locator": row[2],
+                       "source_text": row[3][:4000], "source_truncated": len(row[3]) > 4000,
+                       "source_hash": row[8], "interpretation": row[4][:4000],
+                       "reading_id": row[5],
+                       "formalization": "\n".join(node_from_dict(n).ksf()
+                                                   for n in nodes)[:4000],
+                       "diagnostics": diagnostics[:12], "conflicts": conflicts,
+                       "conflicts_available": conflicts_available,
+                       "source_snapshot": True})
+        return json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if kind == "record":
+        rec = kb.state.records.get(identifier)
+        if rec is None:
+            raise ValueError("Knowledge record is unavailable")
+        provenance = rec.provenance[-1] if rec.provenance else {}
+        related_events = [e for e in kb.state.entries if e.id in rec.journal][-12:]
+        detail.update({"role": rec.role, "status": rec.status.value,
+                       "path": provenance.get("document", ""),
+                       "locator": provenance.get("locator", ""),
+                       "source_text": str(provenance.get("text") or "")[:4000],
+                       "source_hash": provenance.get("document_sha", ""),
+                       "source_snapshot": True,
+                       "interpretation": rec.node.ksf()[:4000],
+                       "formalization": rec.node.ksf()[:4000],
+                       "confidence": rec.confidence.value,
+                       "knowledge_type": rec.knowledge_type,
+                       "verified_at": provenance.get("verified_at", ""),
+                       "verifier": provenance.get("verifier", ""),
+                       "supersedes": rec.supersedes[:10],
+                       "superseded_by": rec.superseded_by,
+                       "superseded_by_many": rec.superseded_by_many[:10],
+                       "history": [{"id": e.id, "op": e.op, "time": e.ts}
+                                   for e in related_events], "conflicts": [],
+                       "diagnostics": []})
+    else:
+        event = next((e for e in kb.state.entries if e.id == identifier), None)
+        if event is None:
+            raise ValueError("Journal entry is unavailable")
+        detail.update({"role": event.op, "status": "JOURNAL", "time": event.ts,
+                       "interpretation": _journal_label(event),
+                       "formalization": "", "source_text": "", "source_snapshot": False,
+                       "history": [{"id": event.id, "op": event.op, "time": event.ts}],
+                       "targets": event.data.get("targets",
+                                                 [event.data["target"]] if "target" in event.data
+                                                 else event.data.get("candidates", [])),
+                       "diagnostics": [], "conflicts": []})
+    return json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def preview_retraction(workspace_dir: str, record_id: str) -> str:
