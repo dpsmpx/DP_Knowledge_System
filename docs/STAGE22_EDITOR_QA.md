@@ -10,6 +10,10 @@ unsaved edit produced **editor text differs from saved note**. The second
 result is an intended guard, not a failed attempt to write the journal.
 The first is strict CNL behavior with inadequate guidance. Both are
 scenario-specific observations, not a complete editor QA verdict.
+After Preview #16, the owner confirmed the updated scenario works.
+This does not close the untested lifecycle, accessibility or stress cases.
+The owner explicitly requested that future device checks be batched and
+deferred rather than required after every incremental PR.
 
 ## Expected scope
 
@@ -85,7 +89,10 @@ scenario-specific observations, not a complete editor QA verdict.
 
 - **QA-59 / OPEN:** no complete hardware verification of the fourth slice.
 - **QA-60 / OPEN:** fifth-slice guided manual interpretation, separate
-  provenance, explicit Save and stale-source resistance are synthetic-only.
+  provenance, explicit Save and stale-source resistance received positive
+  owner feedback in Preview #16, but full device checks remain open.
+- **QA-61 / OPEN, DEFERRED:** sixth-slice editor context panel must be checked
+  in a later batched device acceptance run; automated tests are not a UI PASS.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; contextual inline sidebar,
@@ -98,3 +105,27 @@ scenario-specific observations, not a complete editor QA verdict.
 
 Use only disposable notes/journals for state-changing validation. Never
 include private text, filesystem paths or credentials in public CI/QA logs.
+
+## QA-61 — deferred context-panel acceptance checklist
+
+1. On an empty synthetic vault with no journal or semantic index, open a
+   note, tap **Знания**, and verify separate empty states for accepted
+   records and possible links; no index or journal file may be created.
+2. With a disposable approved claim, open its note and inspect the panel:
+   role and original source excerpt must be distinct from formal KSF,
+   provenance path and source-freshness state. Tap the record and jump to
+   the exact source in Edit mode. Repeated/changed excerpts must refuse
+   navigation rather than guessing.
+3. With two synthetic opposing claims in the disposable semantic index,
+   verify **possible conflict** is marked unapproved and can open the other
+   Markdown note. Accepted journal contradictions must appear in the
+   *separate* approved section.
+4. Edit a note without saving. Open the context panel and confirm the
+   banner identifies **saved source**, not the buffer; changing the saved
+   file or invalidating its index must suppress stale candidate links.
+5. Switch vaults, rotate, close/open the panel, navigate back, force-stop
+   during the worker, and verify no stale modal appears, no path escapes
+   the selected vault and no personal content reaches logs.
+6. Defer 200% text, TalkBack, dark/dynamic theme, 760/20k-note latency,
+   memory/battery and rapid repeated navigation measurements to a single
+   later device QA session, with redacted evidence only.

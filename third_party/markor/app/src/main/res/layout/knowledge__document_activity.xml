@@ -84,6 +84,14 @@
                 android:text="@string/knowledge_editor_inspect" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_context"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_context" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/knowledge_editor_review_selection"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
@@ -114,6 +122,81 @@
         android:text="@string/knowledge_editor_ready"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/knowledge_editor_context_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurfaceContainer"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/knowledge_editor_context_summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityLiveRegion="polite"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="6dp"
+            android:text="@string/knowledge_editor_context_loading"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:textColor="?attr/colorOnSurface" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="168dp"
+            android:fillViewport="false">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/knowledge_editor_context_accepted"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <LinearLayout
+                    android:id="@+id/knowledge_editor_context_records"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/knowledge_editor_context_relations"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <LinearLayout
+                    android:id="@+id/knowledge_editor_context_relations_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/knowledge_editor_context_warning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="6dp"
+                    android:text="@string/knowledge_editor_context_disclaimer"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
 
     <FrameLayout
         android:id="@+id/document__placeholder_fragment"

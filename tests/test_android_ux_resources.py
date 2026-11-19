@@ -191,6 +191,37 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_manual_separate_warning", "knowledge_manual_preview_failed"):
                 self.assertIn(name, names)
 
+    def test_editor_context_panel_separates_journal_and_unapproved_relations(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        ids = [element.get(ANDROID + "id", "") for element in shell.iter()]
+        for name in ("knowledge_editor_context", "knowledge_editor_context_panel",
+                     "knowledge_editor_context_summary", "knowledge_editor_context_records",
+                     "knowledge_editor_context_relations_list",
+                     "knowledge_editor_context_warning"):
+            self.assertEqual(1, ids.count("@+id/" + name), name)
+        panel = next(x for x in shell.iter()
+                     if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_panel")
+        self.assertEqual("gone", panel.get(ANDROID + "visibility"))
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
+                     "KnowledgePythonBridge.editorContext(", "relation_index_state",
+                     "accepted_records", "candidate_relations", "source_current",
+                     "knowledge_editor_context_unsaved", "knowledge_editor_context_disclaimer",
+                     "jumpToSavedSource(", "openRelatedNote(", "relativePath(candidate)"):
+            self.assertIn(item, editor)
+        bridge = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        self.assertIn('"editor_note_context"', bridge)
+        for folder in ("values", "values-ru"):
+            strings = ET.parse(ROOT / f"res/{folder}/knowledge_strings.xml").getroot()
+            names = [element.get("name") for element in strings]
+            self.assertEqual(len(names), len(set(names)), folder)
+            for name in ("knowledge_editor_context", "knowledge_editor_context_accepted",
+                         "knowledge_editor_context_relations", "knowledge_editor_context_unsaved",
+                         "knowledge_editor_context_index_stale",
+                         "knowledge_editor_context_record_stale",
+                         "knowledge_editor_context_conflict"):
+                self.assertIn(name, names)
+
     def test_decision_review_previews_are_comparison_panels(self):
         core = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         for method in ("confirmRevision", "confirmSplit", "confirmMerge", "showRetractionPreview"):
