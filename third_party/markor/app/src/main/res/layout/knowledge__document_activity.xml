@@ -134,7 +134,7 @@
         android:paddingBottom="5dp"
         android:accessibilityLiveRegion="polite"
         android:ellipsize="end"
-        android:maxLines="2"
+        android:maxLines="3"
         android:text="@string/knowledge_editor_ready"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
@@ -180,7 +180,7 @@
             android:layout_weight="1"
             android:accessibilityLiveRegion="polite"
             android:ellipsize="end"
-            android:maxLines="2"
+            android:maxLines="3"
             android:paddingStart="16dp"
             android:paddingEnd="4dp"
             android:paddingTop="10dp"
@@ -259,6 +259,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="6dp"
                     android:paddingBottom="4dp"
+                    android:accessibilityHeading="true"
                     android:text="@string/knowledge_editor_context_accepted"
                     android:textAppearance="?attr/textAppearanceTitleSmall" />
 
@@ -273,6 +274,7 @@
                     android:layout_height="wrap_content"
                     android:paddingTop="10dp"
                     android:paddingBottom="4dp"
+                    android:accessibilityHeading="true"
                     android:text="@string/knowledge_editor_context_relations"
                     android:textAppearance="?attr/textAppearanceTitleSmall" />
 

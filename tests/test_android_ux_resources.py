@@ -93,6 +93,24 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         unit = ROOT.parent / "test/java/net/gsantner/markor/knowledge"
         self.assertTrue((unit / "KnowledgeProcessHistoryTest.java").exists())
 
+    def test_stage22_context_dock_a11y_and_final_consolidated_qa_contract(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        headings = {e.get(ANDROID + "text") for e in layout.iter()
+                    if e.get(ANDROID + "accessibilityHeading") == "true"}
+        self.assertTrue({"@string/knowledge_editor_context_accepted",
+                         "@string/knowledge_editor_context_relations"} <= headings)
+        document = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        self.assertIn("item.setContentDescription", document)
+        self.assertIn("item.setMinHeight", document)
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle(detail", document)
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle(list", document)
+        qa = ROOT.parents[4] / "docs/ANDROID_DEVICE_QA_STAGE22.md"
+        # ROOT = repo/third_party/markor/app/src/main, so 4 parents up is repo.
+        self.assertTrue(qa.exists())
+        checklist = qa.read_text()
+        for code in ("UI-STATE-22", "UI-HISTORY-22", "EDITOR-22-UI", "QA-52–74"):
+            self.assertIn(code, checklist)
+
     def test_all_existing_actions_remain_available_and_unique(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         observed = [element.get(ANDROID + "id", "") for element in layout.iter()]

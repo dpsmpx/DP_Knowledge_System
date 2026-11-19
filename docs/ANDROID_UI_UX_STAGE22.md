@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **thirteen slices integrated; full Stage 22 completion work in progress**. The owner confirmed ordinary decision
+Status: **thirteen slices integrated; slices 14–20 in PR #72, final CI/release in progress**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -9,6 +9,18 @@ signoff. The owner subsequently confirmed that Preview #16's updated flow
 works, but not the full QA-60 matrix. The sixth-slice read-only contextual
 knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
+
+## Twentieth slice — editor dock accessibility and final consolidated QA
+
+- Context rows retain 48dp minimum targets and expose longer local labels to
+  TalkBack when the visual row is clipped for a bounded list. The dock's
+  overview/detail pages identify themselves as accessibility panes, and the
+  accepted-versus-proposed headings are navigable. More status text remains
+  visible at enlarged font sizes.
+- The one-pass, disposable-data acceptance plan is now
+  `docs/ANDROID_DEVICE_QA_STAGE22.md`. QA-75 remains OPEN until the owner
+  observes a real device; JVM/Python checks cannot certify fonts, focus,
+  real touch, keyboard, rotations, network or OEM lifecycle.
 
 ## Nineteenth slice — redacted process history (PR #72)
 
@@ -483,24 +495,23 @@ On an Android 15 device with test notes (avoid private journal mutations):
    TalkBack. Cancel without committing for the UX smoke test. Test actual
    journal changes only with a verified backup and deliberately synthetic data.
 
-## Remaining UI/UX work
+## Remaining limitations outside the Stage 22 engineering UI closure gate
 
-- A full independent DPKS editor and intelligent workspace replacing the
-  remaining Markor note-editing engine/menu chrome, while retaining reliable
-  import/export and edit/preview workflows. The sixth slice adds a bounded
-  context panel, verified source navigation, cursor-based journal inspection and temporary inline source marks,
-  but not an inline semantic diff, persistent tablet
-  sidebar or separate Markdown renderer.
-- Accessible large-list navigation beyond the current 250 visible results,
-  filtering/chips, meaningful progress history and pause/resume controls.
-- Inline semantic diff, richer evidence, selective approval and reversible
-  proposal preview; the Decisions screen covers navigation and provenance,
-  but explicit confirmation still uses the established dialogs. The thirteenth
-  slice highlights only literal token differences, not semantic equivalence.
-- Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
-  gesture navigation/edge-to-edge insets, instrumented UI tests and measured
-  scrolling/rendering under 20k notes.
-- Complete portable app backup, secure secret management and controlled sync.
+- DPKS owns its UI, decisions, searchable library, contextual dock and
+  navigation; proven Markor internals still perform Markdown editing and
+  rendering. A fully separate Markdown engine/menu chrome may evolve later,
+  but replacing it now would risk source-file regressions.
+- Structure-aware comparison only covers uniquely formalized strict CNL
+  predicates and fields; ambiguous natural-language equivalence and broad
+  semantic diff remain explicitly unknown. Confirmation remains human-led.
+- Library now pages beyond 250 results and the Processes page retains bounded
+  local history. True pause/resume for every job (rather than cancel/restart or
+  embedding checkpoints) and system-process restoration are not implemented.
+- Android hardware acceptance of TalkBack, 200% font, edge-to-edge, rotation,
+  gesture navigation, high-volume scrolling, battery/OEM lifecycle and actual
+  UI widgets is deferred. There is no emulator-based end-to-end UI suite;
+  code-state, Android unit and Python synthetic checks are **not** a UI PASS.
+- Full portable app backup and synchronization remain separate Stage 21 debt.
 
 No UI work changes the owner-confirmed rule: original Markdown is never
 rewritten by autonomous analysis, and human confirmation is required for

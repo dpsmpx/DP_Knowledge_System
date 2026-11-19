@@ -986,6 +986,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         item.setSingleLine(false);
         item.setMaxLines(3);
         item.setText(label.length() > 260 ? label.substring(0, 260) + "…" : label);
+        // The visual row is bounded, while assistive services get a longer
+        // locally displayed label without changing the original text.
+        item.setContentDescription(label.length() > 512 ? label.substring(0, 512) + "…" : label);
+        item.setMinHeight((int) (48 * getResources().getDisplayMetrics().density));
         item.setOnClickListener(onClick);
         final LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1033,6 +1037,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             detail.setVisibility(View.GONE);
             navigation.setVisibility(View.GONE);
             list.setVisibility(View.VISIBLE);
+            ViewCompat.setAccessibilityPaneTitle(list,
+                    getString(R.string.knowledge_editor_context));
             return;
         }
         list.setVisibility(View.GONE);
@@ -1040,6 +1046,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         navigation.setVisibility(View.VISIBLE);
         ((TextView) findViewById(R.id.knowledge_editor_context_page_title))
                 .setText(dockCurrentPage.title);
+        ViewCompat.setAccessibilityPaneTitle(detail, dockCurrentPage.title);
         container.addView(dockCurrentPage.content);
         final DockPage displayed = dockCurrentPage;
         detail.post(() -> {

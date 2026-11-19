@@ -145,6 +145,11 @@ deferred rather than required after every incremental PR.
   device check reject malformed entries. Test real cancellation races,
   background recovery and screen readers together on the final APK. A
   historical Start event must never be read as proof the job is still alive.
+- **QA-75 / OPEN, DEFERRED:** twentieth-slice dock TalkBack panes, enlarged
+  labels and minimum touch targets have only resource/CI checks. The owner
+  requested **one consolidated** final hardware pass; use
+  `docs/ANDROID_DEVICE_QA_STAGE22.md`. Do not record QA-75 as PASS merely
+  because the final signed APK exists.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
