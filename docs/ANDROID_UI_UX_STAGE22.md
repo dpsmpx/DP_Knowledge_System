@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first nine slices integrated; tenth in review, device QA deferred**. The owner confirmed ordinary decision
+Status: **first ten slices integrated; tenth awaiting deferred device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -232,7 +232,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   remain separate work. Python and Android CI passed on PR #57;
   physical QA-64 is deferred at owner request.
 
-## Tenth slice — evidence and journal-linked navigation (under review)
+## Tenth slice — evidence and journal-linked navigation (integrated, QA deferred)
 
 - **Evidence, related knowledge and decision timeline** is reachable from a
   journal-backed record in the editor. The new `editor_record_evidence` bridge
@@ -253,7 +253,9 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
 - Exact source navigation, nested-dialog Back behavior, large-journal
   performance and TalkBack require later **QA-65** on synthetic Android data.
   This is not a full interactive evidence graph, a semantic diff or a
-  replacement for the Markor editing engine.
+  replacement for the Markor editing engine. Python and Android CI passed on
+  [PR #60](https://github.com/dpsmpx/DP_Knowledge_System/pull/60);
+  physical QA-65 is OPEN/DEFERRED at the owner's request.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
