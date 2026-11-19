@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DP Knowledge</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_review">Review</string>
+    <string name="nav_knowledge">Knowledge</string>
+    <string name="nav_assistant">Assistant</string>
+    <string name="nav_more">More</string>
+    <string name="library_empty_title">No notebook yet</string>
+    <string name="library_empty_body">Choose a folder with Markdown notes. Files stay on your device; the app never rewrites them without your explicit approval.</string>
+    <string name="library_pick_folder">Choose folder</string>
+    <string name="review_placeholder">Candidate review will appear here after semantic analysis.</string>
+    <string name="knowledge_placeholder">Approved knowledge, contradictions and provenance will live here.</string>
+    <string name="assistant_placeholder">Ask the deterministic core offline. Optional LLM is opt-in and separate.</string>
+    <string name="more_title">Settings and tools</string>
+    <string name="process_idle">No background work</string>
+    <string name="shell_banner">UI shell 0.22.0 — knowledge core bridge lands in 22.1+</string>
+</resources>
