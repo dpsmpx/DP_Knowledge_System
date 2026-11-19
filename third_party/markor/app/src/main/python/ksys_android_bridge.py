@@ -21,7 +21,7 @@ from ksys.importer.vault import import_vault, MARKDOWN_EXT
 from ksys.importer.relations import related_claims
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.db import connect
-from ksys.store.kb import KnowledgeBase
+from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.store.workspace import Workspace
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
@@ -373,6 +373,99 @@ def retract_decision(workspace_dir: str, record_id: str, expected_head: str | No
         "journal_ids": [entry.id for entry in result.entries],
         "journal_head": kb.journal.head,
         "decision": "retract",
+        "affected_derived": len(result.auth.removed),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _revision_preview(kb: KnowledgeBase, record_id: str, statement: str):
+    """Validate a human-authored replacement without touching any file."""
+    if not isinstance(statement, str) or not statement.strip() or len(statement) > 2000:
+        raise ValueError("Replacement must contain 1–2000 characters")
+    rec = kb.state.records.get(record_id)
+    if rec is None or not kb.state.active(record_id) or rec.role not in (
+            "claim", "hypothesis", "fact"):
+        raise ValueError("Record cannot be revised in the Android editor")
+    preview = kb.preview(statement.strip(), origin="android-revision:" + record_id,
+                         mode="assert")
+    if preview.formalization.status in ("NO_PARSE", "UNRESOLVED"):
+        raise ValueError("Replacement cannot be unambiguously formalized")
+    options = []
+    for candidate in preview.options:
+        if len(candidate["nodes"]) != 1 or candidate["unresolved"] or any(
+                str(d.get("severity", "")).lower() == "error"
+                for d in candidate["diagnostics"]):
+            continue
+        node = convert_role(candidate["nodes"][0], rec.role)
+        # Duplicate IDs must be resolved through a separate merge workflow.
+        if node.id == record_id or kb.state.active(node.id) or node.id in kb.state.rejected:
+            continue
+        options.append((candidate, node))
+    if not options:
+        raise ValueError("No safe replacement interpretation available")
+    return rec, preview, options
+
+
+def preview_revision(workspace_dir: str, record_id: str, statement: str) -> str:
+    """Read-only preview; conflicts and exact interpretation remain visible."""
+    kb = _kb(workspace_dir)
+    rec, preview, options = _revision_preview(kb, record_id, statement)
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "record_id": record_id,
+        "journal_head": kb.journal.head,
+        "statement_hash": _source_hash(statement),
+        "role": rec.role,
+        "old_summary": rec.node.ksf()[:4000],
+        "old_summary_truncated": len(rec.node.ksf()) > 4000,
+        "parse_status": preview.formalization.status,
+        "options": [{
+            "reading_id": o[0]["reading_id"],
+            "paraphrase": o[0]["paraphrase"][:1000],
+            "new_summary": o[1].ksf()[:4000],
+            "new_summary_truncated": len(o[1].ksf()) > 4000,
+            "conflict_count": len(o[0]["conflicts"]),
+            "diagnostic_count": len(o[0]["diagnostics"]),
+        } for o in options],
+        "requires_human_confirmation": True,
+        "read_only": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def revise_decision(workspace_dir: str, record_id: str, statement: str,
+                    reading_id: str, reason: str, expected_hash: str,
+                    expected_head: str | None) -> str:
+    """Commit only an explicitly confirmed, freshly revalidated one-node edit."""
+    if _source_hash(statement) != expected_hash:
+        raise ValueError("Replacement changed after preview")
+    if not isinstance(reason, str) or len(reason) > 1000:
+        raise ValueError("Reason is too long")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed after revision preview")
+    _, _, options = _revision_preview(kb, record_id, statement)
+    chosen = next((n for candidate, n in options
+                   if candidate["reading_id"] == reading_id), None)
+    if chosen is None:
+        raise ValueError("Selected reading changed after preview")
+    kb.ws.init()
+    result = kb.revise(record_id, chosen,
+                       reason=reason.strip() or "explicit manual Android correction",
+                       provenance={
+                           "source_type": "human_input",
+                           "method": "manual_revision",
+                           "previous_record": record_id,
+                           "statement_sha": expected_hash,
+                           "reading_id": reading_id,
+                       })
+    if kb.journal.verify() or kb.state.active(record_id) or not kb.state.active(chosen.id):
+        raise ValueError("Revision journal state inconsistent")
+    return json.dumps({
+        "protocol": "dpksys.decision.v1",
+        "decision": "revise",
+        "old_record_id": record_id,
+        "new_record_id": chosen.id,
+        "journal_ids": [e.id for e in result.entries],
+        "journal_head": kb.journal.head,
         "affected_derived": len(result.auth.removed),
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 

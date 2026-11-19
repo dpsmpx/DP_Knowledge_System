@@ -1,15 +1,15 @@
 # Stage 17: Android device QA — decision retraction slice
 
-This is a **partial Stage 17 implementation**. The full lifecycle (edit,
-split, merge), batch review and strict automated policies are **not** complete.
+This is a **partial Stage 17 implementation**. The full lifecycle (split,
+merge), batch review and strict automated policies are **not** complete.
 
 ## One-button synthetic acceptance check
 
 1. Install the signed APK from the latest `knowledge-stage17-*` GitHub prerelease.
    Verify the accompanying `.sha256` file after downloading both artifacts.
 2. Open the Knowledge System screen in the app and tap **Run device QA + copy**.
-   The report is copied automatically. The synthetic `DECISION-17` step must
-   report `PASS`.
+   The report is copied automatically. The synthetic `DECISION-17` and
+   `REVISE-17` steps must both report `PASS`.
 3. Optionally tap **20k stress + copy** for the separate indexing load check.
 4. Send only the **redacted** report, not your real notes, API tokens, journal
    files, or vault paths. The diagnostic test creates and removes its own
@@ -24,6 +24,15 @@ split, merge), batch review and strict automated policies are **not** complete.
 - Append an explicit retraction and confirm the record becomes inactive.
 - Reject an attempt to retract the same record again.
 - Confirm the synthetic source hash has not changed.
+
+`REVISE-17` independently exercises the real Python `revise` path:
+
+- Accept a synthetic fact and preview a different, single-node replacement.
+- Reject a stale-head revision without changing the active record.
+- Append one `revise` journal operation, retire the old record and activate
+  only the replacement (while keeping history intact).
+- Reject a repeated revision of the now-obsolete record.
+- Check that the source hash is identical before and after the revision.
 
 All output is count/boolean only. Any unexpected exception is reported only
 by type, without a path, message or note text.
@@ -44,8 +53,14 @@ by type, without a path, message or note text.
 5. Repeat the preview after any concurrent decision change: the stale preview
    must fail rather than silently retract a different state.
 
-The current screen allows a **single human-approved retraction**, not bulk
-or automatic changes. The old record and provenance remain in the journal.
+For a manual revision, choose **Revise with a new statement…** for a claim,
+hypothesis or fact. Type a new standalone statement and optionally a reason;
+select the formally analyzed reading. The final dialog shows the old and new
+representations and conflict/diagnostic counts. **Cancel** must leave the
+journal unchanged. Confirm only on an isolated test journal you can restore.
+
+The current screen allows a **single human-approved retraction or revision**,
+not bulk or automatic changes. The old record and provenance remain in the journal.
 Original Markdown is never modified by this feature.
 
 ## Outstanding QA and development debts
@@ -58,7 +73,7 @@ Original Markdown is never modified by this feature.
   Android/OEM restrictions, power management, interrupted operations.
 - `DEBT-01`: complete encrypted export/import, default daily backups, cloud
   synchronization and permission handling.
-- Full Stage 17: revision, split/merge, versioned policy records, batch
+- Full Stage 17: split/merge, revision edge-cases, versioned policy records, batch
   acceptance and verifiably safe auto-approval; no automatic fact promotion.
 
 The previous Android 15 owner report showed `RECONCILE-16 PASS`, while two
