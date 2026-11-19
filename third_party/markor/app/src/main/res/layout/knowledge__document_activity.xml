@@ -92,6 +92,14 @@
                 android:text="@string/knowledge_editor_context" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_editor_highlights"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_editor_highlights" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/knowledge_editor_review_selection"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
@@ -122,6 +130,19 @@
         android:text="@string/knowledge_editor_ready"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/knowledge_editor_highlight_legend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurfaceContainer"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
+        android:textColor="?attr/colorOnSurface"
+        android:textSize="12sp"
+        android:visibility="gone" />
 
     <LinearLayout
         android:id="@+id/knowledge_editor_context_panel"

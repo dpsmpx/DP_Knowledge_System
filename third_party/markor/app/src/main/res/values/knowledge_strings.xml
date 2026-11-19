@@ -404,6 +404,17 @@
     <string name="knowledge_editor_context_jump">Show source in editor</string>
     <string name="knowledge_editor_context_reload">Source or editor buffer changed. Refresh context before jumping.</string>
     <string name="knowledge_editor_context_failed">Could not load local knowledge context. No files or journal were changed.</string>
+    <string name="knowledge_editor_highlights">Highlight knowledge</string>
+    <string name="knowledge_editor_highlights_hide">Hide highlights</string>
+    <string name="knowledge_editor_highlights_loading">Reading verified source locations from the local journal…</string>
+    <string name="knowledge_editor_highlights_edit_mode">Switch to Edit mode to highlight Markdown. Preview is unchanged.</string>
+    <string name="knowledge_editor_highlights_stale">Source or editor text changed; highlights were removed. Save and refresh before highlighting again.</string>
+    <string name="knowledge_editor_highlights_empty">No verified accepted source spans to highlight. Older or stale records are never guessed.</string>
+    <string name="knowledge_editor_highlights_off">Temporary knowledge highlights are hidden.</string>
+    <string name="knowledge_editor_highlights_active">Only origins of accepted journal records are marked; highlighting does not prove truth or alter Markdown.</string>
+    <string name="knowledge_editor_highlights_summary">Highlighted %1$d of %2$d source areas · Unverified origins: %3$d\n</string>
+    <string name="knowledge_editor_highlights_mixed">multiple roles</string>
+    <string name="knowledge_editor_highlights_truncated">Only the first 128 source areas are highlighted. This is not the full journal.</string>
     <string name="knowledge_diff_before">Before · accepted knowledge</string>
     <string name="knowledge_diff_before_first">Before · first record</string>
     <string name="knowledge_diff_before_second">Before · second record</string>

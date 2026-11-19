@@ -9,6 +9,11 @@ package net.gsantner.markor.knowledge;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.Spannable;
+import android.text.SpannableStringBuilder;
+import android.text.TextWatcher;
+import android.text.style.BackgroundColorSpan;
 import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
@@ -20,6 +25,7 @@ import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.graphics.ColorUtils;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
@@ -30,6 +36,7 @@ import net.gsantner.markor.R;
 import net.gsantner.markor.activity.DocumentActivity;
 import net.gsantner.markor.activity.DocumentEditAndViewFragment;
 import net.gsantner.markor.model.Document;
+import net.gsantner.markor.frontend.textview.HighlightingEditor;
 import net.gsantner.opoc.frontend.base.GsFragmentBase;
 
 import org.json.JSONArray;
@@ -41,6 +48,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -51,8 +59,13 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private static final int MAX_SOURCE_BYTES = 2_000_000;
     private final ExecutorService knowledgeWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger operationGeneration = new AtomicInteger();
+    private final AtomicInteger highlightGeneration = new AtomicInteger();
+    private final List<BackgroundColorSpan> inlineKnowledgeSpans = new ArrayList<>();
     private TextView knowledgeStatus;
     private MaterialButtonToggleGroup modeButtons;
+    private HighlightingEditor highlightedEditor;
+    private TextWatcher highlightWatcher;
+    private boolean highlightsRequested;
 
     public static void open(final Activity activity, final File file) {
         final Intent intent = new Intent(activity, KnowledgeDocumentActivity.class);
@@ -71,6 +84,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         findViewById(R.id.knowledge_editor_save).setOnClickListener(view -> saveExplicitly());
         findViewById(R.id.knowledge_editor_inspect).setOnClickListener(view -> inspectDocument());
         findViewById(R.id.knowledge_editor_context).setOnClickListener(view -> toggleKnowledgeContext());
+        findViewById(R.id.knowledge_editor_highlights).setOnClickListener(view -> toggleEditorHighlights());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
         findViewById(R.id.knowledge_editor_backlinks).setOnClickListener(view -> showBacklinks());
         final Toolbar toolbar = findViewById(R.id.toolbar);
@@ -96,6 +110,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     }
 
     private void setMode(final boolean preview) {
+        if (preview) clearEditorHighlights();
         final DocumentEditAndViewFragment fragment = editor();
         if (fragment == null) return;
         if (fragment.isViewModeVisibility() != preview) {
@@ -108,6 +123,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         if (modeButtons == null) return;
         final DocumentEditAndViewFragment fragment = editor();
         if (fragment == null) return;
+        if (fragment.isViewModeVisibility() && highlightsRequested) clearEditorHighlights();
         final int id = fragment.isViewModeVisibility()
                 ? R.id.knowledge_editor_preview_button : R.id.knowledge_editor_edit_button;
         if (modeButtons.getCheckedButtonId() != id) modeButtons.check(id);
@@ -146,6 +162,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
 
     /** A deliberate user save via Markor's existing file writer, never analysis. */
     private void saveExplicitly() {
+        clearEditorHighlights();
         final DocumentEditAndViewFragment fragment = editor();
         if (fragment == null) return;
         final File file = fragment.getDocument().file;
@@ -357,6 +374,171 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         final StringBuilder hex = new StringBuilder(hash.length * 2);
         for (final byte b : hash) hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 0xff));
         return hex.toString();
+    }
+
+    /** Highlight verified, approved provenance only. Editable spans are not file content. */
+    private void toggleEditorHighlights() {
+        if (highlightsRequested) {
+            clearEditorHighlights();
+            setKnowledgeStatus(R.string.knowledge_editor_highlights_off);
+            return;
+        }
+        final DocumentEditAndViewFragment fragment = editor();
+        if (fragment == null) return;
+        if (fragment.isViewModeVisibility()) {
+            setKnowledgeStatus(R.string.knowledge_editor_highlights_edit_mode);
+            return;
+        }
+        final File file = fragment.getDocument().file;
+        final String path;
+        try {
+            path = relativePath(file);
+        } catch (IOException ignored) {
+            setKnowledgeStatus(R.string.knowledge_editor_source_invalid);
+            return;
+        }
+        final String editorSnapshot = fragment.getTextString();
+        final int generation = highlightGeneration.incrementAndGet();
+        highlightsRequested = true;
+        ((MaterialButton) findViewById(R.id.knowledge_editor_highlights))
+                .setText(R.string.knowledge_editor_highlights_hide);
+        setKnowledgeStatus(R.string.knowledge_editor_highlights_loading);
+        knowledgeWorker.submit(() -> {
+            try {
+                if (!path.equals(relativePath(file))) throw new IOException("Selected vault changed");
+                final String saved = readSavedNote(file.getCanonicalFile());
+                if (!saved.equals(editorSnapshot)) throw new IOException("Unsaved editor buffer");
+                final JSONObject result = KnowledgePythonBridge.editorHighlights(this,
+                        new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
+                        path, saved);
+                if (!sha256(saved).equals(result.optString("source_hash"))) {
+                    throw new IOException("Highlights do not match saved source");
+                }
+                runOnUiThread(() -> {
+                    if (highlightGeneration.get() != generation || !highlightsRequested
+                            || isFinishing() || isDestroyed()) return;
+                    final DocumentEditAndViewFragment current = editor();
+                    if (current == null || current.isViewModeVisibility()
+                            || !saved.equals(current.getTextString())) {
+                        clearEditorHighlights();
+                        setKnowledgeStatus(R.string.knowledge_editor_highlights_stale);
+                        return;
+                    }
+                    applyEditorHighlights(current.getEditor(), result, saved);
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> {
+                    if (highlightGeneration.get() == generation && highlightsRequested
+                            && !isFinishing() && !isDestroyed()) {
+                        clearEditorHighlights();
+                        setKnowledgeStatus(R.string.knowledge_editor_highlights_stale);
+                    }
+                });
+            }
+        });
+    }
+
+    private int knowledgeHighlightColor(final View view, final String role) {
+        final int attribute;
+        switch (role) {
+            case "fact": attribute = com.google.android.material.R.attr.colorPrimaryContainer; break;
+            case "hypothesis": attribute = com.google.android.material.R.attr.colorTertiaryContainer; break;
+            case "claim": attribute = com.google.android.material.R.attr.colorSecondaryContainer; break;
+            default: attribute = com.google.android.material.R.attr.colorOutline; break;
+        }
+        return ColorUtils.setAlphaComponent(MaterialColors.getColor(view, attribute), 100);
+    }
+
+    private void applyEditorHighlights(final HighlightingEditor edit,
+                                       final JSONObject result, final String snapshot) {
+        clearEditorHighlights();
+        final Editable text = edit.getText();
+        if (text == null || !snapshot.contentEquals(text)) {
+            setKnowledgeStatus(R.string.knowledge_editor_highlights_stale);
+            return;
+        }
+        final JSONArray positions = result.optJSONArray("highlights");
+        final int totalCodepoints = snapshot.codePointCount(0, snapshot.length());
+        final int amount = positions == null ? 0 : Math.min(positions.length(), 128);
+        int previousCodepoint = 0;
+        int previousUtf16 = 0;
+        for (int i = 0; i < amount; i++) {
+            final JSONObject item = positions.optJSONObject(i);
+            if (item == null) continue;
+            final int start = item.optInt("start", -1);
+            final int end = item.optInt("end", -1);
+            if (start < previousCodepoint || end <= start || end > totalCodepoints) continue;
+            // Sorted, non-overlapping Unicode spans: traverse each prefix only
+            // once instead of rescanning a large note for every highlight.
+            final int startUtf16 = snapshot.offsetByCodePoints(previousUtf16,
+                    start - previousCodepoint);
+            final int endUtf16 = snapshot.offsetByCodePoints(startUtf16, end - start);
+            previousCodepoint = end;
+            previousUtf16 = endUtf16;
+            final BackgroundColorSpan span = new BackgroundColorSpan(
+                    knowledgeHighlightColor(edit, item.optString("role")));
+            text.setSpan(span, startUtf16, endUtf16, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            inlineKnowledgeSpans.add(span);
+        }
+        if (inlineKnowledgeSpans.isEmpty()) {
+            setKnowledgeStatus(R.string.knowledge_editor_highlights_empty);
+            return;
+        }
+        highlightedEditor = edit;
+        highlightWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(final CharSequence s, final int start,
+                                                    final int count, final int after) { }
+            @Override public void onTextChanged(final CharSequence s, final int start,
+                                               final int before, final int count) { }
+            @Override public void afterTextChanged(final Editable editable) {
+                clearEditorHighlights();
+                setKnowledgeStatus(R.string.knowledge_editor_highlights_stale);
+            }
+        };
+        edit.addTextChangedListener(highlightWatcher);
+        highlightsRequested = true;
+        ((MaterialButton) findViewById(R.id.knowledge_editor_highlights))
+                .setText(R.string.knowledge_editor_highlights_hide);
+        final TextView legend = findViewById(R.id.knowledge_editor_highlight_legend);
+        final SpannableStringBuilder labels = new SpannableStringBuilder(getString(
+                R.string.knowledge_editor_highlights_summary, inlineKnowledgeSpans.size(),
+                result.optInt("highlight_total"), result.optInt("unverified_origins")));
+        final String[] roles = {"fact", "hypothesis", "claim", "mixed"};
+        for (final String role : roles) {
+            labels.append("  ");
+            final int start = labels.length();
+            labels.append(" ").append("mixed".equals(role)
+                    ? getString(R.string.knowledge_editor_highlights_mixed)
+                    : editorKnowledgeRole(role)).append(" ");
+            labels.setSpan(new BackgroundColorSpan(knowledgeHighlightColor(legend, role)),
+                    start, labels.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        if (result.optBoolean("truncated")) {
+            labels.append("\n").append(getString(R.string.knowledge_editor_highlights_truncated));
+        }
+        legend.setText(labels);
+        legend.setVisibility(View.VISIBLE);
+        setKnowledgeStatus(R.string.knowledge_editor_highlights_active);
+    }
+
+    /** Remove only DPKS-owned decoration and watcher; never replace the text. */
+    private void clearEditorHighlights() {
+        highlightGeneration.incrementAndGet();
+        highlightsRequested = false;
+        if (highlightedEditor != null) {
+            if (highlightWatcher != null) highlightedEditor.removeTextChangedListener(highlightWatcher);
+            final Editable buffer = highlightedEditor.getText();
+            if (buffer != null) {
+                for (final BackgroundColorSpan span : inlineKnowledgeSpans) buffer.removeSpan(span);
+            }
+        }
+        highlightedEditor = null;
+        highlightWatcher = null;
+        inlineKnowledgeSpans.clear();
+        final View legend = findViewById(R.id.knowledge_editor_highlight_legend);
+        if (legend != null) legend.setVisibility(View.GONE);
+        final MaterialButton button = findViewById(R.id.knowledge_editor_highlights);
+        if (button != null) button.setText(R.string.knowledge_editor_highlights);
     }
 
     /**
@@ -741,6 +923,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     protected void onStop() {
         // Do not surface stale dialogs over the library or another editor.
         operationGeneration.incrementAndGet();
+        clearEditorHighlights();
         final View context = findViewById(R.id.knowledge_editor_context_panel);
         if (context != null) context.setVisibility(View.GONE);
         super.onStop();
@@ -749,6 +932,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     @Override
     protected void onDestroy() {
         operationGeneration.incrementAndGet();
+        clearEditorHighlights();
         knowledgeWorker.shutdownNow();
         super.onDestroy();
     }

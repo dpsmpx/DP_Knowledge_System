@@ -95,11 +95,13 @@ deferred rather than required after every incremental PR.
   in a later batched device acceptance run; automated tests are not a UI PASS.
 - **QA-62 / OPEN, DEFERRED:** seventh-slice source-span alignment and separate
   source/KSF comparison have only synthetic CI coverage; no device PASS.
+- **QA-63 / OPEN, DEFERRED:** eighth-slice temporary inline highlights have
+  synthetic checks only; the Markor editor lifecycle and colors need device QA.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
-  separate source/KSF view exist, but semantic backlinks, live highlighting
-  and full semantic diff are not implemented.
+  separate source/KSF view and bounded temporary provenance highlights exist,
+  but semantic backlinks, editable inline review and full diff are not implemented.
 - **QA-54 / PARTIAL USER FEEDBACK:** owner reports working decision review in
   Preview #14. This does not close unperformed TalkBack, stress or lifecycle
   acceptance checks in docs/STAGE22_DECISIONS_QA.md.
@@ -149,3 +151,22 @@ include private text, filesystem paths or credentials in public CI/QA logs.
 4. Check back navigation, rotation, app stop/resume, font scale 200%, TalkBack,
    light/dark theme and slow source reads. No unexpected journal/source write,
    no personal text in logs; keep QA-62 OPEN until completed on-device.
+
+## QA-63 — deferred inline highlighting checklist
+
+1. On a disposable note with two identical sentences and emoji preceding the
+   second, accept **only the second** as a claim. Press **Подсветить знания**:
+   the exact second source must be tinted without changing its characters or
+   the note SHA. Toggle off and confirm all decorations vanish.
+2. Create approved fact and hypothesis origins in different synthetic ranges.
+   Confirm the legend/contrast in light/dark/dynamic theme. Overlapping
+   different epistemic roles must appear as **mixed**, never a proven fact.
+3. Run analysis producing only unapproved index candidates and no journal:
+   **no source is highlighted**. Repeat with stale/missing provenance,
+   an unsaved edit, changed disk source, and a journal with more than 128
+   distinct ranges. Check count, truncation and refusal, not false negatives.
+4. While highlights are visible, type, change to Preview via both DPKS and
+   Markor actions, save, switch apps, rotate or close editor: decorations must
+   disappear and must never enter persisted Markdown. Return to Edit and
+   activate again explicitly. Assess keyboard, scrolling, TalkBack/200% text,
+   20k performance and no personal content in telemetry or public QA logs.
