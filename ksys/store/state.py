@@ -32,6 +32,7 @@ class Record:
     supersedes: list = field(default_factory=list)
     superseded_by: str | None = None
     obsoleted_by: str | None = None   # J:-решение, сделавшее запись OBSOLETE
+    superseded_by_many: list = field(default_factory=list)  # split → all successor record ids
 
     @property
     def authoritative(self) -> bool:
@@ -42,7 +43,8 @@ class Record:
                 "knowledge_type": self.knowledge_type, "confidence": self.confidence.value,
                 "provenance": self.provenance, "created_at": self.created_at, "updated_at": self.updated_at,
                 "journal": self.journal, "supersedes": self.supersedes, "superseded_by": self.superseded_by,
-                "obsoleted_by": self.obsoleted_by, "ksf": self.node.ksf()}
+                "obsoleted_by": self.obsoleted_by, "superseded_by_many": self.superseded_by_many,
+                "ksf": self.node.ksf()}
 
 
 @dataclass
@@ -136,6 +138,18 @@ class KnowledgeState:
             else:
                 self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR, f"revise of unknown {d['target']}",
                                                    location=e.id))
+        elif e.op == "split":
+            target = d["target"]
+            nodes = [node_from_dict(item) for item in d["nodes"]]
+            if self.active(target) and len(nodes) == 2 and len({node.id for node in nodes}) == 2 \
+                    and all(node.id not in self.records and node.id not in self.rejected for node in nodes):
+                self._obsolete(target, e, ch, nodes[0].id)
+                self.records[target].superseded_by_many = [node.id for node in nodes]
+                for node in nodes:
+                    self._accept(node, d, e, ch, supersedes=target)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "split target inactive or successors invalid", location=e.id))
         elif e.op == "resolve":
             self.choices[d["origin"]] = d["reading_id"]
         elif e.op == "bind":

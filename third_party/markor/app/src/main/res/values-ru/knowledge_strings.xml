@@ -103,6 +103,7 @@
     <string name="knowledge_retract_failed">Ничего не изменено: журнал мог обновиться или запись стала недоступна. Откройте список заново.</string>
     <string name="knowledge_decision_actions">Изменить запись знаний</string>
     <string name="knowledge_revise_action">Исправить новым утверждением…</string>
+    <string name="knowledge_split_action">Разделить на два самостоятельных утверждения…</string>
     <string name="knowledge_retract_action">Просмотреть отзыв…</string>
     <string name="knowledge_revision_title">Ручной пересмотр знания</string>
     <string name="knowledge_revision_text_hint">Введите новое утверждение обычным языком</string>
@@ -114,6 +115,16 @@
     <string name="knowledge_revision_conflicts">Возможные конфликты: %1$d; диагностика: %2$d. Проверьте до принятия.</string>
     <string name="knowledge_revision_saved">Исправление записано. Предыдущая история журнала сохранена.</string>
     <string name="knowledge_revision_failed">Исправление не сохранено: изменился журнал, интерпретация или текст некорректен. Откройте и проверьте заново.</string>
+    <string name="knowledge_split_title">Ручное разделение одной записи знаний</string>
+    <string name="knowledge_split_first_hint">Первое новое самостоятельное утверждение</string>
+    <string name="knowledge_split_second_hint">Второе новое самостоятельное утверждение</string>
+    <string name="knowledge_split_choose_first">Выберите формальное прочтение первого</string>
+    <string name="knowledge_split_choose_second">Выберите формальное прочтение второго</string>
+    <string name="knowledge_split_confirm">Подтвердить разделение на две записи</string>
+    <string name="knowledge_split_diagnostics">Возможные конфликты: %1$d; диагностика: %2$d.</string>
+    <string name="knowledge_split_warning">Оба новых утверждения — ваши самостоятельные решения, а не доказанные следствия старой записи. Старая запись станет устаревшей, две новые атомарно попадут в приватный журнал. Исходный Markdown не изменится. Предварительно сохраните резервную копию журнала.</string>
+    <string name="knowledge_split_saved">Разделение записано. Две новые записи активны, история сохранена.</string>
+    <string name="knowledge_split_failed">Разделение не записано. Утверждения или прочтения некорректны или совпадают, либо изменился журнал. Откройте запись и повторите просмотр.</string>
     <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
     <string name="knowledge_diagnostic_count">Сообщений проверки: %1$d</string>
     <string name="knowledge_diagnostics">Состояние знаний</string>

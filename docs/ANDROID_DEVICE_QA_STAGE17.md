@@ -1,7 +1,8 @@
-# Stage 17: Android device QA — decision retraction slice
+# Stage 17: Android device QA — human decision lifecycle slices
 
-This is a **partial Stage 17 implementation**. The full lifecycle (split,
-merge), batch review and strict automated policies are **not** complete.
+This is a **partial Stage 17 implementation**. Only one-record retraction,
+revision and one-to-two split exist; multi-record merge, batch review and
+strict automated policies are **not** complete.
 
 ## One-button synthetic acceptance check
 
@@ -9,7 +10,7 @@ merge), batch review and strict automated policies are **not** complete.
    Verify the accompanying `.sha256` file after downloading both artifacts.
 2. Open the Knowledge System screen in the app and tap **Run device QA + copy**.
    The report is copied automatically. The synthetic `DECISION-17` and
-   `REVISE-17` steps must both report `PASS`.
+   `REVISE-17` and `SPLIT-17` must all report `PASS`.
 3. Optionally tap **20k stress + copy** for the separate indexing load check.
 4. Send only the **redacted** report, not your real notes, API tokens, journal
    files, or vault paths. The diagnostic test creates and removes its own
@@ -33,6 +34,15 @@ merge), batch review and strict automated policies are **not** complete.
   only the replacement (while keeping history intact).
 - Reject a repeated revision of the now-obsolete record.
 - Check that the source hash is identical before and after the revision.
+
+`SPLIT-17` exercises the new one-to-two atomic journal transition:
+
+- Accept one synthetic fact; preview two distinct formally interpreted successors.
+- Reject stale-head confirmation before any append.
+- Append a **single** `split` entry, retire the old record and activate both
+  independent successors; preserve back-references in journal replay.
+- Reject repeating the split on an obsolete record.
+- Verify the synthetic source hash is unchanged.
 
 All output is count/boolean only. Any unexpected exception is reported only
 by type, without a path, message or note text.
@@ -60,7 +70,11 @@ representations and conflict/diagnostic counts. **Cancel** must leave the
 journal unchanged. Confirm only on an isolated test journal you can restore.
 
 The current screen allows a **single human-approved retraction or revision**,
-not bulk or automatic changes. The old record and provenance remain in the journal.
+or a human-approved split into exactly two independent statements. For split,
+enter two separate statements, choose each formal reading and inspect the final
+comparison; cancelling must not append. Test only with a backed-up disposable
+journal. This is not automatic knowledge derivation: the user independently
+stands behind both new statements. The old record and provenance remain in the journal.
 Original Markdown is never modified by this feature.
 
 ## Outstanding QA and development debts
@@ -73,9 +87,10 @@ Original Markdown is never modified by this feature.
   Android/OEM restrictions, power management, interrupted operations.
 - `DEBT-01`: complete encrypted export/import, default daily backups, cloud
   synchronization and permission handling.
-- Full Stage 17: split/merge, revision edge-cases, versioned policy records, batch
+- Full Stage 17: multi-record merge, split/revision edge-cases, versioned policy records, batch
   acceptance and verifiably safe auto-approval; no automatic fact promotion.
 
-The previous Android 15 owner report showed `RECONCILE-16 PASS`, while two
-SQLite warnings and manual/future checks remained. It does **not** substitute
-for running the new `DECISION-17` test on the target device.
+The previous Android 15 owner report confirmed `DECISION-17 PASS` and
+`REVISE-17 PASS` in isolated synthetic tests, while two SQLite warnings and
+manual/future checks remained. **It does not validate the new `SPLIT-17` test**;
+run the current APK on the actual device before marking that step passed.
