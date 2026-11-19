@@ -59,6 +59,15 @@ public final class KnowledgeDeviceQaRunner {
         }
     }
 
+    /** Fixed fields from artificial fixtures only; never an arbitrary SQLite error string. */
+    private static final class SyntheticMismatch extends IllegalStateException {
+        private final String countOnlyDetails;
+
+        SyntheticMismatch(final String countOnlyDetails) {
+            this.countOnlyDetails = countOnlyDetails;
+        }
+    }
+
     private final Context context;
     private final File notebook;
     private final KnowledgeLocalIndex actualIndex;
@@ -142,6 +151,9 @@ public final class KnowledgeDeviceQaRunner {
             throw cancelled;
         } catch (SkippedCheck skipped) {
             report.add("SKIP", code, SystemClock.elapsedRealtime() - start, skipped.reason);
+        } catch (SyntheticMismatch mismatch) {
+            report.add("FAIL", code, SystemClock.elapsedRealtime() - start,
+                    mismatch.countOnlyDetails);
         } catch (Exception error) {
             report.add("FAIL", code, SystemClock.elapsedRealtime() - start,
                     "exception=" + safeErrorClass(error) + " (details withheld for privacy)");
@@ -179,9 +191,14 @@ public final class KnowledgeDeviceQaRunner {
         final KnowledgeLocalIndex.IndexHealth health = actualIndex.healthReport();
         if (!health.isHealthy()) {
             report.add("WARN", "INDEX-INTEGRITY", 0,
-                    "index inconsistent; rebuild requires explicit approval");
+                    health.isStructurallyHealthy()
+                            ? "SQLite read-only quick_check non-ok; structural counts agree; "
+                                    + "cannot distinguish engine limitation from corruption; no repair performed"
+                            : "index relationships inconsistent; rebuild requires explicit approval");
         }
         return "quick_check=" + ("ok".equals(health.quickCheck) ? "ok" : "not-ok")
+                + ", sqliteVersion=" + safeVersion(health.sqliteVersion)
+                + ", structuralHealthy=" + health.isStructurallyHealthy()
                 + ", healthy=" + health.isHealthy()
                 + ", sources=" + health.sources + ", fts=" + health.textRows
                 + ", missingFts=" + health.missingTextRows
@@ -311,29 +328,66 @@ public final class KnowledgeDeviceQaRunner {
             final long indexMillis = SystemClock.elapsedRealtime() - indexStart;
             ensureRunning();
             final List<KnowledgeLocalIndex.Hit> hits = testIndex.search("amber", 8);
-            final KnowledgeLocalIndex.IndexHealth health = testIndex.healthReport();
-            if (first.indexed != total || hits.isEmpty()
-                    || !health.isHealthy() || health.sources != total) {
-                throw new IllegalStateException("Synthetic index/search mismatch");
+            final KnowledgeLocalIndex.IndexHealth readOnlyHealth = testIndex.healthReport();
+            // This second connection is ONLY for a brand-new disposable QA DB.
+            // The actual user index is never opened read/write by diagnostics.
+            final KnowledgeLocalIndex.IndexHealth comparisonHealth =
+                    testIndex.syntheticHealthOnReadWriteConnection();
+            final KnowledgeDeviceQaSqliteVerdict.Result verdict =
+                    KnowledgeDeviceQaSqliteVerdict.assess(total, first.indexed, hits.size(),
+                            readOnlyHealth.sources, readOnlyHealth.textRows,
+                            readOnlyHealth.missingTextRows, readOnlyHealth.orphanTextRows,
+                            readOnlyHealth.isStructurallyHealthy(),
+                            "ok".equals(readOnlyHealth.quickCheck),
+                            "ok".equals(comparisonHealth.quickCheck));
+            final String counts = "syntheticNotes=" + total + ", indexed=" + first.indexed
+                    + ", FTS hits=" + hits.size() + ", sources=" + readOnlyHealth.sources
+                    + ", fts=" + readOnlyHealth.textRows
+                    + ", missingFts=" + readOnlyHealth.missingTextRows
+                    + ", orphanFts=" + readOnlyHealth.orphanTextRows
+                    + ", structuralHealthy=" + readOnlyHealth.isStructurallyHealthy()
+                    + ", sqliteVersion=" + safeVersion(readOnlyHealth.sqliteVersion)
+                    + ", quickCheckReadOnly=" + quickStatus(readOnlyHealth.quickCheck)
+                    + ", quickCheckSyntheticReadWrite=" + quickStatus(comparisonHealth.quickCheck)
+                    + ", verdict=" + verdict.code;
+            if (!verdict.passed) {
+                throw new SyntheticMismatch(counts);
+            }
+            if (verdict.readOnlyDiscrepancy) {
+                report.add("WARN", "SQLITE-RO-CHECK", 0,
+                        "synthetic FTS quick_check differs by connection mode; "
+                                + "real index remains read-only and unmodified; "
+                                + "manual/engine follow-up required");
             }
             if (!stress) {
                 final KnowledgeLocalIndex.SyncResult second = testIndex.synchronize(vault,
                         scan, this::isCancelled);
                 if (second.reused != total || second.indexed != 0) {
-                    throw new IllegalStateException("Incremental sync mismatch");
+                    throw new SyntheticMismatch(counts + ", incrementalReused=" + second.reused
+                            + ", incrementalIndexed=" + second.indexed
+                            + ", verdict=INCREMENTAL_SYNC_MISMATCH");
                 }
             }
             if (!Arrays.equals(referenceHash, sha256(reference))) {
-                throw new IllegalStateException("Synthetic source changed during indexing");
+                throw new SyntheticMismatch(counts + ", verdict=SOURCE_HASH_CHANGED");
             }
-            return "syntheticNotes=" + total + ", indexed=" + first.indexed
-                    + ", FTS hits=" + hits.size() + ", healthy=" + health.isHealthy()
+            return counts
                     + ", indexingMillis=" + indexMillis
                     + (stress ? ", 20k target exercised" : ", incremental reuse verified")
                     + "; synthetic source hash unchanged; all fixtures confined to app cache";
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    private static String quickStatus(final String value) {
+        return "ok".equals(value) ? "ok" : "not-ok";
+    }
+
+    /** SQLite version is not user data, but still bound its characters and length. */
+    private static String safeVersion(final String version) {
+        return version != null && version.matches("[0-9]{1,3}(\\.[0-9]{1,3}){1,3}")
+                ? version : "unknown";
     }
 
     private static void writeFixture(final File destination, final String content) throws IOException {
