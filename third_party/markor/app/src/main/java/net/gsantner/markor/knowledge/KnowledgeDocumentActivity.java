@@ -1014,6 +1014,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 ? R.string.knowledge_editor_text_diff_unavailable
                 : comparison.hasChanges() ? R.string.knowledge_editor_text_diff_legend
                 : R.string.knowledge_editor_text_diff_identical)));
+        renderStructuralComparison(body, record.optJSONObject("structured_comparison"));
         final StringBuilder detail = new StringBuilder(getString(
                 R.string.knowledge_editor_context_provenance,
                 record.optString("provenance_kind"), record.optString("locator")));
@@ -1082,6 +1083,51 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     view -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
         }
         showDockPage(editorKnowledgeRole(record.optString("role")), body);
+    }
+
+    /** The CNL/IR comparison is a bounded machine reading, never a truth verdict. */
+    private void renderStructuralComparison(final LinearLayout body, final JSONObject comparison) {
+        addEvidenceHeading(body, getString(R.string.knowledge_editor_structural_title));
+        if (comparison == null || !comparison.optBoolean("read_only")
+                || comparison.optBoolean("proves_truth")
+                || !"FORMALIZED".equals(comparison.optString("source_formalization"))) {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_unavailable)));
+            return;
+        }
+        final String state = comparison.optString("status");
+        if ("same_structure".equals(state)) {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_same)));
+        } else if ("different_structure".equals(state)) {
+            final JSONArray changes = comparison.optJSONArray("changed_fields");
+            if (changes == null || changes.length() == 0 || changes.length() > 6) {
+                body.addView(contextDetailText(getString(
+                        R.string.knowledge_editor_structural_unavailable)));
+                return;
+            }
+            for (int i = 0; i < changes.length(); i++) {
+                final JSONObject changed = changes.optJSONObject(i);
+                if (changed == null) continue;
+                body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_change,
+                        structuralField(changed.optString("field")),
+                        changed.optString("source"), changed.optString("accepted"))));
+            }
+        } else {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_unavailable)));
+            return;
+        }
+        body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_disclaimer)));
+    }
+
+    private String structuralField(final String field) {
+        switch (field) {
+            case "predicate": return getString(R.string.knowledge_editor_structural_predicate);
+            case "arguments": return getString(R.string.knowledge_editor_structural_arguments);
+            case "negation": return getString(R.string.knowledge_editor_structural_negation);
+            case "modality": return getString(R.string.knowledge_editor_structural_modality);
+            case "context": return getString(R.string.knowledge_editor_structural_context);
+            case "interval": return getString(R.string.knowledge_editor_structural_interval);
+            default: return field;
+        }
     }
 
     /** Navigate only among human-approved journal records; never index candidates. */

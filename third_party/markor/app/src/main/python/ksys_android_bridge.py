@@ -24,6 +24,8 @@ from ksys.importer.relations import related_claims
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.ir.nodes import node_from_dict
+from ksys.core.errors import KSError
+from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
@@ -206,6 +208,57 @@ def _verified_source_span(source: dict, markdown: str, source_sha: str,
         aligned.update({"source_line": before.count("\n") + 1,
                         "source_column": start - before.rfind("\n")})
     return aligned
+
+
+def _structural_editor_comparison(source_text: str, approved_node, verified: bool) -> dict:
+    """Compare unambiguous CNL-derived IR fields, without asserting truth.
+
+    Missing/stale provenance, long sources, unsupported syntax, ambiguous
+    readings and non-assertion nodes are *unknown*, never equivalent or false.
+    This is an in-memory comparison; no workspace, source or journal is opened.
+    """
+    result = {"status": "unavailable", "source_formalization": "NOT_CHECKED",
+              "changed_fields": [], "read_only": True, "proves_truth": False}
+    if not verified or not isinstance(source_text, str) or not source_text.strip() \
+            or len(source_text) > 320:
+        return result
+    approved_assertion = getattr(approved_node, "assertion", None)
+    if approved_assertion is None:
+        return result
+    try:
+        reading = Formalizer(mode="import").formalize(source_text)
+        result["source_formalization"] = reading.status
+        if reading.status != "FORMALIZED" or reading.selected is None \
+                or len(reading.selected.nodes) != 1:
+            return result
+        extracted = getattr(reading.selected.nodes[0], "assertion", None)
+        if extracted is None:
+            return result
+        old, new = extracted.payload(), approved_assertion.payload()
+        old_atom, new_atom = old["atom"], new["atom"]
+        fields = (
+            ("predicate", old_atom["p"], new_atom["p"]),
+            ("arguments", old_atom["args"], new_atom["args"]),
+            ("negation", old["neg"], new["neg"]),
+            ("modality", old["mod"], new["mod"]),
+            ("context", old.get("ctx"), new.get("ctx")),
+            ("interval", old.get("iv"), new.get("iv")),
+        )
+        differences = []
+        for field, source, accepted in fields:
+            if source == accepted:
+                continue
+            # UI diagnostics are bounded; this is display, not an IR export.
+            differences.append({"field": field,
+                                "source": json.dumps(source, ensure_ascii=False,
+                                                     sort_keys=True)[:200],
+                                "accepted": json.dumps(accepted, ensure_ascii=False,
+                                                       sort_keys=True)[:200]})
+        result["changed_fields"] = differences
+        result["status"] = "different_structure" if differences else "same_structure"
+    except (KSError, ValueError, TypeError, KeyError, AttributeError):
+        result["source_formalization"] = "UNAVAILABLE"
+    return result
 
 
 def editor_note_highlights(workspace_dir: str, relative_path: str, markdown: str) -> str:
@@ -634,6 +687,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
             "conflicts_available": conflicts_available,
             "conflict_count": len(conflict_ids) if conflicts_available else None,
             "conflicts_with": conflict_ids,
+            "structured_comparison": _structural_editor_comparison(
+                excerpt, rec.node, alignment["source_span_state"] == "verified"),
             **alignment,
         })
 

@@ -410,6 +410,17 @@
     <string name="knowledge_editor_text_diff_legend">Highlighted words and symbols differ literally between saved Markdown and accepted KSF. This is a textual comparison only; it does not establish equal or different meaning.</string>
     <string name="knowledge_editor_text_diff_identical">The displayed words and symbols match literally. This does not prove that the underlying interpretation is correct.</string>
     <string name="knowledge_editor_text_diff_unavailable">Literal comparison is unavailable for unverified, truncated, empty or oversized text. Both representations remain readable without guessed highlights.</string>
+    <string name="knowledge_editor_structural_title">Structured interpretation check</string>
+    <string name="knowledge_editor_structural_unavailable">A unique, verified source interpretation is unavailable. The system cannot compare meaning for this fragment.</string>
+    <string name="knowledge_editor_structural_same">The source parser and the accepted record produced the same normalized assertion structure.</string>
+    <string name="knowledge_editor_structural_change">%1$s\nSource reading: %2$s\nAccepted record: %3$s</string>
+    <string name="knowledge_editor_structural_disclaimer">This checks fields of a single deterministic CNL reading, not whether the note is true, complete, or equivalent in natural language. Epistemic role and provenance are separate.</string>
+    <string name="knowledge_editor_structural_predicate">Predicate</string>
+    <string name="knowledge_editor_structural_arguments">Arguments</string>
+    <string name="knowledge_editor_structural_negation">Negation</string>
+    <string name="knowledge_editor_structural_modality">Modality</string>
+    <string name="knowledge_editor_structural_context">Context</string>
+    <string name="knowledge_editor_structural_interval">Time interval</string>
     <string name="knowledge_editor_context_provenance">Origin: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Open linked note</string>
     <string name="knowledge_editor_context_jump">Show source in editor</string>

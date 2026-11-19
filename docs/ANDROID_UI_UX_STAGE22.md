@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **twelve slices integrated, Preview #18 published; thirteenth literal-comparison slice in development**. The owner confirmed ordinary decision
+Status: **thirteen slices integrated; full Stage 22 completion work in progress**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -344,6 +344,24 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   large fonts, RTL/TalkBack, rotation, stale and truncated records is pooled
   with QA-59–67. This is a *lexical* comparison, not the still-open semantic
   source-span diff or standalone Markdown editing engine.
+
+## Fourteenth slice — explicit CNL/IR structure comparison (in review)
+
+- The dock now compares a *uniquely formalized* source sentence with the
+  human-approved journal assertion using the same deterministic ksys IR.
+  Predicate, typed arguments, negation, modality, context and time interval
+  differences are shown separately from the existing **literal** token diff.
+- A missing/stale source span, unsupported punctuation, ambiguous readings,
+  sources longer than 320 Unicode code points, non-assertion nodes or a
+  parser failure give **unavailable**.
+  There is no guessed equivalence, automatic verdict on truth or promotion of
+  machine interpretation to accepted fact. The source role/provenance remain
+  separately labeled.
+- Comparison runs in memory during the existing off-main-thread context load,
+  without new index/journal/Markdown writes or network requests. Synthetic
+  unit tests cover matching IR, inserted negation, unsupported grammar,
+  stale provenance and source size bounds. **QA-69 physical UI signoff is
+  deferred** until the owner's combined device test.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee

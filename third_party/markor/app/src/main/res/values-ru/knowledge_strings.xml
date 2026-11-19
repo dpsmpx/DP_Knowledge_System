@@ -410,6 +410,17 @@
     <string name="knowledge_editor_text_diff_legend">Подсвечены слова и символы, которые буквально различаются в сохранённом Markdown и принятом KSF. Это только текстовое сравнение, не доказательство совпадения или различия смысла.</string>
     <string name="knowledge_editor_text_diff_identical">Показанные слова и символы буквально совпадают. Это не доказывает правильность интерпретации.</string>
     <string name="knowledge_editor_text_diff_unavailable">Текстовое сравнение недоступно для непроверенного, сокращённого, пустого или слишком длинного текста. Обе версии видны без предположительной подсветки.</string>
+    <string name="knowledge_editor_structural_title">Проверка структуры интерпретации</string>
+    <string name="knowledge_editor_structural_unavailable">Нет однозначной проверенной интерпретации источника. Система не может сравнить смысл этого фрагмента.</string>
+    <string name="knowledge_editor_structural_same">Парсер исходного текста и принятая запись дали одинаковую нормализованную структуру утверждения.</string>
+    <string name="knowledge_editor_structural_change">%1$s\nПрочтение источника: %2$s\nПринятая запись: %3$s</string>
+    <string name="knowledge_editor_structural_disclaimer">Сравниваются поля одного детерминированного CNL-прочтения, а не истинность, полнота или смысловая эквивалентность естественного языка. Статус знания и происхождение показаны отдельно.</string>
+    <string name="knowledge_editor_structural_predicate">Предикат</string>
+    <string name="knowledge_editor_structural_arguments">Аргументы</string>
+    <string name="knowledge_editor_structural_negation">Отрицание</string>
+    <string name="knowledge_editor_structural_modality">Модальность</string>
+    <string name="knowledge_editor_structural_context">Контекст</string>
+    <string name="knowledge_editor_structural_interval">Временной интервал</string>
     <string name="knowledge_editor_context_provenance">Происхождение: %1$s · %2$s</string>
     <string name="knowledge_editor_context_open">Открыть связанную заметку</string>
     <string name="knowledge_editor_context_jump">Показать в редакторе</string>

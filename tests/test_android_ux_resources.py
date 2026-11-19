@@ -340,6 +340,27 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 self.assertIn(name, strings)
             self.assertTrue(strings["knowledge_editor_text_diff_legend"])
 
+    def test_editor_structural_diff_discloses_uncertainty_and_separate_epistemic_roles(self):
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("renderStructuralComparison(body,", "knowledge_editor_structural_unavailable",
+                       "comparison.optBoolean(\"proves_truth\")",
+                       "knowledge_editor_structural_disclaimer"):
+            self.assertIn(marker, editor)
+        for marker in ("_structural_editor_comparison(", "Formalizer(mode=\"import\")",
+                       '"status": "unavailable"', '"proves_truth": False',
+                       '"structured_comparison": _structural_editor_comparison('):
+            self.assertIn(marker, bridge)
+        for folder_name in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{folder_name}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_editor_structural_title",
+                         "knowledge_editor_structural_same",
+                         "knowledge_editor_structural_change",
+                         "knowledge_editor_structural_unavailable",
+                         "knowledge_editor_structural_disclaimer"):
+                self.assertIn(name, names)
+
     def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
         shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
         ids = [element.get(ANDROID + "id", "") for element in shell.iter()]

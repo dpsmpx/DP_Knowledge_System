@@ -112,6 +112,12 @@ deferred rather than required after every incremental PR.
 - **QA-68 / OPEN, DEFERRED:** thirteenth-slice literal Markdown/KSF diff has
   Java unit coverage but no observed on-device contrast, selectable text,
   long-text or TalkBack verification. It is not a semantic equivalence test.
+- **QA-69 / OPEN, DEFERRED:** fourteenth-slice deterministic CNL/IR structural
+  comparison has synthetic tests, not an observed Android UI signoff.
+  Ambiguous/unparsed/stale sources must remain *unavailable*, even when a
+  human-approved KSF assertion exists. Verify category wording, contrast,
+  source/journal immutability and large-font/screen-reader behavior in the
+  combined hardware QA.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and
