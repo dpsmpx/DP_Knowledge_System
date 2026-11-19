@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first ten slices integrated; tenth awaiting deferred device QA**. The owner confirmed ordinary decision
+Status: **first ten slices integrated; eleventh under review, device QA deferred**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -256,6 +256,35 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   replacement for the Markor editing engine. Python and Android CI passed on
   [PR #60](https://github.com/dpsmpx/DP_Knowledge_System/pull/60);
   physical QA-65 is OPEN/DEFERRED at the owner's request.
+
+## Eleventh slice — persistent in-editor knowledge dock (under review)
+
+- The editor has a **permanent, compact knowledge rail** with saved-note
+  counts/status and explicit Expand, Collapse and Refresh actions. It stays
+  visible even when details are collapsed, preserving Markdown editing space.
+  The read-only context snapshot is loaded locally after the editor becomes
+  ready; it does not save, analyze with an external LLM or authorize knowledge.
+- Inside its bounded 200dp scroll area, the dock shows the separate accepted
+  journal and *unapproved tentative-index* lists, exact original Markdown vs
+  canonical KSF, verified source navigation, historical event timelines,
+  predecessor/successor links and possible conflicts. Selecting a source
+  record, indexed relation or linked journal record now opens an **inline
+  detail page**, not a succession of record/evidence confirmation dialogs.
+  The cursor-linked inspector also routes its results to the dock.
+- Back navigates a maximum of eight detached read-only detail pages and then
+  returns to the note context; a system Back press traverses this history
+  before leaving the editor. Refreshed context resets old page history. Source
+  jumps still require the previously implemented vault, SHA and full Unicode
+  span checks, collapsing only the dock body—not the permanent rail.
+- Text changes make the snapshot visibly **stale** until explicit Refresh;
+  even when unsaved, the displayed knowledge is labeled as originating from
+  the **saved note**. Dock loading has its own worker generation so it cannot
+  invalidate a concurrent editor source jump; stopped editors invalidate
+  pending dock results and detach text observers.
+- QA-66 is deferred to the later batched real-device test: viewport size,
+  keyboard/rotation, TalkBack/200% text, nested navigation, large vaults and
+  source/journal invariants remain unverified physically. This remains a
+  bounded dock, not a free-resizing independent Markdown IDE or proof engine.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee

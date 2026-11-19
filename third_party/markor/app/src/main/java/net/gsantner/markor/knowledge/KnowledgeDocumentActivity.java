@@ -64,6 +64,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private static final String JUMP_END = "dpks.editor.source.end";
     private final ExecutorService knowledgeWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger operationGeneration = new AtomicInteger();
+    private final AtomicInteger dockGeneration = new AtomicInteger();
     private final AtomicInteger highlightGeneration = new AtomicInteger();
     private final List<BackgroundColorSpan> inlineKnowledgeSpans = new ArrayList<>();
     private TextView knowledgeStatus;
@@ -71,9 +72,28 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private HighlightingEditor highlightedEditor;
     private TextWatcher highlightWatcher;
     private boolean highlightsRequested;
-    private AlertDialog evidenceDialog;
+    private boolean dockContextInitialized;
+    private boolean dockContextStale;
+    private boolean dockForeground;
+    private int dockInitAttempts;
+    private HighlightingEditor dockWatchedEditor;
+    private TextWatcher dockEditWatcher;
+    private DockPage dockCurrentPage;
+    private final List<DockPage> dockPageHistory = new ArrayList<>();
     private boolean incomingJumpStarted;
     private int incomingJumpAttempts;
+
+    /** At most eight detached, read-only views; no journal/model data is persisted. */
+    private static final class DockPage {
+        final String title;
+        final LinearLayout content;
+        int scrollY;
+
+        DockPage(final String title, final LinearLayout content) {
+            this.title = title;
+            this.content = content;
+        }
+    }
 
     public static void open(final Activity activity, final File file) {
         final Intent intent = new Intent(activity, KnowledgeDocumentActivity.class);
@@ -107,6 +127,9 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         findViewById(R.id.knowledge_editor_save).setOnClickListener(view -> saveExplicitly());
         findViewById(R.id.knowledge_editor_inspect).setOnClickListener(view -> inspectDocument());
         findViewById(R.id.knowledge_editor_context).setOnClickListener(view -> toggleKnowledgeContext());
+        findViewById(R.id.knowledge_editor_context_expand).setOnClickListener(view -> toggleKnowledgeContext());
+        findViewById(R.id.knowledge_editor_context_refresh).setOnClickListener(view -> refreshKnowledgeContext());
+        findViewById(R.id.knowledge_editor_context_back).setOnClickListener(view -> navigateDockBack());
         findViewById(R.id.knowledge_editor_highlights).setOnClickListener(view -> toggleEditorHighlights());
         findViewById(R.id.knowledge_editor_source_inspector).setOnClickListener(view -> inspectSourceKnowledge());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
@@ -163,8 +186,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        dockForeground = true;
         if (modeButtons != null) modeButtons.post(this::updateModeButtons);
         if (modeButtons != null) modeButtons.post(this::selectIncomingSource);
+        if (modeButtons != null) modeButtons.post(this::initializeContextDock);
     }
 
     /** Canonical vault-relative paths only. Never follow symlinks outside the vault. */
@@ -408,12 +433,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 result.optInt("unverified_origins"));
         knowledgeStatus.setText(suffix);
         if (count == 0) {
-            new AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setView(contextDetailText(getString(
-                            R.string.knowledge_editor_source_inspector_none) + "\n\n" + suffix))
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
+            final LinearLayout page = newDockContent();
+            page.addView(contextDetailText(getString(
+                    R.string.knowledge_editor_source_inspector_none) + "\n\n" + suffix));
+            showDockPage(title, page);
             return;
         }
         if (count == 1) {
@@ -423,26 +446,24 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             }
             return;
         }
-        final String[] labels = new String[count];
+        final LinearLayout page = newDockContent();
+        page.addView(contextDetailText(suffix));
         for (int i = 0; i < count; i++) {
             final JSONObject record = items.optJSONObject(i);
             if (record == null) continue;
-            labels[i] = editorKnowledgeRole(record.optString("role")) + " · "
+            final String label = editorKnowledgeRole(record.optString("role")) + " · "
                     + getString(record.optBoolean("active")
                     ? R.string.knowledge_editor_source_inspector_active
                     : R.string.knowledge_editor_source_inspector_historical)
                     + " · " + record.optString("statement");
-            if (labels[i].length() > 180) labels[i] = labels[i].substring(0, 180) + "…";
+            addContextRow(page, label, view -> showContextRecord(record, path,
+                    result.optString("source_hash"), savedMarkdown));
         }
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setItems(labels, (dialog, index) -> {
-                    final JSONObject record = items.optJSONObject(index);
-                    if (record != null) showContextRecord(record, path,
-                            result.optString("source_hash"), savedMarkdown);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        if (result.optBoolean("truncated")) {
+            page.addView(contextDetailText(getString(
+                    R.string.knowledge_editor_source_inspector_truncated)));
+        }
+        showDockPage(title, page);
         if (result.optBoolean("truncated")) {
             Toast.makeText(this, R.string.knowledge_editor_source_inspector_truncated,
                     Toast.LENGTH_LONG).show();
@@ -676,17 +697,65 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         if (button != null) button.setText(R.string.knowledge_editor_highlights);
     }
 
-    /**
-     * A bounded context panel grounded in the saved note. No journal/index
-     * migration, network request, or source mutation is permitted here.
-     */
+    /** The summary rail is always present; the bounded detail area is collapsible. */
     private void toggleKnowledgeContext() {
-        final View panel = findViewById(R.id.knowledge_editor_context_panel);
-        if (panel.getVisibility() == View.VISIBLE) {
-            operationGeneration.incrementAndGet();
-            panel.setVisibility(View.GONE);
+        final View body = findViewById(R.id.knowledge_editor_context_body);
+        setDockExpanded(body.getVisibility() != View.VISIBLE);
+        if (!dockContextInitialized) refreshKnowledgeContext();
+    }
+
+    private void setDockExpanded(final boolean expanded) {
+        findViewById(R.id.knowledge_editor_context_body).setVisibility(
+                expanded ? View.VISIBLE : View.GONE);
+        ((MaterialButton) findViewById(R.id.knowledge_editor_context_expand))
+                .setText(expanded ? R.string.knowledge_editor_dock_collapse
+                        : R.string.knowledge_editor_dock_expand);
+    }
+
+    private void initializeContextDock() {
+        if (!dockForeground || isFinishing() || isDestroyed()) return;
+        final DocumentEditAndViewFragment fragment = editor();
+        if (fragment == null) {
+            if (++dockInitAttempts < 30 && modeButtons != null) {
+                modeButtons.postDelayed(this::initializeContextDock, 100);
+            }
             return;
         }
+        watchDockEdits(fragment.getEditor());
+        if (!dockContextInitialized) refreshKnowledgeContext();
+    }
+
+    private void watchDockEdits(final HighlightingEditor edit) {
+        if (dockWatchedEditor == edit) return;
+        stopWatchingDockEdits();
+        dockWatchedEditor = edit;
+        dockEditWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(final CharSequence s, final int start,
+                                                    final int count, final int after) { }
+            @Override public void onTextChanged(final CharSequence s, final int start,
+                                               final int before, final int count) { }
+            @Override public void afterTextChanged(final Editable value) {
+                if (!dockContextInitialized || dockContextStale) return;
+                dockContextStale = true;
+                ((TextView) findViewById(R.id.knowledge_editor_context_summary))
+                        .setText(R.string.knowledge_editor_dock_stale);
+                ((TextView) findViewById(R.id.knowledge_editor_context_warning))
+                        .append("\n\n" + getString(R.string.knowledge_editor_context_unsaved));
+            }
+        };
+        edit.addTextChangedListener(dockEditWatcher);
+    }
+
+    private void stopWatchingDockEdits() {
+        if (dockWatchedEditor != null && dockEditWatcher != null) {
+            dockWatchedEditor.removeTextChangedListener(dockEditWatcher);
+        }
+        dockWatchedEditor = null;
+        dockEditWatcher = null;
+    }
+
+    /** Rebuild only from the saved note; never save it or promote index candidates. */
+    private void refreshKnowledgeContext() {
         final DocumentEditAndViewFragment fragment = editor();
         if (fragment == null) return;
         final File file = fragment.getDocument().file;
@@ -699,9 +768,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             setKnowledgeStatus(R.string.knowledge_editor_source_invalid);
             return;
         }
-        final String editorSnapshot = fragment.getTextString();
-        final int generation = operationGeneration.incrementAndGet();
-        panel.setVisibility(View.VISIBLE);
+        final int generation = dockGeneration.incrementAndGet();
+        dockContextInitialized = true;
+        dockContextStale = false;
+        resetDockNavigation();
         ((TextView) findViewById(R.id.knowledge_editor_context_summary))
                 .setText(R.string.knowledge_editor_context_loading);
         ((LinearLayout) findViewById(R.id.knowledge_editor_context_records)).removeAllViews();
@@ -718,14 +788,26 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                         new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
                         path, saved);
                 runOnUiThread(() -> {
-                    if (current(generation) && panel.getVisibility() == View.VISIBLE) {
-                        renderKnowledgeContext(context, saved, !saved.equals(editorSnapshot),
-                                selectedVault);
+                    if (!currentDock(generation)) return;
+                    final DocumentEditAndViewFragment currentEditor = editor();
+                    try {
+                        if (currentEditor == null || !path.equals(relativePath(
+                                currentEditor.getDocument().file))
+                                || !_appSettings.getNotebookDirectory().getCanonicalFile()
+                                .equals(selectedVault)) {
+                            throw new IOException("Vault changed");
+                        }
+                        final boolean unsaved = !saved.equals(currentEditor.getTextString());
+                        dockContextStale = unsaved;
+                        renderKnowledgeContext(context, saved, unsaved, selectedVault);
+                    } catch (IOException ignored) {
+                        ((TextView) findViewById(R.id.knowledge_editor_context_summary))
+                                .setText(R.string.knowledge_editor_context_failed);
                     }
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
-                    if (current(generation) && panel.getVisibility() == View.VISIBLE) {
+                    if (currentDock(generation)) {
                         ((TextView) findViewById(R.id.knowledge_editor_context_summary))
                                 .setText(R.string.knowledge_editor_context_failed);
                     }
@@ -809,6 +891,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         }
         ((TextView) findViewById(R.id.knowledge_editor_context_warning))
                 .setText(warnings.toString());
+        if (unsavedBuffer) {
+            ((TextView) findViewById(R.id.knowledge_editor_context_summary))
+                    .setText(R.string.knowledge_editor_dock_stale);
+        }
     }
 
     private void appendContextWarning(final StringBuilder text, final int message) {
@@ -839,6 +925,63 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         list.addView(message);
     }
 
+    private LinearLayout newDockContent() {
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        final int inset = (int) (8 * getResources().getDisplayMetrics().density);
+        content.setPadding(inset, inset, inset, inset);
+        return content;
+    }
+
+    /** At most eight back steps; previous views remain detached and read-only. */
+    private void showDockPage(final String title, final LinearLayout content) {
+        if (dockCurrentPage != null) {
+            dockCurrentPage.scrollY = ((ScrollView) findViewById(
+                    R.id.knowledge_editor_context_detail_scroll)).getScrollY();
+            if (dockPageHistory.size() >= 8) dockPageHistory.remove(0);
+            dockPageHistory.add(dockCurrentPage);
+        }
+        dockCurrentPage = new DockPage(title, content);
+        renderDockPage();
+        setDockExpanded(true);
+    }
+
+    private void renderDockPage() {
+        final ScrollView list = findViewById(R.id.knowledge_editor_context_list_scroll);
+        final ScrollView detail = findViewById(R.id.knowledge_editor_context_detail_scroll);
+        final LinearLayout container = findViewById(R.id.knowledge_editor_context_detail_content);
+        final View navigation = findViewById(R.id.knowledge_editor_context_navigation);
+        container.removeAllViews();
+        if (dockCurrentPage == null) {
+            detail.setVisibility(View.GONE);
+            navigation.setVisibility(View.GONE);
+            list.setVisibility(View.VISIBLE);
+            return;
+        }
+        list.setVisibility(View.GONE);
+        detail.setVisibility(View.VISIBLE);
+        navigation.setVisibility(View.VISIBLE);
+        ((TextView) findViewById(R.id.knowledge_editor_context_page_title))
+                .setText(dockCurrentPage.title);
+        container.addView(dockCurrentPage.content);
+        final DockPage displayed = dockCurrentPage;
+        detail.post(() -> {
+            if (dockCurrentPage == displayed) detail.scrollTo(0, displayed.scrollY);
+        });
+    }
+
+    private void navigateDockBack() {
+        dockCurrentPage = dockPageHistory.isEmpty()
+                ? null : dockPageHistory.remove(dockPageHistory.size() - 1);
+        renderDockPage();
+    }
+
+    private void resetDockNavigation() {
+        dockPageHistory.clear();
+        dockCurrentPage = null;
+        renderDockPage();
+    }
+
     private String editorKnowledgeRole(final String role) {
         switch (role) {
             case "fact": return getString(R.string.knowledge_decision_fact);
@@ -852,12 +995,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private void showContextRecord(final JSONObject record, final String path,
                                    final String savedHash, final String savedMarkdown) {
         final boolean verified = "verified".equals(record.optString("source_span_state"));
-        final ScrollView scroll = new ScrollView(this);
-        final LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        final int inset = (int) (16 * getResources().getDisplayMetrics().density);
-        body.setPadding(inset, inset, inset, inset);
-        scroll.addView(body);
+        final LinearLayout body = newDockContent();
         addComparisonBlock(body, R.string.knowledge_editor_context_source_snapshot,
                 record.optString("source_excerpt"));
         addComparisonBlock(body, R.string.knowledge_editor_context_formal_statement,
@@ -925,15 +1063,11 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             addContextRow(body, getString(R.string.knowledge_editor_evidence_open),
                     view -> inspectRecordEvidence(record.optString("id")));
         }
-        final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
-                .setTitle(editorKnowledgeRole(record.optString("role")))
-                .setView(scroll)
-                .setNegativeButton(android.R.string.cancel, null);
         if (verified) {
-            dialog.setPositiveButton(R.string.knowledge_editor_context_jump,
-                    (d, which) -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
+            addContextRow(body, getString(R.string.knowledge_editor_context_jump),
+                    view -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
         }
-        dialog.show();
+        showDockPage(editorKnowledgeRole(record.optString("role")), body);
     }
 
     /** Navigate only among human-approved journal records; never index candidates. */
@@ -963,12 +1097,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     }
 
     private void renderRecordEvidence(final JSONObject evidence) {
-        final ScrollView scroll = new ScrollView(this);
-        final LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        final int inset = (int) (16 * getResources().getDisplayMetrics().density);
-        body.setPadding(inset, inset, inset, inset);
-        scroll.addView(body);
+        final LinearLayout body = newDockContent();
         addComparisonBlock(body, R.string.knowledge_editor_context_formal_statement,
                 evidence.optString("statement"));
         body.addView(contextDetailText(editorKnowledgeRole(evidence.optString("role")) + " · "
@@ -1035,13 +1164,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             body.addView(contextDetailText(getString(R.string.knowledge_editor_evidence_truncated)));
         }
         body.addView(contextDetailText(getString(R.string.knowledge_editor_evidence_disclaimer)));
-        if (evidenceDialog != null) evidenceDialog.dismiss();
-        evidenceDialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.knowledge_editor_evidence_title)
-                .setView(scroll)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        evidenceDialog.show();
+        showDockPage(getString(R.string.knowledge_editor_evidence_title), body);
     }
 
     private void addEvidenceHeading(final LinearLayout body, final String title) {
@@ -1106,10 +1229,9 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                             final JSONObject destination = new JSONObject();
                             destination.put("source_span_state", "verified");
                             destination.put("source_span", new JSONArray().put(start).put(end));
-                            if (evidenceDialog != null) evidenceDialog.dismiss();
                             jumpToSavedSource(destination, relative, expectedSha, disk);
                         } else {
-                            if (evidenceDialog != null) evidenceDialog.dismiss();
+                            setDockExpanded(false);
                             openAtSource(this, target, relative, expectedSha, textSha, start, end);
                         }
                     } catch (Exception ignored) {
@@ -1211,14 +1333,11 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 + ": " + relation.optString("source_locator")
                 + "\n" + relation.optString("path") + " · "
                 + relation.optString("other_locator");
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(contextDetailText(description))
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.knowledge_editor_context_open,
-                        (dialog, which) -> openRelatedNote(relation.optString("path"),
-                                selectedVault))
-                .show();
+        final LinearLayout body = newDockContent();
+        body.addView(contextDetailText(description));
+        addContextRow(body, getString(R.string.knowledge_editor_context_open),
+                view -> openRelatedNote(relation.optString("path"), selectedVault));
+        showDockPage(getString(title), body);
     }
 
     private TextView contextDetailText(final String text) {
@@ -1267,7 +1386,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                             buffer.offsetByCodePoints(0, end));
                     fragment.getEditor().requestFocus();
                     operationGeneration.incrementAndGet();
-                    findViewById(R.id.knowledge_editor_context_panel).setVisibility(View.GONE);
+                    setDockExpanded(false);
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> {
@@ -1347,17 +1466,25 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         return !isFinishing() && !isDestroyed() && operationGeneration.get() == generation;
     }
 
+    private boolean currentDock(final int generation) {
+        return dockForeground && !isFinishing() && !isDestroyed()
+                && dockGeneration.get() == generation;
+    }
+
     @Override
     protected void onStop() {
         // Do not surface stale dialogs over the library or another editor.
+        dockForeground = false;
         operationGeneration.incrementAndGet();
+        dockGeneration.incrementAndGet();
         clearEditorHighlights();
-        if (evidenceDialog != null) {
-            evidenceDialog.dismiss();
-            evidenceDialog = null;
-        }
-        final View context = findViewById(R.id.knowledge_editor_context_panel);
-        if (context != null) context.setVisibility(View.GONE);
+        stopWatchingDockEdits();
+        dockContextInitialized = false;
+        dockContextStale = true;
+        dockInitAttempts = 0;
+        resetDockNavigation();
+        ((TextView) findViewById(R.id.knowledge_editor_context_summary))
+                .setText(R.string.knowledge_editor_dock_initial);
         super.onStop();
     }
 
@@ -1382,6 +1509,11 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
 
     @Override
     public void onBackPressed() {
+        if (dockCurrentPage != null
+                && findViewById(R.id.knowledge_editor_context_body).getVisibility() == View.VISIBLE) {
+            navigateDockBack();
+            return;
+        }
         // The inherited DocumentActivity calls finishAndRemoveTask(), which
         // would also remove the user's DPKS library from Android recents.
         final Fragment fragment = getSupportFragmentManager()

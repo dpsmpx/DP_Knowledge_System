@@ -373,6 +373,12 @@
     <string name="knowledge_manual_one_statement">Введите одно непустое утверждение в одну строку.</string>
     <string name="knowledge_manual_preview_failed">Не удалось подготовить интерпретацию. Возможно, исходник изменился — откройте заметку заново. Никаких записей не сделано.</string>
     <string name="knowledge_editor_context">Знания</string>
+    <string name="knowledge_editor_dock_initial">Знания · контекст сохранённой заметки</string>
+    <string name="knowledge_editor_dock_refresh">Обновить</string>
+    <string name="knowledge_editor_dock_expand">Развернуть</string>
+    <string name="knowledge_editor_dock_collapse">Свернуть</string>
+    <string name="knowledge_editor_dock_back">Назад</string>
+    <string name="knowledge_editor_dock_stale">Редактор изменён · показан прежний контекст сохранённой заметки. Обновите.</string>
     <string name="knowledge_editor_context_loading">Загрузка локального контекста знаний…</string>
     <string name="knowledge_editor_context_summary">Активных записей журнала: %1$d · Возможных межзаметочных связей: %2$s</string>
     <string name="knowledge_editor_context_accepted">Принятые знания и утверждения пользователя</string>

@@ -373,6 +373,12 @@
     <string name="knowledge_manual_one_statement">Enter one nonempty statement on a single line.</string>
     <string name="knowledge_manual_preview_failed">The interpretation could not be previewed. The source may have changed; reopen the note and try again. No changes were made.</string>
     <string name="knowledge_editor_context">Knowledge</string>
+    <string name="knowledge_editor_dock_initial">Knowledge · saved-note context</string>
+    <string name="knowledge_editor_dock_refresh">Refresh</string>
+    <string name="knowledge_editor_dock_expand">Expand</string>
+    <string name="knowledge_editor_dock_collapse">Collapse</string>
+    <string name="knowledge_editor_dock_back">Back</string>
+    <string name="knowledge_editor_dock_stale">Editor changed · showing older saved-note context. Refresh.</string>
     <string name="knowledge_editor_context_loading">Loading local knowledge context…</string>
     <string name="knowledge_editor_context_summary">Active journal records: %1$d · Possible cross-note links: %2$s</string>
     <string name="knowledge_editor_context_accepted">Accepted knowledge and user claims</string>
