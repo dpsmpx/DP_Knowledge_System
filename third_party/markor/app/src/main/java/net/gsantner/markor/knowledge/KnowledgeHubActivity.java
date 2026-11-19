@@ -82,6 +82,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int MAX_VISIBLE = 250;
+    private static final String EXTRA_EDITOR_REVIEW_PATH = "com.dpsmpx.dpks.editor.review_path";
+    private static final String EXTRA_EDITOR_REVIEW_FRAGMENT = "com.dpsmpx.dpks.editor.fragment";
+    private static final String EXTRA_EDITOR_SOURCE_HASH = "com.dpsmpx.dpks.editor.source_sha256";
+
+    /** Only the selected source identifier enters the Intent, never note text. */
+    public static void reviewFromEditor(final Activity activity, final String relativePath,
+                                        final String fragmentId, final String sourceHash) {
+        final Intent intent = new Intent(activity, KnowledgeHubActivity.class);
+        intent.putExtra(EXTRA_EDITOR_REVIEW_PATH, relativePath);
+        intent.putExtra(EXTRA_EDITOR_REVIEW_FRAGMENT, fragmentId);
+        intent.putExtra(EXTRA_EDITOR_SOURCE_HASH, sourceHash);
+        activity.startActivity(intent);
+    }
     private static final String STATE_WORKSPACE_PAGE = "dpks_workspace_page";
     private static final String STATE_DECISION_CATEGORY = "dpks_decision_category";
     private static final String[] DECISION_CATEGORIES = {
@@ -349,6 +362,17 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         setupDecisionWorkspace();
         scanNotebook();
+        final Intent launch = getIntent();
+        if (launch != null && launch.hasExtra(EXTRA_EDITOR_REVIEW_PATH)) {
+            final String path = launch.getStringExtra(EXTRA_EDITOR_REVIEW_PATH);
+            final String fragmentId = launch.getStringExtra(EXTRA_EDITOR_REVIEW_FRAGMENT);
+            final String sourceHash = launch.getStringExtra(EXTRA_EDITOR_SOURCE_HASH);
+            if (path != null && fragmentId != null && sourceHash != null
+                    && sourceHash.matches("[0-9a-f]{64}")) {
+                navigation.setSelectedItemId(R.id.knowledge_nav_decisions);
+                previewFragment(path, fragmentId, sourceHash);
+            }
+        }
     }
 
     @Override
@@ -1726,12 +1750,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void previewFragment(final String relativePath, final String fragmentId) {
+        previewFragment(relativePath, fragmentId, null);
+    }
+
+    private void previewFragment(final String relativePath, final String fragmentId,
+                                 final String expectedSourceHash) {
         final int scan = scanGeneration.get();
         status.setText(R.string.knowledge_inspecting);
         worker.submit(() -> {
             try {
+                final String savedMarkdown = readSelectedNote(relativePath);
+                if (expectedSourceHash != null && !expectedSourceHash.equals(
+                        sha256Hex(savedMarkdown.getBytes(java.nio.charset.StandardCharsets.UTF_8)))) {
+                    throw new IOException("Editor selection source changed before review");
+                }
                 final JSONObject preview = KnowledgePythonBridge.preview(this, workspacePath(),
-                        relativePath, readSelectedNote(relativePath), fragmentId);
+                        relativePath, savedMarkdown, fragmentId);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         chooseReading(relativePath, fragmentId, preview);
@@ -1744,6 +1778,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_analysis_failed);
+                        if (workspacePage == R.id.knowledge_nav_decisions) {
+                            ((TextView) findViewById(R.id.knowledge_decisions_status))
+                                    .setText(R.string.knowledge_editor_save_first);
+                        }
                     }
                 });
             }
