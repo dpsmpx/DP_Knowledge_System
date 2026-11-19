@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **first eight slices integrated; ninth pending CI and device QA**. The owner confirmed ordinary decision
+Status: **first nine slices integrated; ninth awaiting device QA**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -211,7 +211,7 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   those statements are true. It is not a live semantic annotation engine,
   independent Markdown renderer or automatic proposal editor.
 
-## Ninth slice — source selection → knowledge journal inspection (pending CI)
+## Ninth slice — source selection → knowledge journal inspection (integrated, QA deferred)
 
 - The editor provides **Knowledge at cursor**: place the caret inside a
   verified journal source or select text fully contained within one. The
@@ -229,7 +229,8 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   freshness check. Neither preview nor navigation appends to the journal.
 - This is a read-only contextual drill-down. Full decision action flows,
   exhaustive evidence graphs, semantic proof and independent editor engine
-  remain separate work. Physical QA-64 is deferred at owner request.
+  remain separate work. Python and Android CI passed on PR #57;
+  physical QA-64 is deferred at owner request.
 
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
