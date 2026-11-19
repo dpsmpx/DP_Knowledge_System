@@ -121,6 +121,8 @@ public final class KnowledgeDeviceQaRunner {
                         + ", batteryPct=" + batteryPercent();
             });
             if (editorStage22) {
+                step("UI-STATE-22", this::checkSyntheticWorkspaceNavigation);
+                step("UI-HISTORY-22", this::checkSyntheticProcessHistory);
                 step("EDITOR-22-SUITE", this::checkSyntheticStage22Editor);
                 report.add("SKIP", "EDITOR-22-UI", 0,
                         "real touch, keyboard, rotation, TalkBack, font scale and task lifecycle "
@@ -162,6 +164,53 @@ public final class KnowledgeDeviceQaRunner {
                     + safeErrorClass(failed));
         }
         return report.render(SystemClock.elapsedRealtime() - started);
+    }
+
+    /** Device-side pure transition checks; no touch automation or source/journal I/O. */
+    private String checkSyntheticWorkspaceNavigation() throws SyntheticMismatch {
+        final KnowledgeWorkspaceNavigation state = new KnowledgeWorkspaceNavigation(10, 20, 30, 40);
+        if (state.page() != 10 || state.backAction() != KnowledgeWorkspaceNavigation.BackAction.FINISH
+                || state.openDecisionDetail()) {
+            throw new SyntheticMismatch("verdict=UI_DEFAULT_INVALID");
+        }
+        state.select(20);
+        if (!state.openDecisionDetail()
+                || state.backAction() != KnowledgeWorkspaceNavigation.BackAction.CLOSE_DETAIL) {
+            throw new SyntheticMismatch("verdict=UI_DETAIL_BACK_INVALID");
+        }
+        state.closeDecisionDetail();
+        if (state.backAction() != KnowledgeWorkspaceNavigation.BackAction.LIBRARY
+                || state.select(30) != 30 || state.openDecisionDetail()
+                || state.select(-1) != 10) {
+            throw new SyntheticMismatch("verdict=UI_NAVIGATION_INVALID");
+        }
+        final String sample = "# Synthetic\n🎯 Марс является планетой.\n";
+        if (!KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample, sample)
+                || KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample + "!", sample)
+                || KnowledgeEditorReviewGuard.matchesSavedSource(sample, sample, sample + "!")) {
+            throw new SyntheticMismatch("verdict=UI_SAVE_GUARD_INVALID");
+        }
+        return "synthetic tab/back/detail transitions and unsaved-source handoff guard pass; "
+                + "no touch or journal commit tested";
+    }
+
+    private String checkSyntheticProcessHistory() throws SyntheticMismatch {
+        final KnowledgeProcessHistory history = new KnowledgeProcessHistory();
+        for (int i = 1; i <= 40; i++) {
+            history.record(KnowledgeProcessHistory.Operation.SCAN,
+                    KnowledgeProcessHistory.Outcome.COMPLETED, i);
+        }
+        final KnowledgeProcessHistory restored =
+                KnowledgeProcessHistory.fromStored(history.serialize());
+        if (restored.recent().size() != KnowledgeProcessHistory.MAX_EVENTS
+                || restored.recent().get(0).timestamp != 40
+                || restored.recent().get(31).timestamp != 9
+                || KnowledgeProcessHistory.fromStored(
+                "123|/private/synthetic.md|STARTED\n").recent().size() != 0) {
+            throw new SyntheticMismatch("verdict=UI_EVENT_LOG_INVALID");
+        }
+        return "bounded code-only events, privacy filter and persisted order verified; "
+                + "actual long-running Android scheduling is not tested";
     }
 
     private void step(final String code, final Check check) throws InterruptedIOException {
@@ -394,6 +443,24 @@ public final class KnowledgeDeviceQaRunner {
             final long indexMillis = SystemClock.elapsedRealtime() - indexStart;
             ensureRunning();
             final List<KnowledgeLocalIndex.Hit> hits = testIndex.search("amber", 8);
+            final KnowledgeLocalIndex.SearchPage firstPage = testIndex.searchPage("", 0, 60);
+            final KnowledgeLocalIndex.SearchPage lastPage = testIndex.searchPage(
+                    "amber", total + 120, 60);
+            if (firstPage.total != total || firstPage.offset != 0
+                    || firstPage.hits.size() != Math.min(total, 60)
+                    || lastPage.total != total || lastPage.hits.isEmpty()
+                    || lastPage.nextOffset != -1
+                    || lastPage.offset != ((total - 1) / 60) * 60) {
+                throw new SyntheticMismatch("verdict=BOUNDED_FTS_PAGING_MISMATCH");
+            }
+            if (total > 60) {
+                final KnowledgeLocalIndex.SearchPage secondPage = testIndex.searchPage("", 60, 60);
+                if (secondPage.total != total || secondPage.hits.size() != 60
+                        || firstPage.hits.get(59).relativePath.equals(
+                                secondPage.hits.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=NONDETERMINISTIC_FTS_PAGING");
+                }
+            }
             final KnowledgeLocalIndex.IndexHealth readOnlyHealth = testIndex.healthReport();
             // This second connection is ONLY for a brand-new disposable QA DB.
             // The actual user index is never opened read/write by diagnostics.
@@ -415,7 +482,7 @@ public final class KnowledgeDeviceQaRunner {
                     + ", sqliteVersion=" + safeVersion(readOnlyHealth.sqliteVersion)
                     + ", quickCheckReadOnly=" + quickStatus(readOnlyHealth.quickCheck)
                     + ", quickCheckSyntheticReadWrite=" + quickStatus(comparisonHealth.quickCheck)
-                    + ", verdict=" + verdict.code;
+                    + ", paging=true, verdict=" + verdict.code;
             if (!verdict.passed) {
                 throw new SyntheticMismatch(counts);
             }

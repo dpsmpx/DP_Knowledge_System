@@ -55,6 +55,22 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /** Stable, bounded search page. A total does not imply source freshness. */
+    public static final class SearchPage {
+        public final List<Hit> hits;
+        public final int total;
+        public final int offset;
+        public final int nextOffset;
+
+        SearchPage(final List<Hit> hits, final int total, final int offset,
+                   final int nextOffset) {
+            this.hits = Collections.unmodifiableList(new ArrayList<>(hits));
+            this.total = total;
+            this.offset = offset;
+            this.nextOffset = nextOffset;
+        }
+    }
+
     public static final class SyncResult {
         public final int indexed;
         public final int reused;
@@ -394,6 +410,57 @@ public final class KnowledgeLocalIndex {
                 }
             }
             return hits;
+        } finally {
+            db.close();
+        }
+    }
+
+    /**
+     * Read-only offset paging instead of a 250-row hard stop. The binary tie
+     * breaker makes case-insensitive path ordering deterministic across pages.
+     */
+    public synchronized SearchPage searchPage(final String input, final int requestedOffset,
+                                              final int limit) {
+        if (requestedOffset < 0 || requestedOffset > 200_000
+                || limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Invalid knowledge search page");
+        }
+        final SQLiteDatabase db = open();
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            final String safe = KnowledgeMarkdownMetadata.ftsQuery(input);
+            final String match = safe.isEmpty() ? "" : "FROM documents_fts JOIN notes "
+                    + "ON documents_fts.docid=notes.id WHERE documents_fts MATCH ?";
+            final String countSql = safe.isEmpty() ? "SELECT COUNT(*) FROM notes"
+                    : "SELECT COUNT(*) " + match;
+            final int total;
+            try (Cursor count = db.rawQuery(countSql,
+                    safe.isEmpty() ? null : new String[]{safe})) {
+                total = count.moveToFirst() ? count.getInt(0) : 0;
+            }
+            final int offset = total == 0 ? 0
+                    : Math.min(requestedOffset, ((total - 1) / limit) * limit);
+            final String sql = safe.isEmpty()
+                    ? "SELECT path, title, generation FROM notes "
+                    + "ORDER BY CASE WHEN generation=? THEN 0 ELSE 1 END, "
+                    + "path COLLATE NOCASE, path COLLATE BINARY LIMIT ? OFFSET ?"
+                    : "SELECT notes.path, notes.title, notes.generation " + match
+                    + " ORDER BY CASE WHEN notes.generation=? THEN 0 ELSE 1 END, "
+                    + "notes.path COLLATE NOCASE, notes.path COLLATE BINARY LIMIT ? OFFSET ?";
+            final String[] args = safe.isEmpty()
+                    ? new String[]{generation == null ? "" : generation,
+                            Integer.toString(limit), Integer.toString(offset)}
+                    : new String[]{safe, generation == null ? "" : generation,
+                            Integer.toString(limit), Integer.toString(offset)};
+            final List<Hit> rows = new ArrayList<>();
+            try (Cursor c = db.rawQuery(sql, args)) {
+                while (c.moveToNext()) {
+                    rows.add(new Hit(c.getString(0), c.getString(1),
+                            generation != null && generation.equals(c.getString(2))));
+                }
+            }
+            return new SearchPage(rows, total, offset,
+                    offset + rows.size() < total ? offset + rows.size() : -1);
         } finally {
             db.close();
         }

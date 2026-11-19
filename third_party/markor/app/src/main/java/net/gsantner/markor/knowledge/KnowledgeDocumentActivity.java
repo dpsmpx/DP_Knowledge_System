@@ -7,6 +7,7 @@
 package net.gsantner.markor.knowledge;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.os.Bundle;
 import android.graphics.Typeface;
@@ -29,6 +30,8 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.graphics.ColorUtils;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
@@ -60,6 +63,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** A note opened from DPKS must return to the library, not destroy its task. */
 public final class KnowledgeDocumentActivity extends DocumentActivity {
     private static final int MAX_SOURCE_BYTES = 2_000_000;
+    private static final String DOCK_EXPANDED_STATE = "dpks.editor.dock.expanded";
     private static final String JUMP_PATH = "dpks.editor.source.path";
     private static final String JUMP_SHA = "dpks.editor.source.sha";
     private static final String JUMP_TEXT_SHA = "dpks.editor.source.text_sha";
@@ -85,6 +89,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     private final List<DockPage> dockPageHistory = new ArrayList<>();
     private boolean incomingJumpStarted;
     private int incomingJumpAttempts;
+    private boolean sideDock;
 
     /** At most eight detached, read-only views; no journal/model data is persisted. */
     private static final class DockPage {
@@ -137,6 +142,22 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         findViewById(R.id.knowledge_editor_source_inspector).setOnClickListener(view -> inspectSourceKnowledge());
         findViewById(R.id.knowledge_editor_review_selection).setOnClickListener(view -> reviewSelection());
         findViewById(R.id.knowledge_editor_backlinks).setOnClickListener(view -> showBacklinks());
+        applyResponsiveEditorLayout();
+        final View workspace = findViewById(R.id.knowledge_editor_workspace);
+        ViewCompat.setOnApplyWindowInsetsListener(workspace, (view, insets) -> {
+            // On a phone the IME must not leave a 200dp knowledge pane over
+            // the remaining editor. The permanent summary rail stays present.
+            if (!sideDock && insets.isVisible(WindowInsetsCompat.Type.ime())
+                    && findViewById(R.id.knowledge_editor_context_body)
+                    .getVisibility() == View.VISIBLE) {
+                setDockExpanded(false);
+            }
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(workspace);
+        if (state != null && state.getBoolean(DOCK_EXPANDED_STATE, false)) {
+            setDockExpanded(true);
+        }
         final Toolbar toolbar = findViewById(R.id.toolbar);
         if (toolbar != null) {
             toolbar.setNavigationIcon(R.drawable.ic_arrow_back_white_24dp);
@@ -494,8 +515,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 runOnUiThread(() -> {
                     if (!current(generation)) return;
                     final DocumentEditAndViewFragment currentEditor = editor();
-                    if (!saved.equals(editorSnapshot) || currentEditor == null
-                            || !editorSnapshot.equals(currentEditor.getTextString())) {
+                    if (currentEditor == null || !KnowledgeEditorReviewGuard.matchesSavedSource(
+                            saved, editorSnapshot, currentEditor.getTextString())) {
                         setKnowledgeStatus(R.string.knowledge_editor_save_first);
                         return;
                     }
@@ -715,6 +736,59 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                         : R.string.knowledge_editor_dock_expand);
     }
 
+    /** Tablet uses a side rail; phone preserves a bounded top rail above EditText. */
+    private void applyResponsiveEditorLayout() {
+        final Configuration config = getResources().getConfiguration();
+        final KnowledgeEditorLayoutPolicy policy = KnowledgeEditorLayoutPolicy.forWindow(
+                config.screenWidthDp, config.screenHeightDp, config.smallestScreenWidthDp);
+        sideDock = policy.sideDock;
+        final float density = getResources().getDisplayMetrics().density;
+        final LinearLayout workspace = findViewById(R.id.knowledge_editor_workspace);
+        final LinearLayout panel = findViewById(R.id.knowledge_editor_context_panel);
+        final LinearLayout body = findViewById(R.id.knowledge_editor_context_body);
+        final View editorSurface = findViewById(R.id.document__placeholder_fragment);
+        final ScrollView list = findViewById(R.id.knowledge_editor_context_list_scroll);
+        final ScrollView detail = findViewById(R.id.knowledge_editor_context_detail_scroll);
+        workspace.setOrientation(sideDock ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        if (sideDock) {
+            panel.setLayoutParams(new LinearLayout.LayoutParams(
+                    (int) (policy.dockWidthDp * density), ViewGroup.LayoutParams.MATCH_PARENT));
+            editorSurface.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+            body.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            list.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            detail.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        } else {
+            panel.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            editorSurface.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            body.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            final int scrollPx = (int) (policy.phoneScrollDp * density);
+            list.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, scrollPx));
+            detail.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, scrollPx));
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(final Configuration config) {
+        super.onConfigurationChanged(config);
+        applyResponsiveEditorLayout();
+    }
+
+    @Override
+    protected void onSaveInstanceState(final Bundle state) {
+        state.putBoolean(DOCK_EXPANDED_STATE,
+                findViewById(R.id.knowledge_editor_context_body).getVisibility() == View.VISIBLE);
+        super.onSaveInstanceState(state);
+    }
+
     private void initializeContextDock() {
         if (!dockForeground || isFinishing() || isDestroyed()) return;
         final DocumentEditAndViewFragment fragment = editor();
@@ -912,6 +986,10 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         item.setSingleLine(false);
         item.setMaxLines(3);
         item.setText(label.length() > 260 ? label.substring(0, 260) + "…" : label);
+        // The visual row is bounded, while assistive services get a longer
+        // locally displayed label without changing the original text.
+        item.setContentDescription(label.length() > 512 ? label.substring(0, 512) + "…" : label);
+        item.setMinHeight((int) (48 * getResources().getDisplayMetrics().density));
         item.setOnClickListener(onClick);
         final LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -959,6 +1037,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             detail.setVisibility(View.GONE);
             navigation.setVisibility(View.GONE);
             list.setVisibility(View.VISIBLE);
+            ViewCompat.setAccessibilityPaneTitle(list,
+                    getString(R.string.knowledge_editor_context));
             return;
         }
         list.setVisibility(View.GONE);
@@ -966,6 +1046,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         navigation.setVisibility(View.VISIBLE);
         ((TextView) findViewById(R.id.knowledge_editor_context_page_title))
                 .setText(dockCurrentPage.title);
+        ViewCompat.setAccessibilityPaneTitle(detail, dockCurrentPage.title);
         container.addView(dockCurrentPage.content);
         final DockPage displayed = dockCurrentPage;
         detail.post(() -> {
@@ -1014,6 +1095,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 ? R.string.knowledge_editor_text_diff_unavailable
                 : comparison.hasChanges() ? R.string.knowledge_editor_text_diff_legend
                 : R.string.knowledge_editor_text_diff_identical)));
+        renderStructuralComparison(body, record.optJSONObject("structured_comparison"));
         final StringBuilder detail = new StringBuilder(getString(
                 R.string.knowledge_editor_context_provenance,
                 record.optString("provenance_kind"), record.optString("locator")));
@@ -1082,6 +1164,51 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     view -> jumpToSavedSource(record, path, savedHash, savedMarkdown));
         }
         showDockPage(editorKnowledgeRole(record.optString("role")), body);
+    }
+
+    /** The CNL/IR comparison is a bounded machine reading, never a truth verdict. */
+    private void renderStructuralComparison(final LinearLayout body, final JSONObject comparison) {
+        addEvidenceHeading(body, getString(R.string.knowledge_editor_structural_title));
+        if (comparison == null || !comparison.optBoolean("read_only")
+                || comparison.optBoolean("proves_truth")
+                || !"FORMALIZED".equals(comparison.optString("source_formalization"))) {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_unavailable)));
+            return;
+        }
+        final String state = comparison.optString("status");
+        if ("same_structure".equals(state)) {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_same)));
+        } else if ("different_structure".equals(state)) {
+            final JSONArray changes = comparison.optJSONArray("changed_fields");
+            if (changes == null || changes.length() == 0 || changes.length() > 6) {
+                body.addView(contextDetailText(getString(
+                        R.string.knowledge_editor_structural_unavailable)));
+                return;
+            }
+            for (int i = 0; i < changes.length(); i++) {
+                final JSONObject changed = changes.optJSONObject(i);
+                if (changed == null) continue;
+                body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_change,
+                        structuralField(changed.optString("field")),
+                        changed.optString("source"), changed.optString("accepted"))));
+            }
+        } else {
+            body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_unavailable)));
+            return;
+        }
+        body.addView(contextDetailText(getString(R.string.knowledge_editor_structural_disclaimer)));
+    }
+
+    private String structuralField(final String field) {
+        switch (field) {
+            case "predicate": return getString(R.string.knowledge_editor_structural_predicate);
+            case "arguments": return getString(R.string.knowledge_editor_structural_arguments);
+            case "negation": return getString(R.string.knowledge_editor_structural_negation);
+            case "modality": return getString(R.string.knowledge_editor_structural_modality);
+            case "context": return getString(R.string.knowledge_editor_structural_context);
+            case "interval": return getString(R.string.knowledge_editor_structural_interval);
+            default: return field;
+        }
     }
 
     /** Navigate only among human-approved journal records; never index candidates. */

@@ -14,6 +14,103 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_stage22_first_open_guide_is_private_and_accessible(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        buttons = [element for element in layout.iter()
+                   if element.get(ANDROID + "id") == "@+id/knowledge_open_guide"]
+        self.assertEqual(1, len(buttons))
+        self.assertEqual("@string/knowledge_guide_open", buttons[0].get(ANDROID + "text"))
+        self.assertEqual("48dp", buttons[0].get(ANDROID + "minHeight"))
+        guide = ET.parse(ROOT / "res/layout/knowledge__guide.xml").getroot()
+        self.assertEqual("ScrollView", guide.tag)
+        headings = [e.get(ANDROID + "text") for e in guide.iter()
+                    if e.get(ANDROID + "accessibilityHeading") == "true"]
+        self.assertEqual([f"@string/knowledge_guide_{section}_title" for section in
+                          ("markdown", "interpretation", "claim", "fact", "inference")], headings)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for needle in ("GUIDE_SEEN", "MODE_PRIVATE", "savedInstanceState == null",
+                       "showKnowledgeGuide()", "MaterialAlertDialogBuilder(this)",
+                       "R.layout.knowledge__guide"):
+            self.assertIn(needle, hub)
+        for folder in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{folder}/knowledge_strings.xml").getroot()}
+            for item in ("markdown", "interpretation", "claim", "fact", "inference"):
+                self.assertTrue(strings[f"knowledge_guide_{item}_title"])
+                self.assertTrue(strings[f"knowledge_guide_{item}_body"])
+            self.assertIn("journal" if folder == "values" else "журнал",
+                          strings["knowledge_guide_privacy"].lower())
+
+    def test_decision_detail_accessibility_and_reduced_motion(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        for name in ("knowledge_library_previous", "knowledge_library_next",
+                     "knowledge_decisions_previous", "knowledge_decisions_next",
+                     "knowledge_decisions_batch"):
+            element = next(e for e in layout.iter()
+                           if e.get(ANDROID + "id") == "@+id/" + name)
+            self.assertEqual("48dp", element.get(ANDROID + "minHeight"), name)
+        for name in ("knowledge_library_page_number", "knowledge_decisions_page_number"):
+            element = next(e for e in layout.iter()
+                           if e.get(ANDROID + "id") == "@+id/" + name)
+            self.assertEqual("polite", element.get(ANDROID + "accessibilityLiveRegion"))
+        detail = ET.parse(ROOT / "res/layout/knowledge__decision_detail.xml").getroot()
+        self.assertTrue(any(e.get(ANDROID + "accessibilityHeading") == "true"
+                            for e in detail.iter()))
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle", hub)
+        self.assertNotIn("smoothScrollToPosition", hub)
+
+    def test_android_navigation_and_unsaved_source_guards_have_executable_checks(self):
+        source = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (source / "KnowledgeHubActivity.java").read_text()
+        editor = (source / "KnowledgeDocumentActivity.java").read_text()
+        runner = (source / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("workspaceNavigation.backAction()", hub)
+        self.assertIn("workspaceNavigation.openDecisionDetail()", hub)
+        self.assertIn("workspaceNavigation.closeDecisionDetail()", hub)
+        self.assertIn("KnowledgeEditorReviewGuard.matchesSavedSource", editor)
+        self.assertIn('step("UI-STATE-22", this::checkSyntheticWorkspaceNavigation)', runner)
+        self.assertIn('report.add("SKIP", "EDITOR-22-UI"', runner)
+        unit = ROOT.parent / "test/java/net/gsantner/markor/knowledge"
+        for name in ("KnowledgeWorkspaceNavigationTest.java", "KnowledgeEditorReviewGuardTest.java"):
+            self.assertTrue((unit / name).exists(), name)
+
+    def test_stage22_process_timeline_only_persists_known_status_codes(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        processes = next(e for e in layout.iter()
+                         if e.get(ANDROID + "id") == "@+id/knowledge_page_processes")
+        self.assertTrue(any(e.get(ANDROID + "id") == "@+id/knowledge_process_history"
+                            for e in processes.iter()))
+        model = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeProcessHistory.java").read_text()
+        self.assertIn("MAX_EVENTS = 32", model)
+        self.assertIn("Operation.valueOf", model)
+        self.assertIn("Outcome.valueOf", model)
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        self.assertIn("MODE_PRIVATE", hub)
+        self.assertIn("recordProcessEvent(KnowledgeProcessHistory.Operation", hub)
+        runner = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('step("UI-HISTORY-22", this::checkSyntheticProcessHistory)', runner)
+        unit = ROOT.parent / "test/java/net/gsantner/markor/knowledge"
+        self.assertTrue((unit / "KnowledgeProcessHistoryTest.java").exists())
+
+    def test_stage22_context_dock_a11y_and_final_consolidated_qa_contract(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        headings = {e.get(ANDROID + "text") for e in layout.iter()
+                    if e.get(ANDROID + "accessibilityHeading") == "true"}
+        self.assertTrue({"@string/knowledge_editor_context_accepted",
+                         "@string/knowledge_editor_context_relations"} <= headings)
+        document = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        self.assertIn("item.setContentDescription", document)
+        self.assertIn("item.setMinHeight", document)
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle(detail", document)
+        self.assertIn("ViewCompat.setAccessibilityPaneTitle(list", document)
+        qa = ROOT.parents[4] / "docs/ANDROID_DEVICE_QA_STAGE22.md"
+        # ROOT = repo/third_party/markor/app/src/main, so 4 parents up is repo.
+        self.assertTrue(qa.exists())
+        checklist = qa.read_text()
+        for code in ("UI-STATE-22", "UI-HISTORY-22", "EDITOR-22-UI", "QA-52–74"):
+            self.assertIn(code, checklist)
+
     def test_all_existing_actions_remain_available_and_unique(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         observed = [element.get(ANDROID + "id", "") for element in layout.iter()]
@@ -339,6 +436,64 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_editor_text_diff_unavailable"):
                 self.assertIn(name, strings)
             self.assertTrue(strings["knowledge_editor_text_diff_legend"])
+
+    def test_editor_structural_diff_discloses_uncertainty_and_separate_epistemic_roles(self):
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("renderStructuralComparison(body,", "knowledge_editor_structural_unavailable",
+                       "comparison.optBoolean(\"proves_truth\")",
+                       "knowledge_editor_structural_disclaimer"):
+            self.assertIn(marker, editor)
+        for marker in ("_structural_editor_comparison(", "Formalizer(mode=\"import\")",
+                       '"status": "unavailable"', '"proves_truth": False',
+                       '"structured_comparison": _structural_editor_comparison('):
+            self.assertIn(marker, bridge)
+        for folder_name in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{folder_name}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_editor_structural_title",
+                         "knowledge_editor_structural_same",
+                         "knowledge_editor_structural_change",
+                         "knowledge_editor_structural_unavailable",
+                         "knowledge_editor_structural_disclaimer"):
+                self.assertIn(name, names)
+
+    def test_editor_has_responsive_keyboard_safe_workspace_with_permanent_rail(self):
+        root = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()
+        workspace = next(x for x in root.iter() if x.get(ANDROID + "id") ==
+                         "@+id/knowledge_editor_workspace")
+        children = [x.get(ANDROID + "id") for x in workspace]
+        self.assertEqual(["@+id/knowledge_editor_context_panel",
+                          "@+id/document__placeholder_fragment"], children)
+        editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        policy = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeEditorLayoutPolicy.java").read_text()
+        for marker in ("applyResponsiveEditorLayout()", "WindowInsetsCompat.Type.ime()",
+                       "setDockExpanded(false)", "DOCK_EXPANDED_STATE",
+                       "onSaveInstanceState(final Bundle state)",
+                       "onConfigurationChanged(final Configuration config)"):
+            self.assertIn(marker, editor)
+        self.assertIn("smallestDp >= 600 && width >= 720 && height >= 400", policy)
+        self.assertIn("Math.max(96, Math.min(200,", policy)
+
+    def test_library_pagination_is_bounded_and_reaches_beyond_250_notes(self):
+        shell = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        ids = [x.get(ANDROID + "id") for x in shell.iter()]
+        for item in ("knowledge_library_pagination", "knowledge_library_previous",
+                     "knowledge_library_next", "knowledge_library_page_number"):
+            self.assertEqual(1, ids.count("@+id/" + item))
+        index = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeLocalIndex.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        device = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("SearchPage searchPage(", "LIMIT ? OFFSET ?",
+                       "path COLLATE NOCASE, path COLLATE BINARY",
+                       "SELECT COUNT(*)", "nextOffset"):
+            self.assertIn(marker, index)
+        for marker in ("LIBRARY_PAGE_SIZE = 60", "loadLibraryPage(",
+                       "libraryNextOffset", "knowledge_library_page_range",
+                       "STATE_LIBRARY_OFFSET", "queryGeneration.incrementAndGet()"):
+            self.assertIn(marker, hub)
+        self.assertIn('testIndex.searchPage("", 0, 60)', device)
+        self.assertIn('"amber", total + 120, 60)', device)
 
     def test_editor_inline_highlights_are_ephemeral_and_approved_only(self):
         shell = ET.parse(ROOT / "res/layout/knowledge__document_activity.xml").getroot()

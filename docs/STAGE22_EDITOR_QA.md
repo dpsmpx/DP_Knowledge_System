@@ -112,6 +112,44 @@ deferred rather than required after every incremental PR.
 - **QA-68 / OPEN, DEFERRED:** thirteenth-slice literal Markdown/KSF diff has
   Java unit coverage but no observed on-device contrast, selectable text,
   long-text or TalkBack verification. It is not a semantic equivalence test.
+- **QA-69 / OPEN, DEFERRED:** fourteenth-slice deterministic CNL/IR structural
+  comparison has synthetic tests, not an observed Android UI signoff.
+  Ambiguous/unparsed/stale sources must remain *unavailable*, even when a
+  human-approved KSF assertion exists. Verify category wording, contrast,
+  source/journal immutability and large-font/screen-reader behavior in the
+  combined hardware QA.
+- **QA-70 / OPEN, DEFERRED:** fifteenth-slice side-dock policy and IME-aware
+  phone panel are covered by pure Java tests and static layout checks, but
+  actual Android tablet/foldable multi-window, keyboard, rotation, font scale
+  and TalkBack behavior require observation in the final combined run.
+- **QA-71 / OPEN, DEFERRED:** sixteenth-slice library pagination queries are
+  SQL-bounded and exercised by synthetic 20k index QA; real 760/20k scrolling,
+  stale/partial index distinctions, keyboard, TalkBack and 200% fonts remain
+  untested on device. Validate that tapping Next never opens/writes a note.
+- **QA-72 / OPEN, DEFERRED:** seventeenth-slice first-open guide is local, skippable,
+  and can be reopened from Settings. Synthetic XML wiring checks cover its five
+  epistemic categories, private seen-state, scrollable large-font content and
+  touch targets; no actual TalkBack reading order, rotation focus or 200% font
+  acceptance has occurred. Decision details now identify their accessibility
+  pane and lists reset without smooth-scroll motion. Test these on the final APK.
+- **QA-73 / OPEN, DEFERRED:** eighteenth-slice Android JUnit tests exercise
+  library/decisions/processes/settings navigation, decision detail Back,
+  invalid restored destination, and the editor-versus-saved-source identity
+  guard. The one-button editor QA now runs these Java transitions on device as
+  `UI-STATE-22` before Python synthetic checks. This is a state-model test,
+  **not** a robot operating the actual screen; `EDITOR-22-UI` stays SKIP.
+- **QA-74 / OPEN, DEFERRED:** nineteenth-slice Processes history persists at
+  most 32 code-only events (scan, analysis, audit, embeddings, QA), timestamp,
+  and enum outcome in private preferences. No path, excerpt, prompt, model
+  or API error is recorded. Android/JVM and the new `UI-HISTORY-22` synthetic
+  device check reject malformed entries. Test real cancellation races,
+  background recovery and screen readers together on the final APK. A
+  historical Start event must never be read as proof the job is still alive.
+- **QA-75 / OPEN, DEFERRED:** twentieth-slice dock TalkBack panes, enlarged
+  labels and minimum touch targets have only resource/CI checks. The owner
+  requested **one consolidated** final hardware pass; use
+  `docs/ANDROID_DEVICE_QA_STAGE22.md`. Do not record QA-75 as PASS merely
+  because the final signed APK exists.
 - **EDITOR-58 / PARTIAL:** an explicit editor mode control, selection analysis
   and possible-link browser now exist. Markor still owns actual Markdown
   editing/rendering and file persistence; a bounded contextual panel and

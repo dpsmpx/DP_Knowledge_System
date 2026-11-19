@@ -1,6 +1,6 @@
 # Android UI/UX Stage 22 — workspace, editor chrome and decision previews
 
-Status: **twelve slices integrated, Preview #18 published; thirteenth literal-comparison slice in development**. The owner confirmed ordinary decision
+Status: **thirteen slices integrated; slices 14–20 in PR #72, final CI/release in progress**. The owner confirmed ordinary decision
 review in Preview #14 and reported two observations in Preview #15:
 formalization of a selected fragment returned `unsupported punctuation`;
 the editor/saved-file mismatch guard fired on an unsaved edit. These are
@@ -9,6 +9,61 @@ signoff. The owner subsequently confirmed that Preview #16's updated flow
 works, but not the full QA-60 matrix. The sixth-slice read-only contextual
 knowledge panel is integrated; its physical QA-61 remains deferred.
 Markor still owns actual Markdown editing.
+
+## Twentieth slice — editor dock accessibility and final consolidated QA
+
+- Context rows retain 48dp minimum targets and expose longer local labels to
+  TalkBack when the visual row is clipped for a bounded list. The dock's
+  overview/detail pages identify themselves as accessibility panes, and the
+  accepted-versus-proposed headings are navigable. More status text remains
+  visible at enlarged font sizes.
+- The one-pass, disposable-data acceptance plan is now
+  `docs/ANDROID_DEVICE_QA_STAGE22.md`. QA-75 remains OPEN until the owner
+  observes a real device; JVM/Python checks cannot certify fonts, focus,
+  real touch, keyboard, rotations, network or OEM lifecycle.
+
+## Nineteenth slice — redacted process history (PR #72)
+
+- **Processes** adds a bounded recent-events list showing scan, knowledge
+  analysis, audit, embedding and device QA starts and results. It retains at
+  most 32 locally stored type/time/outcome tuples. The parser rejects unknown
+  event categories or arbitrary strings, so no user note text, paths, API
+  identifiers, prompts or diagnostics can enter the history.
+- Scan, analysis, audit and embedding worker success/partial/failure/cancel
+  paths emit only predefined event types. The cancelable device QA flow
+  records a cancel request but never mislabels that report as a completed run.
+- `UI-HISTORY-22` joins the one-button synthetic QA; Java JUnit verifies
+  persistence order, bounds and rejection of malformed records. No scheduler
+  or process resurrection is claimed; manual QA-74 remains open.
+
+## Eighteenth slice — synthetic UI-state and save guards (PR #72)
+
+- A pure Java navigation model now drives the four DPKS tabs, the decision
+  detail screen and Back behavior. It rejects invalid restored destinations,
+  does not confuse Back-from-detail with app exit, and closes stale detail
+  state when destinations change. Android JVM unit tests cover transitions.
+- The editor handoff uses a separately tested guard that requires equality
+  of the saved Markdown, immutable selected snapshot and current buffer;
+  existing source-hash and journal-head validation continues at commit.
+- The existing **one-button Stage 22 editor QA** now adds `UI-STATE-22` on
+  device, validating navigation state and the save guard with purely synthetic
+  strings. `EDITOR-22-UI` remains **SKIP** for touch, keyboard, focus, rotation,
+  real editor widgets and accessibility. No vault, journal or network read.
+
+## Seventeenth slice — knowledge guide and accessible navigation (PR #72)
+
+- On first normal launch, a **dismissible, offline guide** explains five distinct
+  categories: original Markdown, machine interpretation, human assertion,
+  human-confirmed fact and derived inference. It warns that a fact label is a
+  human judgment rather than a guarantee of objective truth. A private app
+  preference remembers dismissal; **Settings → Read the guide again** remains
+  available without opening a journal, note or network connection.
+- The guide scrolls for large system fonts and exposes distinct accessibility
+  headings. Decisions detail is named as an accessibility pane, important page
+  counters announce polite changes, pagination buttons have 48dp minimum
+  targets, and decision pagination avoids animated scrolling.
+- Python resource tests check the wiring. **QA-72 is OPEN**: these tests do not
+  certify TalkBack, focus restoration, 200% font or rotation on actual Android.
 
 ## Scope
 
@@ -345,6 +400,54 @@ an audit-ready source-span diff or a replacement for the decision list dialogs.
   with QA-59–67. This is a *lexical* comparison, not the still-open semantic
   source-span diff or standalone Markdown editing engine.
 
+## Fourteenth slice — explicit CNL/IR structure comparison (in review)
+
+- The dock now compares a *uniquely formalized* source sentence with the
+  human-approved journal assertion using the same deterministic ksys IR.
+  Predicate, typed arguments, negation, modality, context and time interval
+  differences are shown separately from the existing **literal** token diff.
+- A missing/stale source span, unsupported punctuation, ambiguous readings,
+  sources longer than 320 Unicode code points, non-assertion nodes or a
+  parser failure give **unavailable**.
+  There is no guessed equivalence, automatic verdict on truth or promotion of
+  machine interpretation to accepted fact. The source role/provenance remain
+  separately labeled.
+- Comparison runs in memory during the existing off-main-thread context load,
+  without new index/journal/Markdown writes or network requests. Synthetic
+  unit tests cover matching IR, inserted negation, unsupported grammar,
+  stale provenance and source size bounds. **QA-69 physical UI signoff is
+  deferred** until the owner's combined device test.
+
+## Fifteenth slice — responsive editor dock and keyboard safety (in review)
+
+- The Markdown surface and permanent DPKS knowledge rail share one workspace.
+  Phones use a bounded vertical panel; tablets with at least 600dp smallest
+  width, 720dp available width and 400dp height get a 280–360dp side dock.
+  Multi-window/landscape phones remain protected against narrow editors.
+- On phones, showing the keyboard collapses expanded knowledge details while
+  retaining the compact status/actions. Orientation recreation preserves the
+  user's expanded/collapsed choice and reapplies responsive measurements.
+- Pure Java layout policy tests cover narrow devices, landscape phones,
+  tablets and zero-size multi-window cases. Real keyboard, rotation, scroll,
+  large-font/TalkBack and tablet accessibility remain **QA-70 OPEN/DEFERRED**
+  for a single end-of-stage device acceptance run.
+
+## Sixteenth slice — repeatable large-vault library pages (in review)
+
+- Replaced the fixed first-250 library result stop with **60-note pages**,
+  a visible source-count/range indicator and 48dp Previous/Next controls.
+  Search text changes reset to the first page. Rotation/restoration preserves
+  the current offset; shrinking indexes clamp invalid offsets safely.
+- The private SQLite FTS query returns a bounded page and a total; verified
+  current-scan rows remain ordered before preserved-but-unverified rows.
+  Case-insensitive paths receive a binary secondary sort to avoid unstable
+  ties across page boundaries. No selected Markdown file is opened during
+  pagination, and no index synchronization/rebuild is triggered by paging.
+- Quick/20k synthetic QA now checks first and clamped last pages, bounds,
+  stable consecutive pages and total counts on an isolated test index.
+  **QA-71 OPEN/DEFERRED** covers physical scrolling and selection, 20k latency,
+  TalkBack/large font, interrupted scan, IME and source-freshness behavior.
+
 **Still incomplete:** Stage 22 is not a complete independent Markdown
 editor or inline evidence-linked diff. Indexed snippets are not a guarantee
 that original notes are still current; history displays journal events but
@@ -392,24 +495,23 @@ On an Android 15 device with test notes (avoid private journal mutations):
    TalkBack. Cancel without committing for the UX smoke test. Test actual
    journal changes only with a verified backup and deliberately synthetic data.
 
-## Remaining UI/UX work
+## Remaining limitations outside the Stage 22 engineering UI closure gate
 
-- A full independent DPKS editor and intelligent workspace replacing the
-  remaining Markor note-editing engine/menu chrome, while retaining reliable
-  import/export and edit/preview workflows. The sixth slice adds a bounded
-  context panel, verified source navigation, cursor-based journal inspection and temporary inline source marks,
-  but not an inline semantic diff, persistent tablet
-  sidebar or separate Markdown renderer.
-- Accessible large-list navigation beyond the current 250 visible results,
-  filtering/chips, meaningful progress history and pause/resume controls.
-- Inline semantic diff, richer evidence, selective approval and reversible
-  proposal preview; the Decisions screen covers navigation and provenance,
-  but explicit confirmation still uses the established dialogs. The thirteenth
-  slice highlights only literal token differences, not semantic equivalence.
-- Screen-reader audit, reduced motion, large-font layouts, adaptive tablets,
-  gesture navigation/edge-to-edge insets, instrumented UI tests and measured
-  scrolling/rendering under 20k notes.
-- Complete portable app backup, secure secret management and controlled sync.
+- DPKS owns its UI, decisions, searchable library, contextual dock and
+  navigation; proven Markor internals still perform Markdown editing and
+  rendering. A fully separate Markdown engine/menu chrome may evolve later,
+  but replacing it now would risk source-file regressions.
+- Structure-aware comparison only covers uniquely formalized strict CNL
+  predicates and fields; ambiguous natural-language equivalence and broad
+  semantic diff remain explicitly unknown. Confirmation remains human-led.
+- Library now pages beyond 250 results and the Processes page retains bounded
+  local history. True pause/resume for every job (rather than cancel/restart or
+  embedding checkpoints) and system-process restoration are not implemented.
+- Android hardware acceptance of TalkBack, 200% font, edge-to-edge, rotation,
+  gesture navigation, high-volume scrolling, battery/OEM lifecycle and actual
+  UI widgets is deferred. There is no emulator-based end-to-end UI suite;
+  code-state, Android unit and Python synthetic checks are **not** a UI PASS.
+- Full portable app backup and synchronization remain separate Stage 21 debt.
 
 No UI work changes the owner-confirmed rule: original Markdown is never
 rewritten by autonomous analysis, and human confirmation is required for

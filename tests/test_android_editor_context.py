@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party/markor/app/src/main/python"))
 
 from ksys_android_bridge import (analyze_vault, editor_note_context, inspect_note,
-                                 preview_fragment, record_decision, _verified_source_span)
+                                 preview_fragment, record_decision, _verified_source_span,
+                                 _structural_editor_comparison)
+from ksys.semantics.formalize import Formalizer
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
 from ksys.store.workspace import Workspace
@@ -68,6 +70,9 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual(frag, rec["fragment_id"])
         self.assertIn("Алекс", rec["source_excerpt"])
         self.assertEqual("verified", rec["source_span_state"])
+        self.assertEqual("same_structure", rec["structured_comparison"]["status"])
+        self.assertEqual("FORMALIZED", rec["structured_comparison"]["source_formalization"])
+        self.assertFalse(rec["structured_comparison"]["proves_truth"])
         begin, finish = rec["source_span"]
         self.assertEqual(note[begin:finish], rec["source_excerpt"])
         self.assertEqual([2, 1], [rec["source_line"], rec["source_column"]])
@@ -78,6 +83,7 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual(1, changed["stale_provenance_count"])
         self.assertFalse(changed["accepted_records"][0]["source_current"])
         self.assertEqual("stale_source", changed["accepted_records"][0]["source_span_state"])
+        self.assertEqual("unavailable", changed["accepted_records"][0]["structured_comparison"]["status"])
         self.assertNotIn("source_span", changed["accepted_records"][0])
         self.assertEqual([], Journal(self.workspace / "data/formal/journal.jsonl",
                                      FixedClock()).verify())
@@ -129,6 +135,28 @@ class EditorContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             editor_note_context(str(self.workspace), "a.md", "x" * 2_000_001)
         self.assertFalse(self.workspace.exists())
+
+    def test_structured_comparison_reports_exact_ir_field_changes_without_truth_claim(self):
+        formalizer = Formalizer(mode="import")
+        positive = formalizer.formalize("Алекс является разработчиком.").selected.nodes[0]
+        negative = formalizer.formalize("Алекс не является разработчиком.").selected.nodes[0]
+        same = _structural_editor_comparison("Алекс является разработчиком.", positive, True)
+        self.assertEqual("same_structure", same["status"])
+        self.assertEqual([], same["changed_fields"])
+        opposite = _structural_editor_comparison("Алекс является разработчиком.", negative, True)
+        self.assertEqual("different_structure", opposite["status"])
+        self.assertEqual(["negation"], [row["field"] for row in opposite["changed_fields"]])
+        self.assertEqual("false", opposite["changed_fields"][0]["source"])
+        self.assertEqual("true", opposite["changed_fields"][0]["accepted"])
+        self.assertFalse(opposite["proves_truth"])
+        for source, verified in (("Алекс (разработчик);", True),
+                                 ("Алекс является разработчиком.", False),
+                                 ("слово " * 55, True),
+                                 ("x" * 1001, True)):
+            result = _structural_editor_comparison(source, positive, verified)
+            self.assertEqual("unavailable", result["status"])
+            self.assertFalse(result["changed_fields"])
+        self.assertFalse(self.workspace.exists(), "A pure IR comparison must not open the vault")
 
     def test_duplicate_excerpt_uses_approved_span_not_first_text_match(self):
         note = "# 😀\nАлекс является разработчиком.\nАлекс является разработчиком.\n"
