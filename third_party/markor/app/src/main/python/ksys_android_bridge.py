@@ -398,7 +398,8 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
     # Evidence, modality, dated, and remaining hints share one SHA budget.
     # Cached exact sources are free to recheck; alias partner files cannot
     # escape the cap or silently be called current after its exhaustion.
-    for kinds in (("modal_contrast",), ("temporal_overlap", "temporal_separation"),
+    for kinds in (("modal_contrast",), ("temporal_overlap", "temporal_separation",
+                   "temporal_uncertainty"),
                   ("possible_agreement", "possible_conflict", "alias_candidate")):
         for match in matches or []:
             if match.get("kind") not in kinds:
@@ -413,7 +414,8 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
             unchecked = "not_checked" in (source_state, other_state)
             if kinds == ("modal_contrast",):
                 modal_limited = modal_limited or unchecked
-            elif kinds == ("temporal_overlap", "temporal_separation"):
+            elif kinds == ("temporal_overlap", "temporal_separation",
+                           "temporal_uncertainty"):
                 temporal_limited = temporal_limited or unchecked
             else:
                 relation_limited = relation_limited or unchecked

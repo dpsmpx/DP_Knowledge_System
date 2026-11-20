@@ -353,6 +353,20 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_relation_temporal_separation_warning"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_incomplete_temporal_bounds_are_labeled_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        for activity in ("KnowledgeHubActivity.java", "KnowledgeDocumentActivity.java"):
+            self.assertIn('"temporal_uncertainty".equals(kind)',
+                          (folder / activity).read_text())
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_uncertainty".equals(relation.optString("kind"))',
+                      presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_possible_temporal_uncertainty"])
+            self.assertTrue(strings["knowledge_relation_temporal_uncertainty_warning"])
+
     def test_temporal_hints_show_per_file_sha_and_shared_limit_in_both_surfaces(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

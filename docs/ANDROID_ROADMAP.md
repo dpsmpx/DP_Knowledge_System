@@ -720,6 +720,19 @@ no disagreement prompt. Missing/open periods and overlapping endpoints retain
 their earlier conservative behavior. No changes to source Markdown, journal,
 schema or authority; physical Android QA remains deferred.
 
+**Stage 18 partial-bound temporal uncertainty (twenty-fourth slice, awaiting
+Android QA):** Two candidate assertions with the same exact predicate,
+arguments and context but different partially bounded validity intervals now
+receive a distinct `temporal_uncertainty` hint when each supplies at least one
+date and no overlap can be established. A wholly unspecified period is not
+treated as an all-time assertion. The reviewer sees both original intervals,
+any opposing polarity, source-hash freshness and an EN/RU warning that neither
+chronological order nor real-world change can be inferred. This read-only
+hint cannot contribute to conflict counts, agreement counts, approved
+decisions or source independence. The existing 100-result relation cap and
+shared 16-file SHA-verification budget remain in force. Physical device QA
+is deferred separately.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

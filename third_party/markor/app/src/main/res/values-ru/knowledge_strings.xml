@@ -268,6 +268,8 @@
     <string name="knowledge_relation_later_polarity">Более позднее утверждение: %1$s</string>
     <string name="knowledge_relation_negative">отрицательное</string>
     <string name="knowledge_relation_positive">положительное</string>
+    <string name="knowledge_possible_temporal_uncertainty">Неполные временные границы</string>
+    <string name="knowledge_relation_temporal_uncertainty_warning">Как минимум один период имеет открытую временную границу. На основании этой подсказки нельзя установить точный порядок версий, изменение факта или противоречие. Проверьте оба источника.</string>
     <string name="knowledge_relation_temporal_separation_warning">Порядок дат и противоположная полярность не доказывают изменение факта, согласие или противоречие. Это неподтверждённые прочтения из индекса; проверьте исходные заметки.</string>
     <string name="knowledge_temporal_source_sha">SHA исследуемого файла: %1$s</string>
     <string name="knowledge_temporal_other_sha">SHA другого файла: %1$s</string>

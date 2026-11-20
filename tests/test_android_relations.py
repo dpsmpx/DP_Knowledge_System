@@ -1108,12 +1108,26 @@ class RelationTests(unittest.TestCase):
             assign(con, "c.md", "2025-03-01", None, negated=True)
         self.assertFalse(any(m["kind"] == "temporal_separation"
                              for m in self._relations("a.md")["matches"]))
+        uncertain = [m for m in self._relations("a.md")["matches"]
+                     if m["path"] == "c.md"]
+        self.assertEqual(["temporal_uncertainty"], [m["kind"] for m in uncertain])
+        self.assertEqual({"from": "2025-03-01", "to": None},
+                         uncertain[0]["other_interval"])
+        self.assertTrue(uncertain[0]["opposing_polarity"])
+        self.assertEqual("unapproved_parser_hint", uncertain[0]["authority"])
 
         # The inclusive shared endpoint belongs to overlap, not separation.
         with sqlite3.connect(db) as con:
             assign(con, "c.md", "2025-02-28", "2025-03-31", negated=True)
         touching = [m for m in self._relations("a.md")["matches"] if m["path"] == "c.md"]
         self.assertEqual(["temporal_overlap"], [m["kind"] for m in touching])
+        # An open future endpoint can still have a proven shared date. Do
+        # not duplicate that overlap as an uncertainty warning.
+        with sqlite3.connect(db) as con:
+            assign(con, "c.md", "2025-02-20", None, negated=True)
+        overlapping_open = [m for m in self._relations("a.md")["matches"]
+                            if m["path"] == "c.md"]
+        self.assertEqual(["temporal_overlap"], [m["kind"] for m in overlapping_open])
         self.assertEqual({"from": "2025-02-28", "to": "2025-02-28"},
                          touching[0]["overlap_interval"])
 

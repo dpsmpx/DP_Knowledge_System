@@ -290,8 +290,18 @@ final class KnowledgeRelationPresentation {
                 }
             }
         }
+        if ("temporal_uncertainty".equals(relation.optString("kind"))) {
+            appendInterval(text, context, R.string.knowledge_relation_other_interval,
+                    relation.optJSONObject("other_interval"));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_temporal_uncertainty_warning));
+            if (relation.optBoolean("opposing_polarity")) {
+                text.append("\n").append(context.getString(R.string.knowledge_modal_opposing_info));
+            }
+        }
         if ("temporal_overlap".equals(relation.optString("kind"))
-                || "temporal_separation".equals(relation.optString("kind"))) {
+                || "temporal_separation".equals(relation.optString("kind"))
+                || "temporal_uncertainty".equals(relation.optString("kind"))) {
             text.append("\n").append(context.getString(
                     R.string.knowledge_temporal_source_sha,
                     evidenceVerification(context,
