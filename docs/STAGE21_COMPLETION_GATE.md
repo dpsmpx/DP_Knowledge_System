@@ -44,6 +44,9 @@ APIs. These Java tests still need an Android SDK/Gradle CI runner.
    the owner explicitly chooses anything broader.
 2. Run Android Java CI and compile the actual integrated app; no APK release
    without a new explicit owner instruction.
+   The Stage 21 draft PR's Android CI job is restricted to unit-test tasks:
+   debug APK assembly, package-ID and embedded-runtime APK inspection are
+   disabled for this branch until that instruction arrives.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior.
 4. Agree on policy for unsupported journal operations and whether a stronger
