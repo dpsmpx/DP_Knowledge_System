@@ -94,6 +94,13 @@ public final class KnowledgePythonBridge {
         return invoke(context, "stage22_editor_selftest", privateCacheDirectory);
     }
 
+    /** Synthetic Stage 21 journal checks in the EXISTING device QA buttons. */
+    public static JSONObject stage21SyncSelfTest(final Context context,
+                                                final String privateCacheDirectory)
+            throws JSONException {
+        return invoke(context, "stage21_sync_selftest", privateCacheDirectory);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,
@@ -252,6 +259,208 @@ public final class KnowledgePythonBridge {
         return invoke(context, "journal_restore_commit", workspace, text, expectedSha);
     }
 
+    public static JSONObject journalSyncPreview(final Context context, final String workspace,
+                                                final String foreignText) throws JSONException {
+        return invoke(context, "journal_sync_preview", workspace, foreignText);
+    }
+
+    public static JSONObject journalSyncEvents(final Context context, final String workspace,
+                                               final String foreignText, final int offset)
+            throws JSONException {
+        return invoke(context, "journal_sync_event_list", workspace, foreignText, offset, 40);
+    }
+
+    public static JSONObject journalSyncEventDetail(final Context context,
+                                                    final String foreignText, final String eventId,
+                                                    final String expectedHash) throws JSONException {
+        return invoke(context, "journal_sync_event_detail", foreignText, eventId, expectedHash);
+    }
+
+    public static JSONObject journalSyncMetadataPreview(final Context context,
+                                                        final String workspace,
+                                                        final String foreignText,
+                                                        final String fingerprint,
+                                                        final String eventId,
+                                                        final String localHead,
+                                                        final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_metadata_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncMetadataCommit(final Context context,
+                                                       final String workspace,
+                                                       final String foreignText,
+                                                       final String fingerprint,
+                                                       final String eventId,
+                                                       final String localHead,
+                                                       final String remoteSha,
+                                                       final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_metadata_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, planSha);
+    }
+
+    public static JSONObject journalSyncContextSource(final Context context,
+                                                      final String workspace,
+                                                      final String foreignText,
+                                                      final String fingerprint,
+                                                      final String eventId,
+                                                      final String localHead,
+                                                      final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_context_source", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncContextPreview(final Context context,
+                                                       final String workspace,
+                                                       final String foreignText,
+                                                       final String fingerprint,
+                                                       final String eventId,
+                                                       final String localHead,
+                                                       final String remoteSha,
+                                                       final String sourcePath,
+                                                       final String markdown) throws JSONException {
+        return invoke(context, "journal_sync_context_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown);
+    }
+
+    public static JSONObject journalSyncContextCommit(final Context context,
+                                                      final String workspace,
+                                                      final String foreignText,
+                                                      final String fingerprint,
+                                                      final String eventId,
+                                                      final String localHead,
+                                                      final String remoteSha,
+                                                      final String sourcePath,
+                                                      final String markdown,
+                                                      final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_context_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown, planSha);
+    }
+
+    public static JSONObject journalSyncStructuralPreview(final Context context,
+                                                          final String workspace,
+                                                          final String foreignText,
+                                                          final String fingerprint,
+                                                          final String eventId,
+                                                          final String localHead,
+                                                          final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_structural_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncStructuralCommit(final Context context,
+                                                         final String workspace,
+                                                         final String foreignText,
+                                                         final String fingerprint,
+                                                         final String eventId,
+                                                         final String localHead,
+                                                         final String remoteSha,
+                                                         final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_structural_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, planSha);
+    }
+
+    public static JSONObject journalSyncBatchSources(final Context context,
+                                                     final String workspace,
+                                                     final String foreignText,
+                                                     final String fingerprint,
+                                                     final String eventId,
+                                                     final String localHead,
+                                                     final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_batch_sources", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncBatchPreview(final Context context,
+                                                     final String workspace,
+                                                     final String foreignText,
+                                                     final String fingerprint,
+                                                     final String eventId,
+                                                     final String localHead,
+                                                     final String remoteSha,
+                                                     final String originalsJson) throws JSONException {
+        return invoke(context, "journal_sync_batch_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, originalsJson);
+    }
+
+    public static JSONObject journalSyncBatchCommit(final Context context,
+                                                    final String workspace,
+                                                    final String foreignText,
+                                                    final String fingerprint,
+                                                    final String eventId,
+                                                    final String localHead,
+                                                    final String remoteSha,
+                                                    final String originalsJson,
+                                                    final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_batch_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, originalsJson, planSha);
+    }
+
+    public static JSONObject journalSyncReviewCommit(final Context context, final String workspace,
+                                                     final String foreignText,
+                                                     final String fingerprint,
+                                                     final String eventId,
+                                                     final String expectedLocalHead,
+                                                     final String expectedRemoteSha,
+                                                     final String verdict) throws JSONException {
+        return invoke(context, "journal_sync_review_commit", workspace, foreignText,
+                fingerprint, eventId, expectedLocalHead, expectedRemoteSha, verdict);
+    }
+
+    public static JSONObject journalSyncAcknowledge(final Context context, final String workspace,
+                                                    final String foreignText, final String fingerprint,
+                                                    final String expectedLocalHead,
+                                                    final String expectedRemoteSha) throws JSONException {
+        return invoke(context, "journal_sync_ack_commit", workspace, foreignText,
+                fingerprint, expectedLocalHead, expectedRemoteSha);
+    }
+
+    public static JSONObject journalSyncAdopt(final Context context, final String workspace,
+                                             final String foreignText, final String fingerprint,
+                                             final String eventId, final String expectedLocalHead,
+                                             final String expectedRemoteSha,
+                                             final String sourcePath, final String sourceMarkdown)
+            throws JSONException {
+        return invoke(context, "journal_sync_adopt", workspace, foreignText,
+                fingerprint, eventId, expectedLocalHead, expectedRemoteSha,
+                sourcePath, sourceMarkdown);
+    }
+
+    public static JSONObject journalSyncConflictPreview(final Context context, final String workspace,
+                                                         final String foreignText, final String fingerprint,
+                                                         final String eventId, final String localHead,
+                                                         final String remoteSha, final String sourcePath,
+                                                         final String markdown) throws JSONException {
+        return invoke(context, "journal_sync_conflict_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown);
+    }
+
+    public static JSONObject journalSyncConflictCommit(final Context context, final String workspace,
+                                                        final String foreignText, final String fingerprint,
+                                                        final String eventId, final String localHead,
+                                                        final String remoteSha, final String sourcePath,
+                                                        final String markdown, final String verdict)
+            throws JSONException {
+        return invoke(context, "journal_sync_conflict_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown, verdict);
+    }
+
+    public static JSONObject journalSyncRetractPreview(final Context context, final String workspace,
+                                                       final String foreignText, final String fingerprint,
+                                                       final String eventId, final String localHead,
+                                                       final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_retract_preview", workspace,
+                foreignText, fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncRetractCommit(final Context context, final String workspace,
+                                                      final String foreignText, final String fingerprint,
+                                                      final String eventId, final String localHead,
+                                                      final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_retract_commit", workspace,
+                foreignText, fingerprint, eventId, localHead, remoteSha);
+    }
+
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
         synchronized (KnowledgePythonBridge.class) {
@@ -275,9 +484,30 @@ public final class KnowledgePythonBridge {
                 || "dpksys.decision.v1".equals(protocol)
                 || "dpksys.query.v1".equals(protocol)
                 || "dpksys.backup.v1".equals(protocol)
+                || "dpksys.sync-preview.v1".equals(protocol)
+                || "dpksys.sync-events.v1".equals(protocol)
+                || "dpksys.sync-event-detail.v1".equals(protocol)
+                || "dpksys.sync-metadata-preview.v1".equals(protocol)
+                || "dpksys.sync-metadata-commit.v1".equals(protocol)
+                || "dpksys.sync-context-source.v1".equals(protocol)
+                || "dpksys.sync-context-preview.v1".equals(protocol)
+                || "dpksys.sync-context-commit.v1".equals(protocol)
+                || "dpksys.sync-structural-preview.v1".equals(protocol)
+                || "dpksys.sync-structural-commit.v1".equals(protocol)
+                || "dpksys.sync-batch-sources.v1".equals(protocol)
+                || "dpksys.sync-batch-preview.v1".equals(protocol)
+                || "dpksys.sync-batch-commit.v1".equals(protocol)
+                || "dpksys.sync-review-commit.v1".equals(protocol)
+                || "dpksys.sync-ack-commit.v1".equals(protocol)
+                || "dpksys.sync-adopt.v1".equals(protocol)
+                || "dpksys.sync-conflict-preview.v1".equals(protocol)
+                || "dpksys.sync-conflict-resolve.v1".equals(protocol)
+                || "dpksys.sync-retract-preview.v1".equals(protocol)
+                || "dpksys.sync-retract-commit.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)
+                || "dpksys.stage21_sync_selftest.v1".equals(protocol)
                 || "dpksys.stage22_editor_selftest.v1".equals(protocol);
     }
 }

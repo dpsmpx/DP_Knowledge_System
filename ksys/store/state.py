@@ -68,6 +68,15 @@ class KnowledgeState:
         self.auto_labels: dict[str, str] = {}       # поверхностные формы из принятых текстов
         self.aliases: dict[str, str] = {}
         self.schema_ext: list = []
+        # Audit decisions about authenticated foreign events are NOT active
+        # knowledge and never directly alter records or inference.
+        self.peer_reviews: dict[tuple[str, str, str], tuple[str, str]] = {}
+        # Contested FOREIGN assertions are quarantined from active inference.
+        # A human may keep the local decision or record explicit disagreement;
+        # neither verdict covertly activates unreviewed remote knowledge.
+        self.peer_resolutions: dict[tuple[str, str, str], tuple[str, tuple[str, ...], str]] = {}
+        # Branch-level signed acknowledgements: causal evidence only.
+        self.peer_acks: dict[tuple[str, str], tuple[str, str]] = {}
         self.head: str | None = None
         self.entries: list[Entry] = []
         self.diagnostics: list[Diagnostic] = []
@@ -190,6 +199,48 @@ class KnowledgeState:
             self.aliases[d["alias"]] = d["canonical"]
         elif e.op == "schema":
             self.schema_ext.append(d["schema"])
+        elif e.op == "peer_review":
+            fingerprint, branch, event_id, verdict = (
+                d.get("peer_fingerprint"), d.get("remote_sha256"),
+                d.get("remote_event_id"), d.get("verdict"))
+            if (all(isinstance(value, str) for value in (fingerprint, branch, event_id))
+                    and len(fingerprint) == len(branch) == 64
+                    and event_id.startswith("J:") and verdict in ("hold", "reject")
+                    and d.get("activates_knowledge") is False):
+                self.peer_reviews[(fingerprint, branch, event_id)] = (verdict, e.id)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid foreign event review receipt", location=e.id))
+        elif e.op == "peer_resolution":
+            fp, branch, remote_id, verdict = (
+                d.get("peer_fingerprint"), d.get("remote_sha256"),
+                d.get("remote_event_id"), d.get("verdict"))
+            targets = d.get("conflicting_assertions")
+            if (all(isinstance(value, str) for value in (fp, branch, remote_id))
+                    and len(fp) == len(branch) == 64
+                    and remote_id.startswith("J:")
+                    and verdict in ("contested", "keep_local")
+                    and isinstance(d.get("foreign_node_id"), str)
+                    and isinstance(targets, list) and 1 <= len(targets) <= 100
+                    and all(isinstance(value, str) and value for value in targets)
+                    and targets == sorted(set(targets))
+                    and d.get("activates_knowledge") is False):
+                self.peer_resolutions[(fp, branch, remote_id)] = (
+                    verdict, tuple(targets), e.id)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid foreign conflict resolution", location=e.id))
+        elif e.op == "peer_ack":
+            fingerprint, branch, remote = (d.get("peer_fingerprint"),
+                                            d.get("remote_sha256"), d.get("remote_head"))
+            if (all(isinstance(v, str) for v in (fingerprint, branch, remote))
+                    and len(fingerprint) == len(branch) == 64
+                    and remote.startswith("J:")
+                    and d.get("activates_knowledge") is False):
+                self.peer_acks[(fingerprint, branch)] = (remote, e.id)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid peer branch acknowledgement", location=e.id))
         self.head = e.id
         self.entries.append(e)
         return ch

@@ -1,11 +1,11 @@
-name: Signed DP Knowledge Android prerelease
+name: Signed DP Knowledge Stage 21 QA release
 
 on:
-  # Publish QA milestones automatically when the signed workflow is updated;
-  # other milestones can still be started explicitly from integration.
+  # Explicit workflow edits on the approved Stage 21 branch publish one
+  # signed, installable QA prerelease. Normal source pushes do not publish.
   push:
     branches:
-      - feature/knowledge-android
+      - feature/stage21-safe-backup-workspace
     paths:
       - .github/workflows/knowledge-signed-prerelease.yml
   workflow_dispatch:
@@ -14,16 +14,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: signed-knowledge-preview
+  group: signed-knowledge-stage21-qa
   cancel-in-progress: false
 
 jobs:
   sign-and-publish:
-    if: github.ref == 'refs/heads/feature/knowledge-android'
+    if: github.ref == 'refs/heads/feature/stage21-safe-backup-workspace'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
-      - name: Checkout integration snapshot
+      - name: Checkout exact Stage 21 source commit
         uses: actions/checkout@v4
 
       - name: Configure Java 21
@@ -32,7 +32,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Python 3.11
+      - name: Configure Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -43,20 +43,7 @@ jobs:
       - name: Install Android platform and signing tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Test the knowledge core
-        run: python -m unittest discover -s tests -t .
-
-      - name: Build and test isolated Android preview package
-        working-directory: third_party/markor
-        env:
-          GRADLE_OPTS: -Xms128m -Xmx768m
-        run: |
-          set -euo pipefail
-          chmod +x gradlew
-          ./gradlew :app:testFlavorAtestDebugUnitTest :app:assembleFlavorAtestRelease \
-            --no-daemon --no-parallel --max-workers=2 --stacktrace
-
-      - name: Verify release signing secrets are present
+      - name: Confirm signing secrets before building
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -67,12 +54,39 @@ jobs:
           set -euo pipefail
           for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [[ -z "${!name}" ]]; then
-              echo "::error::Missing required signing secret: $name"
+              echo "::error::Required signing secret not configured: $name"
               exit 1
             fi
           done
 
-      - name: Align, sign and independently verify preview APK
+      - name: Confirm the existing in-app Stage 21 self-test is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          qa=third_party/markor/app/src/main/java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java
+          bridge=third_party/markor/app/src/main/python/ksys_android_bridge.py
+          strings=third_party/markor/app/src/main/res/values-ru/knowledge_strings.xml
+          grep -Fq 'step("PORTABLE-21", this::checkSyntheticStage21Portable)' "$qa"
+          grep -Fq 'step("SYNC-21-SUITE", this::checkSyntheticStage21Sync)' "$qa"
+          grep -Fq 'def stage21_sync_selftest(' "$bridge"
+          grep -Fq 'SYNC21-BATCH-ATOMIC' "$bridge"
+          grep -Fq 'Проверить Stage 21' "$strings"
+
+      - name: Run all Python core and Android bridge tests
+        run: python -m unittest discover -s tests -t .
+
+      - name: Test both Android flavors and build only the standalone DPKS release APK
+        working-directory: third_party/markor
+        env:
+          GRADLE_OPTS: -Xms128m -Xmx768m
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
+            :app:assembleFlavorAtestRelease \
+            --no-daemon --no-parallel --max-workers=2 --stacktrace
+
+      - name: Align, sign, verify and hash the exact DPKS APK
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -90,18 +104,22 @@ jobs:
           mapfile -d '' -t apks < <(find third_party/markor/app/build/outputs/apk/flavorAtest/release \
             -maxdepth 1 -type f -name '*-unsigned.apk' -print0)
           if [[ ${#apks[@]} -ne 1 ]]; then
-            echo "::error::Expected exactly one unsigned flavorAtest APK, found ${#apks[@]}"
+            echo "::error::Expected one unsigned standalone DPKS APK, got ${#apks[@]}"
             exit 1
           fi
-          package_name="$("$tools_dir/aapt" dump badging "${apks[0]}" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          package_name="$("$tools_dir/aapt" dump badging "${apks[0]}" \
+            | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
           if [[ "$package_name" != 'com.dpsmpx.dpks' ]]; then
-            echo "::error::Unexpected Android applicationId (expected com.dpsmpx.dpks)"
+            echo "::error::Unexpected package ID: $package_name"
             exit 1
           fi
+          # Release must contain the Python bridge for all Stage 21 checks.
+          unzip -Z1 "${apks[0]}" | grep '^assets/chaquopy/' > /dev/null
 
-          keystore="$RUNNER_TEMP/knowledge-preview-key"
-          aligned="$RUNNER_TEMP/knowledge-preview-aligned.apk"
-          apk="$GITHUB_WORKSPACE/dpks-${GITHUB_RUN_NUMBER}-signed.apk"
+          keystore="$RUNNER_TEMP/knowledge-stage21-signing-key"
+          aligned="$RUNNER_TEMP/knowledge-stage21-aligned.apk"
+          short_sha="${GITHUB_SHA:0:10}"
+          apk="$GITHUB_WORKSPACE/dpks-stage21-qa-${GITHUB_RUN_NUMBER}-${short_sha}-signed.apk"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
           test -s "$keystore"
           "$tools_dir/zipalign" -f 4 "${apks[0]}" "$aligned"
@@ -112,93 +130,45 @@ jobs:
             --key-pass env:KEY_PASSWORD \
             --out "$apk" "$aligned"
           "$tools_dir/apksigner" verify --min-sdk-version 24 "$apk" > /dev/null
-          signed_package="$("$tools_dir/aapt" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          signed_package="$("$tools_dir/aapt" dump badging "$apk" \
+            | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
           test "$signed_package" = 'com.dpsmpx.dpks'
-          # Write a portable relative filename: users verify both downloaded
-          # files from one folder with `sha256sum -c dpks-*-signed.apk.sha256`.
           (cd "$GITHUB_WORKSPACE" && sha256sum "$(basename "$apk")") > "$apk.sha256"
           (cd "$GITHUB_WORKSPACE" && sha256sum -c "$(basename "$apk").sha256")
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
-          echo 'Verified signed Android preview. No signing passwords were logged.'
+          echo 'Signed DP Knowledge System QA APK and SHA-256 verified.'
 
-      - name: Publish consolidated Stage 22 signed APK and SHA-256 as prerelease
+      - name: Publish signed Stage 21 QA APK and checksum to GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:10}"
-          tag="knowledge-stage22-${GITHUB_RUN_NUMBER}-${short_sha}"
+          tag="knowledge-stage21-qa-${GITHUB_RUN_NUMBER}-${short_sha}"
           notes="$(printf '%s\n' \
-            'DP Knowledge System: единая сборка Android UI/UX Stage 22 для комплексной аппаратной проверки.' \
+            'DP Knowledge System — подписанная ПРЕДВАРИТЕЛЬНАЯ сборка Stage 21 для ручной аппаратной приёмки.' \
             '' \
-            '- Пакет: com.dpsmpx.dpks (устанавливается отдельно от обычного Markor и прежнего тестового пакета).' \
-            '- Перенос данных из прежнего имени пакета автоматически не выполняется.' \
-            '- Stage 22, срезы 14–20: ограниченное структурное CNL/IR-сравнение; адаптивная контекстная панель телефона/планшета и клавиатуры; библиотека с постраничным SQL-поиском вместо лимита 250 строк; памятка о пяти типах знания; доступные заголовки и минимум 48dp; локальная история процессов (не содержит заметок, путей и секретов).' \
-            '- Новый шаг UI-STATE-22 одной кнопкой синтетически проверяет переходы Библиотека/Решения/Процессы/Настройки, Back и защиту несовпадения текста редактора/файла; UI-HISTORY-22 проверяет безопасный формат и ограничение истории. Реальные касания не эмулируются.' \
-            '- Полный комплект устройств/сценариев: docs/ANDROID_DEVICE_QA_STAGE22.md. QA-52–75, SQLite quick_check, TalkBack, 200%-шрифт, 20k-скроллинг и жизненный цикл не объявлены PASS до фактической проверки владельцем.' \
-            '- Библиотека, решения, контекстный анализ и оболочка принадлежат DPKS, а проверенный механизм редактирования/рендеринга Markor пока переиспользуется. Сложный естественно-языковой семантический diff не объявляется доказанным.' \
-            '- Содержит редактор Markor, локальное ядро знаний, поиск, аудит и ручную интеграцию LLM/эмбеддингов.' \
-            '- Этап 15: встроенные кнопки для офлайн-диагностики устройства и нагрузочного теста 20 000 искусственных заметок.' \
-            '- Stage 15: точные синтетические счётчики и сравнение SQLite quick_check на двух режимах открытия только временной базы.' \
-            '- Этап 16: после неполного обхода сохранённые, но не подтверждённые заметки помечаются в поиске и исключаются из контекста AI, эмбеддинг-поиска и обратных ссылок.' \
-            '- После полного успешного обхода удаляются только устаревшие производные записи; Markdown и журнал решений не изменяются.' \
-            '- Добавлен проверяемый одной кнопкой сценарий RECONCILE-16: синтетическое переименование, неполный обход, исключение сомнительного доказательства, восстановление и отмена.' \
-            '- Stage 17 (частично): просмотр активных записей решений, оценка последствий отзыва и ручное подтверждение append-only retraction; исходные заметки не меняются.' \
-            '- Проверка DECISION-17 в диагностике: синтетическое принятие, просмотр, отзыв, отказ устаревшему запросу и повторному отзыву, сохранность источника.' \
-            '- Stage 17 (второй срез): ручной пересмотр одного claim/hypothesis/fact через новую фразу, выбор формальной интерпретации, preview и явное подтверждение; новый объект заменяет старый только в журнале.' \
-            '- Проверка REVISE-17 в диагностике: синтетический revise, отказ stale head/повтору, старый объект становится OBSOLETE, исходный hash неизменён.' \
-            '- Stage 17 (третий срез): ручное разделение одной принятой записи на две самостоятельные с отдельным выбором интерпретации, явным сравнением и подтверждением; одна атомарная запись split в приватный журнал, старый объект устаревает.' \
-            '- Проверка SPLIT-17: синтетический split, две новые активные записи, один journal append, отказы stale head и replay, неизменность исходного hash.' \
-            '- Stage 17 (четвёртый срез): ручное объединение двух активных записей одной роли в одно новое утверждение с выбором интерпретации и явным подтверждением; один атомарный merge в журнале, две старые записи устаревают.' \
-            '- Проверка MERGE-17: две синтетические исходные записи, один merge в журнале, одна новая активная, отказы stale head/replay, исходные hashes неизменны.' \
-            '- Stage 17 (пятый срез): ограниченное пакетное принятие 2–8 прочтений из очереди только в роли claim, предпросмотр каждого, одно ручное подтверждение и одно событие batch_accept с отдельным provenance.' \
-            '- UI/UX Stage 22 (первый срез): собственная Material 3 DayNight оболочка DPKS, Dynamic Color Android 12+, три вкладки Библиотека / Процессы / Управление, поиск и заметки на главном экране.' \
-            '- UI/UX Stage 22 (второй срез): DPKS запускается напрямую из ярлыка вместо меню Markor; редактор заметок открывается в собственной Material 3 оболочке и возвращает в библиотеку; экраны подтверждения revise/split/merge/retract показывают отдельные блоки до/после.' \
-            '- UI/UX Stage 22 (третий срез): четыре вкладки Библиотека / Решения / Процессы / Настройки; Решения доступны с главного экрана и при пустом журнале.' \
-            '- В Решениях: восемь категорий (ожидание, активные, факты, гипотезы, отклонения, отложения, устаревшие, история), поиск, счётчики и страницы по 30 записей.' \
-            '- У каждой записи отдельный полноэкранный просмотр: снимок источника, интерпретация, формализация, происхождение, доступные конфликты и история. Сам просмотр не изменяет Markdown и журнал.' \
-            '- Подтверждения и изменения записей используют существующие проверяемые операции; редактор Markdown всё ещё основан на Markor, inline source-span diff остаётся в плане.' \
-            '- В разделе Процессы сохранены анализ, эмбеддинги, фон и QA; значок показывает активные операции, навигация не отменяет задачи. В Настройках находятся аудит, диагностика и экспорт/импорт журнала.' \
-            '- UI/UX Stage 22 (четвёртый срез): у редактора DPKS собственное переключение Правка/Просмотр, локальный анализ фрагментов заметки и кнопка проверки выделенного текста.' \
-            '- Перед передачей выделенного фрагмента на ручное подтверждение проверяется сохранённый Markdown и его SHA-256; несохранённые изменения блокируют подтверждение, автоматической перезаписи источника нет.' \
-            '- Экран Ссылки показывает возможные входящие текстовые ссылки из существующего полного локального индекса, без модификации заметок и без признания ссылок доказанными.' \
-            '- UI/UX Stage 22 (пятый срез): если строгая CNL-грамматика не понимает пунктуацию, экран объясняет ограничение и предлагает отдельно написать свою интерпретацию, не изменяя исходную заметку.' \
-            '- Ручная формулировка отображается отдельно от оригинала, проходит формализацию на предпросмотре и записывается только после явного подтверждения с повторной проверкой источника, текста и журнала.' \
-            '- В редакторе появилась явная кнопка Сохранить через существующий движок Markor; после сохранения проверяется совпадение файла и редактора. Сам анализ никогда не сохраняет заметки.' \
-            '- Stage 22 (срезы 6–9): контекстная панель принятых знаний и отдельно неподтверждённых связей; строгая привязка к исходному Unicode-фрагменту, сравнение Markdown/KSF, временная подсветка по ролям и инспектор знаний по курсору.' \
-            '- Stage 22 (срез 10): чтение оснований, истории, предшественников/последователей и возможных противоречий; переходы к другим заметкам с повторной проверкой SHA-256 и точного исходного фрагмента.' \
-            '- Stage 22 (срез 11): постоянно видимая сворачиваемая панель редактора со встроенным просмотром карточек, Back, Refresh и предупреждением о несохранённых изменениях; это не самостоятельный движок Markdown.' \
-            '- Stage 22 (срез 13): в карточке принятого знания подсвечиваются буквальные различия слов и пунктуации между проверенным сохранённым фрагментом Markdown и KSF. Это текстовое сравнение, не смысловой diff или доказательство эквивалентности.' \
-            '- Для устаревшего, сокращённого, пустого или большого фрагмента подсветка не строится. Сравнение ограничено 128 токенами и 1024 UTF-16 единицами на каждую сторону, не изменяет Markdown и журнал; покрыто Java unit tests.' \
-            '- В Процессы → Проверки есть кнопка Проверить редактор Stage 22: десять Python-синтетических тестов плюс отдельные Java-проверки UI-STATE-22 и UI-HISTORY-22, с обезличенным отчётом.' \
-            '- Исправление после Preview #17: общая Java-проверка разрешённых протоколов теперь принимает dpksys.stage22_editor_selftest.v1; раньше кнопка завершалась JSONException ещё до выдачи результатов. Добавлен Android unit regression test и Python contract test.' \
-            '- Отчёт по кнопке содержит только коды PASS/FAIL/SKIP и счётчики, автоматически копируется; создаваемый тестовый журнал остаётся в приватном временном кэше и удаляется после прогона.' \
-            '- Кнопка НЕ симулирует реальные касания, IME/клавиатуру, поворот, TalkBack, фон или OEM; аппаратные QA-59–75 остаются открытыми до единой проверки владельцем.' \
-            '- Полный самостоятельный движок редактора DPKS, смысловой diff и подробный дизайн-системный аудит остаются в плане; встроенные синтетические проверки не заменяют UI-приёмку.' \
-            '- Проверка BATCH-17: две искусственные заметки, единая запись журнала, блокировка устаревшего head, изменённого источника и повторного подтверждения.' \
-            '- Расширенные пакетные решения и строгие версионированные автоматические политики ещё не реализованы.' \
-            '- Реальный индекс диагностируется исключительно на чтение; сомнительный quick_check не вызывает автоматическое пересоздание.' \
-            '- Прогресс на экране, проверка SQLite FTS/индекса, Python-ядра, эмбеддингов, шифрования и только чтение реального vault.' \
-            '- После выполнения безопасный отчёт автоматически копируется в буфер обмена; личные пути, заметки и ключи в отчёт не попадают.' \
-            '- Проверка 20k создаёт и удаляет только временные файлы в приватном кэше приложения; её можно отменить.' \
-            '- Неиспытанные сценарии и незавершённые функции перечисляются как SKIP, а не как PASS.' \
-            '- Владелец подтвердил работу проверки решений в Preview #14, но полный QA-54 (стресс, TalkBack и жизненный цикл) остаётся открытым.' \
-            '- Новый QA-59: аппаратная приёмка четвёртого среза редактора не выполнена; синтетические Python/Android CI тесты не заменяют проверку на телефоне.' \
-            '- Отзыв о Preview #15: unsupported punctuation показал ограничение CNL, а отказ при несохранённом тексте соответствует защите исходника; QA-60 для ручной переформулировки и сохранения ещё открыт.' \
-            '- Никакие личные заметки не включены в APK или GitHub release.' \
-            '- Проверены Python/Android unit tests и подпись APK; SHA-256 вложен отдельно.' \
-            '- Это предварительная сборка: сценарии должны быть реально запущены на устройстве; перед проверкой создайте резервную копию своих заметок.' \
-            '- Инструкция: docs/ANDROID_DEVICE_QA_STAGE15.md.' \
-            '- Дополнительная проверка: docs/ANDROID_DEVICE_QA_STAGE17.md.' \
-            '- Результаты Stage 15: 20 000 синтетических заметок проверены на Android 15; предупреждения SQLite и реальные проверки по-прежнему открыты.' \
-            '- Оригинал Markor: Gregor Santner и участники. Исходный код Markor — Apache-2.0; переводы и примеры — CC0-1.0.' \
+            '- Android package: com.dpsmpx.dpks (не заменяет обычный Markor).' \
+            '- Кнопка: Процессы → Проверки → «Проверить Stage 21 и устройство».' \
+            '- PORTABLE-21: зашифрованный синтетический архив, manifest, high-water, отсутствие секретов, отказ при подмене и восстановление двух вымышленных заметок (включая вложенную) в новую папку приватного кэша с проверкой SHA и неизменности оригиналов.' \
+            '- SYNC21-*: 7 синтетических проверок причинности, ручного согласования, устаревшего состояния, источника, структурных операций, отказа и атомарного batch_accept.' \
+            '- SQLite на Android 15 / SQLite 3.44: global read-only quick_check с FTS может дать ложный WARN (известный дефект движка, исправлен upstream в 3.45.1); это не доказательство целостности реальной базы.' \
+            '- При SQLITE-RO-CHECK или INDEX-INTEGRITY WARN сохраните обезличенные baseTablesQuickCheck и ftsStorageQuickCheck из INDEX-01 и SANDBOX-01; они проверяют только B-tree, не подменяют полную FTS-проверку.' \
+            '- Не пересоздавайте реальный индекс только ради устранения WARN; приложение ничего не восстанавливает автоматически.' \
+            '- Отчёт обезличенный; тесты используют приватный временный кэш и не пишут в библиотеку заметок.' \
+            '- Реальные Android SAF, Keystore, сопряжение двух устройств, WorkManager и 20 000 файлов необходимо отдельно проверить владельцу.' \
+            '- Порядок проверки: docs/STAGE21_DEVICE_ACCEPTANCE.md и корневой TODO.md.' \
+            '- Автоматической отправки заметок, автоматической загрузки моделей и переноса чужих решений без согласия нет.' \
+            '- APK подписан существующим release key из GitHub Secrets; SHA-256 приложен отдельным файлом.' \
+            '- Оригинальный редактор: Markor, Gregor Santner и участники; код Apache-2.0, переводы и примеры CC0-1.0.' \
+            '- Stage 21 остаётся NOT PASS до реальных испытаний. Это не production/stable релиз.' \
             '' \
             "Исходный коммит: ${GITHUB_SHA}." \
           )"
           gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "DP Knowledge System (com.dpsmpx.dpks) — signed preview #${GITHUB_RUN_NUMBER}" \
+            --title "DPKS Stage 21 — signed device QA #${GITHUB_RUN_NUMBER}" \
             --notes "$notes" \
             --prerelease

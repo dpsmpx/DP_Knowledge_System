@@ -9,7 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
-from ksys_android_bridge import journal_export_info, journal_restore_preview, journal_restore_commit
+from ksys_android_bridge import (
+    journal_export_info, journal_restore_preview, journal_restore_commit,
+    journal_sync_preview,
+)
 from ksys.core.clock import FixedClock
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
@@ -49,6 +52,18 @@ class BackupTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             journal_restore_preview(str(self.root / "restored"), tampered)
         self.assertFalse((self.root / "restored").exists())
+
+    def test_cross_device_preview_is_read_only_and_reports_branch_relation(self):
+        before = self.source.journal_path.read_bytes()
+        preview = json.loads(journal_sync_preview(str(self.source.root), self.original))
+        self.assertEqual("dpksys.sync-preview.v1", preview["protocol"])
+        self.assertEqual("identical", preview["relation"])
+        self.assertTrue(preview["read_only"])
+        self.assertFalse(preview["automatic_merge"])
+        self.assertEqual(before, self.source.journal_path.read_bytes())
+        with self.assertRaises(ValueError):
+            journal_sync_preview(str(self.source.root),
+                                 self.original.replace('"actor":"human:me"', '"actor":"attacker"'))
 
 
 if __name__ == "__main__":

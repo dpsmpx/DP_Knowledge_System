@@ -116,6 +116,9 @@ public final class KnowledgeLocalIndex {
     /** Read-only, count-only diagnostics; no source paths or private note text. */
     public static final class IndexHealth {
         public final String quickCheck;
+        /** Read-only per-table checks, excluding the FTS4 virtual-table xIntegrity hook. */
+        public final String baseTablesQuickCheck;
+        public final String ftsStorageQuickCheck;
         public final String sqliteVersion;
         public final int sources;
         public final int textRows;
@@ -184,6 +187,45 @@ public final class KnowledgeLocalIndex {
             lastScanCount = (int) parseLong(getMeta(db, "last_scan_count"));
             lastScanIncomplete = "1".equals(getMeta(db, "last_scan_incomplete"));
             unreadableDirectories = (int) parseLong(getMeta(db, "last_scan_unreadable"));
+            // SQLite 3.44.0 introduced virtual-table xIntegrity, whose FTS
+            // read-only check was fixed upstream in 3.45.1. Probe ordinary
+            // B-trees separately if the global check fails, without opening
+            // the user's index read/write or declaring the FTS index healthy.
+            baseTablesQuickCheck = "ok".equals(quickCheck) ? "not-needed"
+                    : readOnlyBtreeCheck(db, new String[]{"sqlite_schema", "meta", "notes",
+                            "links", "embedding_notes", "embedding_chunks", "embedding_lsh"});
+            ftsStorageQuickCheck = "ok".equals(quickCheck) ? "not-needed"
+                    : readOnlyBtreeCheck(db, new String[]{"documents_fts_content",
+                            "documents_fts_segments", "documents_fts_segdir",
+                            "documents_fts_docsize", "documents_fts_stat"});
+        }
+
+        /** Fixed names only: no source paths, dynamic identifiers or private text in SQL. */
+        private static String readOnlyBtreeCheck(final SQLiteDatabase db,
+                                                 final String[] tables) {
+            try {
+                for (final String table : tables) {
+                    if (!"sqlite_schema".equals(table)) {
+                        try (Cursor exists = db.rawQuery("SELECT 1 FROM sqlite_master "
+                                + "WHERE type='table' AND name=? LIMIT 1",
+                                new String[]{table})) {
+                            if (!exists.moveToFirst()) {
+                                return "missing-table";
+                            }
+                        }
+                    }
+                    try (Cursor check = db.rawQuery("PRAGMA quick_check(\"" + table + "\")", null)) {
+                        if (!check.moveToFirst() || !"ok".equals(check.getString(0))
+                                || check.moveToNext()) {
+                            return "not-ok";
+                        }
+                    }
+                }
+                return "ok";
+            } catch (RuntimeException unavailable) {
+                // Unsupported table-scoped PRAGMA is inconclusive, not PASS.
+                return "unavailable";
+            }
         }
 
         public boolean isHealthy() {

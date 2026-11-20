@@ -25,7 +25,7 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Android SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Unit tests and unsigned debug build
+      - name: Android unit tests (APK disabled for Stage 21 draft)
         working-directory: third_party/markor
         env:
           # gradlew defaults to a 64 MiB launcher heap; the Gradle protocol
@@ -37,12 +37,23 @@ jobs:
           # Keep job logs compact enough for offline/mobile troubleshooting.
           # Preserve the full Gradle log only on the ephemeral CI runner.
           log="$RUNNER_TEMP/dpks-gradle-ci.log"
-          if ! ./gradlew :app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest \
-            :app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug \
+          tasks=(:app:testFlavorDefaultDebugUnitTest :app:testFlavorAtestDebugUnitTest)
+          if [ "${GITHUB_HEAD_REF:-}" != 'feature/stage21-safe-backup-workspace' ]; then
+            tasks+=(:app:assembleFlavorDefaultDebug :app:assembleFlavorAtestDebug)
+          else
+            echo 'Stage 21 draft: no APK assemble tasks are authorized.'
+          fi
+          if ! ./gradlew "${tasks[@]}" \
             --no-daemon --no-parallel --max-workers=2 --stacktrace > "$log" 2>&1; then
             echo '::group::Compiler errors and failing Gradle tasks'
             grep -nE 'error:|Compilation failed|FAILURE:|What went wrong|Execution failed|^> Task .*FAILED' \
               "$log" | tail -n 90 || true
+            echo '::endgroup::'
+            echo '::group::Failed Android JUnit cases'
+            if [ -d app/build/test-results ]; then
+              grep -RhnE '<(failure|error)( |>)' app/build/test-results \
+                | head -n 70 || true
+            fi
             echo '::endgroup::'
             echo '::group::Final Gradle lines'
             tail -n 40 "$log"
@@ -51,6 +62,7 @@ jobs:
           fi
           tail -n 24 "$log"
       - name: Confirm standalone DP Knowledge package ID
+        if: github.head_ref != 'feature/stage21-safe-backup-workspace'
         run: |
           set -euo pipefail
           apk=$(find third_party/markor/app/build/outputs/apk/flavorAtest/debug -name '*.apk' -print -quit)
@@ -59,6 +71,7 @@ jobs:
             dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
           test "$package_name" = 'com.dpsmpx.dpks'
       - name: Verify embedded Python runtime payload
+        if: github.head_ref != 'feature/stage21-safe-backup-workspace'
         run: |
           apk=$(find third_party/markor/app/build/outputs/apk/flavorDefault/debug -name '*.apk' -print -quit)
           test -n "$apk"

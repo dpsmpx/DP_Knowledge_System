@@ -73,6 +73,13 @@
 
 На Android API 35 штатная SQLite относится к семейству 3.44; в некоторых
 вариантах SQLite известны ошибки проверки FTS на read-only соединениях.
+В [официальной истории SQLite](https://www.sqlite.org/changes.html#version_3_45_1)
+зафиксировано исправление проверки `integrity_check` для read-only БД с FTS3/5
+в версии 3.45.1. Сообщение SQLite 3.44.5 на устройстве согласуется с этим
+дефектом, но **не доказывает**, что настоящий индекс исправен. После первого
+Stage21 QA отчёта добавлены отдельные table-scoped read-only B-tree проверки
+`baseTablesQuickCheck` и `ftsStorageQuickCheck`: обе относятся к обычным
+таблицам и FTS4 shadow storage, не заменяют full virtual-table xIntegrity.
 Одинаковая структура и успешный `quick_check` временного файла в режиме
 read/write при неуспешном read-only даёт `SQLITE-RO-CHECK: WARN`, **а не**
 автоматическое разрешение игнорировать любые реальные сбои. Если оба режима

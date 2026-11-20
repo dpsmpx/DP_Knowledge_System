@@ -120,6 +120,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
+    private static final int REQUEST_EXPORT_PORTABLE = 40024;
+    private static final int REQUEST_INSPECT_PORTABLE = 40025;
+    private static final int REQUEST_RESTORE_PORTABLE = 40026;
+    private static final int REQUEST_EXTERNAL_BACKUP_TREE = 40027;
+    private static final int REQUEST_SYNC_COMPARE_PORTABLE = 40028;
+    private static final int REQUEST_COMPARE_PORTABLE_SOURCES = 40029;
+    private static final int REQUEST_IMPORT_PLAIN_MARKDOWN = 40030;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -198,10 +205,23 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
     private KnowledgeProcessHistory processHistory;
     private char[] pendingExportPassword;
+    private char[] pendingPortablePassword;
+    private boolean pendingPortableSecrets;
+    private File pendingPortableStaging;
+    private File pendingPortableSourceStaging;
+    private File pendingPlainMarkdownStaging;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // A process kill during a preview must not retain decrypted private
+        // notes in the temporary cache until an unrelated cache eviction.
+        final File[] staleBackups = getCacheDir().listFiles(
+                (dir, name) -> name.startsWith(".dpks-verified-") && name.endsWith(".zip"));
+        if (staleBackups != null) for (final File file : staleBackups) file.delete();
+        final File[] staleMarkdown = getCacheDir().listFiles(
+                (dir, name) -> name.startsWith(".dpks-md-") && name.endsWith(".tmp"));
+        if (staleMarkdown != null) for (final File file : staleMarkdown) file.delete();
         // This is deliberately scoped to the knowledge workspace: the legacy
         // Markor editor keeps its existing appearance and behavior.
         DynamicColors.applyToActivityIfAvailable(this);
@@ -390,6 +410,38 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
+        findViewById(R.id.knowledge_portable_export).setOnClickListener(view -> requestPortableExport());
+        findViewById(R.id.knowledge_portable_inspect).setOnClickListener(view -> requestPortableInspect());
+        findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
+        findViewById(R.id.knowledge_portable_compare_sources).setOnClickListener(
+                view -> requestPortableSourceCompare());
+        findViewById(R.id.knowledge_portable_import_markdown).setOnClickListener(
+                view -> requestPlainMarkdownCompare());
+        findViewById(R.id.knowledge_portable_compare_peer).setOnClickListener(
+                view -> requestPortablePeerCompare());
+        findViewById(R.id.knowledge_sync_my_device).setOnClickListener(
+                view -> showOwnPeerIdentity());
+        findViewById(R.id.knowledge_sync_pair).setOnClickListener(
+                view -> promptPeerPair());
+        findViewById(R.id.knowledge_sync_trusted).setOnClickListener(
+                view -> showPairedPeers());
+        findViewById(R.id.knowledge_sync_inbox).setOnClickListener(
+                view -> showPeerInbox());
+        findViewById(R.id.knowledge_daily_backup_toggle).setOnClickListener(
+                view -> toggleDailyBackup());
+        findViewById(R.id.knowledge_daily_backup_now).setOnClickListener(view -> {
+            try {
+                KnowledgeDailyBackup.now(this);
+                Toast.makeText(this, R.string.knowledge_daily_backup_scheduled,
+                        Toast.LENGTH_LONG).show();
+            } catch (RuntimeException failure) {
+                Toast.makeText(this, R.string.knowledge_daily_backup_failed,
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+        findViewById(R.id.knowledge_external_backup_toggle).setOnClickListener(view ->
+                toggleExternalBackup());
+        refreshDailyBackupStatus();
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
         processHistory = KnowledgeProcessHistory.fromStored(
                 getSharedPreferences(PROCESS_HISTORY_PREFERENCES, MODE_PRIVATE)
@@ -569,6 +621,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     : " · " + item.optString("locator")));
                             final String path = item.optString("path");
                             row.put("summary", (path.isEmpty() ? "" : path + "\n")
+                                    + (item.optInt("peer_contested") > 0
+                                    ? getString(R.string.knowledge_sync_contested_indicator,
+                                            item.optInt("peer_contested")) + "\n" : "")
                                     + item.optString("summary"));
                             decisionRows.add(row);
                         }
@@ -690,6 +745,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 provenance.length() == 0 ? getString(R.string.knowledge_decision_not_available)
                         : provenance.toString().trim());
         final StringBuilder diagnostics = new StringBuilder();
+        if (item.optInt("peer_contested") > 0) {
+            diagnostics.append(getString(R.string.knowledge_sync_contested_indicator,
+                    item.optInt("peer_contested"))).append('\n')
+                    .append(getString(R.string.knowledge_sync_contested_qualification))
+                    .append("\n\n");
+        }
+        if (item.optInt("peer_kept_local") > 0) {
+            diagnostics.append(getString(R.string.knowledge_sync_keep_local_indicator,
+                    item.optInt("peer_kept_local"))).append("\n\n");
+        }
         if (item.optBoolean("conflicts_available")) {
             final JSONArray conflicts = item.optJSONArray("conflicts");
             if (conflicts == null || conflicts.length() == 0) {
@@ -3507,6 +3572,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private String formatQueryResult(final JSONObject result) {
         final StringBuilder out = new StringBuilder();
+        if (result.optInt("unresolved_peer_disputes") > 0) {
+            out.append(getString(R.string.knowledge_sync_query_dispute_warning,
+                    result.optInt("unresolved_peer_disputes"))).append("\n\n");
+        }
         out.append(getString(R.string.knowledge_query_status, result.optString("status")))
                 .append("\n\n").append(result.optString("answer"));
         final JSONObject sections = result.optJSONObject("sections");
@@ -3699,6 +3768,1781 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return input;
     }
 
+    private void requestPortableExport() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setPadding(24, 0, 24, 0);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final EditText password = passwordInput(this);
+        final EditText confirm = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        confirm.setHint(R.string.knowledge_backup_password_confirm);
+        fields.addView(password);
+        fields.addView(confirm);
+        final CheckBox includeSecrets = new CheckBox(this);
+        includeSecrets.setText(R.string.knowledge_portable_secrets_export_choice);
+        includeSecrets.setChecked(false);
+        fields.addView(includeSecrets);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_export)
+                .setMessage(R.string.knowledge_portable_privacy)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_export, (dialog, which) -> {
+                    final String first = password.getText().toString();
+                    if (first.length() < 12 || first.length() > 512
+                            || !first.equals(confirm.getText().toString())) {
+                        Toast.makeText(this, R.string.knowledge_backup_password_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (includeSecrets.isChecked()) {
+                        // A separate, per-export approval is required even after
+                        // opting into the unchecked-by-default checkbox.
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_portable_secrets_export_title)
+                                .setMessage(R.string.knowledge_portable_secrets_export_warning)
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .setPositiveButton(R.string.knowledge_portable_secrets_approve,
+                                        (approval, choice) -> beginPortableExport(first.toCharArray(), true))
+                                .show();
+                    } else beginPortableExport(first.toCharArray(), false);
+                }).show();
+    }
+
+    private void beginPortableExport(final char[] password, final boolean secretsApproved) {
+        if (pendingPortablePassword != null) Arrays.fill(pendingPortablePassword, '\0');
+        pendingPortablePassword = password;
+        pendingPortableSecrets = secretsApproved;
+        final Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("application/octet-stream");
+        pick.putExtra(Intent.EXTRA_TITLE, "DPKS_Portable_Backup.dpksb");
+        startActivityForResult(pick, REQUEST_EXPORT_PORTABLE);
+    }
+
+    private void refreshDailyBackupStatus() {
+        final boolean enabled = KnowledgeDailyBackup.enabled(this);
+        ((Button) findViewById(R.id.knowledge_daily_backup_toggle)).setText(enabled
+                ? R.string.knowledge_daily_backup_disable
+                : R.string.knowledge_daily_backup_enable);
+        findViewById(R.id.knowledge_daily_backup_now).setEnabled(enabled);
+        final TextView notice = findViewById(R.id.knowledge_daily_backup_status);
+        if (!enabled) {
+            notice.setText(R.string.knowledge_daily_backup_unconfigured);
+        } else {
+            final android.content.SharedPreferences prefs = KnowledgeDailyBackup.prefs(this);
+            final long last = prefs.getLong(KnowledgeDailyBackup.LAST_AT, 0);
+            final String when = last == 0
+                    ? getString(R.string.knowledge_daily_backup_never)
+                    : DateFormat.getDateTimeInstance().format(new Date(last));
+            notice.setText(getString(R.string.knowledge_daily_backup_active, when,
+                    prefs.getInt(KnowledgeDailyBackup.LAST_COUNT, 0)));
+        }
+        final boolean external = KnowledgeExternalBackup.destination(this) != null;
+        ((Button) findViewById(R.id.knowledge_external_backup_toggle)).setText(external
+                ? R.string.knowledge_external_backup_disable
+                : R.string.knowledge_external_backup_choose);
+        final TextView externalStatus = findViewById(R.id.knowledge_external_backup_status);
+        externalStatus.setText(external
+                ? getString(R.string.knowledge_external_backup_on,
+                        KnowledgeExternalBackup.hasSuccessfulCopy(this))
+                : getString(R.string.knowledge_external_backup_off));
+    }
+
+    private void toggleExternalBackup() {
+        if (KnowledgeExternalBackup.destination(this) != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_external_backup_disable)
+                    .setMessage(R.string.knowledge_external_backup_removed)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.knowledge_external_backup_disable,
+                            (dialog, which) -> {
+                                KnowledgeExternalBackup.disable(this);
+                                refreshDailyBackupStatus();
+                            }).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_external_backup_choose)
+                .setMessage(R.string.knowledge_external_backup_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_external_backup_choose,
+                        (dialog, which) -> {
+                            final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                            startActivityForResult(intent, REQUEST_EXTERNAL_BACKUP_TREE);
+                        }).show();
+    }
+
+    private void toggleDailyBackup() {
+        if (KnowledgeDailyBackup.enabled(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.knowledge_daily_backup_disable)
+                    .setMessage(R.string.knowledge_daily_backup_stopped)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.knowledge_daily_backup_disable,
+                            (dialog, which) -> {
+                                KnowledgeDailyBackup.stop(this);
+                                refreshDailyBackupStatus();
+                            }).show();
+            return;
+        }
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setPadding(24, 0, 24, 0);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final EditText pass = passwordInput(this);
+        final EditText repeated = passwordInput(this);
+        pass.setHint(R.string.knowledge_backup_password);
+        repeated.setHint(R.string.knowledge_backup_password_confirm);
+        fields.addView(pass);
+        fields.addView(repeated);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_daily_backup_enable)
+                .setMessage(R.string.knowledge_daily_backup_config)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_daily_backup_enable, (dialog, which) -> {
+                    final String first = pass.getText().toString();
+                    if (first.length() < 12 || first.length() > 512
+                            || !first.equals(repeated.getText().toString())) {
+                        Toast.makeText(this, R.string.knowledge_backup_password_invalid,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final char[] password = first.toCharArray();
+                    worker.submit(() -> {
+                        try {
+                            KnowledgeDailyBackup.start(this, password);
+                            runOnUiThread(() -> {
+                                if (!isDestroyed()) {
+                                    refreshDailyBackupStatus();
+                                    Toast.makeText(this, R.string.knowledge_daily_backup_scheduled,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        } catch (Exception failure) {
+                            runOnUiThread(() -> {
+                                if (!isDestroyed())
+                                    Toast.makeText(this, R.string.knowledge_daily_backup_failed,
+                                            Toast.LENGTH_LONG).show();
+                            });
+                        } finally { Arrays.fill(password, '\0'); }
+                    });
+                }).show();
+    }
+
+    private void requestPortableInspect() {
+        final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("application/octet-stream");
+        startActivityForResult(pick, REQUEST_INSPECT_PORTABLE);
+    }
+
+    private void requestPortableRestore() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_restore)
+                .setMessage(R.string.knowledge_portable_restore_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_restore, (dialog, which) -> {
+                    final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("application/octet-stream");
+                    startActivityForResult(pick, REQUEST_RESTORE_PORTABLE);
+                }).show();
+    }
+
+    /** Manual encrypted exchange via SAF/Android folders, never a background sync. */
+    private void requestPortableSourceCompare() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_compare_sources)
+                .setMessage(R.string.knowledge_portable_sources_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_compare_sources, (dialog, which) -> {
+                    final Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    choose.addCategory(Intent.CATEGORY_OPENABLE);
+                    choose.setType("application/octet-stream");
+                    startActivityForResult(choose, REQUEST_COMPARE_PORTABLE_SOURCES);
+                }).show();
+    }
+
+    /** The other approved route: raw .md over SAF/Syncthing/Android folder. */
+    private void requestPlainMarkdownCompare() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_import_markdown)
+                .setMessage(R.string.knowledge_portable_plain_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_import_markdown, (dialog, which) -> {
+                    final Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    choose.addCategory(Intent.CATEGORY_OPENABLE);
+                    choose.setType("*/*"); // Some SAF providers label .md as octet-stream.
+                    startActivityForResult(choose, REQUEST_IMPORT_PLAIN_MARKDOWN);
+                }).show();
+    }
+
+    private String safMarkdownName(final Uri uri) throws Exception {
+        String name = null;
+        try (android.database.Cursor cursor = getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0))
+                name = cursor.getString(0);
+        }
+        return KnowledgeSafMarkdown.safeName(name);
+    }
+
+    private void closePlainMarkdownStaging(final File staged) {
+        if (pendingPlainMarkdownStaging == staged) {
+            pendingPlainMarkdownStaging = null;
+            staged.delete();
+        }
+    }
+
+    private void comparePlainMarkdownFromUri(final Uri source) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            boolean handedToDialog = false;
+            try {
+                final String filename = safMarkdownName(source);
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    staged = KnowledgeSafMarkdown.stage(input, getCacheDir());
+                }
+                final KnowledgePortableSources.Item item = KnowledgePortableSources.inspectPlain(
+                        staged, notebook, filename);
+                final File confirmed = staged;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        confirmed.delete();
+                        return;
+                    }
+                    if (pendingPlainMarkdownStaging != null) pendingPlainMarkdownStaging.delete();
+                    pendingPlainMarkdownStaging = confirmed;
+                    showPlainMarkdownPreview(confirmed, item, generation);
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (!handedToDialog && staged != null) staged.delete();
+            }
+        });
+    }
+
+    private void showPlainMarkdownPreview(final File staged,
+                                          final KnowledgePortableSources.Item item,
+                                          final int generation) {
+        if (pendingPlainMarkdownStaging != staged) return;
+        final String text = getString(R.string.knowledge_portable_sources_details,
+                item.path, item.status, item.remoteBytes,
+                item.remoteSha.substring(0, 16))
+                + "\n\n" + getString(R.string.knowledge_portable_sources_local)
+                + "\n" + item.localExcerpt
+                + (item.localTruncated ? getString(
+                        R.string.knowledge_portable_sources_truncated) : "")
+                + "\n\n" + getString(R.string.knowledge_portable_sources_foreign)
+                + "\n" + item.remoteExcerpt
+                + (item.remoteTruncated ? getString(
+                        R.string.knowledge_portable_sources_truncated) : "");
+        final MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_import_markdown)
+                .setMessage(text)
+                .setNegativeButton(R.string.knowledge_portable_sources_close,
+                        (d, which) -> closePlainMarkdownStaging(staged))
+                .setOnCancelListener(d -> closePlainMarkdownStaging(staged));
+        if (!"identical".equals(item.status)) dialog.setPositiveButton(
+                R.string.knowledge_portable_sources_keep_both, (d, which) ->
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_portable_sources_keep_both)
+                                .setMessage(getString(R.string.knowledge_portable_sources_save_warning,
+                                        item.path, item.remoteBytes))
+                                .setNegativeButton(android.R.string.cancel, (no, ignored) ->
+                                        showPlainMarkdownPreview(staged, item, generation))
+                                .setOnCancelListener(no -> showPlainMarkdownPreview(
+                                        staged, item, generation))
+                                .setPositiveButton(R.string.knowledge_portable_sources_keep_both,
+                                        (yes, ignored) -> worker.submit(() -> {
+                                            try {
+                                                if (pendingPlainMarkdownStaging != staged)
+                                                    throw new IOException("Expired SAF Markdown");
+                                                final File saved = KnowledgePortableSources.savePlainCopy(
+                                                        staged, notebook, item);
+                                                runOnUiThread(() -> {
+                                                    closePlainMarkdownStaging(staged);
+                                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                                            getString(R.string.knowledge_portable_sources_saved,
+                                                                    saved.getName()), Toast.LENGTH_LONG).show();
+                                                });
+                                            } catch (Exception invalid) {
+                                                runOnUiThread(() -> {
+                                                    closePlainMarkdownStaging(staged);
+                                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                                            R.string.knowledge_portable_sources_failed,
+                                                            Toast.LENGTH_LONG).show();
+                                                });
+                                            }
+                                        }))
+                                .show());
+        dialog.show();
+    }
+
+    private void promptPortableSourcePassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_compare_sources)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        loadPortableSources(source, password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void closePortableSourceStaging(final File staged) {
+        if (pendingPortableSourceStaging == staged) {
+            pendingPortableSourceStaging = null;
+            staged.delete();
+        }
+    }
+
+    private void loadPortableSources(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File stage = null;
+            boolean handedToDialog = false;
+            try {
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    if (input == null) throw new IOException("Portable source unavailable");
+                    stage = KnowledgePortableCipher.decryptToVerifiedStaging(input,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                KnowledgePortableArchive.verify(stage,
+                        () -> Thread.currentThread().isInterrupted());
+                final File verified = stage;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        verified.delete();
+                        return;
+                    }
+                    if (pendingPortableSourceStaging != null)
+                        pendingPortableSourceStaging.delete();
+                    pendingPortableSourceStaging = verified;
+                    showPortableSourcePage(verified, 0, generation);
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (!handedToDialog && stage != null) stage.delete();
+            }
+        });
+    }
+
+    private void showPortableSourcePage(final File staged, final int offset,
+                                        final int generation) {
+        if (pendingPortableSourceStaging != staged) return;
+        worker.submit(() -> {
+            try {
+                final KnowledgePortableSources.Page page = KnowledgePortableSources.page(
+                        staged, offset);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || pendingPortableSourceStaging != staged
+                            || scanGeneration.get() != generation) {
+                        closePortableSourceStaging(staged);
+                        return;
+                    }
+                    final CharSequence[] labels = page.paths.toArray(new CharSequence[0]);
+                    final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                            .setTitle(getString(R.string.knowledge_portable_sources_page,
+                                    Math.min(page.total, offset + 1), page.total))
+                            .setItems(labels, (dialog, selection) -> previewPortableSource(
+                                    staged, page.paths.get(selection), offset, generation))
+                            .setNegativeButton(R.string.knowledge_portable_sources_close,
+                                    (dialog, which) -> closePortableSourceStaging(staged))
+                            .setOnCancelListener(dialog -> closePortableSourceStaging(staged));
+                    if (offset > 0) builder.setNeutralButton(
+                            R.string.knowledge_portable_sources_previous,
+                            (dialog, which) -> showPortableSourcePage(staged,
+                                    Math.max(0, offset - KnowledgePortableSources.PAGE), generation));
+                    if (offset + KnowledgePortableSources.PAGE < page.total)
+                        builder.setPositiveButton(R.string.knowledge_portable_sources_next,
+                                (dialog, which) -> showPortableSourcePage(staged,
+                                        offset + KnowledgePortableSources.PAGE, generation));
+                    builder.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    closePortableSourceStaging(staged);
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void previewPortableSource(final File staged, final String path, final int offset,
+                                       final int generation) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePortableSources.Item item = KnowledgePortableSources.inspect(
+                        staged, notebook, path);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || pendingPortableSourceStaging != staged
+                            || scanGeneration.get() != generation) return;
+                    final String shown = getString(R.string.knowledge_portable_sources_details,
+                            item.path, item.status, item.remoteBytes,
+                            item.remoteSha.substring(0, 16))
+                            + "\n\n" + getString(R.string.knowledge_portable_sources_local)
+                            + "\n" + item.localExcerpt
+                            + (item.localTruncated ? getString(
+                                    R.string.knowledge_portable_sources_truncated) : "")
+                            + "\n\n" + getString(R.string.knowledge_portable_sources_foreign)
+                            + "\n" + item.remoteExcerpt
+                            + (item.remoteTruncated ? getString(
+                                    R.string.knowledge_portable_sources_truncated) : "");
+                    final MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_portable_compare_sources)
+                            .setMessage(shown)
+                            .setNegativeButton(R.string.knowledge_portable_sources_back,
+                                    (d, which) -> showPortableSourcePage(staged, offset, generation))
+                            .setOnCancelListener(d -> showPortableSourcePage(
+                                    staged, offset, generation));
+                    if (!"identical".equals(item.status))
+                        dialog.setPositiveButton(R.string.knowledge_portable_sources_keep_both,
+                                (d, which) -> confirmPortableSourceSave(staged, item,
+                                        offset, generation));
+                    dialog.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                    showPortableSourcePage(staged, offset, generation);
+                });
+            }
+        });
+    }
+
+    private void confirmPortableSourceSave(final File staged,
+                                           final KnowledgePortableSources.Item item,
+                                           final int offset, final int generation) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_sources_keep_both)
+                .setMessage(getString(R.string.knowledge_portable_sources_save_warning,
+                        item.path, item.remoteBytes))
+                .setNegativeButton(android.R.string.cancel,
+                        (d, which) -> showPortableSourcePage(staged, offset, generation))
+                .setOnCancelListener(d -> showPortableSourcePage(staged, offset, generation))
+                .setPositiveButton(R.string.knowledge_portable_sources_keep_both, (d, which) -> {
+                    worker.submit(() -> {
+                        try {
+                            if (pendingPortableSourceStaging != staged)
+                                throw new IOException("Expired Markdown review");
+                            final File saved = KnowledgePortableSources.saveCopy(
+                                    staged, notebook, item);
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                        getString(R.string.knowledge_portable_sources_saved,
+                                                saved.getName()), Toast.LENGTH_LONG).show();
+                                showPortableSourcePage(staged, offset, generation);
+                            });
+                        } catch (Exception invalid) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                        R.string.knowledge_portable_sources_failed,
+                                        Toast.LENGTH_LONG).show();
+                                showPortableSourcePage(staged, offset, generation);
+                            });
+                        }
+                    });
+                }).show();
+    }
+
+    private void requestPortablePeerCompare() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_sync_compare_peer)
+                .setMessage(R.string.knowledge_sync_compare_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_compare_peer, (dialog, which) -> {
+                    final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("application/octet-stream");
+                    startActivityForResult(pick, REQUEST_SYNC_COMPARE_PORTABLE);
+                }).show();
+    }
+
+    /** A fresh invitation is public information; the P-256 private key stays in Keystore. */
+    private void showOwnPeerIdentity() {
+        worker.submit(() -> {
+            try {
+                final String invitation = KnowledgePeerIdentity.currentInvitation(this);
+                final String fingerprint = KnowledgePeerIdentity.ownFingerprint();
+                final String code = KnowledgePeerIdentity.verificationCode(invitation);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final TextView details = new TextView(this);
+                    details.setText(getString(R.string.knowledge_sync_invite_details,
+                            fingerprint, code, invitation));
+                    details.setTextIsSelectable(true);
+                    final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                    details.setPadding(pad, pad, pad, pad);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_my_device)
+                            .setView(details)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_copy_invitation,
+                                    (dialog, which) -> {
+                                        final ClipboardManager clipboard = (ClipboardManager)
+                                                getSystemService(Context.CLIPBOARD_SERVICE);
+                                        if (clipboard != null) clipboard.setPrimaryClip(
+                                                ClipData.newPlainText("DPKS peer invitation", invitation));
+                                    }).show();
+                });
+            } catch (Exception failure) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_pair_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void promptPeerPair() {
+        final EditText invitation = new EditText(this);
+        invitation.setHint(R.string.knowledge_sync_enter_invitation);
+        invitation.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        invitation.setMinLines(2);
+        final EditText code = new EditText(this);
+        code.setHint(R.string.knowledge_sync_enter_code);
+        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        code.setFilters(new InputFilter[]{new InputFilter.LengthFilter(12)});
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        fields.setPadding(pad, pad, pad, pad);
+        fields.addView(invitation);
+        fields.addView(code);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_pair)
+                .setMessage(R.string.knowledge_sync_pair_warning)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_pair, (dialog, which) -> {
+                    final String inviteValue = invitation.getText().toString().trim();
+                    final String codeValue = code.getText().toString().trim();
+                    worker.submit(() -> {
+                        boolean success = false;
+                        try {
+                            KnowledgePeerIdentity.pair(this, inviteValue, codeValue);
+                            success = true;
+                        } catch (Exception invalid) {
+                            // Invalid pairing data never changes trust state.
+                        }
+                        final boolean paired = success;
+                        runOnUiThread(() -> Toast.makeText(this,
+                                paired ? R.string.knowledge_sync_paired
+                                        : R.string.knowledge_sync_pair_failed,
+                                Toast.LENGTH_LONG).show());
+                    });
+                }).show();
+    }
+
+    private void showPairedPeers() {
+        final String[] peers = KnowledgePeerIdentity.pairedFingerprints(this);
+        if (peers.length == 0) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_sync_trusted)
+                    .setMessage(R.string.knowledge_sync_no_peers)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_trusted)
+                .setItems(peers, (dialog, which) -> new MaterialAlertDialogBuilder(this)
+                        .setTitle(peers[which])
+                        .setMessage(R.string.knowledge_sync_revoke_warning)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.knowledge_sync_revoke,
+                                (confirm, selected) -> KnowledgePeerIdentity.revoke(this, peers[which]))
+                        .show()).show();
+    }
+
+    private void showPeerInbox() {
+        final String[] names;
+        try { names = KnowledgePeerInbox.list(this); }
+        catch (Exception failure) {
+            Toast.makeText(this, R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (names.length == 0) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_sync_inbox)
+                    .setMessage(R.string.knowledge_sync_inbox_empty)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        final String[] labels = new String[names.length];
+        for (int i = 0; i < names.length; i++) {
+            labels[i] = names[i].substring(0, 12) + "… / "
+                    + names[i].substring(65, 77) + "…";
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_inbox)
+                .setItems(labels, (dialog, index) -> reviewPeerInbox(names[index]))
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    private void reviewPeerInbox(final String name) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                // This separately validates both hash chains on each review.
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), snapshot.journal);
+                final String currentHead = comparison.isNull("local_head") ? ""
+                        : comparison.getString("local_head");
+                final String remoteSha = comparison.getString("remote_sha256");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(name.substring(0, 12) + "…")
+                            .setMessage(getString(R.string.knowledge_sync_branch_review,
+                                    snapshot.peer.paired, comparison.optString("relation"),
+                                    comparison.optInt("local_only"),
+                                    comparison.optInt("remote_only"),
+                                    comparison.optInt("possible_target_conflicts")))
+                            .setPositiveButton(snapshot.peer.paired
+                                            ? R.string.knowledge_sync_ack_branch
+                                            : android.R.string.ok,
+                                    snapshot.peer.paired
+                                            ? (dialog, which) -> confirmPeerAcknowledgement(
+                                            name, remoteSha, currentHead)
+                                            : null)
+                            .setNegativeButton(R.string.knowledge_sync_events,
+                                    (dialog, which) -> showPeerBranchEvents(name, 0))
+                            .setNeutralButton(R.string.knowledge_sync_delete_branch,
+                                    (dialog, which) -> new MaterialAlertDialogBuilder(this)
+                                            .setTitle(R.string.knowledge_sync_delete_branch)
+                                            .setMessage(R.string.knowledge_sync_delete_warning)
+                                            .setNegativeButton(android.R.string.cancel, null)
+                                            .setPositiveButton(R.string.knowledge_sync_delete_branch,
+                                                    (confirmed, selected) -> {
+                                                        try {
+                                                            KnowledgePeerInbox.delete(this, name);
+                                                        } catch (Exception failed) {
+                                                            Toast.makeText(this,
+                                                                    R.string.knowledge_sync_branch_failed,
+                                                                    Toast.LENGTH_LONG).show();
+                                                        }
+                                                    }).show())
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerAcknowledgement(final String name, final String remoteSha,
+                                            final String localHead) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_ack_branch)
+                .setMessage(R.string.knowledge_sync_ack_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncAcknowledge(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, localHead, remoteSha);
+                                if (result.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected foreign activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_ack_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_branch_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    private void showPeerBranchEvents(final String name, final int offset) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                if (!snapshot.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject page = KnowledgePythonBridge.journalSyncEvents(
+                        this, workspacePath(), snapshot.journal, offset);
+                final JSONArray events = page.getJSONArray("events");
+                final String[] labels = new String[events.length() + 1];
+                final String[] ids = new String[events.length()];
+                labels[0] = getString(R.string.knowledge_sync_events_warning,
+                        page.optInt("foreign_total"), offset + 1);
+                for (int i = 0; i < events.length(); i++) {
+                    final JSONObject event = events.getJSONObject(i);
+                    ids[i] = event.getString("event_id");
+                    labels[i + 1] = "#" + event.getInt("seq") + " · "
+                            + event.getString("operation") + " · " + ids[i].substring(0, 15)
+                            + (event.optBoolean("possible_conflict") ? " ⚠" : "");
+                }
+                final String expectedHash = page.getString("remote_sha256");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_events)
+                            .setItems(labels, (dialog, index) -> {
+                                if (index > 0) showPeerEventDetail(
+                                        name, ids[index - 1], expectedHash);
+                            });
+                    if (page.optBoolean("has_more")) builder.setPositiveButton(
+                            R.string.knowledge_sync_next_page,
+                            (dialog, which) -> showPeerBranchEvents(name, offset + 40));
+                    else builder.setPositiveButton(android.R.string.ok, null);
+                    if (offset > 0) builder.setNegativeButton(
+                            R.string.knowledge_sync_previous_page,
+                            (dialog, which) -> showPeerBranchEvents(name, offset - 40));
+                    else builder.setNegativeButton(android.R.string.cancel, null);
+                    builder.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void showPeerEventDetail(final String name, final String eventId,
+                                     final String expectedHash) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                if (!snapshot.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject detail = KnowledgePythonBridge.journalSyncEventDetail(
+                        this, snapshot.journal, eventId, expectedHash);
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), snapshot.journal);
+                if (!expectedHash.equals(comparison.getString("remote_sha256")))
+                    throw new SecurityException("Peer branch changed since review");
+                final String localHead = comparison.isNull("local_head") ? ""
+                        : comparison.getString("local_head");
+                final String operation = detail.optString("operation");
+                final boolean metadata = "alias".equals(operation)
+                        || "label".equals(operation) || "schema".equals(operation);
+                final boolean context = "bind".equals(operation)
+                        || "resolve".equals(operation);
+                final boolean structural = "revise".equals(operation)
+                        || "split".equals(operation) || "merge".equals(operation);
+                final boolean batch = "batch_accept".equals(operation);
+                String payload = detail.toString(2);
+                if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
+                final String shown = payload;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final TextView text = new TextView(this);
+                    text.setText(shown);
+                    text.setTextIsSelectable(true);
+                    final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                    text.setPadding(pad, pad, pad, pad);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_event_detail)
+                            .setMessage(R.string.knowledge_sync_event_detail_warning)
+                            .setView(text)
+                            .setPositiveButton("accept".equals(operation)
+                                            ? R.string.knowledge_sync_adopt_preview
+                                            : "retract".equals(operation)
+                                            ? R.string.knowledge_sync_retract_preview
+                                            : metadata
+                                            ? R.string.knowledge_sync_metadata_preview
+                                            : context
+                                            ? R.string.knowledge_sync_context_preview
+                                            : structural
+                                            ? R.string.knowledge_sync_structural_preview
+                                            : batch
+                                            ? R.string.knowledge_sync_batch_preview
+                                            : android.R.string.ok,
+                                    "accept".equals(operation)
+                                            ? (dialog, which) -> previewPeerAdoption(
+                                            name, eventId, expectedHash, localHead)
+                                            : "retract".equals(operation)
+                                            ? (dialog, which) -> previewPeerRetraction(
+                                            name, eventId, expectedHash, localHead)
+                                            : metadata
+                                            ? (dialog, which) -> previewPeerMetadata(
+                                            name, eventId, expectedHash, localHead)
+                                            : context
+                                            ? (dialog, which) -> previewPeerContext(
+                                            name, eventId, expectedHash, localHead)
+                                            : structural
+                                            ? (dialog, which) -> previewPeerStructure(
+                                            name, eventId, expectedHash, localHead)
+                                            : batch
+                                            ? (dialog, which) -> previewPeerBatch(
+                                            name, eventId, expectedHash, localHead)
+                                            : null)
+                            .setNeutralButton(R.string.knowledge_sync_review_hold,
+                                    (dialog, which) -> confirmPeerReview(name, eventId,
+                                            expectedHash, localHead, "hold"))
+                            .setNegativeButton(R.string.knowledge_sync_review_reject,
+                                    (dialog, which) -> confirmPeerReview(name, eventId,
+                                            expectedHash, localHead, "reject"))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    /** Foreign schema/alias/label is never directly replayed as a journal line. */
+    private void previewPeerMetadata(final String name, final String eventId,
+                                     final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject plan = KnowledgePythonBridge.journalSyncMetadataPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!plan.optBoolean("read_only", false)
+                        || !plan.optBoolean("requires_human_confirmation", false))
+                    throw new SecurityException("Unsafe metadata preview");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_metadata_warning)
+                        + "\n\n" + plan.getString("operation")
+                        + " / " + plan.getString("risk")
+                        + "\n\n" + plan.getJSONObject("data").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_metadata_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_metadata_apply,
+                                    (dialog, which) -> confirmPeerMetadata(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_metadata_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerMetadata(final String name, final String eventId,
+                                     final String remoteSha, final String localHead,
+                                     final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_metadata_apply)
+                .setMessage(R.string.knowledge_sync_metadata_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_metadata_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncMetadataCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true))
+                                    throw new SecurityException("Metadata translation not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                            R.string.knowledge_sync_metadata_saved,
+                                            Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_metadata_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    /** Bind/resolve applies only to an identical fragment of an indexed LOCAL note. */
+    private void previewPeerContext(final String name, final String eventId,
+                                    final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject source = KnowledgePythonBridge.journalSyncContextSource(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!source.optBoolean("read_only") || !source.optBoolean("requires_local_note"))
+                    throw new SecurityException("Unsafe foreign context source");
+                final String path = source.getString("source_document");
+                final String markdown = readSelectedNote(path);
+                final JSONObject plan = KnowledgePythonBridge.journalSyncContextPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, path, markdown);
+                if (!plan.optBoolean("read_only")
+                        || !plan.optBoolean("requires_human_confirmation"))
+                    throw new SecurityException("Unsafe foreign context preview");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_context_warning)
+                        + "\n\n" + path + "\n" + plan.getString("operation")
+                        + "\n\n" + plan.getJSONObject("data").toString(2)
+                        + "\n\n" + plan.getString("source_excerpt")
+                        + "\n\n" + plan.getString("local_meaning");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_context_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_context_apply,
+                                    (dialog, which) -> confirmPeerContext(
+                                            name, eventId, remoteSha, localHead, path, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_context_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerContext(final String name, final String eventId,
+                                    final String remoteSha, final String localHead,
+                                    final String path, final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_context_apply)
+                .setMessage(R.string.knowledge_sync_context_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_context_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncContextCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, path, readSelectedNote(path), planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true))
+                                    throw new SecurityException("Context translation not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                            R.string.knowledge_sync_context_saved,
+                                            Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_context_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    /** Each remote revision/split/merge proposal is revalidated against active local records. */
+    private void previewPeerStructure(final String name, final String eventId,
+                                      final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject plan = KnowledgePythonBridge.journalSyncStructuralPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!plan.optBoolean("read_only")
+                        || !plan.optBoolean("requires_human_confirmation"))
+                    throw new SecurityException("Unsafe structural proposal");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_structural_warning)
+                        + "\n\n" + plan.getString("operation")
+                        + "\n\n" + plan.getJSONArray("existing_local").toString(2)
+                        + "\n\n" + plan.getJSONObject("data").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_structural_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_structural_apply,
+                                    (dialog, which) -> confirmPeerStructure(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_structural_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerStructure(final String name, final String eventId,
+                                      final String remoteSha, final String localHead,
+                                      final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_structural_apply)
+                .setMessage(R.string.knowledge_sync_structural_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_structural_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncStructuralCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true))
+                                    throw new SecurityException("Revision proposal not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) {
+                                        Toast.makeText(this, R.string.knowledge_sync_structural_saved,
+                                                Toast.LENGTH_LONG).show();
+                                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                                    }
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_structural_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    /** A foreign claim batch is indivisible: every local original must match. */
+    private String peerBatchLocalOriginals(final KnowledgePeerInbox.Snapshot branch,
+                                           final String eventId, final String remoteSha,
+                                           final String localHead) throws Exception {
+        final JSONObject sources = KnowledgePythonBridge.journalSyncBatchSources(
+                this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                eventId, localHead, remoteSha);
+        if (!sources.optBoolean("read_only") || !sources.optBoolean("requires_local_originals"))
+            throw new SecurityException("Unsafe foreign batch source list");
+        final JSONArray items = sources.getJSONArray("sources");
+        if (items.length() < 2 || items.length() > 8)
+            throw new SecurityException("Foreign batch source count invalid");
+        final JSONArray originals = new JSONArray();
+        for (int i = 0; i < items.length(); i++) {
+            final String path = items.getJSONObject(i).getString("path");
+            final JSONObject selected = new JSONObject();
+            selected.put("path", path);
+            selected.put("markdown", readSelectedNote(path));
+            originals.put(selected);
+        }
+        return originals.toString();
+    }
+
+    private void previewPeerBatch(final String name, final String eventId,
+                                  final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final String originals = peerBatchLocalOriginals(branch, eventId, remoteSha, localHead);
+                final JSONObject plan = KnowledgePythonBridge.journalSyncBatchPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, originals);
+                if (!plan.optBoolean("read_only")
+                        || !plan.optBoolean("requires_human_confirmation")
+                        || plan.getInt("count") < 2 || plan.getInt("count") > 8)
+                    throw new SecurityException("Unsafe foreign batch preview");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_batch_warning)
+                        + "\n\n" + plan.getJSONArray("items").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_batch_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_batch_apply,
+                                    (dialog, which) -> confirmPeerBatch(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_batch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerBatch(final String name, final String eventId,
+                                  final String remoteSha, final String localHead,
+                                  final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_batch_apply)
+                .setMessage(R.string.knowledge_sync_batch_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_batch_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final String originals = peerBatchLocalOriginals(
+                                        branch, eventId, remoteSha, localHead);
+                                final JSONObject result = KnowledgePythonBridge.journalSyncBatchCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, originals, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true)
+                                        || result.optInt("count") < 2)
+                                    throw new SecurityException("Claim batch was not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) {
+                                        Toast.makeText(this, R.string.knowledge_sync_batch_saved,
+                                                Toast.LENGTH_LONG).show();
+                                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                                    }
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_batch_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    private void confirmPeerReview(final String name, final String eventId,
+                                   final String remoteSha, final String localHead,
+                                   final String verdict) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_review_title)
+                .setMessage(R.string.knowledge_sync_review_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm, (dialog, which) ->
+                        worker.submit(() -> {
+                            try {
+                                // Recheck ECDSA, paired public key and journal bytes
+                                // on EVERY decision, even after the detail was viewed.
+                                final KnowledgePeerInbox.Snapshot incoming =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!incoming.peer.paired)
+                                    throw new SecurityException("Peer trust was revoked");
+                                final JSONObject receipt = KnowledgePythonBridge.journalSyncReviewCommit(
+                                        this, workspacePath(), incoming.journal,
+                                        incoming.peer.fingerprint, eventId, localHead,
+                                        remoteSha, verdict);
+                                if (receipt.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected remote activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_review_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception failure) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_branch_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    private void previewPeerRetraction(final String name, final String eventId,
+                                       final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject preview = KnowledgePythonBridge.journalSyncRetractPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                final String shown = getString(R.string.knowledge_sync_retract_warning,
+                        preview.optInt("affected_derived"), preview.optInt("rederived"))
+                        + "\n\n" + preview.optString("role") + " · "
+                        + preview.optString("summary");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_retract_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_retract_confirm,
+                                    (dialog, which) -> commitPeerRetraction(
+                                            name, eventId, remoteSha, localHead))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_retract_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void commitPeerRetraction(final String name, final String eventId,
+                                      final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject result = KnowledgePythonBridge.journalSyncRetractCommit(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!result.optBoolean("applied", false))
+                    throw new SecurityException("Local retraction was not committed");
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, R.string.knowledge_sync_retract_saved,
+                                Toast.LENGTH_LONG).show();
+                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_retract_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void previewPeerAdoption(final String name, final String eventId,
+                                     final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject detail = KnowledgePythonBridge.journalSyncEventDetail(
+                        this, branch.journal, eventId, remoteSha);
+                if (!"accept".equals(detail.optString("operation")))
+                    throw new SecurityException("Unsupported foreign operation");
+                final JSONObject data = detail.getJSONObject("data");
+                final JSONObject source = data.getJSONObject("provenance");
+                if (!"vault_note".equals(source.optString("source_type")))
+                    throw new SecurityException("Foreign source is not portable");
+                final String path = source.getString("document");
+                final String markdown = readSelectedNote(path);
+                final String freshSha = sha256Hex(
+                        markdown.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                if (!freshSha.equals(source.getString("document_sha")))
+                    throw new SecurityException("Local Markdown differs from peer original");
+                final JSONObject candidate = KnowledgePythonBridge.journalSyncConflictPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, path, markdown);
+                final int conflicts = candidate.getInt("conflict_count");
+                final String excerpt = source.optString("text", "");
+                final String shown = getString(R.string.knowledge_sync_adopt_warning)
+                        + "\n\n" + path + "\n" + data.optString("role", "")
+                        + "\n\n" + excerpt.substring(0, Math.min(1500, excerpt.length()));
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (conflicts > 0) {
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_sync_conflict_title)
+                                .setMessage(getString(R.string.knowledge_sync_conflict_warning,
+                                        conflicts) + "\n\n" + shown)
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .setNeutralButton(R.string.knowledge_sync_conflict_keep_local,
+                                        (dialog, which) -> confirmPeerConflict(name, eventId,
+                                                remoteSha, localHead, path, "keep_local"))
+                                .setPositiveButton(R.string.knowledge_sync_conflict_contested,
+                                        (dialog, which) -> confirmPeerConflict(name, eventId,
+                                                remoteSha, localHead, path, "contested"))
+                                .show();
+                        return;
+                    }
+                    if (!candidate.optBoolean("can_adopt", false)) {
+                        Toast.makeText(this, R.string.knowledge_sync_adopt_failed,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_adopt_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_adopt_confirm,
+                                    (dialog, which) -> commitPeerAdoption(
+                                            name, eventId, remoteSha, localHead, path))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_adopt_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerConflict(final String name, final String eventId,
+                                     final String remoteSha, final String localHead,
+                                     final String sourcePath, final String verdict) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_conflict_title)
+                .setMessage(R.string.knowledge_sync_conflict_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                // Confirm the same immutable remote journal and trust again.
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncConflictCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, sourcePath, readSelectedNote(sourcePath), verdict);
+                                if (result.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected foreign activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_conflict_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_adopt_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    private void commitPeerAdoption(final String name, final String eventId,
+                                    final String remoteSha, final String localHead,
+                                    final String sourcePath) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final String currentSource = readSelectedNote(sourcePath);
+                final JSONObject result = KnowledgePythonBridge.journalSyncAdopt(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, sourcePath, currentSource);
+                if (!result.optBoolean("applied", false))
+                    throw new SecurityException("Foreign adoption not committed");
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, R.string.knowledge_sync_adopt_saved,
+                                Toast.LENGTH_LONG).show();
+                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_adopt_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void promptPortablePeerPassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_sync_compare_peer)
+                .setMessage(R.string.knowledge_sync_compare_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        comparePortablePeerFromUri(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    /** No event from this method is ever committed or accepted. */
+    private void comparePortablePeerFromUri(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            try {
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    if (input == null) throw new IOException("Selected peer backup unavailable");
+                    staged = KnowledgePortableCipher.decryptToVerifiedStaging(
+                            input, getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                KnowledgePortableArchive.verify(staged,
+                        () -> Thread.currentThread().isInterrupted());
+                final KnowledgePeerIdentity.Verification peer =
+                        KnowledgePortableRestore.verifyPeer(this, staged);
+                final byte[] proof = peer == null ? null
+                        : KnowledgePortableRestore.peerProof(staged);
+                final String foreign = KnowledgePortableRestore.journalText(staged);
+                if (foreign == null) throw new IOException("Peer backup lacks a journal");
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), foreign);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_sync_compare_peer)
+                                .setMessage(getString(R.string.knowledge_sync_compare_result,
+                                        comparison.optString("relation"),
+                                        comparison.optInt("common_events"),
+                                        comparison.optInt("local_only"),
+                                        comparison.optInt("remote_only"),
+                                        comparison.optInt("possible_target_conflicts"))
+                                        + "\n\n" + (peer == null
+                                        ? getString(R.string.knowledge_sync_peer_unsigned)
+                                        : getString(R.string.knowledge_sync_peer_signer,
+                                                peer.fingerprint.substring(0, 12),
+                                                peer.paired)))
+                                .setPositiveButton(android.R.string.ok, null);
+                        if (peer != null && peer.paired && proof != null) {
+                            builder.setNeutralButton(R.string.knowledge_sync_save_branch,
+                                    (dialog, which) -> worker.submit(() -> {
+                                        try {
+                                            final boolean created = KnowledgePeerInbox.save(
+                                                    this, proof, foreign);
+                                            runOnUiThread(() -> Toast.makeText(this,
+                                                    created ? R.string.knowledge_sync_branch_saved
+                                                            : R.string.knowledge_sync_branch_duplicate,
+                                                    Toast.LENGTH_LONG).show());
+                                        } catch (KnowledgePeerInbox.ObservedRollbackException old) {
+                                            runOnUiThread(() -> new MaterialAlertDialogBuilder(this)
+                                                    .setTitle(R.string.knowledge_sync_rollback_title)
+                                                    .setMessage(R.string.knowledge_sync_rollback_warning)
+                                                    .setPositiveButton(android.R.string.ok, null)
+                                                    .show());
+                                        } catch (Exception invalid) {
+                                            runOnUiThread(() -> Toast.makeText(this,
+                                                    R.string.knowledge_sync_branch_failed,
+                                                    Toast.LENGTH_LONG).show());
+                                        }
+                                    }));
+                        }
+                        builder.show();
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_sync_compare_failed);
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (staged != null) staged.delete();
+            }
+        });
+    }
+
+    /** Only an explicit SAF save, never background upload or automatic rewriting. */
+    private void exportPortableToUri(final Uri destination, final char[] password,
+                                     final boolean secretsApproved) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staging = null;
+            try {
+                final File vault = notebook;
+                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+                if (journal.isFile()) KnowledgePythonBridge.journalExportInfo(this, workspacePath());
+                final byte[] peerProof = journal.isFile()
+                        ? KnowledgePeerIdentity.signJournal(journal) : null;
+                final android.content.SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+                final byte[] safeSettings = KnowledgePortableSettings.snapshot(
+                        prefs, secretsApproved);
+                final byte[] secretBundle = secretsApproved
+                        ? KnowledgePortableSecrets.snapshot(prefs) : null;
+                // The ledger is metadata only. Exportable checkpoint hashes
+                // are inside this manually password-encrypted backup; the
+                // device Keystore AES key itself is never serialized.
+                final byte[] portableHighWater = KnowledgePeerHighWater.exportPortable(this);
+                final KnowledgePortableArchive.Summary exported;
+                try (OutputStream saf = getContentResolver().openOutputStream(destination, "w")) {
+                    if (saf == null) throw new IOException("Backup destination unavailable");
+                    exported = KnowledgePortableArchive.write(vault,
+                            journal.isFile() ? journal : null, safeSettings,
+                            peerProof, secretBundle, portableHighWater,
+                            KnowledgePortableCipher.encrypt(saf, password),
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                // Re-read the SAF destination, verify AEAD tag and each ZIP SHA.
+                try (InputStream saf = getContentResolver().openInputStream(destination)) {
+                    if (saf == null) throw new IOException("Backup verification unavailable");
+                    staging = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary verified =
+                        KnowledgePortableArchive.verify(staging,
+                                () -> Thread.currentThread().isInterrupted());
+                if (peerProof != null) KnowledgePortableRestore.verifyPeer(this, staging);
+                if (exported.sources != verified.sources || exported.bytes != verified.bytes
+                        || exported.journal != verified.journal || !verified.settings
+                        || exported.secrets != verified.secrets
+                        || exported.highWater != verified.highWater) {
+                    throw new IOException("Written backup is incomplete");
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        Toast.makeText(this, getString(R.string.knowledge_portable_exported,
+                                verified.sources), Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_failed);
+                });
+            } finally {
+                if (staging != null && staging.exists() && !staging.delete()) staging.deleteOnExit();
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
+    private void promptPortableInspectPassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_inspect)
+                .setMessage(R.string.knowledge_portable_inspect_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        inspectPortableFromUri(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void promptPortableRestorePassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_portable_restore)
+                .setMessage(R.string.knowledge_portable_restore_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        previewPortableRestore(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void previewPortableRestore(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            boolean handedToDialog = false;
+            try {
+                try (InputStream saf = getContentResolver().openInputStream(source)) {
+                    if (saf == null) throw new IOException("Restore input unavailable");
+                    staged = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password, () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary summary =
+                        KnowledgePortableArchive.verify(staged,
+                                () -> Thread.currentThread().isInterrupted());
+                final String journalText = KnowledgePortableRestore.journalText(staged);
+                final JSONObject journalPreview = journalText == null ? null
+                        : KnowledgePythonBridge.journalRestorePreview(this,
+                                workspacePath(), journalText);
+                final Map<String, String> safeModels = KnowledgePortableSettings.read(staged);
+                final List<String> secretFields = summary.secrets
+                        ? KnowledgePortableSecrets.fieldNames(staged) : Collections.emptyList();
+                final int highWaterPrefixes = summary.highWater
+                        ? KnowledgePeerHighWater.portablePrefixCount(staged) : 0;
+                final int highWaterSigners = summary.highWater
+                        ? KnowledgePeerHighWater.portableSignerCount(staged) : 0;
+                final File confirmedStaging = staged;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        confirmedStaging.delete();
+                        return;
+                    }
+                    pendingPortableStaging = confirmedStaging;
+                    final CheckBox migrateModels = new CheckBox(this);
+                    migrateModels.setText(R.string.knowledge_portable_migrate_models);
+                    migrateModels.setChecked(false);
+                    final CheckBox migrateSecrets = new CheckBox(this);
+                    migrateSecrets.setText(R.string.knowledge_portable_secrets_restore_choice);
+                    migrateSecrets.setChecked(false);
+                    final CheckBox migrateHighWater = new CheckBox(this);
+                    migrateHighWater.setText(R.string.knowledge_portable_highwater_restore_choice);
+                    migrateHighWater.setChecked(false);
+                    final LinearLayout options = new LinearLayout(this);
+                    options.setOrientation(LinearLayout.VERTICAL);
+                    options.setPadding(24, 0, 24, 0);
+                    if (!safeModels.isEmpty()) options.addView(migrateModels);
+                    if (summary.secrets) options.addView(migrateSecrets);
+                    if (summary.highWater) options.addView(migrateHighWater);
+                    final AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_portable_restore)
+                            .setMessage(getString(R.string.knowledge_portable_restore_preview,
+                                    summary.sources, summary.bytes, summary.journal)
+                                    + (safeModels.isEmpty() ? "" : "\n\n"
+                                            + getString(R.string.knowledge_portable_models_preview,
+                                                    safeModels.values().toString()))
+                                    + (summary.secrets ? "\n\n" + getString(
+                                            R.string.knowledge_portable_secrets_restore_preview,
+                                            secretFields.toString()) : "")
+                                    + (summary.highWater ? "\n\n" + getString(
+                                            R.string.knowledge_portable_highwater_restore_preview,
+                                            highWaterSigners, highWaterPrefixes) : ""))
+                            .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
+                                confirmedStaging.delete();
+                                pendingPortableStaging = null;
+                            })
+                            .setOnCancelListener(dialog -> {
+                                confirmedStaging.delete();
+                                pendingPortableStaging = null;
+                            })
+                            .setPositiveButton(R.string.knowledge_backup_confirm_import,
+                                    (dialog, which) -> applyPortableRestore(confirmedStaging,
+                                            summary, journalPreview, generation,
+                                            migrateModels.isChecked() ? safeModels
+                                                    : Collections.emptyMap(),
+                                            migrateSecrets.isChecked(),
+                                            migrateHighWater.isChecked()));
+                    if (!safeModels.isEmpty() || summary.secrets || summary.highWater)
+                        builder.setView(options);
+                    builder.show();
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_restore_failed);
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (!handedToDialog && staged != null) staged.delete();
+            }
+        });
+    }
+
+    private void applyPortableRestore(final File verifiedZip,
+                                      final KnowledgePortableArchive.Summary summary,
+                                      final JSONObject journalPreview, final int generation,
+                                      final Map<String, String> safeModels,
+                                      final boolean secretsApproved,
+                                      final boolean highWaterApproved) {
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            try {
+                final File oldNotebook = notebook;
+                final File restored = KnowledgePortableRestore.restoreNewLibrary(
+                        verifiedZip, oldNotebook, journalText -> {
+                            if (journalPreview == null)
+                                throw new IOException("Missing journal validation");
+                            KnowledgePythonBridge.journalRestoreCommit(this, workspacePath(),
+                                    journalText, journalPreview.getString("sha256"));
+                        }, () -> Thread.currentThread().isInterrupted());
+                // Only after a successful journal commit may the active vault
+                // switch to the restored notes. Never overwrite old notebooks.
+                _appSettings.setNotebookDirectory(restored);
+                notebook = restored;
+                final boolean modelsRestored = KnowledgePortableSettings.apply(
+                        getPreferences(MODE_PRIVATE), safeModels);
+                final boolean secretsRestored = !secretsApproved || KnowledgePortableSecrets.apply(
+                        getPreferences(MODE_PRIVATE), KnowledgePortableSecrets.read(verifiedZip));
+                boolean ledgerRestored = !highWaterApproved;
+                if (highWaterApproved) {
+                    try {
+                        KnowledgePeerHighWater.importPortable(this, verifiedZip);
+                        ledgerRestored = true;
+                    } catch (Exception badCheckpoint) {
+                        ledgerRestored = false;
+                    }
+                }
+                final boolean highWaterRestored = ledgerRestored;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        ((TextView) findViewById(R.id.knowledge_root)).setText(
+                                getString(R.string.knowledge_root_label, restored.getAbsolutePath()));
+                        Toast.makeText(this,
+                                getString(R.string.knowledge_portable_restored,
+                                        summary.sources), Toast.LENGTH_LONG).show();
+                        if (!modelsRestored || !secretsRestored) Toast.makeText(this,
+                                R.string.knowledge_portable_settings_failed,
+                                Toast.LENGTH_LONG).show();
+                        if (!highWaterRestored) Toast.makeText(this,
+                                R.string.knowledge_portable_highwater_restore_failed,
+                                Toast.LENGTH_LONG).show();
+                        recreate();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_restore_failed);
+                });
+            } finally {
+                verifiedZip.delete();
+                if (pendingPortableStaging == verifiedZip) pendingPortableStaging = null;
+            }
+        });
+    }
+
+    /** A read-only dry-run. No source or journal changes are authorized here. */
+    private void inspectPortableFromUri(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staging = null;
+            try {
+                try (InputStream saf = getContentResolver().openInputStream(source)) {
+                    if (saf == null) throw new IOException("Backup source unavailable");
+                    staging = KnowledgePortableCipher.decryptToVerifiedStaging(saf,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                final KnowledgePortableArchive.Summary summary =
+                        KnowledgePortableArchive.verify(staging,
+                                () -> Thread.currentThread().isInterrupted());
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_portable_inspect)
+                                .setMessage(getString(R.string.knowledge_portable_verified,
+                                        summary.sources, summary.bytes, summary.journal,
+                                        summary.settings, summary.secrets, summary.highWater))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_portable_failed);
+                });
+            } finally {
+                if (staging != null && staging.exists() && !staging.delete()) staging.deleteOnExit();
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
     private void requestJournalExport() {
         final android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
         fields.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -3751,7 +5595,41 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     @Override
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_EXPORT_JOURNAL) {
+        if (requestCode == REQUEST_EXPORT_PORTABLE) {
+            final char[] password = pendingPortablePassword;
+            pendingPortablePassword = null;
+            final boolean secretsApproved = pendingPortableSecrets;
+            pendingPortableSecrets = false;
+            if (password != null) {
+                if (resultCode == RESULT_OK && data != null && data.getData() != null)
+                    exportPortableToUri(data.getData(), password, secretsApproved);
+                else Arrays.fill(password, '\0');
+            }
+        } else if (requestCode == REQUEST_INSPECT_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableInspectPassword(data.getData());
+        } else if (requestCode == REQUEST_RESTORE_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableRestorePassword(data.getData());
+        } else if (requestCode == REQUEST_SYNC_COMPARE_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortablePeerPassword(data.getData());
+        } else if (requestCode == REQUEST_COMPARE_PORTABLE_SOURCES
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableSourcePassword(data.getData());
+        } else if (requestCode == REQUEST_IMPORT_PLAIN_MARKDOWN
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            comparePlainMarkdownFromUri(data.getData());
+        } else if (requestCode == REQUEST_EXTERNAL_BACKUP_TREE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                KnowledgeExternalBackup.configure(this, data.getData(), data.getFlags());
+                refreshDailyBackupStatus();
+            } catch (RuntimeException denied) {
+                Toast.makeText(this, R.string.knowledge_external_backup_failed,
+                        Toast.LENGTH_LONG).show();
+            }
+        } else if (requestCode == REQUEST_EXPORT_JOURNAL) {
             final char[] password = pendingExportPassword;
             pendingExportPassword = null;
             if (password == null) {
@@ -3959,6 +5837,23 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (pendingExportPassword != null) {
             Arrays.fill(pendingExportPassword, '\0');
             pendingExportPassword = null;
+        }
+        if (pendingPortablePassword != null) {
+            Arrays.fill(pendingPortablePassword, '\0');
+            pendingPortablePassword = null;
+        }
+        pendingPortableSecrets = false;
+        if (pendingPortableStaging != null) {
+            pendingPortableStaging.delete();
+            pendingPortableStaging = null;
+        }
+        if (pendingPortableSourceStaging != null) {
+            pendingPortableSourceStaging.delete();
+            pendingPortableSourceStaging = null;
+        }
+        if (pendingPlainMarkdownStaging != null) {
+            pendingPlainMarkdownStaging.delete();
+            pendingPlainMarkdownStaging = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();
