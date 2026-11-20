@@ -50,6 +50,104 @@ class RelationTests(unittest.TestCase):
         self.assertEqual((2, 1, 0), (after["same_polarity_files"],
                         after["opposite_polarity_files"], after["mixed_polarity_files"]))
 
+    def test_live_hash_checks_and_possible_duplicate_excerpts_do_not_approve_claims(self):
+        original = {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
+                    for name in self.notes}
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            indexed_rows = sorted(con.iterdump())
+        result = self._relations(verified=True)
+        group = result["evidence_groups"][0]
+        self.assertFalse(result["evidence_checks_limited"])
+        self.assertEqual("current", group["source_verification"])
+        self.assertEqual((2, 1, 0), (
+            group["verified_same_polarity_files"],
+            group["verified_opposite_polarity_files"],
+            group["verified_mixed_polarity_files"]))
+        self.assertEqual((3, 0, 0, 0), (
+            group["current_files"], group["stale_files"],
+            group["unavailable_files"], group["unchecked_files"]))
+        same = {source["path"]: source for source in group["other_sources"]}
+        self.assertTrue(same["b.md"]["repeated_excerpt"])
+        self.assertTrue(same["sub/e.markdown"]["repeated_excerpt"])
+        self.assertFalse(same["c.md"]["repeated_excerpt"])
+        self.assertEqual(2, group["repeated_excerpt_files"])
+        self.assertEqual(0, group["identical_document_files"])
+        self.assertEqual("not_assessed", group["confidence"])
+        self.assertEqual("unapproved_candidates", group["authority"])
+        self.assertEqual(original, {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
+                                    for name in self.notes})
+        with sqlite3.connect(db) as con:
+            self.assertEqual(indexed_rows, sorted(con.iterdump()))
+        self.assertFalse((self.workspace / "data").exists())
+
+    def test_changed_missing_or_changed_source_files_are_not_current(self):
+        self._import()
+        (self.vault / "b.md").write_text("# Changed\nNothing relevant.\n", encoding="utf-8")
+        (self.vault / "c.md").unlink()
+        group = self._relations(verified=True)["evidence_groups"][0]
+        self.assertEqual((1, 1, 1), (
+            group["current_files"], group["stale_files"], group["unavailable_files"]))
+        self.assertEqual((1, 0, 0), (
+            group["verified_same_polarity_files"],
+            group["verified_opposite_polarity_files"],
+            group["verified_mixed_polarity_files"]))
+        statuses = {s["path"]: s["verification"] for s in group["other_sources"]}
+        self.assertEqual("stale", statuses["b.md"])
+        self.assertEqual("unavailable", statuses["c.md"])
+        self.assertEqual("current", statuses["sub/e.markdown"])
+        self.assertFalse(any("repeated_excerpt" in item for item in group["other_sources"]
+                             if item["verification"] != "current"))
+
+        (self.vault / "a.md").write_text("# A changed\n", encoding="utf-8")
+        stale = self._relations(verified=True)["evidence_groups"][0]
+        self.assertEqual("stale", stale["source_verification"])
+        self.assertEqual((0, 0, 0), (
+            stale["verified_same_polarity_files"],
+            stale["verified_opposite_polarity_files"],
+            stale["verified_mixed_polarity_files"]))
+
+    def test_wrong_vault_disables_live_checks_and_budget_marks_remainder(self):
+        self._import()
+        unverified = self._relations()
+        self.assertTrue(unverified["evidence_checks_limited"])
+        self.assertEqual("not_checked", unverified["evidence_groups"][0]["source_verification"])
+        with tempfile.TemporaryDirectory() as other_root:
+            wrong = json.loads(note_relationships(
+                str(self.workspace), "a.md", other_root))
+        self.assertTrue(wrong["evidence_checks_limited"])
+        self.assertEqual(3, wrong["evidence_groups"][0]["unchecked_files"])
+
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            for i in range(35):
+                path = f"many/note{i:02}.md"
+                con.execute("INSERT INTO documents (path,sha256,size,status,kind) "
+                            "VALUES (?,?,?,?,?)", (path, "0"*64, 12, "PARSED", "markdown"))
+                con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (f"many-{i}", row[1], path, *row[3:]))
+        capped = self._relations(verified=True)
+        group = capped["evidence_groups"][0]
+        self.assertTrue(capped["evidence_checks_limited"])
+        self.assertTrue(capped["evidence_limited"])
+        self.assertEqual(32, group["indexed_other_files"])
+        self.assertEqual(16, 1 + group["current_files"] + group["stale_files"]
+                         + group["unavailable_files"])
+        self.assertEqual(17, group["unchecked_files"])
+        self.assertTrue(any(s["verification"] == "not_checked"
+                            for s in group["other_sources"]))
+
+    def test_whole_file_copy_is_detected_without_independence_claim(self):
+        self.notes["b.md"] = self.notes["a.md"]
+        (self.vault / "b.md").write_text(self.notes["b.md"], encoding="utf-8")
+        self._import()
+        group = self._relations(verified=True)["evidence_groups"][0]
+        self.assertEqual(1, group["identical_document_files"])
+        self.assertTrue(next(s for s in group["other_sources"]
+                             if s["path"] == "b.md")["identical_document"])
+
     def test_mixed_polarity_in_one_file_never_double_votes(self):
         self._import()
         db = self.workspace / "var/ks.sqlite"
@@ -147,8 +245,9 @@ class RelationTests(unittest.TestCase):
     def _import(self, callback=None):
         return json.loads(analyze_vault(str(self.workspace), str(self.vault), callback))
 
-    def _relations(self, path="a.md"):
-        return json.loads(note_relationships(str(self.workspace), path))
+    def _relations(self, path="a.md", verified=False):
+        return json.loads(note_relationships(str(self.workspace), path,
+                                             str(self.vault) if verified else None))
 
     def _atoms(self):
         with sqlite3.connect(self.workspace / "var" / "ks.sqlite") as con:

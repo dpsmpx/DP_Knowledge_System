@@ -38,10 +38,11 @@ class EditorContextTests(unittest.TestCase):
         for path, content in self.notes.items():
             (self.vault / path).write_text(content, encoding="utf-8")
 
-    def context(self, markdown=None):
+    def context(self, markdown=None, verify_files=False):
         return json.loads(editor_note_context(str(self.workspace), "a.md",
                                               self.notes["a.md"] if markdown is None
-                                              else markdown))
+                                              else markdown,
+                                              str(self.vault) if verify_files else None))
 
     def test_absent_index_and_journal_do_not_create_files(self):
         result = self.context()
@@ -110,6 +111,8 @@ class EditorContextTests(unittest.TestCase):
             context["evidence_groups"][0]["opposite_polarity_files"],
             context["evidence_groups"][0]["mixed_polarity_files"]))
         self.assertFalse(context["evidence_limited"])
+        self.assertTrue(context["evidence_checks_limited"])
+        self.assertEqual("not_checked", context["evidence_groups"][0]["source_verification"])
         self.assertIsNone(related["c.md"]["context"])
         self.assertEqual({"from": None, "to": None}, related["c.md"]["interval"])
         self.assertTrue(all(item["source_locator"] and item["other_locator"]
@@ -123,6 +126,26 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual([], changed["candidate_relations"])
         self.assertEqual([], changed["evidence_groups"])
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+    def test_editor_evidence_checks_live_other_files_only_when_root_matches(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        current = self.context(verify_files=True)
+        self.assertEqual("current", current["relation_index_state"])
+        self.assertFalse(current["evidence_checks_limited"])
+        group = current["evidence_groups"][0]
+        self.assertEqual("current", group["source_verification"])
+        self.assertEqual((1, 1, 0), (
+            group["verified_same_polarity_files"],
+            group["verified_opposite_polarity_files"], group["verified_mixed_polarity_files"]))
+        (self.vault / "b.md").write_text("# B\nAnother claim.\n", encoding="utf-8")
+        changed = self.context(verify_files=True)["evidence_groups"][0]
+        self.assertEqual(1, changed["stale_files"])
+        self.assertEqual((0, 1), (changed["verified_same_polarity_files"],
+                                  changed["verified_opposite_polarity_files"]))
+        self.assertEqual("current", changed["source_verification"])
+        unsaved = self.context(self.notes["a.md"] + "\nUnsaved", verify_files=True)
+        self.assertEqual("stale", unsaved["relation_index_state"])
+        self.assertEqual([], unsaved["evidence_groups"])
 
     def test_editor_alias_hints_cite_owner_journal_without_approving_claim(self):
         (self.vault / "d.md").write_text("# D\nБорис является разработчиком.\n",

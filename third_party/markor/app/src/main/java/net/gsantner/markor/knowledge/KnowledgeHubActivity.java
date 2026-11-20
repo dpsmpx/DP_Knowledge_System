@@ -1773,7 +1773,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.submit(() -> {
             try {
                 final JSONObject result = KnowledgePythonBridge.relationships(
-                        this, workspacePath(), relativePath);
+                        this, workspacePath(), relativePath,
+                        notebook == null ? "" : notebook.getAbsolutePath());
                 final JSONArray matches = result.getJSONArray("matches");
                 final JSONArray evidence = result.optJSONArray("evidence_groups");
                 final String[] labels = new String[matches.length()];
@@ -1808,7 +1809,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (evidence != null && evidence.length() > 0) {
                         dialog.setNeutralButton(R.string.knowledge_evidence_title,
                                 (d, w) -> showEvidenceGroups(evidence,
-                                        result.optBoolean("evidence_limited")));
+                                        result.optBoolean("evidence_limited"),
+                                        result.optBoolean("evidence_checks_limited")));
                     }
                     if (labels.length == 0) {
                         dialog.setMessage(R.string.knowledge_no_semantic_relations);
@@ -1836,7 +1838,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
-    private void showEvidenceGroups(final JSONArray groups, final boolean limited) {
+    private void showEvidenceGroups(final JSONArray groups, final boolean limited,
+                                    final boolean checksLimited) {
         final String[] rows = new String[groups.length()];
         for (int i = 0; i < rows.length; i++) {
             rows[i] = KnowledgeRelationPresentation.evidenceSummary(
@@ -1844,7 +1847,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.knowledge_evidence_title)
-                        + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : ""))
+                        + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : "")
+                        + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : ""))
                 .setItems(rows, (d, which) -> {
                     final JSONObject group = groups.optJSONObject(which);
                     if (group != null) showEvidenceDetail(group);
@@ -1864,10 +1868,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     final String[] rows = new String[sources.length()];
                     for (int i = 0; i < rows.length; i++) {
                         final JSONObject source = sources.optJSONObject(i);
-                        if (source != null) rows[i] = source.optString("path") + " · "
-                                + source.optString("locator") + " · "
-                                + KnowledgeRelationPresentation.evidenceRelation(
-                                        this, source.optString("relation"));
+                        if (source != null) rows[i] =
+                                KnowledgeRelationPresentation.evidenceSourceLabel(this, source);
                     }
                     new AlertDialog.Builder(this)
                             .setTitle(R.string.knowledge_evidence_title)

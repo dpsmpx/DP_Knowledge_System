@@ -431,10 +431,36 @@ therefore explicitly says confidence is **not assessed**, authority remains
 `unapproved_candidates`, and freshness is an unverified index snapshot. Caps
 are labeled as incomplete, not silently presented as exhaustive counts. No
 factual reconciliation, authority promotion, numerical confidence or direct
-journal/source writes occur. The next substantive Stage 18 tasks are identity
-disambiguation beyond reviewed exact symbol aliases, versioned time reasoning,
-evidence provenance freshness and calibrated source reliability. Physical
+journal/source writes occur. Physical
 Android UI, latency, TalkBack and large-vault acceptance remain open.
+
+**Stage 18 live evidence provenance (sixth slice, awaiting device acceptance):**
+When the selected notebook matches the import's recorded root, both the Hub
+relation overview and editor context now rehash a bounded selection of original
+Markdown files, read-only, before presenting cross-note evidence. Each displayed
+source is explicitly marked **current hash**, **changed**, **unavailable** or
+**not checked**. At most 16 distinct file hashes are inspected per request
+(each eligible file at most 2 MiB; approximately 32 MiB upper I/O bound).
+The checked subset receives separate same/opposite/mixed counts only if **both**
+the inspected note and the other file match their indexed SHA-256. Original
+indexed counts remain visibly labeled as unverified snapshots. Files outside
+the check budget and root mismatches are **not checked**, not presumed valid;
+limits are surfaced in both UIs. Missing or oversized files and rejected paths
+are not silently counted as current.
+
+The disposable index also exposes the representative indexed fragment hash
+for each matched document, enabling a **possible repeated excerpt** warning
+only among currently verified files; when two complete file hashes match,
+the UI can say **identical file content**. Fragment hashing normalizes Unicode
+and trims surrounding whitespace, so this is a textual-repeat signal, not
+proof of shared authorship or independent provenance. Distinct hashes do **not**
+establish independence. A hash match proves the file was unchanged relative to
+indexing, not that the semantic interpretation or claim is true. No journal
+decision, Markdown edit, automatic merge, confidence number or authorization
+promotion is produced. Next Stage 18 work: more robust human-reviewed entity
+identity, versioned temporal reasoning, and calibrated source reliability.
+Device UI, lifecycle, 20k-note performance, TalkBack and SAF checks remain
+unverified; Stage 21 physical QA is still separately deferred.
 
 ## Stage 09 — whole-library contradiction and uncertainty audit
 

@@ -863,7 +863,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 final String saved = readSavedNote(file.getCanonicalFile());
                 final JSONObject context = KnowledgePythonBridge.editorContext(this,
                         new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
-                        path, saved);
+                        path, saved, selectedVault.getAbsolutePath());
                 runOnUiThread(() -> {
                     if (!currentDock(generation)) return;
                     final DocumentEditAndViewFragment currentEditor = editor();
@@ -962,6 +962,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 R.string.knowledge_alias_search_limited);
         if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
                 R.string.knowledge_evidence_limited);
+        if (evidenceCount > 0 && context.optBoolean("evidence_checks_limited"))
+            appendContextWarning(warnings, R.string.knowledge_evidence_checks_limited);
         final String indexState = context.optString("relation_index_state");
         if ("absent".equals(indexState)) {
             appendContextWarning(warnings, R.string.knowledge_editor_context_index_absent);
@@ -1535,10 +1537,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             for (int i = 0; i < others.length(); i++) {
                 final JSONObject item = others.optJSONObject(i);
                 if (item == null) continue;
-                addContextRow(body, item.optString("path") + " · "
-                        + item.optString("locator") + " · "
-                        + KnowledgeRelationPresentation.evidenceRelation(this,
-                                item.optString("relation")),
+                addContextRow(body, KnowledgeRelationPresentation.evidenceSourceLabel(this, item),
                         view -> openRelatedNote(item.optString("path"), selectedVault));
             }
         }

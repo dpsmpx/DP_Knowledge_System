@@ -156,7 +156,8 @@ def review_queue(workspace_dir: str, offset: int = 0) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def note_relationships(workspace_dir: str, relative_path: str) -> str:
+def note_relationships(workspace_dir: str, relative_path: str,
+                       vault_dir: str | None = None) -> str:
     """Compare unapproved structured assertions between different notes.
 
     A shared atom is evidence of a candidate relation, never evidence that
@@ -173,6 +174,15 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
         raise ValueError("Knowledge journal integrity check failed")
     aliases = verified_owner_aliases(journal.entries(), journal.actor)
     matches = related_claims(ws, relative_path, aliases=aliases)
+    evidence_checks_limited = True
+    if matches["evidence_groups"]:
+        con = _decision_index(workspace)
+        if con is not None:
+            try:
+                evidence_checks_limited = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, matches["evidence_groups"])
+            finally:
+                con.close()
     return json.dumps({
         "protocol": "dpksys.relations.v1",
         "path": relative_path,
@@ -181,6 +191,7 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
         "alias_search_limited": matches["alias_search_limited"],
         "evidence_groups": matches["evidence_groups"],
         "evidence_limited": matches["evidence_limited"],
+        "evidence_checks_limited": evidence_checks_limited,
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -191,6 +202,7 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
 # unapproved, disposable projection, so every source must be rechecked against
 # the original file's SHA before a preview or journal append.
 ENTITY_SOURCE_PAGE = 24
+MAX_EVIDENCE_LIVE_CHECKS = 16  # at most 32 MiB of live Markdown I/O per query
 
 
 def _entity_symbol(symbol: str) -> str:
@@ -230,6 +242,85 @@ def _entity_live_hash(root: Path, relative_path: str) -> str | None:
         return hashlib.sha256(source.read_bytes()).hexdigest()
     except (OSError, PermissionError):
         return None
+
+
+def _verify_evidence_freshness(con, vault_dir: str | None,
+                               source_path: str, groups: list[dict]) -> bool:
+    """Verify a bounded set of current file hashes without indexing or writes.
+
+    The supplied selected notebook must match the import's recorded root;
+    otherwise *every* status stays unchecked (never silently current). Cached
+    fragment hashes allow only exact-text-repeat notices, never claims of
+    independent authorship, truth, or factual corroboration.
+    """
+    root = None
+    if isinstance(vault_dir, str) and Path(vault_dir).is_absolute():
+        selected = Path(vault_dir).resolve()
+        stored = con.execute("SELECT value FROM meta WHERE key='vault_root'").fetchone()
+        if selected.is_dir() and stored and stored[0] == str(selected):
+            root = selected
+    cache: dict[str, tuple[str, str | None]] = {}
+    limited = root is None
+
+    def check(path: str) -> tuple[str, str | None]:
+        nonlocal limited
+        if path in cache:
+            return cache[path]
+        if root is None or len(cache) >= MAX_EVIDENCE_LIVE_CHECKS:
+            limited = True
+            return ("not_checked", None)
+        row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                          (path,)).fetchone()
+        expected = row[0] if row else None
+        live = _entity_live_hash(root, path)
+        state = ("unavailable" if live is None or expected is None else
+                 "current" if live == expected else "stale")
+        cache[path] = (state, expected)
+        return cache[path]
+
+    source_state, source_sha = check(source_path)
+    for group in groups:
+        group["source_verification"] = source_state
+        verified = {"same_polarity": 0, "opposite_polarity": 0, "mixed": 0}
+        statuses = {"current": 0, "stale": 0, "unavailable": 0, "not_checked": 0}
+        excerpt_hashes = ({group["source_excerpt_hash"]}
+                          if source_state == "current" else set())
+        repeats = duplicates = 0
+        for evidence in group["other_sources"]:
+            state, sha = check(evidence["path"])
+            evidence["verification"] = state
+            statuses[state] += 1
+            if state != "current":
+                continue
+            if source_state == "current":
+                kind = evidence["relation"]
+                if kind in verified:
+                    verified[kind] += 1
+            # A matching excerpt is merely a possible copied text; it does
+            # not prove that different wording is independent testimony.
+            excerpt = evidence.get("excerpt_hash")
+            if isinstance(excerpt, str) and excerpt:
+                if excerpt in excerpt_hashes:
+                    evidence["repeated_excerpt"] = True
+                    repeats += 1
+                else:
+                    evidence["repeated_excerpt"] = False
+                    excerpt_hashes.add(excerpt)
+            if source_state == "current" and sha == source_sha:
+                evidence["identical_document"] = True
+                duplicates += 1
+        group.update({
+            "verified_same_polarity_files": verified["same_polarity"],
+            "verified_opposite_polarity_files": verified["opposite_polarity"],
+            "verified_mixed_polarity_files": verified["mixed"],
+            "current_files": statuses["current"],
+            "stale_files": statuses["stale"],
+            "unavailable_files": statuses["unavailable"],
+            "unchecked_files": statuses["not_checked"],
+            "repeated_excerpt_files": repeats,
+            "identical_document_files": duplicates,
+        })
+    return limited
 
 
 def _entity_sources(con, root: Path, symbol: str) -> tuple[list[dict], bool]:
@@ -879,7 +970,8 @@ def stage22_editor_selftest(cache_dir: str) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
+def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
+                        vault_dir: str | None = None) -> str:
     """Read-only, bounded note context from the *saved* source snapshot.
 
     Approved journal records are distinct from unapproved, indexed lexical/
@@ -935,6 +1027,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
 
     relations, truncated, index_state = [], False, "absent"
     evidence_groups, evidence_limited = [], False
+    evidence_checks_limited = True
     alias_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
@@ -954,6 +1047,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 alias_limited = result["alias_search_limited"]
                 evidence_groups = result["evidence_groups"]
                 evidence_limited = result["evidence_limited"]
+                evidence_checks_limited = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, evidence_groups)
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -970,6 +1065,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         "historical_count": historical,
         "candidate_relations": relations, "relations_truncated": truncated,
         "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
+        "evidence_checks_limited": evidence_checks_limited,
         "alias_search_limited": alias_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,

@@ -24,6 +24,23 @@ final class KnowledgeRelationPresentation {
                         group.optInt("same_polarity_files"),
                         group.optInt("opposite_polarity_files"),
                         group.optInt("mixed_polarity_files")));
+        text.append("\n").append(context.getString(R.string.knowledge_evidence_source_status,
+                evidenceVerification(context, group.optString("source_verification", "not_checked"))));
+        text.append("\n").append(context.getString(R.string.knowledge_evidence_checked_counts,
+                group.optInt("verified_same_polarity_files"),
+                group.optInt("verified_opposite_polarity_files"),
+                group.optInt("verified_mixed_polarity_files")));
+        text.append("\n").append(context.getString(R.string.knowledge_evidence_other_statuses,
+                group.optInt("current_files"), group.optInt("stale_files"),
+                group.optInt("unavailable_files"), group.optInt("unchecked_files")));
+        if (group.optInt("repeated_excerpt_files") > 0) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_repeated_count,
+                    group.optInt("repeated_excerpt_files")));
+        }
+        if (group.optInt("identical_document_files") > 0) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_identical_count,
+                    group.optInt("identical_document_files")));
+        }
         if ("mixed".equals(group.optString("source_polarity"))) {
             text.append("\n").append(context.getString(R.string.knowledge_evidence_source_mixed));
         }
@@ -47,6 +64,30 @@ final class KnowledgeRelationPresentation {
             case "opposite_polarity": return context.getString(R.string.knowledge_evidence_opposite);
             case "mixed": return context.getString(R.string.knowledge_evidence_mixed);
             default: return context.getString(R.string.knowledge_evidence_unclassified);
+        }
+    }
+
+    static String evidenceSourceLabel(Context context, JSONObject source) {
+        final StringBuilder text = new StringBuilder(source.optString("path"))
+                .append(" · ").append(source.optString("locator"))
+                .append(" · ").append(evidenceRelation(context, source.optString("relation")))
+                .append("\n").append(evidenceVerification(context,
+                        source.optString("verification", "not_checked")));
+        if (source.optBoolean("repeated_excerpt")) {
+            text.append(" · ").append(context.getString(R.string.knowledge_evidence_repeated_excerpt));
+        }
+        if (source.optBoolean("identical_document")) {
+            text.append(" · ").append(context.getString(R.string.knowledge_evidence_identical_document));
+        }
+        return text.toString();
+    }
+
+    private static String evidenceVerification(Context context, String state) {
+        switch (state) {
+            case "current": return context.getString(R.string.knowledge_evidence_current);
+            case "stale": return context.getString(R.string.knowledge_evidence_stale);
+            case "unavailable": return context.getString(R.string.knowledge_evidence_unavailable);
+            default: return context.getString(R.string.knowledge_evidence_not_checked);
         }
     }
 

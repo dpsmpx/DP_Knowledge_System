@@ -28,13 +28,24 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("showContextEvidence(group, selectedVault)", editor)
         self.assertIn("openRelatedNote(item.optString(\"path\"), selectedVault)", editor)
         self.assertIn("evidenceDisclosure(Context context, JSONObject group)", presentation)
+        self.assertIn("evidenceSourceLabel(Context context, JSONObject source)", presentation)
+        self.assertIn('context.optBoolean("evidence_checks_limited")', editor)
+        self.assertIn('result.optBoolean("evidence_checks_limited")', hub)
+        self.assertIn('source.optBoolean("repeated_excerpt")', presentation)
+        self.assertIn('source.optBoolean("identical_document")', presentation)
         self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
+        self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
+        self.assertIn("_verify_evidence_freshness(", bridge)
         for locale in ("values", "values-ru"):
             strings = {e.get("name"): e.text or "" for e in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             for key in ("knowledge_evidence_title", "knowledge_evidence_file_counts",
                         "knowledge_evidence_disclaimer", "knowledge_evidence_limited",
-                        "knowledge_evidence_source_mixed"):
+                        "knowledge_evidence_source_mixed", "knowledge_evidence_current",
+                        "knowledge_evidence_stale", "knowledge_evidence_unavailable",
+                        "knowledge_evidence_not_checked", "knowledge_evidence_checked_counts",
+                        "knowledge_evidence_other_statuses", "knowledge_evidence_checks_limited",
+                        "knowledge_evidence_repeated_excerpt", "knowledge_evidence_identical_document"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):

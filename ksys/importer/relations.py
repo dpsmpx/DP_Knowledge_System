@@ -226,19 +226,21 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
     """
     source = con.execute(
         "SELECT a.atom_key, MIN(a.locator), MIN(a.predicate), "
-        "MIN(a.negated), MAX(a.negated) "
-        "FROM candidate_atoms a JOIN documents d ON d.path=a.doc "
+        "MIN(a.negated), MAX(a.negated), MIN(f.text_hash) "
+        "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
+        "JOIN documents d ON d.path=a.doc "
         "AND d.status='PARSED' WHERE a.doc=? "
         "GROUP BY a.atom_key ORDER BY a.atom_key LIMIT ?",
         (source_path, MAX_EVIDENCE_GROUPS + 1)).fetchall()
     limited = len(source) > MAX_EVIDENCE_GROUPS
     groups = []
-    for atom_key, source_locator, predicate, minimum, maximum in source[:MAX_EVIDENCE_GROUPS]:
+    for atom_key, source_locator, predicate, minimum, maximum, text_hash in source[:MAX_EVIDENCE_GROUPS]:
         # An exact signature is the predicate + *all* args + context + the
         # precise interval. Alias and temporal-overlap hints stay separate.
         rows = con.execute(
-            "SELECT a.doc, MIN(a.locator), MIN(a.negated), MAX(a.negated) "
-            "FROM candidate_atoms a JOIN documents d ON d.path=a.doc "
+            "SELECT a.doc, MIN(a.locator), MIN(a.negated), MAX(a.negated), MIN(f.text_hash) "
+            "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
+            "JOIN documents d ON d.path=a.doc "
             "AND d.status='PARSED' WHERE a.atom_key=? AND a.doc<>? "
             "GROUP BY a.doc ORDER BY a.doc COLLATE NOCASE LIMIT ?",
             (atom_key, source_path, MAX_EVIDENCE_DOCUMENTS + 1)).fetchall()
@@ -247,7 +249,7 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
         mixed_source = minimum != maximum
         corroborating = opposing = mixed = 0
         evidence = []
-        for doc, locator, low, high in rows[:MAX_EVIDENCE_DOCUMENTS]:
+        for doc, locator, low, high, other_hash in rows[:MAX_EVIDENCE_DOCUMENTS]:
             if low != high:
                 kind = "mixed"
                 mixed += 1
@@ -259,10 +261,12 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
             else:
                 kind = "opposite_polarity"
                 opposing += 1
-            evidence.append({"path": doc, "locator": locator, "relation": kind})
+            evidence.append({"path": doc, "locator": locator, "relation": kind,
+                             "excerpt_hash": other_hash})
         kinds = sum(bool(x) for x in (corroborating, opposing, mixed))
         groups.append({
             "predicate": predicate, "source_locator": source_locator,
+            "source_excerpt_hash": text_hash,
             "source_polarity": "mixed" if mixed_source else (
                 "negative" if minimum else "positive"),
             **atom_qualifiers(atom_key),

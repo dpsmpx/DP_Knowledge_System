@@ -37,8 +37,9 @@ public final class KnowledgePythonBridge {
     }
 
     public static JSONObject relationships(final Context context, final String workspace,
-                                           final String relativePath) throws JSONException {
-        return invoke(context, "note_relationships", workspace, relativePath);
+                                           final String relativePath, final String notebook)
+            throws JSONException {
+        return invoke(context, "note_relationships", workspace, relativePath, notebook);
     }
 
     /** Strict manual entity lifecycle: no inferred merges or Markdown changes. */
@@ -105,9 +106,11 @@ public final class KnowledgePythonBridge {
 
     /** Saved-note context: accepted journal records plus tentative, read-only links. */
     public static JSONObject editorContext(final Context context, final String workspace,
-                                           final String relativePath, final String savedMarkdown)
+                                           final String relativePath, final String savedMarkdown,
+                                           final String notebook)
             throws JSONException {
-        return invoke(context, "editor_note_context", workspace, relativePath, savedMarkdown);
+        return invoke(context, "editor_note_context", workspace, relativePath, savedMarkdown,
+                notebook);
     }
 
     /** Ephemeral, approved-only source spans: no index or journal write. */
