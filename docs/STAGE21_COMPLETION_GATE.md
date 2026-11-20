@@ -87,7 +87,9 @@ it explicitly skipped package-ID and APK content inspections as requested.
    disabled for this branch until that instruction arrives. Earlier runs
    under the old workflow did build unsigned, unpublished ephemeral APKs.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
-   constrained storage, interruption and SAF provider behavior.
+   constrained storage, interruption and SAF provider behavior. Follow
+   `docs/STAGE21_DEVICE_ACCEPTANCE.md`, including new QA-21-09..10; record
+   PASS/FAIL per scenario, never infer PASS from unit tests.
 4. Complete the approved manually reviewed operation handlers and device QA
    for protected high-water transfer to a restored device.
    Exercise the new synthetic Stage21 checks in the existing in-app QA buttons.
