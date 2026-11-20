@@ -374,8 +374,8 @@
     <string name="knowledge_portable_restore">Restore into a new library</string>
     <string name="knowledge_portable_restore_warning">Restore writes to a NEW folder beside your current library, leaving existing source files untouched. A journal can be imported only when the local knowledge journal is empty; conflicting decisions are never merged. Check available storage, and keep the source archive until completion.</string>
     <string name="knowledge_portable_restore_preview">Verified source files: %1$d\nUncompressed bytes: %2$d\nJournal present: %3$b\n\nRestore into a NEW library folder next to the current library? This cannot overwrite the current vault. Optional safe model identifiers may be imported only if you explicitly select them; secrets, endpoints and indexes are excluded.</string>
-    <string name="knowledge_portable_migrate_models">Also import safe model names (no endpoints, API keys or other settings)</string>
-    <string name="knowledge_portable_models_preview">Optional model names in this archive: %1$s. Disabled by default; importing them does not download models.</string>
+    <string name="knowledge_portable_migrate_models">Also import reviewed non-secret model names and analysis-on-refresh preference (no endpoints, API keys, or passwords)</string>
+    <string name="knowledge_portable_models_preview">Optional safe settings in this archive: %1$s. Import is disabled by default. No models are downloaded or indexing jobs started by import.</string>
     <string name="knowledge_portable_settings_failed">Notes were restored, but model settings could not be saved. Configure models manually.</string>
     <string name="knowledge_portable_restored">Source files restored to a new library (%1$d files). The original library was preserved.</string>
     <string name="knowledge_portable_restore_failed">Restore stopped. The original library was preserved. A newly created recovery folder may remain if journal import failed.</string>

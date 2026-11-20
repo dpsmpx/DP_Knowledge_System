@@ -15,10 +15,12 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-/** Explicitly safe, allowlisted model labels. URLs, tokens and raw app prefs stay local. */
+/** Versioned allowlist of non-secret preferences. Endpoints/tokens stay local. */
 final class KnowledgePortableSettings {
-    private static final String SCHEMA = "dpks-safe-settings-v1";
+    private static final String SCHEMA_V1 = "dpks-safe-settings-v1";
+    private static final String SCHEMA_V2 = "dpks-safe-settings-v2";
     private static final String[] MODELS = {"knowledge_embedding_model", "knowledge_llm_model"};
+    private static final String ANALYZE_ON_REFRESH = "semantic_analysis_on_refresh";
 
     private KnowledgePortableSettings() { }
 
@@ -30,13 +32,19 @@ final class KnowledgePortableSettings {
 
     static byte[] snapshot(final SharedPreferences preferences) throws Exception {
         final JSONObject safe = new JSONObject();
-        safe.put("schema", SCHEMA);
+        safe.put("schema", SCHEMA_V2);
         safe.put("secrets_exported", false);
         safe.put("derived_indexes_exported", false);
         if (preferences != null) {
             for (final String key : MODELS) {
                 final String value = preferences.getString(key, "");
                 if (safeModel(value)) safe.put(key, value);
+            }
+            try {
+                safe.put(ANALYZE_ON_REFRESH, preferences.getBoolean(ANALYZE_ON_REFRESH, false));
+            } catch (ClassCastException malformedLocalPreference) {
+                // Do not abort a verified snapshot for an invalid optional
+                // preference; neither guess nor serialize an arbitrary type.
             }
         }
         return safe.toString().getBytes(StandardCharsets.UTF_8);
@@ -62,13 +70,20 @@ final class KnowledgePortableSettings {
             }
             final JSONObject json = new JSONObject(new String(bytes.toByteArray(),
                     StandardCharsets.UTF_8));
-            if (!SCHEMA.equals(json.optString("schema"))
+            final String schema = json.optString("schema");
+            if (!(SCHEMA_V1.equals(schema) || SCHEMA_V2.equals(schema))
                     || json.optBoolean("secrets_exported", true)
                     || json.optBoolean("derived_indexes_exported", true))
                 throw new SecurityException("Unsupported or unsafe portable settings");
             for (final String key : MODELS) {
                 final String value = json.optString(key, "");
                 if (safeModel(value)) models.put(key, value);
+            }
+            if (SCHEMA_V2.equals(schema) && json.has(ANALYZE_ON_REFRESH)) {
+                final Object value = json.get(ANALYZE_ON_REFRESH);
+                if (!(value instanceof Boolean))
+                    throw new SecurityException("Invalid portable analysis preference");
+                models.put(ANALYZE_ON_REFRESH, value.toString());
             }
             return models;
         }
@@ -81,6 +96,9 @@ final class KnowledgePortableSettings {
             final String value = models.get(key);
             if (safeModel(value)) update.putString(key, value);
         }
+        final String analyze = models.get(ANALYZE_ON_REFRESH);
+        if ("true".equals(analyze) || "false".equals(analyze))
+            update.putBoolean(ANALYZE_ON_REFRESH, Boolean.parseBoolean(analyze));
         return update.commit();
     }
 }

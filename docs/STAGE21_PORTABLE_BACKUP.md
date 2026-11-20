@@ -132,6 +132,24 @@ activity-specific model settings from a background process. Full non-secret
 app preferences migration and user-approved portable secret recovery remain
 open and must be specified before being implemented.
 
+## Fifteenth slice: versioned opt-in non-secret preferences (pending CI)
+
+Portable settings `dpks-safe-settings-v2` allowlist the two validated model
+**identifiers** plus a strictly typed `semantic_analysis_on_refresh` boolean.
+Import remains off by default and needs the user's separate checkbox during
+new-library restore. The v1 safe-settings format remains readable; arbitrary
+v1 fields never become new preferences. The v2 importer rejects malformed
+boolean types instead of coercing strings or numbers. Endpoints, keys,
+passwords, device signing identities, recovery passphrases, background job
+permissions, derived indexes and raw app preferences are still excluded.
+Enabling the checkbox does not start indexing or download any model.
+
+Daily background jobs lack the Activity-private preferences context and
+intentionally continue writing the safe schema without that optional toggle;
+they do not fabricate an old value. Other non-secret app preferences and any
+opt-in recovery of secrets remain a separate reviewed policy and open owner
+choice in `TODO.md`.
+
 ## Eighth slice: detailed offline branch inspection (pending CI)
 
 The signed, paired, encrypted inbox gains a paged review of foreign-only
