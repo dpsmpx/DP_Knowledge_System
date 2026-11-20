@@ -237,7 +237,7 @@
     <string name="knowledge_conflicts">Potential conflicts: %1$d</string>
     <string name="knowledge_diagnostic_count">Validation diagnostics: %1$d</string>
     <string name="knowledge_diagnostics">Knowledge state</string>
-    <string name="knowledge_qa_quick">Run device QA + copy</string>
+    <string name="knowledge_qa_quick">Test Stage 21 and device + copy report</string>
     <string name="knowledge_qa_stress">20k stress + copy</string>
     <string name="knowledge_qa_editor">Test Stage 22 editor + copy</string>
     <string name="knowledge_qa_editor_limits">Synthetic core checks plus local UI-state/navigation and saved-source handoff guards. Touchscreen, layout, keyboard, rotation and accessibility still need observed device QA.</string>

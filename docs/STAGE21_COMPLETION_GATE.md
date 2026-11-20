@@ -1,10 +1,14 @@
 # Stage 21 — completion and release gate (20 November 2026)
 
 **Status: NOT PASS.** This checklist is a truthful engineering handoff, not
-release approval. No APK was published or delivered. Before slice 19, the
+physical-device acceptance. Before slice 19, the
 pre-existing PR workflow **did build an unsigned debug APK on an ephemeral
 GitHub Actions runner** (run #195, 44691540899); that workflow uploaded no
 artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
+On 20 November the owner separately authorized a **signed, installable QA
+prerelease via GitHub Actions and GitHub Releases**; the limited release
+workflow is independent of the existing PR unit-test-only job. This permission
+does not authorize marking Stage 21 PASS or a stable production release.
 
 | Area | Current evidence | Gate |
 | --- | --- | --- |
@@ -80,12 +84,11 @@ it explicitly skipped package-ID and APK content inspections as requested.
    none substitute for physical QA. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.
-2. Android Java unit CI **passed** on both flavors. Physical integration,
-   real APK installation and release need a new explicit owner instruction.
-   The Stage 21 draft PR's *new* Android CI job is restricted to unit tests:
-   debug APK assembly, package-ID and embedded-runtime APK inspection are
-   disabled for this branch until that instruction arrives. Earlier runs
-   under the old workflow did build unsigned, unpublished ephemeral APKs.
+2. Android Java unit CI **passed** on both flavors. The owner has now
+   authorized one signed, standalone Stage21 QA prerelease, with APK package
+   verification and SHA-256, while the existing draft PR's general Android CI
+   remains unit-test-only. A successful signed release workflow is a build
+   gate, **not** evidence that hardware integration or UI acceptance passed.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior. Follow
    `docs/STAGE21_DEVICE_ACCEPTANCE.md`, including new QA-21-09..10; record

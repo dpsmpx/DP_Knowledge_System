@@ -237,7 +237,7 @@
     <string name="knowledge_conflicts">Возможных противоречий: %1$d</string>
     <string name="knowledge_diagnostic_count">Сообщений проверки: %1$d</string>
     <string name="knowledge_diagnostics">Состояние знаний</string>
-    <string name="knowledge_qa_quick">Диагностика и копирование</string>
+    <string name="knowledge_qa_quick">Проверить Stage 21 и устройство</string>
     <string name="knowledge_qa_stress">Стресс 20 тыс. и копирование</string>
     <string name="knowledge_qa_editor">Проверить редактор Stage 22 и скопировать</string>
     <string name="knowledge_qa_editor_limits">Синтетические проверки ядра, переходов между экранами и защиты от несовпадения с сохранённым текстом. Реальные нажатия, раскладка, клавиатура, поворот и доступность остаются отдельной аппаратной проверкой.</string>

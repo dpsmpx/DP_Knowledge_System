@@ -289,6 +289,30 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("def stage21_sync_selftest(", python)
         self.assertIn('"used_selected_vault": False', python)
 
+    def test_signed_stage21_qa_release_builds_from_exact_branch_with_visible_selftest(self):
+        workflow = (ROOT / ".github/workflows/knowledge-signed-prerelease.yml").read_text()
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        layout = ET.parse(SOURCE / "res/layout/knowledge__activity.xml").getroot()
+        ids = [element.get(ANDROID + "id") for element in layout.iter()]
+        self.assertEqual(1, ids.count("@+id/knowledge_qa_quick"))
+        self.assertIn("runDeviceQa(false, false)", hub)
+        for locale in ("values", "values-ru"):
+            strings = {e.attrib["name"]: e.text for e in ET.parse(
+                SOURCE / "res" / locale / "knowledge_strings.xml").getroot()}
+            self.assertIn("Stage 21", strings["knowledge_qa_quick"])
+        for required in (
+                "feature/stage21-safe-backup-workspace",
+                "workflow_dispatch:", "contents: write",
+                "github.ref == 'refs/heads/feature/stage21-safe-backup-workspace'",
+                "testFlavorDefaultDebugUnitTest", "testFlavorAtestDebugUnitTest",
+                "assembleFlavorAtestRelease", "PORTABLE-21", "SYNC-21-SUITE",
+                "SYNC21-BATCH-ATOMIC", "KEYSTORE_BASE64", "KEY_ALIAS",
+                "apksigner\" verify", "com.dpsmpx.dpks", "^assets/chaquopy/",
+                "sha256sum -c", "gh release create", "--prerelease"):
+            self.assertIn(required, workflow)
+        self.assertIn("knowledge-stage21-qa-${GITHUB_RUN_NUMBER}", workflow)
+        self.assertNotIn("assembleFlavorDefaultRelease", workflow)
+
     def test_stage21_synthetic_selftest_passes_and_cleans_private_fixture(self):
         import json
         import tempfile
