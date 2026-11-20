@@ -1,11 +1,14 @@
 # Stage 21 — completion and release gate (20 November 2026)
 
 **Status: NOT PASS.** This checklist is a truthful engineering handoff, not
-release approval. No APK was built or distributed (owner restriction).
+release approval. No APK was published or delivered. Before slice 19, the
+pre-existing PR workflow **did build an unsigned debug APK on an ephemeral
+GitHub Actions runner** (run #195, 44691540899); that workflow uploaded no
+artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 
 | Area | Current evidence | Gate |
 | --- | --- | --- |
-| Encrypted full snapshot + manifest | Versioned authenticated ciphertext, write/readback verification, clean-library restore | Android CI + independent device restore |
+| Encrypted full snapshot + manifest | Versioned authenticated ciphertext, write/readback verification, clean-library restore; Android unit CI passed | Independent device restore |
 | Opt-in 24-hour local daily backup | WorkManager, Keystore-sealed passphrase, retention and verified copies | Battery/OEM, reboot, low-storage device QA |
 | Off-device backup | Separately consented SAF tree copy/readback | Real provider durability/revoked-permission tests |
 | Settings | Model labels plus v2 typed analysis preference, opt-in restore; all secrets excluded | Owner decision on portable secrets, v1/v2 device migration |
@@ -14,13 +17,14 @@ release approval. No APK was built or distributed (owner restriction).
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | New tests cover archive, peer rollback boundary, safe settings, etc. | Android CI not run in this environment |
+| Java unit suite | **PASS** in GitHub Actions Android workflow [#196](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44691962030), both flavors, APK checks skipped | Physical integration tests still open |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside
 an Android runtime; the dependency does **not** enter the shipped application.
 Protocol allowlist unit cases include the new signed-branch and conflict
-APIs. These Java tests still need an Android SDK/Gradle CI runner.
+APIs. The GitHub Actions Android SDK/Gradle runner passed these unit tasks;
+it explicitly skipped package-ID and APK content inspections as requested.
 
 ## Deliberate non-features
 
@@ -42,11 +46,12 @@ APIs. These Java tests still need an Android SDK/Gradle CI runner.
 
 1. Resolve **TODO-21-01..03** in root `TODO.md`; preserve safe defaults until
    the owner explicitly chooses anything broader.
-2. Run Android Java CI and compile the actual integrated app; no APK release
-   without a new explicit owner instruction.
-   The Stage 21 draft PR's Android CI job is restricted to unit-test tasks:
+2. Android Java unit CI **passed** on both flavors. Physical integration,
+   real APK installation and release need a new explicit owner instruction.
+   The Stage 21 draft PR's *new* Android CI job is restricted to unit tests:
    debug APK assembly, package-ID and embedded-runtime APK inspection are
-   disabled for this branch until that instruction arrives.
+   disabled for this branch until that instruction arrives. Earlier runs
+   under the old workflow did build unsigned, unpublished ephemeral APKs.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior.
 4. Agree on policy for unsupported journal operations and whether a stronger
