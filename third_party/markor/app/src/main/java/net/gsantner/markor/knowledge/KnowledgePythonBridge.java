@@ -280,6 +280,14 @@ public final class KnowledgePythonBridge {
                 fingerprint, eventId, expectedLocalHead, expectedRemoteSha, verdict);
     }
 
+    public static JSONObject journalSyncAcknowledge(final Context context, final String workspace,
+                                                    final String foreignText, final String fingerprint,
+                                                    final String expectedLocalHead,
+                                                    final String expectedRemoteSha) throws JSONException {
+        return invoke(context, "journal_sync_ack_commit", workspace, foreignText,
+                fingerprint, expectedLocalHead, expectedRemoteSha);
+    }
+
     public static JSONObject journalSyncAdopt(final Context context, final String workspace,
                                              final String foreignText, final String fingerprint,
                                              final String eventId, final String expectedLocalHead,
@@ -337,6 +345,7 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-events.v1".equals(protocol)
                 || "dpksys.sync-event-detail.v1".equals(protocol)
                 || "dpksys.sync-review-commit.v1".equals(protocol)
+                || "dpksys.sync-ack-commit.v1".equals(protocol)
                 || "dpksys.sync-adopt.v1".equals(protocol)
                 || "dpksys.sync-conflict-preview.v1".equals(protocol)
                 || "dpksys.sync-conflict-resolve.v1".equals(protocol)

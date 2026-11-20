@@ -4069,6 +4069,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 // This separately validates both hash chains on each review.
                 final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
                         this, workspacePath(), snapshot.journal);
+                final String currentHead = comparison.isNull("local_head") ? ""
+                        : comparison.getString("local_head");
+                final String remoteSha = comparison.getString("remote_sha256");
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     new MaterialAlertDialogBuilder(this)
@@ -4078,7 +4081,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     comparison.optInt("local_only"),
                                     comparison.optInt("remote_only"),
                                     comparison.optInt("possible_target_conflicts")))
-                            .setPositiveButton(android.R.string.ok, null)
+                            .setPositiveButton(snapshot.peer.paired
+                                            ? R.string.knowledge_sync_ack_branch
+                                            : android.R.string.ok,
+                                    snapshot.peer.paired
+                                            ? (dialog, which) -> confirmPeerAcknowledgement(
+                                            name, remoteSha, currentHead)
+                                            : null)
                             .setNegativeButton(R.string.knowledge_sync_events,
                                     (dialog, which) -> showPeerBranchEvents(name, 0))
                             .setNeutralButton(R.string.knowledge_sync_delete_branch,
@@ -4103,6 +4112,37 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
             }
         });
+    }
+
+    private void confirmPeerAcknowledgement(final String name, final String remoteSha,
+                                            final String localHead) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_ack_branch)
+                .setMessage(R.string.knowledge_sync_ack_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncAcknowledge(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, localHead, remoteSha);
+                                if (result.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected foreign activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_ack_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_branch_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
     }
 
     private void showPeerBranchEvents(final String name, final int offset) {

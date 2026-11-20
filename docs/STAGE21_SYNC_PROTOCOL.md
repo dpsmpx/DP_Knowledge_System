@@ -178,3 +178,21 @@ proved answer is not mistaken for a globally reconciled one. Diagnostics
 also expose the pending-dispute count. No foreign node text or peer identity
 is added to general-query outputs. Turning a dispute into **keep local**
 clears the unresolved warning for that event, while retaining its audit.
+
+## Thirteenth slice: durable branch-head acknowledgment (pending CI)
+
+The paired, signed encrypted inbox now offers an **Acknowledge branch**
+action independent of reviewing individual events. After an additional user
+confirmation and a new signature/trust check, Python revalidates both complete
+hash chains and the expected local/remote commitments. A `peer_ack` event
+records the exact foreign branch head, current local and shared heads,
+fingerprint and foreign SHA. It has **no inference or source-file effect**;
+duplicate acknowledgments of the same signed branch are idempotent and a
+stale confirmation fails closed. This is a persistent causal receipt in the
+owner's local linear journal; it is automatically included when that journal
+is next exported inside a new signed encrypted snapshot. No network upload
+or foreign-event replay is triggered by acknowledgment.
+
+The offline exchange remains deliberately manual. Transitive peer receipt
+validation, upstream replay of all operation types, background transport,
+anti-rollback high-water enforcement and real-device QA still require work.

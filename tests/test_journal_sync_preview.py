@@ -11,10 +11,11 @@ from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
 from ksys.store.journal_sync import (preview_journals, validated_entries,
                                      review_foreign_events, inspect_foreign_event,
-                                     prepare_peer_review)
+                                     prepare_peer_review, prepare_peer_ack)
 from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
-from third_party.markor.app.src.main.python.ksys_android_bridge import journal_sync_review_commit
+from third_party.markor.app.src.main.python.ksys_android_bridge import (
+    journal_sync_review_commit, journal_sync_ack_commit)
 
 
 def journal_string(path: Path, operations: tuple[tuple[str, dict], ...]) -> str:
@@ -184,6 +185,43 @@ class JournalSyncPreviewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare_peer_review(self.base, remote.replace("foreign", "tampers"),
                                 "b" * 64, event_id, common, digest, "hold")
+
+    def test_explicit_branch_ack_is_causal_idempotent_and_never_activates_knowledge(self):
+        workspace = Workspace(self.root / "ack-local")
+        remote = self.base
+        fingerprint = "c" * 64
+        checksum = hashlib.sha256(remote.encode()).hexdigest()
+        plan = prepare_peer_ack("", remote, fingerprint, None, checksum)
+        self.assertEqual(validated_entries(remote)[-1].id, plan["remote_head"])
+        self.assertFalse(plan["activates_knowledge"])
+        self.assertNotIn("sample-a", json.dumps(plan))
+        receipt = json.loads(journal_sync_ack_commit(
+            str(workspace.root), remote, fingerprint, "", checksum))
+        self.assertEqual("dpksys.sync-ack-commit.v1", receipt["protocol"])
+        self.assertFalse(receipt["activates_knowledge"])
+        kb = KnowledgeBase(workspace, FixedClock(), use_cache=False)
+        self.assertEqual(0, len(kb.state.records))
+        self.assertEqual([], kb.journal.verify())
+        self.assertEqual("peer_ack", kb.journal.entries()[0].op)
+        self.assertEqual((plan["remote_head"], receipt["receipt_id"]),
+                         kb.state.peer_acks[(fingerprint, checksum)])
+        duplicate = json.loads(journal_sync_ack_commit(
+            str(workspace.root), remote, fingerprint,
+            receipt["journal_head"], checksum))
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(1, len(Journal(workspace.journal_path, FixedClock()).entries()))
+
+    def test_ack_rejects_rollback_preview_staleness_and_invalid_commitment(self):
+        valid = self.base
+        sha = hashlib.sha256(valid.encode()).hexdigest()
+        for peer, head, branch, digest in [
+                ("invalid", None, valid, sha),
+                ("f" * 64, "J:stale", valid, sha),
+                ("f" * 64, None, valid, "f" * 64),
+                ("f" * 64, None, "", hashlib.sha256(b"").hexdigest()),
+        ]:
+            with self.assertRaises(ValueError):
+                prepare_peer_ack("", branch, peer, head, digest)
 
 
 if __name__ == "__main__":

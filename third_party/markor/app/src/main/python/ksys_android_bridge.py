@@ -29,7 +29,7 @@ from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
 from ksys.store.journal_sync import (preview_journals, review_foreign_events,
                                      inspect_foreign_event, prepare_peer_review,
-                                     prepare_peer_adoption)
+                                     prepare_peer_adoption, prepare_peer_ack)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1736,6 +1736,35 @@ def journal_sync_review_commit(workspace_dir: str, foreign_text: str,
                               sort_keys=True, separators=(",", ":"))
     saved, _, _ = kb._commit("peer_review", data)
     return json.dumps({"protocol": "dpksys.sync-review-commit.v1",
+                       "receipt_id": saved.id, "journal_head": kb.journal.head,
+                       "duplicate": False, "activates_knowledge": False},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_ack_commit(workspace_dir: str, foreign_text: str,
+                            peer_fingerprint: str, expected_local_head: str,
+                            expected_remote_sha256: str) -> str:
+    """Explicit immutable causal acknowledgement, not foreign activation.
+
+    Java authenticates the paired peer and exact signed journal on every call.
+    The new local receipt will travel in subsequent *manual* signed backups.
+    """
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    receipt = prepare_peer_ack(local, foreign_text, peer_fingerprint,
+                               expected_local_head or None, expected_remote_sha256)
+    prior = kb.state.peer_acks.get((peer_fingerprint, expected_remote_sha256))
+    if prior is not None and prior[0] == receipt["remote_head"]:
+        return json.dumps({"protocol": "dpksys.sync-ack-commit.v1",
+                           "receipt_id": prior[1], "journal_head": kb.journal.head,
+                           "duplicate": True, "activates_knowledge": False},
+                          sort_keys=True, separators=(",", ":"))
+    kb.ws.init()
+    saved, _, _ = kb._commit("peer_ack", receipt)
+    if kb.journal.verify():
+        raise ValueError("Peer acknowledgement did not verify")
+    return json.dumps({"protocol": "dpksys.sync-ack-commit.v1",
                        "receipt_id": saved.id, "journal_head": kb.journal.head,
                        "duplicate": False, "activates_knowledge": False},
                       sort_keys=True, separators=(",", ":"))

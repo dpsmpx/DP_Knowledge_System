@@ -98,7 +98,7 @@ def validated_entries(content: str) -> list[Entry]:
 
 def _targets(event: Entry) -> set[str] | None:
     data = event.data
-    if event.op in ("peer_review", "peer_resolution"):
+    if event.op in ("peer_review", "peer_resolution", "peer_ack"):
         # Audit-only receipts never activate a peer claim.
         return set()
     if event.op in {"retract", "revise", "split"}:
@@ -320,5 +320,36 @@ def prepare_peer_adoption(local_content: str, remote_content: str,
         "remote_event_id": remote_event_id,
         "common_head": comparison.common_head,
         "local_head_at_review": expected_local_head,
+        "protocol_version": 1,
+    }
+
+
+def prepare_peer_ack(local_content: str, remote_content: str,
+                     peer_fingerprint: str, expected_local_head: str | None,
+                     expected_remote_sha256: str) -> dict[str, Any]:
+    """Plan an explicit acknowledgement of ONE signed remote branch head.
+
+    Signature and locally pinned peer trust MUST be verified by Android first.
+    An ack is a causal edge in our *own* linear journal, never a replay/merge.
+    """
+    if not isinstance(peer_fingerprint, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", peer_fingerprint):
+        raise ValueError("Invalid paired identity fingerprint")
+    if not isinstance(expected_remote_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", expected_remote_sha256):
+        raise ValueError("Invalid signed remote commitment")
+    compared = preview_journals(local_content, remote_content)
+    if compared.local_head != expected_local_head:
+        raise ValueError("Local head changed since acknowledgement preview")
+    if compared.remote_sha256 != expected_remote_sha256 or not compared.remote_head:
+        raise ValueError("Remote branch changed or empty")
+    return {
+        "peer_fingerprint": peer_fingerprint,
+        "remote_sha256": expected_remote_sha256,
+        "remote_head": compared.remote_head,
+        "common_head": compared.common_head,
+        "local_head_at_ack": compared.local_head,
+        "relation": compared.relation,
+        "activates_knowledge": False,
         "protocol_version": 1,
     }

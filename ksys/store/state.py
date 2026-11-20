@@ -75,6 +75,8 @@ class KnowledgeState:
         # A human may keep the local decision or record explicit disagreement;
         # neither verdict covertly activates unreviewed remote knowledge.
         self.peer_resolutions: dict[tuple[str, str, str], tuple[str, tuple[str, ...], str]] = {}
+        # Branch-level signed acknowledgements: causal evidence only.
+        self.peer_acks: dict[tuple[str, str], tuple[str, str]] = {}
         self.head: str | None = None
         self.entries: list[Entry] = []
         self.diagnostics: list[Diagnostic] = []
@@ -228,6 +230,17 @@ class KnowledgeState:
             else:
                 self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
                                                    "invalid foreign conflict resolution", location=e.id))
+        elif e.op == "peer_ack":
+            fingerprint, branch, remote = (d.get("peer_fingerprint"),
+                                            d.get("remote_sha256"), d.get("remote_head"))
+            if (all(isinstance(v, str) for v in (fingerprint, branch, remote))
+                    and len(fingerprint) == len(branch) == 64
+                    and remote.startswith("J:")
+                    and d.get("activates_knowledge") is False):
+                self.peer_acks[(fingerprint, branch)] = (remote, e.id)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid peer branch acknowledgement", location=e.id))
         self.head = e.id
         self.entries.append(e)
         return ch
