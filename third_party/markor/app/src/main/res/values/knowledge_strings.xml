@@ -398,6 +398,12 @@
     <string name="knowledge_sync_context_confirm">Confirm applying this exact foreign reading or pronoun binding to your verified local note? A NEW local journal event will retain the remote and source commitments. A changed note, journal head or peer branch will be rejected.</string>
     <string name="knowledge_sync_context_saved">Verified interpretation recorded in your local journal.</string>
     <string name="knowledge_sync_context_failed">Cannot safely apply this interpretation. Index your selected Markdown library first, verify the same note exists, or hold/reject the foreign event. No automatic replay occurred.</string>
+    <string name="knowledge_sync_structural_preview">Compare foreign revision proposal</string>
+    <string name="knowledge_sync_structural_warning">This proposal can replace existing accepted knowledge. First come the exact active LOCAL records to be replaced, then the NEW proposed content. All old records must still be active, and the new canonical nodes must be new and role-compatible. Foreign provenance claims are NOT adopted as local source evidence; this records only your own explicit approval of a signed proposal. Original Markdown is untouched.</string>
+    <string name="knowledge_sync_structural_apply">Approve replacement</string>
+    <string name="knowledge_sync_structural_confirm">You have compared every affected local record against the proposed replacement. Create this NEW local revise/split/merge journal event with cryptographic causal references? Recheck both branches and reject any changed record or invalid successor.</string>
+    <string name="knowledge_sync_structural_saved">Reviewed local knowledge revision recorded.</string>
+    <string name="knowledge_sync_structural_failed">Revision cannot be safely applied. Check whether every target still exists and is active; you can hold/reject this foreign event. Nothing was automatically merged.</string>
     <string name="knowledge_portable_compare_sources">Compare original Markdown from encrypted snapshot</string>
     <string name="knowledge_portable_sources_warning">Manually choose a DPKS encrypted snapshot via Android files, Syncthing or SAF. Only original Markdown is listed. No existing note will be replaced, merged or automatically imported. Select a file to compare; saving a copy always requires its own confirmation.</string>
     <string name="knowledge_portable_sources_page">Markdown source files (%1$d of %2$d)</string>

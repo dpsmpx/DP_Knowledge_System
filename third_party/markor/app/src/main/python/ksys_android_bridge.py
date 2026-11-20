@@ -35,6 +35,8 @@ from ksys.store.journal_sync_manual import (plan_foreign_metadata,
                                             commit_foreign_metadata,
                                             MANUAL_CONTEXT_OPS, plan_foreign_context,
                                             commit_foreign_context)
+from ksys.store.journal_sync_structural import (plan_foreign_structure,
+                                                commit_foreign_structure)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1828,6 +1830,35 @@ def journal_sync_context_commit(workspace_dir: str, foreign_text: str,
                                      event_id, local_head or None, remote_sha,
                                      source_path, fragment, _source_hash(markdown), plan_sha)
     return json.dumps({"protocol": "dpksys.sync-context-commit.v1", **result},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_structural_preview(workspace_dir: str, foreign_text: str,
+                                    fingerprint: str, event_id: str,
+                                    local_head: str, remote_sha: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if kb.state.peer_reviews.get((fingerprint, remote_sha, event_id), (None,))[0] == "reject":
+        raise ValueError("Foreign structural proposal was explicitly rejected")
+    plan = plan_foreign_structure(kb, local, foreign_text, fingerprint,
+                                  event_id, local_head or None, remote_sha)
+    return json.dumps({"protocol": "dpksys.sync-structural-preview.v1", **plan},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_structural_commit(workspace_dir: str, foreign_text: str,
+                                   fingerprint: str, event_id: str,
+                                   local_head: str, remote_sha: str,
+                                   plan_sha: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if kb.state.peer_reviews.get((fingerprint, remote_sha, event_id), (None,))[0] == "reject":
+        raise ValueError("Foreign structural proposal was explicitly rejected")
+    result = commit_foreign_structure(kb, local, foreign_text, fingerprint,
+                                      event_id, local_head or None, remote_sha, plan_sha)
+    return json.dumps({"protocol": "dpksys.sync-structural-commit.v1", **result},
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 

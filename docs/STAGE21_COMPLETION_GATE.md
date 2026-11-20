@@ -15,7 +15,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox; separate AES/Keystore-protected high-water history survives inbox deletion; opt-in encrypted checkpoint export and monotonic restore | Real device migration, trust pairing and rollback/replay acceptance |
-| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema` and source-anchored `bind`/`resolve` translations to new local causal events | Device UI + concurrent-write review; `revise`/`split`/`merge` pending |
+| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema`, source-anchored `bind`/`resolve`, and active-local-record-checked `revise`/`split`/`merge` | Device UI + concurrent-write review; unsupported event families audited only |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
 | Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191) and Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668) passed both flavors; APK assembly skipped | New high-water unit tests and physical integration tests |
@@ -37,7 +37,11 @@ it explicitly skipped package-ID and APK content inspections as requested.
   `bind` and `resolve` additionally require the same fragment to exist in a
   manually indexed LOCAL Markdown library; they are revalidated against the
   unchanged local note and active local interpretation on every approval.
-  This does not authorize `revise`/`split`/`merge` translation.
+  `revise`/`split`/`merge` are independently previewed against canonical active
+  LOCAL records and new locally validated successors. Their unverified remote
+  provenance claims are not adopted as source evidence; only the owner's
+  deliberate LOCAL decision and signed foreign causal links are recorded.
+  An event outside supported individual handlers remains hold/reject-only.
 - LLM API keys currently live only in the foreground session, not in app
   preferences, and cannot be transferred. The v3 secret allowlist handles
   only persisted embedding/LLM endpoints, including credentials embedded in
@@ -64,9 +68,10 @@ it explicitly skipped package-ID and APK content inspections as requested.
    endpoint export/restore is implemented, pending Android CI and device QA;
    encrypted-snapshot and plain Markdown SAF compare/keep-both are implemented;
    high-water storage and explicit migration are implemented pending device QA;
-   `alias`/`label`/`schema` and locally anchored `bind`/`resolve` are now
-   handled manually; still implement `revise`/`split`/`merge` and any remaining
-   event families. Owner choices
+   individually handled families now include `alias`/`label`/`schema`,
+   locally anchored `bind`/`resolve`, and active-target-checked
+   `revise`/`split`/`merge`. Still review unsupported event families and
+   extend existing Android QA buttons. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. Physical integration,

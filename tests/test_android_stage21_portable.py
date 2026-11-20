@@ -239,6 +239,23 @@ class Stage21PortableWiring(unittest.TestCase):
             self.assertIn(name, manual)
         self.assertIn("SELECT doc FROM fragments WHERE id=? LIMIT 2", python)
 
+    def test_foreign_structural_changes_require_active_local_targets(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        structural = (ROOT / "ksys/store/journal_sync_structural.py").read_text()
+        for name in ("previewPeerStructure(", "confirmPeerStructure(",
+                     "KnowledgePythonBridge.journalSyncStructuralPreview(",
+                     "KnowledgePythonBridge.journalSyncStructuralCommit("):
+            self.assertIn(name, hub)
+        for operation in ("preview", "commit"):
+            self.assertIn("dpksys.sync-structural-" + operation + ".v1", bridge)
+            self.assertIn("def journal_sync_structural_" + operation + "(", python)
+        for token in ("verified_foreign_event(", "kb.state.active(target)",
+                      "node.to_dict() != source", "check_node(node)",
+                      "kb._commit(", '"foreign_causal"', '"automatic_replay": False'):
+            self.assertIn(token, structural)
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()

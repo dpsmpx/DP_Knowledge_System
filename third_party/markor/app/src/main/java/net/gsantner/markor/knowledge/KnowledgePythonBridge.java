@@ -330,6 +330,29 @@ public final class KnowledgePythonBridge {
                 fingerprint, eventId, localHead, remoteSha, sourcePath, markdown, planSha);
     }
 
+    public static JSONObject journalSyncStructuralPreview(final Context context,
+                                                          final String workspace,
+                                                          final String foreignText,
+                                                          final String fingerprint,
+                                                          final String eventId,
+                                                          final String localHead,
+                                                          final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_structural_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncStructuralCommit(final Context context,
+                                                         final String workspace,
+                                                         final String foreignText,
+                                                         final String fingerprint,
+                                                         final String eventId,
+                                                         final String localHead,
+                                                         final String remoteSha,
+                                                         final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_structural_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, planSha);
+    }
+
     public static JSONObject journalSyncReviewCommit(final Context context, final String workspace,
                                                      final String foreignText,
                                                      final String fingerprint,
@@ -426,6 +449,8 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-context-source.v1".equals(protocol)
                 || "dpksys.sync-context-preview.v1".equals(protocol)
                 || "dpksys.sync-context-commit.v1".equals(protocol)
+                || "dpksys.sync-structural-preview.v1".equals(protocol)
+                || "dpksys.sync-structural-commit.v1".equals(protocol)
                 || "dpksys.sync-review-commit.v1".equals(protocol)
                 || "dpksys.sync-ack-commit.v1".equals(protocol)
                 || "dpksys.sync-adopt.v1".equals(protocol)

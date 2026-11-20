@@ -27,7 +27,8 @@ public class KnowledgePythonBridgeProtocolTest {
                 "dpksys.sync-ack-commit.v1", "dpksys.sync-retract-preview.v1",
                 "dpksys.sync-retract-commit.v1", "dpksys.sync-metadata-preview.v1",
                 "dpksys.sync-metadata-commit.v1", "dpksys.sync-context-source.v1",
-                "dpksys.sync-context-preview.v1", "dpksys.sync-context-commit.v1"
+                "dpksys.sync-context-preview.v1", "dpksys.sync-context-commit.v1",
+                "dpksys.sync-structural-preview.v1", "dpksys.sync-structural-commit.v1"
         }) {
             assertTrue(protocol, KnowledgePythonBridge.isSupportedProtocol(protocol));
         }

@@ -4564,6 +4564,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         || "label".equals(operation) || "schema".equals(operation);
                 final boolean context = "bind".equals(operation)
                         || "resolve".equals(operation);
+                final boolean structural = "revise".equals(operation)
+                        || "split".equals(operation) || "merge".equals(operation);
                 String payload = detail.toString(2);
                 if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
                 final String shown = payload;
@@ -4586,6 +4588,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             ? R.string.knowledge_sync_metadata_preview
                                             : context
                                             ? R.string.knowledge_sync_context_preview
+                                            : structural
+                                            ? R.string.knowledge_sync_structural_preview
                                             : android.R.string.ok,
                                     "accept".equals(operation)
                                             ? (dialog, which) -> previewPeerAdoption(
@@ -4598,6 +4602,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             name, eventId, expectedHash, localHead)
                                             : context
                                             ? (dialog, which) -> previewPeerContext(
+                                            name, eventId, expectedHash, localHead)
+                                            : structural
+                                            ? (dialog, which) -> previewPeerStructure(
                                             name, eventId, expectedHash, localHead)
                                             : null)
                             .setNeutralButton(R.string.knowledge_sync_review_hold,
@@ -4758,6 +4765,78 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             } catch (Exception invalid) {
                                 runOnUiThread(() -> Toast.makeText(this,
                                         R.string.knowledge_sync_context_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    /** Each remote revision/split/merge proposal is revalidated against active local records. */
+    private void previewPeerStructure(final String name, final String eventId,
+                                      final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject plan = KnowledgePythonBridge.journalSyncStructuralPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!plan.optBoolean("read_only")
+                        || !plan.optBoolean("requires_human_confirmation"))
+                    throw new SecurityException("Unsafe structural proposal");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_structural_warning)
+                        + "\n\n" + plan.getString("operation")
+                        + "\n\n" + plan.getJSONArray("existing_local").toString(2)
+                        + "\n\n" + plan.getJSONObject("data").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_structural_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_structural_apply,
+                                    (dialog, which) -> confirmPeerStructure(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_structural_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerStructure(final String name, final String eventId,
+                                      final String remoteSha, final String localHead,
+                                      final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_structural_apply)
+                .setMessage(R.string.knowledge_sync_structural_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_structural_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncStructuralCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true))
+                                    throw new SecurityException("Revision proposal not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) {
+                                        Toast.makeText(this, R.string.knowledge_sync_structural_saved,
+                                                Toast.LENGTH_LONG).show();
+                                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                                    }
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_structural_failed,
                                         Toast.LENGTH_LONG).show());
                             }
                         })).show();
