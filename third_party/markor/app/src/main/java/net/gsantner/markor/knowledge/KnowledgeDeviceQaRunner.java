@@ -404,11 +404,14 @@ public final class KnowledgeDeviceQaRunner {
         if (!health.isHealthy()) {
             report.add("WARN", "INDEX-INTEGRITY", 0,
                     health.isStructurallyHealthy()
-                            ? "SQLite read-only quick_check non-ok; structural counts agree; "
-                                    + "cannot distinguish engine limitation from corruption; no repair performed"
+                            ? "SQLite global read-only quick_check non-ok; structural counts agree; "
+                                    + "separate B-tree checks reported below; FTS and whole-index "
+                                    + "integrity not established; no repair performed"
                             : "index relationships inconsistent; rebuild requires explicit approval");
         }
         return "quick_check=" + ("ok".equals(health.quickCheck) ? "ok" : "not-ok")
+                + ", baseTablesQuickCheck=" + health.baseTablesQuickCheck
+                + ", ftsStorageQuickCheck=" + health.ftsStorageQuickCheck
                 + ", sqliteVersion=" + safeVersion(health.sqliteVersion)
                 + ", structuralHealthy=" + health.isStructurallyHealthy()
                 + ", healthy=" + health.isHealthy()
@@ -580,6 +583,8 @@ public final class KnowledgeDeviceQaRunner {
                     + ", sqliteVersion=" + safeVersion(readOnlyHealth.sqliteVersion)
                     + ", quickCheckReadOnly=" + quickStatus(readOnlyHealth.quickCheck)
                     + ", quickCheckSyntheticReadWrite=" + quickStatus(comparisonHealth.quickCheck)
+                    + ", baseTablesQuickCheck=" + readOnlyHealth.baseTablesQuickCheck
+                    + ", ftsStorageQuickCheck=" + readOnlyHealth.ftsStorageQuickCheck
                     + ", paging=true, verdict=" + verdict.code;
             if (!verdict.passed) {
                 throw new SyntheticMismatch(counts);

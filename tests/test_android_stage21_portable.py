@@ -313,6 +313,27 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("knowledge-stage21-qa-${GITHUB_RUN_NUMBER}", workflow)
         self.assertNotIn("assembleFlavorDefaultRelease", workflow)
 
+    def test_index_readonly_ftsvtab_discrepancy_checks_real_btrees_without_repair(self):
+        index = (JAVAS / "KnowledgeLocalIndex.java").read_text()
+        runner = (JAVAS / "KnowledgeDeviceQaRunner.java").read_text()
+        real_diagnostics = index.split("public synchronized IndexHealth healthReport()", 1)[1]
+        real_diagnostics = real_diagnostics.split("syntheticHealthOnReadWriteConnection", 1)[0]
+        self.assertIn("SQLiteDatabase.OPEN_READONLY", real_diagnostics)
+        self.assertNotIn("SQLiteDatabase.OPEN_READWRITE", real_diagnostics)
+        self.assertNotIn("db.execSQL(", real_diagnostics)
+        self.assertIn("PRAGMA quick_check(1)", index)
+        self.assertIn('PRAGMA quick_check(\\\"', index)
+        self.assertIn("WHERE type='table' AND name=? LIMIT 1", index)
+        for required in ("sqlite_schema", "notes", "embedding_chunks",
+                         "documents_fts_content", "documents_fts_segments",
+                         "documents_fts_docsize", "documents_fts_stat"):
+            self.assertIn('"' + required + '"', index)
+        self.assertIn('return "unavailable"', index)
+        self.assertIn('return "missing-table"', index)
+        self.assertIn('baseTablesQuickCheck=', runner)
+        self.assertIn('ftsStorageQuickCheck=', runner)
+        self.assertIn("FTS and whole-index", runner)
+
     def test_stage21_synthetic_selftest_passes_and_cleans_private_fixture(self):
         import json
         import tempfile

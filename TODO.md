@@ -181,6 +181,17 @@
   кнопки quick/stress; проверить `PORTABLE-21`, все семь `SYNC21-*`, 20 000
   файлов, отсутствие изменений пользовательской библиотеки, TalkBack,
   реальный SAF/Keystore. Сценарий — `docs/STAGE21_DEVICE_ACCEPTANCE.md`.
+  **Частичный отчёт владельца 20.11.2026:** подписанная Stage21 QA APK
+  `knowledge-stage21-qa-21-b8aebd0f1d`, Android API 35, arm64-v8a,
+  `com.dpsmpx.dpks` 2026.10.0-1200, quick 16,048 мс:
+  **PASS=24 WARN=2 FAIL=0 SKIP=5**. `PORTABLE-21` и все семь `SYNC21-*`
+  прошли на синтетических данных. Сканирование 760 заметок — только подсчёт,
+  содержимое не читалось; индекс содержит 760 исходников и 760 FTS-строк,
+  отсутствующих/лишних строк нет. `INDEX-INTEGRITY` и `SQLITE-RO-CHECK`
+  остались WARN: общий `PRAGMA quick_check` в read-only = `not-ok`, на
+  временном индексе read/write = `ok`. Это **не** подтверждение целостности
+  настоящего индекса. `STRESS-20K`, реальные SAF/Keystore/два устройства,
+  фоновые задания и UX — пока SKIP/ручная QA; пункт не закрывать.
 - [x] **TODO-21-04 — ранее запущенные GitHub Actions (факт установлен).**
   До изменения `.github/workflows/android-knowledge-ci.yml` CI при push в
   PR #74 **действительно собрал unsigned debug APK** на временном runner:
@@ -202,6 +213,17 @@
   прошёл; [QA prerelease `knowledge-stage21-qa-21-b8aebd0f1d`](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-21-b8aebd0f1d)
   опубликован, оба файла видны в GitHub Releases. APK подписан для ручной
   аппаратной QA; **QA-21-01..06 по-прежнему не выполнены**.
+
+- [ ] **DEV-21-36 — уточнить причину SQLite read-only WARN на устройстве.**
+  Для SQLite 3.44.5 официальный SQLite upstream подтверждает дефект
+  `integrity_check` на read-only БД с FTS, исправленный в 3.45.1
+  (https://www.sqlite.org/changes.html). Добавлена отдельная диагностика
+  `baseTablesQuickCheck` и `ftsStorageQuickCheck` через table-scoped
+  `PRAGMA quick_check` на **том же read-only соединении**. Никакой repair
+  или открытия реального индекса read/write. Дождаться Android CI и нового
+  аппаратного отчёта с обоими полями; даже `ok/ok` не приравнивать к
+  полной FTS/integrity проверке. Если любой из них не `ok`, нужна отдельная
+  ручная проверка без автоматического пересоздания.
 
 Машинная проверка 20 000 **событий журнала** проходит с синтетическими
 данными; она **не заменяет** 20 000 файлов в заметочном хранилище на Android.
