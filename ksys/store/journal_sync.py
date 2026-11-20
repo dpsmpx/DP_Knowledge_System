@@ -98,8 +98,8 @@ def validated_entries(content: str) -> list[Entry]:
 
 def _targets(event: Entry) -> set[str] | None:
     data = event.data
-    if event.op == "peer_review":
-        # A review receipt is an audit event, not a claim activation.
+    if event.op in ("peer_review", "peer_resolution"):
+        # Audit-only receipts never activate a peer claim.
         return set()
     if event.op in {"retract", "revise", "split"}:
         return {data["target"]} if isinstance(data.get("target"), str) else None

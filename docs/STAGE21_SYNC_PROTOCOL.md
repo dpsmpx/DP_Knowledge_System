@@ -136,3 +136,32 @@ This does not yet resolve conflicting claims, reconstruct remote source
 notes, or automatically replay all compatible operations. A manual conflict
 resolution receipt with explicit causal references, branch acknowledgements,
 and clean-device/concurrency QA remain OPEN.
+
+## Eleventh slice: explicit, non-destructive divergent-claim resolution (pending CI)
+
+When a fully source-verified foreign `accept` conflicts with current local
+knowledge, the **Review adoption** flow does not permit acceptance. It offers
+two independently confirmed actions: **Mark contested** (record unresolved
+disagreement) and **Keep local** (record the owner's current preference).
+Both append a `peer_resolution` event to the local hash chain containing both
+causal heads, peer and branch commitments, foreign node ID and the bounded
+IDs of opposing assertions. The original foreign branch remains in the
+Keystore-encrypted inbox. The journal reducer keeps the latest manual verdict
+in `peer_resolutions` for deterministic replay, independent of device clocks.
+
+Both choices are **audit-only**. In particular, “contested” means *a
+quarantined cross-device disagreement*, **not** an automatically accepted
+negative fact or a silent downgrade of a previously accepted local fact.
+Neither option activates foreign knowledge, changes local proof results or
+edits Markdown. The user can still manually retract/revise a local decision
+in the normal knowledge workflow and then explicitly review adoption again;
+this is never a last-write-wins merge.
+
+Event reviews, adoptions and conflict resolutions recheck current trust and
+both expected heads. Duplicate identical resolution receipts are idempotent.
+No assumption is made that the selected device has all the peer's original
+files; if the exact Markdown is unavailable, the operation is blocked.
+
+Outstanding: durable branch acknowledgements, a full policy for applying
+every other journal operation, user-visible cross-device contest indicators
+in general search/query views, parallel-concurrency and physical-device QA.

@@ -425,6 +425,12 @@
     <string name="knowledge_sync_adopt_warning">Only one accepted assertion with an identical original Markdown note on this device can be adopted. Source text, selected reading, epistemic role and conflicts will be checked again. This is a NEW local human decision referencing a trusted foreign branch, not automatic journal merging. Ambiguity or conflict prevents the write.</string>
     <string name="knowledge_sync_adopt_saved">Foreign assertion adopted as an explicit new local decision.</string>
     <string name="knowledge_sync_adopt_failed">Cannot adopt: the source, interpretation, journal, trust or conflicts failed validation. Nothing was changed.</string>
+    <string name="knowledge_sync_conflict_title">Foreign knowledge conflict</string>
+    <string name="knowledge_sync_conflict_warning">This signed foreign assertion opposes %1$d local assertion(s). It will not be applied. You can explicitly record the unresolved divergence as contested, or choose to keep the local decision. Both choices preserve the foreign branch and leave your Markdown and active knowledge unchanged.</string>
+    <string name="knowledge_sync_conflict_contested">Mark contested</string>
+    <string name="knowledge_sync_conflict_keep_local">Keep local</string>
+    <string name="knowledge_sync_conflict_confirm">Record this explicit decision in your local, hash-chained audit journal? Both causal branch heads and the conflicting assertion IDs will be recorded; foreign knowledge will not be activated. You can revisit the foreign branch later.</string>
+    <string name="knowledge_sync_conflict_saved">Your manual foreign conflict resolution was recorded; no source file or local fact was modified.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

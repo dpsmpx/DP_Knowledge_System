@@ -4238,12 +4238,36 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         markdown.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 if (!freshSha.equals(source.getString("document_sha")))
                     throw new SecurityException("Local Markdown differs from peer original");
+                final JSONObject candidate = KnowledgePythonBridge.journalSyncConflictPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, path, markdown);
+                final int conflicts = candidate.getInt("conflict_count");
                 final String excerpt = source.optString("text", "");
                 final String shown = getString(R.string.knowledge_sync_adopt_warning)
                         + "\n\n" + path + "\n" + data.optString("role", "")
                         + "\n\n" + excerpt.substring(0, Math.min(1500, excerpt.length()));
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
+                    if (conflicts > 0) {
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_sync_conflict_title)
+                                .setMessage(getString(R.string.knowledge_sync_conflict_warning,
+                                        conflicts) + "\n\n" + shown)
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .setNeutralButton(R.string.knowledge_sync_conflict_keep_local,
+                                        (dialog, which) -> confirmPeerConflict(name, eventId,
+                                                remoteSha, localHead, path, "keep_local"))
+                                .setPositiveButton(R.string.knowledge_sync_conflict_contested,
+                                        (dialog, which) -> confirmPeerConflict(name, eventId,
+                                                remoteSha, localHead, path, "contested"))
+                                .show();
+                        return;
+                    }
+                    if (!candidate.optBoolean("can_adopt", false)) {
+                        Toast.makeText(this, R.string.knowledge_sync_adopt_failed,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
                     new MaterialAlertDialogBuilder(this)
                             .setTitle(R.string.knowledge_sync_adopt_preview)
                             .setMessage(shown)
@@ -4258,6 +4282,40 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         R.string.knowledge_sync_adopt_failed, Toast.LENGTH_LONG).show());
             }
         });
+    }
+
+    private void confirmPeerConflict(final String name, final String eventId,
+                                     final String remoteSha, final String localHead,
+                                     final String sourcePath, final String verdict) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_conflict_title)
+                .setMessage(R.string.knowledge_sync_conflict_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                // Confirm the same immutable remote journal and trust again.
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncConflictCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, sourcePath, readSelectedNote(sourcePath), verdict);
+                                if (result.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected foreign activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_conflict_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_adopt_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
     }
 
     private void commitPeerAdoption(final String name, final String eventId,

@@ -1713,20 +1713,17 @@ def journal_sync_review_commit(workspace_dir: str, foreign_text: str,
                       sort_keys=True, separators=(",", ":"))
 
 
-def journal_sync_adopt(workspace_dir: str, foreign_text: str,
-                       peer_fingerprint: str, event_id: str,
-                       expected_local_head: str, expected_remote_sha256: str,
-                       relative_path: str, markdown: str) -> str:
-    """Explicit user adoption after authenticated peer and live-source review.
+def _verified_peer_candidate(kb: KnowledgeBase, foreign_text: str,
+                             peer_fingerprint: str, event_id: str,
+                             expected_local_head: str, expected_remote_sha256: str,
+                             relative_path: str, markdown: str) -> tuple:
+    """Validate the same original Markdown and interpretation before ANY choice.
 
-    The Java caller must authenticate the signed inbox and read the source
-    using the selected Android vault's safe path resolver. This method proves
-    source/hash/span/reading agreement again. Only an individual `accept`
-    operation with canonical CNL provenance may be adopted. Conflict, absent
-    source and any schema/role ambiguity fail closed. No original file changes.
+    The Android caller is responsible for authenticating the signed, paired
+    foreign inbox and safely reading this note from its current selected vault.
+    This function does not treat a branch SHA as proof of identity.
     """
     _validate_note_input(relative_path, markdown)
-    kb = _kb(workspace_dir)
     local_path = kb.ws.journal_path
     local = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
     event, foreign = prepare_peer_adoption(
@@ -1741,16 +1738,6 @@ def journal_sync_adopt(workspace_dir: str, foreign_text: str,
     source = event.data["provenance"]
     if source["document"] != relative_path or source["document_sha"] != _source_hash(markdown):
         raise ValueError("Original local Markdown differs from foreign source")
-    for entry in reversed(kb.journal.entries()):
-        prior = entry.data.get("provenance", {}).get("foreign_event", {}) \
-            if entry.op == "accept" else {}
-        if all(prior.get(key) == foreign[key] for key in
-               ("peer_fingerprint", "remote_sha256", "remote_event_id")):
-            return json.dumps({"protocol": "dpksys.sync-adopt.v1",
-                               "journal_id": entry.id, "journal_head": kb.journal.head,
-                               "duplicate": True, "applied": True},
-                              sort_keys=True, separators=(",", ":"))
-
     fragment = _fragment(relative_path, markdown, source["fragment_id"])
     if (list(fragment.span) != source["span"]
             or fragment.text != source["text"]
@@ -1769,12 +1756,37 @@ def journal_sync_adopt(workspace_dir: str, foreign_text: str,
     node = convert_role(option["nodes"][0], role)
     if node.to_dict() != event.data["node"]:
         raise ValueError("Canonical knowledge differs between devices")
-    if kb.state.active(node.id) or node.id in kb.state.rejected:
-        raise ValueError("Local knowledge already exists or was rejected")
     if any(str(d.get("severity", "")).lower() == "error" for d in option["diagnostics"]):
         raise ValueError("Foreign interpretation failed local validation")
+    return event, foreign, fragment, reading, node
+
+
+def journal_sync_adopt(workspace_dir: str, foreign_text: str,
+                       peer_fingerprint: str, event_id: str,
+                       expected_local_head: str, expected_remote_sha256: str,
+                       relative_path: str, markdown: str) -> str:
+    """Explicitly adopt one signed foreign acceptance after live local recheck."""
+    kb = _kb(workspace_dir)
+    event, foreign, fragment, reading, node = _verified_peer_candidate(
+        kb, foreign_text, peer_fingerprint, event_id, expected_local_head,
+        expected_remote_sha256, relative_path, markdown)
+    for entry in reversed(kb.journal.entries()):
+        prior = entry.data.get("provenance", {}).get("foreign_event", {}) \
+            if entry.op == "accept" else {}
+        if all(prior.get(key) == foreign[key] for key in
+               ("peer_fingerprint", "remote_sha256", "remote_event_id")):
+            return json.dumps({"protocol": "dpksys.sync-adopt.v1",
+                               "journal_id": entry.id, "journal_head": kb.journal.head,
+                               "duplicate": True, "applied": True},
+                              sort_keys=True, separators=(",", ":"))
+    if kb.state.active(node.id) or node.id in kb.state.rejected:
+        raise ValueError("Local knowledge already exists or was rejected")
     if kb.conflicts_for([node]):
         raise ValueError("Contested knowledge requires separate manual resolution")
+    prior_resolution = kb.state.peer_resolutions.get(
+        (peer_fingerprint, expected_remote_sha256, event_id))
+    if prior_resolution and prior_resolution[0] == "keep_local":
+        raise ValueError("An explicit keep-local decision requires separate revision")
 
     provenance = {
         "source_type": "vault_note", "document": relative_path,
@@ -1786,13 +1798,86 @@ def journal_sync_adopt(workspace_dir: str, foreign_text: str,
         "foreign_event": foreign,
     }
     kb.ws.init()
-    saved = kb.accept([node], provenance=provenance, role=role,
+    saved = kb.accept([node], provenance=provenance, role=event.data["role"],
                       note="Explicitly adopted from authenticated peer on Android")
     if kb.journal.verify() or len(saved.entries) != 1:
         raise ValueError("Foreign adoption journal write did not verify")
     return json.dumps({"protocol": "dpksys.sync-adopt.v1",
                        "journal_id": saved.entries[0].id, "journal_head": kb.journal.head,
                        "duplicate": False, "applied": True},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def _peer_conflicts(kb: KnowledgeBase, node) -> list[str]:
+    ids = sorted({item["conflicts_with"] for item in kb.conflicts_for([node])})
+    if len(ids) > 100:
+        raise ValueError("Too many conflicting assertions for a single resolution")
+    return ids
+
+
+def journal_sync_conflict_preview(workspace_dir: str, foreign_text: str,
+                                  peer_fingerprint: str, event_id: str,
+                                  expected_local_head: str, expected_remote_sha256: str,
+                                  relative_path: str, markdown: str) -> str:
+    """Show conflict count only after signed-inbox and original-source checks."""
+    kb = _kb(workspace_dir)
+    _, _, _, _, node = _verified_peer_candidate(
+        kb, foreign_text, peer_fingerprint, event_id, expected_local_head,
+        expected_remote_sha256, relative_path, markdown)
+    conflicts = _peer_conflicts(kb, node)
+    receipt = kb.state.peer_resolutions.get(
+        (peer_fingerprint, expected_remote_sha256, event_id))
+    return json.dumps({"protocol": "dpksys.sync-conflict-preview.v1",
+                       "conflict_count": len(conflicts),
+                       "can_adopt": not conflicts and not kb.state.active(node.id)
+                       and node.id not in kb.state.rejected
+                       and not (receipt and receipt[0] == "keep_local"),
+                       "prior_verdict": receipt[0] if receipt else None,
+                       "requires_explicit_decision": True},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_conflict_commit(workspace_dir: str, foreign_text: str,
+                                 peer_fingerprint: str, event_id: str,
+                                 expected_local_head: str, expected_remote_sha256: str,
+                                 relative_path: str, markdown: str,
+                                 verdict: str) -> str:
+    """Keep distinct branches; record disagreement/keep-local as local audit.
+
+    `contested` deliberately does NOT activate the foreign assertion or
+    downgrade an already accepted local fact inside the inference engine.
+    The unresolved dispute is separately visible in `peer_resolutions` and
+    stays causally anchored to both hash-chain heads.
+    """
+    if verdict not in ("contested", "keep_local"):
+        raise ValueError("Unsupported foreign conflict resolution")
+    kb = _kb(workspace_dir)
+    event, foreign, _, _, node = _verified_peer_candidate(
+        kb, foreign_text, peer_fingerprint, event_id, expected_local_head,
+        expected_remote_sha256, relative_path, markdown)
+    conflicts = _peer_conflicts(kb, node)
+    if not conflicts:
+        raise ValueError("No actual opposing knowledge to resolve")
+    key = (peer_fingerprint, expected_remote_sha256, event_id)
+    prior = kb.state.peer_resolutions.get(key)
+    if prior and prior[0] == verdict and prior[1] == tuple(conflicts):
+        return json.dumps({"protocol": "dpksys.sync-conflict-resolve.v1",
+                           "receipt_id": prior[2], "journal_head": kb.journal.head,
+                           "duplicate": True, "activates_knowledge": False},
+                          sort_keys=True, separators=(",", ":"))
+    data = dict(foreign)
+    data.update({"verdict": verdict, "foreign_node_id": node.id,
+                 "foreign_source_sha": event.data["provenance"]["document_sha"],
+                 "conflicting_assertions": conflicts,
+                 "activates_knowledge": False})
+    kb.ws.init()
+    receipt, _, _ = kb._commit("peer_resolution", data,
+                               note="Explicit user resolution of signed foreign divergence")
+    if kb.journal.verify():
+        raise ValueError("Conflict resolution audit chain invalid")
+    return json.dumps({"protocol": "dpksys.sync-conflict-resolve.v1",
+                       "receipt_id": receipt.id, "journal_head": kb.journal.head,
+                       "duplicate": False, "activates_knowledge": False},
                       sort_keys=True, separators=(",", ":"))
 
 

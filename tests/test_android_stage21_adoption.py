@@ -17,7 +17,8 @@ from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
 from third_party.markor.app.src.main.python.ksys_android_bridge import (
     inspect_note, preview_fragment, record_decision, journal_sync_adopt,
-    journal_sync_review_commit)
+    journal_sync_review_commit, journal_sync_conflict_preview,
+    journal_sync_conflict_commit)
 
 
 class ManualForeignAdoptionTests(unittest.TestCase):
@@ -114,6 +115,66 @@ class ManualForeignAdoptionTests(unittest.TestCase):
         replaced = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
         with self.assertRaises(ValueError):
             self.adopt(replaced, record["id"], hashlib.sha256(replaced.encode()).hexdigest())
+
+    def test_conflict_requires_explicit_quarantined_manual_resolution(self):
+        def decide(workspace, note_path, content):
+            fragment = json.loads(inspect_note(note_path, content))["fragments"][0]["id"]
+            packet = json.loads(preview_fragment(str(workspace), note_path, content, fragment))
+            record_decision(str(workspace), note_path, content, fragment,
+                            packet["preview"]["options"][0]["reading_id"], "fact",
+                            packet["source_hash"], packet["journal_head"])
+
+        decide(self.local, "local.md", "Алекс является разработчиком.\n")
+        remote_note = "Алекс не является разработчиком.\n"
+        decide(self.remote, "foreign.md", remote_note)
+        content = Workspace(self.remote).journal_path.read_text()
+        remote_id = Journal(Workspace(self.remote).journal_path, FixedClock()).head
+        checksum = hashlib.sha256(content.encode()).hexdigest()
+        local_head = Journal(Workspace(self.local).journal_path, FixedClock()).head
+        args = (str(self.local), content, self.peer, remote_id, local_head,
+                checksum, "foreign.md", remote_note)
+        preview = json.loads(journal_sync_conflict_preview(*args))
+        self.assertEqual("dpksys.sync-conflict-preview.v1", preview["protocol"])
+        self.assertGreater(preview["conflict_count"], 0)
+        self.assertFalse(preview["can_adopt"])
+        with self.assertRaises(ValueError):
+            journal_sync_adopt(*args)
+
+        contest = json.loads(journal_sync_conflict_commit(*args, "contested"))
+        self.assertFalse(contest["activates_knowledge"])
+        kb = KnowledgeBase(Workspace(self.local), FixedClock(), use_cache=False)
+        self.assertEqual(1, len(kb.state.authoritative()))
+        self.assertEqual(2, len(kb.journal.entries()))
+        self.assertEqual("peer_resolution", kb.journal.entries()[-1].op)
+        details = kb.journal.entries()[-1].data
+        self.assertEqual("contested", details["verdict"])
+        self.assertEqual(remote_id, details["remote_event_id"])
+        self.assertEqual(local_head, details["local_head_at_review"])
+        self.assertEqual([], kb.journal.verify())
+
+        following_args = (*args[:4], contest["journal_head"], *args[5:])
+        duplicate = json.loads(journal_sync_conflict_commit(*following_args, "contested"))
+        self.assertTrue(duplicate["duplicate"])
+        keep = json.loads(journal_sync_conflict_commit(*following_args, "keep_local"))
+        self.assertFalse(keep["duplicate"])
+        kb = KnowledgeBase(Workspace(self.local), FixedClock(), use_cache=False)
+        key = (self.peer, checksum, remote_id)
+        self.assertEqual("keep_local", kb.state.peer_resolutions[key][0])
+        self.assertEqual(1, len(kb.state.authoritative()))
+        self.assertEqual([], kb.journal.verify())
+        with self.assertRaises(ValueError):
+            journal_sync_conflict_commit(*following_args, "automatic_merge")
+
+    def test_conflict_resolution_requires_a_real_opposition_and_fresh_heads(self):
+        foreign, event_id, checksum = self.foreign()
+        args = (str(self.local), foreign, self.peer, event_id, "", checksum,
+                self.path, self.markdown)
+        self.assertEqual(0, json.loads(journal_sync_conflict_preview(*args))["conflict_count"])
+        with self.assertRaises(ValueError):
+            journal_sync_conflict_commit(*args, "contested")
+        with self.assertRaises(ValueError):
+            journal_sync_conflict_commit(*args[:4], "J:outdated", *args[5:], "contested")
+        self.assertFalse(Workspace(self.local).journal_path.exists())
 
 
 if __name__ == "__main__":
