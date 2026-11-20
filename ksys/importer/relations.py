@@ -216,27 +216,39 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
             "evidence_groups": evidence_groups, "evidence_limited": evidence_limited}
 
 
-def _evidence_excerpt(con, path: str, atom_key: str) -> dict | None:
-    """Choose a stable representative *from this document's own fragment*.
+def _evidence_excerpts(con, atom_key: str, paths: list[str]) -> dict[str, dict]:
+    """Batch one bounded representative per document, never one query per file.
 
     The indexed text is a historical snapshot until a separate live SHA check
     succeeds. Bounded SQLite substr avoids materializing entire long fragments
     in relation responses. A corrupt cross-document fragment reference cannot
     be presented as this file's excerpt or used to claim a repeated excerpt.
+    Android 11+ SQLite supports the window ordering used for deterministic
+    per-document representative selection. A second join fetches text *after*
+    ranking so repeated parser rows do not multiply excerpt allocations.
     """
-    row = con.execute(
-        "SELECT a.locator, a.fragment_id, substr(f.plain, 1, ?), "
-        "length(f.plain), f.text_hash "
-        "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id AND f.doc=a.doc "
-        "WHERE a.doc=? AND a.atom_key=? "
-        "ORDER BY f.ordinal, a.locator, a.fragment_id LIMIT 1",
-        (MAX_EVIDENCE_EXCERPT_CHARS, path, atom_key),
-    ).fetchone()
-    if row is None:
-        return None
-    return {"locator": row[0], "fragment_id": row[1], "excerpt": row[2],
-            "excerpt_truncated": row[3] > MAX_EVIDENCE_EXCERPT_CHARS,
-            "excerpt_hash": row[4]}
+    if not 1 <= len(paths) <= MAX_EVIDENCE_DOCUMENTS + 1:
+        raise ValueError("Evidence excerpt page limit exceeded")
+    placeholders = ",".join("?" for _ in paths)
+    rows = con.execute(
+        "WITH ranked AS ("
+        "SELECT a.doc, a.locator, a.fragment_id, "
+        "ROW_NUMBER() OVER (PARTITION BY a.doc "
+        "ORDER BY f.ordinal, a.locator, a.fragment_id) AS position "
+        "FROM candidate_atoms a JOIN fragments f "
+        "ON f.id=a.fragment_id AND f.doc=a.doc "
+        "WHERE a.atom_key=? AND a.doc IN (" + placeholders + ")) "
+        "SELECT ranked.doc, ranked.locator, ranked.fragment_id, "
+        "substr(f.plain, 1, ?), length(f.plain), f.text_hash "
+        "FROM ranked JOIN fragments f "
+        "ON f.id=ranked.fragment_id AND f.doc=ranked.doc "
+        "WHERE ranked.position=1",
+        (atom_key, *paths, MAX_EVIDENCE_EXCERPT_CHARS),
+    ).fetchall()
+    return {row[0]: {"locator": row[1], "fragment_id": row[2],
+                     "excerpt": row[3],
+                     "excerpt_truncated": row[4] > MAX_EVIDENCE_EXCERPT_CHARS,
+                     "excerpt_hash": row[5]} for row in rows}
 
 
 def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
@@ -259,10 +271,6 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
     limited = len(source) > MAX_EVIDENCE_GROUPS
     groups = []
     for atom_key, predicate, minimum, maximum in source[:MAX_EVIDENCE_GROUPS]:
-        original = _evidence_excerpt(con, source_path, atom_key)
-        if original is None:
-            limited = True
-            continue
         # An exact signature is the predicate + *all* args + context + the
         # precise interval. Alias and temporal-overlap hints stay separate.
         rows = con.execute(
@@ -272,13 +280,20 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
             "AND d.status='PARSED' WHERE a.atom_key=? AND a.doc<>? "
             "GROUP BY a.doc ORDER BY a.doc COLLATE NOCASE LIMIT ?",
             (atom_key, source_path, MAX_EVIDENCE_DOCUMENTS + 1)).fetchall()
+        displayed = rows[:MAX_EVIDENCE_DOCUMENTS]
+        excerpts = _evidence_excerpts(con, atom_key, [source_path] +
+                                      [doc for doc, _, _ in displayed])
+        original = excerpts.get(source_path)
+        if original is None:
+            limited = True
+            continue
         group_limited = len(rows) > MAX_EVIDENCE_DOCUMENTS
         limited = limited or group_limited
         mixed_source = minimum != maximum
         corroborating = opposing = mixed = 0
         evidence = []
-        for doc, low, high in rows[:MAX_EVIDENCE_DOCUMENTS]:
-            excerpt = _evidence_excerpt(con, doc, atom_key)
+        for doc, low, high in displayed:
+            excerpt = excerpts.get(doc)
             if low != high:
                 kind = "mixed"
                 mixed += 1

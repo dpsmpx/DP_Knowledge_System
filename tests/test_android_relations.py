@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" 
 
 from ksys_android_bridge import analyze_vault, note_relationships
 from ksys.audit.library import _source_conflict_count, _source_conflict_page
-from ksys.importer.relations import RELATIONS_VERSION, projected_atoms, related_claims
+from ksys.importer.relations import (RELATIONS_VERSION, projected_atoms, related_claims,
+                                     indexed_source_evidence, _evidence_excerpts)
 from ksys.importer.aliases import verified_owner_aliases, one_symbol_variants
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
@@ -97,6 +98,24 @@ class RelationTests(unittest.TestCase):
         self.assertIsNone(ghost["excerpt"])
         self.assertIsNone(ghost["excerpt_hash"])
         self.assertEqual("", ghost["locator"])
+
+    def test_excerpt_batch_uses_one_ranked_sql_query_per_evidence_group(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            queries = []
+            con.set_trace_callback(queries.append)
+            groups, _ = indexed_source_evidence(con, "a.md")
+            con.set_trace_callback(None)
+            ranked = [query for query in queries
+                      if query.lstrip().upper().startswith("WITH RANKED AS")]
+            self.assertEqual(len(groups), len(ranked))
+            self.assertTrue(groups)
+            self.assertEqual(1 + 2 * len(groups), len(queries))
+            with self.assertRaises(ValueError):
+                _evidence_excerpts(con, "key", [])
+            with self.assertRaises(ValueError):
+                _evidence_excerpts(con, "key", ["file.md"] * 34)
 
     def test_live_hash_checks_and_possible_duplicate_excerpts_do_not_approve_claims(self):
         original = {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()

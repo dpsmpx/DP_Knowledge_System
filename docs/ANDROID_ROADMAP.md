@@ -600,6 +600,18 @@ freshness validates bytes, **not** the interpretation or truth of a claim.
 No additional Markdown reads, network access, source edits, automatic
 confidence scores or journal writes are introduced by comparison.
 
+**Stage 18 bounded excerpt query optimization (sixteenth slice, awaiting Android QA):**
+The source-owned representative selection now uses a single parameterized
+SQLite window query for the inspected note and up to 32 other files per
+evidence group, replacing a separate lookup for each file. Thus at most
+33 SQL reads are needed for 16 groups (one overview + one file-count + one
+excerpt batch per group), rather than hundreds of individual reads. Text
+substrings are still loaded only for the ranked fragment per document, with
+the same 240-character cap, exact path ownership and stable ordering.
+Tests compare the displayed excerpts and verify the per-group query budget;
+this is a bounded implementation improvement, **not** a measured Android
+20k-vault latency claim or a change of evidence authority.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the
