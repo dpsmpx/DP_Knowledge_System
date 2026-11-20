@@ -248,7 +248,12 @@
   Никакого реального SAF, выбранной библиотеки или коммита журнала.
   Python CI [#44740568282](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44740568282)
   и Android unit CI обеих flavor [#44740568119](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44740568119)
-  прошли. Закрыть после нового синтетического Android QA на устройстве;
+  прошли. [Подписанный Stage21 QA prerelease #23](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-23-092418284a)
+  опубликован через успешный
+  [Actions #44741003144](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44741003144).
+  APK скачан и независимо проверен по SHA-256; строка
+  `cleanLibraryRestored=2` найдена в его `classes.dex`. Закрыть после
+  нового синтетического Android QA на устройстве;
   реальные чистое устройство, SAF и перенос остаются ручной приёмкой.
 
 Машинная проверка 20 000 **событий журнала** проходит с синтетическими
