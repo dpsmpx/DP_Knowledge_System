@@ -5,6 +5,7 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
@@ -93,5 +94,36 @@ public class KnowledgePortableSourcesTest {
         try { KnowledgePortableSources.inspect(zip, local, "../outside.md");
             fail("Traversal path accepted");
         } catch (java.io.IOException expected) { /* No writes. */ }
+    }
+
+    @Test public void directSafMarkdownRequiresReviewAndCreatesSeparateCopy() throws Exception {
+        final File parent = Files.createTempDirectory("stage21-plain-saf-").toFile();
+        final File vault = new File(parent, "vault");
+        assertTrue(vault.mkdir());
+        assertEquals("заметка (1).md", KnowledgeSafMarkdown.safeName("заметка (1).md"));
+        final File original = new File(vault, "note.md");
+        Files.write(original.toPath(), LOCAL);
+        final File stage = KnowledgeSafMarkdown.stage(new ByteArrayInputStream(REMOTE), parent);
+        try {
+            final KnowledgePortableSources.Item reviewed = KnowledgePortableSources.inspectPlain(
+                    stage, vault, "note.md");
+            assertEquals("different", reviewed.status);
+            final File saved = KnowledgePortableSources.savePlainCopy(stage, vault, reviewed);
+            assertNotEquals(original.getCanonicalPath(), saved.getCanonicalPath());
+            assertArrayEquals(REMOTE, Files.readAllBytes(saved.toPath()));
+            assertArrayEquals(LOCAL, Files.readAllBytes(original.toPath()));
+            Files.write(original.toPath(), "newer local edit".getBytes(StandardCharsets.UTF_8));
+            try { KnowledgePortableSources.savePlainCopy(stage, vault, reviewed);
+                fail("Stale SAF preview accepted");
+            } catch (java.io.IOException expected) { /* User must inspect again. */ }
+        } finally { assertTrue(stage.delete()); }
+    }
+
+    @Test public void directSafRejectsUnsafeProviderNames() throws Exception {
+        for (final String bad : new String[]{"../../outside.md", "notes\\secret.md",
+                ".hidden.md", "not-markdown.txt", "a..b.md", "note\n.md"}) {
+            try { KnowledgeSafMarkdown.safeName(bad); fail("Unsafe SAF name accepted: " + bad); }
+            catch (java.io.IOException expected) { /* Never turn a provider URI into a path. */ }
+        }
     }
 }

@@ -836,6 +836,14 @@
                             android:text="@string/knowledge_portable_compare_sources" />
 
                         <com.google.android.material.button.MaterialButton
+                            android:id="@+id/knowledge_portable_import_markdown"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/knowledge_portable_import_markdown" />
+
+                        <com.google.android.material.button.MaterialButton
                             android:id="@+id/knowledge_portable_compare_peer"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="match_parent"

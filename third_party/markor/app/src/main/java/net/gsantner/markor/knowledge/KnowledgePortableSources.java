@@ -166,6 +166,30 @@ final class KnowledgePortableSources {
         }
     }
 
+    /** Direct SAF Markdown is staged privately before comparison; no remote URL fetch. */
+    static Item inspectPlain(final File staging, final File vault,
+                             final String filename) throws Exception {
+        if (filename.contains("/") || !markdown("notes/" + filename)
+                || !staging.isFile() || staging.length() > KnowledgePortableArchive.MAX_FILE_BYTES)
+            throw new IOException("Invalid staged Markdown");
+        final File target = local(vault, filename);
+        final String remoteSha;
+        final String remoteExcerpt;
+        try (InputStream input = new FileInputStream(staging)) { remoteSha = hash(input); }
+        try (InputStream input = new FileInputStream(staging)) { remoteExcerpt = excerpt(input); }
+        if (!target.exists()) return new Item(filename, "missing", staging.length(), remoteSha,
+                "", "", remoteExcerpt, false, staging.length() > PREVIEW_BYTES);
+        if (!target.isFile() || target.length() > KnowledgePortableArchive.MAX_FILE_BYTES)
+            throw new IOException("Unsupported local Markdown destination");
+        final String localSha;
+        final String localExcerpt;
+        try (InputStream input = new FileInputStream(target)) { localSha = hash(input); }
+        try (InputStream input = new FileInputStream(target)) { localExcerpt = excerpt(input); }
+        return new Item(filename, remoteSha.equals(localSha) ? "identical" : "different",
+                staging.length(), remoteSha, localSha, localExcerpt, remoteExcerpt,
+                target.length() > PREVIEW_BYTES, staging.length() > PREVIEW_BYTES);
+    }
+
     /** Exclusive create is required even on API 24–25 (Files API was added in 26). */
     private static OutputStream createExclusive(final File candidate) throws IOException {
         if (android.os.Build.VERSION.SDK_INT >= 26 || android.os.Build.VERSION.SDK_INT == 0) {
@@ -183,12 +207,29 @@ final class KnowledgePortableSources {
         }
     }
 
-    /** Creates one new Markdown file, never overwrites or merges existing source. */
     static File saveCopy(final File verifiedZip, final File vault,
                          final Item reviewed) throws Exception {
+        final Item now = inspect(verifiedZip, vault, reviewed.path);
+        try (ZipFile zip = new ZipFile(verifiedZip)) {
+            final ZipEntry entry = zip.getEntry("notes/" + reviewed.path);
+            if (entry == null) throw new IOException("Missing reviewed source");
+            return saveReviewed(vault, reviewed, now, () -> zip.getInputStream(entry));
+        }
+    }
+
+    static File savePlainCopy(final File staging, final File vault,
+                              final Item reviewed) throws Exception {
+        final Item now = inspectPlain(staging, vault, reviewed.path);
+        return saveReviewed(vault, reviewed, now, () -> new FileInputStream(staging));
+    }
+
+    private interface Source { InputStream open() throws Exception; }
+
+    /** Creates one new Markdown file, never overwrites or merges existing source. */
+    private static File saveReviewed(final File vault, final Item reviewed,
+                                     final Item now, final Source source) throws Exception {
         if (reviewed == null || "identical".equals(reviewed.status))
             throw new IOException("No new copy required");
-        final Item now = inspect(verifiedZip, vault, reviewed.path);
         if (!now.remoteSha.equals(reviewed.remoteSha)
                 || !now.localSha.equals(reviewed.localSha)
                 || !now.status.equals(reviewed.status))
@@ -214,14 +255,11 @@ final class KnowledgePortableSources {
                     reviewed.path.substring(0, reviewed.path.length() - filename.length())
                             + filenameCandidate);
             // Atomic exclusive create prevents overwrites even after a concurrent write.
-            try (OutputStream output = createExclusive(candidate);
-                 ZipFile zip = new ZipFile(verifiedZip)) {
+            try (OutputStream output = createExclusive(candidate)) {
                 destination = candidate;
-                final ZipEntry entry = zip.getEntry("notes/" + reviewed.path);
-                if (entry == null) throw new IOException("Missing reviewed source");
                 final MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 long length = 0;
-                try (InputStream input = zip.getInputStream(entry)) {
+                try (InputStream input = source.open()) {
                     final byte[] bytes = new byte[32 * 1024];
                     int count;
                     while ((count = input.read(bytes)) != -1) {

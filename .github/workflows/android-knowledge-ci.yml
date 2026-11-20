@@ -49,6 +49,12 @@ jobs:
             grep -nE 'error:|Compilation failed|FAILURE:|What went wrong|Execution failed|^> Task .*FAILED' \
               "$log" | tail -n 90 || true
             echo '::endgroup::'
+            echo '::group::Failed Android JUnit cases'
+            if [ -d app/build/test-results ]; then
+              grep -RhnE '<(failure|error)( |>)' app/build/test-results \
+                | head -n 70 || true
+            fi
+            echo '::endgroup::'
             echo '::group::Final Gradle lines'
             tail -n 40 "$log"
             echo '::endgroup::'

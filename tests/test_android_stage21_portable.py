@@ -135,6 +135,21 @@ class Stage21PortableWiring(unittest.TestCase):
             self.assertIn(required, source)
         self.assertNotIn("StandardOpenOption.TRUNCATE_EXISTING", source)
 
+    def test_direct_saf_markdown_stays_manual_and_cleaned_up(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        source = (JAVAS / "KnowledgePortableSources.java").read_text()
+        saf = (JAVAS / "KnowledgeSafMarkdown.java").read_text()
+        layout = (SOURCE / "res/layout/knowledge__activity.xml").read_text()
+        self.assertIn("knowledge_portable_import_markdown", layout)
+        self.assertIn("requestPlainMarkdownCompare()", hub)
+        self.assertIn("KnowledgeSafMarkdown.stage(input, getCacheDir())", hub)
+        self.assertIn("KnowledgePortableSources.inspectPlain(", hub)
+        self.assertIn("KnowledgePortableSources.savePlainCopy(", hub)
+        self.assertIn('name.startsWith(".dpks-md-")', hub)
+        self.assertIn("StandardOpenOption.CREATE_NEW", source)
+        self.assertIn("Normalizer.normalize", saf)
+        self.assertIn("staged.delete()", saf)
+
     def test_paged_foreign_events_stay_read_only_and_recheck_commitment(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
         bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()

@@ -12,13 +12,13 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Opt-in 24-hour local daily backup | WorkManager, Keystore-sealed passphrase, retention and verified copies | Battery/OEM, reboot, low-storage device QA |
 | Off-device backup | Separately consented SAF tree copy/readback | Real provider durability/revoked-permission tests |
 | Settings | Safe v1/v2 settings remain compatible; v3 explicitly gated secret-entry transfer with unchecked per-export/per-import choice and second export warning; background archives stay v2/no secrets | Android v1/v2/v3 migration, security review of confidential URLs |
-| Original Markdown exchange | Manual SAF encrypted-snapshot browser with hash/excerpt compare, explicit per-file keep-both, atomic exclusive names; no automatic overwrite | Direct `.md` SAF ingestion, device lifecycle/storage, full large-document compare |
+| Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review | External transport/rollback/replay acceptance |
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | **PASS** in GitHub Actions Android workflow [#196](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44691962030), both flavors, APK checks skipped | Physical integration tests still open |
+| Java unit suite | v3 secrets passed in GitHub Actions [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), both flavors, APK skipped; Markdown slice 23 [#200](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44711907439) has an unresolved Java JUnit failure; reporting improved for next run | Fix JUnit regression, then physical integration tests |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside
@@ -52,8 +52,8 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 1. Implement the **approved** scope in root `TODO.md`: opt-in v3 confidential
    endpoint export/restore is implemented, pending Android CI and device QA;
-   encrypted-snapshot source compare/keep-both is implemented; still implement
-   direct external `.md` SAF ingestion, manual handling of every
+   encrypted-snapshot and plain Markdown SAF compare/keep-both are implemented;
+   still implement manual handling of every
    foreign operation; durable anti-rollback high-water evidence. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.

@@ -126,6 +126,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_EXTERNAL_BACKUP_TREE = 40027;
     private static final int REQUEST_SYNC_COMPARE_PORTABLE = 40028;
     private static final int REQUEST_COMPARE_PORTABLE_SOURCES = 40029;
+    private static final int REQUEST_IMPORT_PLAIN_MARKDOWN = 40030;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -208,6 +209,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private boolean pendingPortableSecrets;
     private File pendingPortableStaging;
     private File pendingPortableSourceStaging;
+    private File pendingPlainMarkdownStaging;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -217,6 +219,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final File[] staleBackups = getCacheDir().listFiles(
                 (dir, name) -> name.startsWith(".dpks-verified-") && name.endsWith(".zip"));
         if (staleBackups != null) for (final File file : staleBackups) file.delete();
+        final File[] staleMarkdown = getCacheDir().listFiles(
+                (dir, name) -> name.startsWith(".dpks-md-") && name.endsWith(".tmp"));
+        if (staleMarkdown != null) for (final File file : staleMarkdown) file.delete();
         // This is deliberately scoped to the knowledge workspace: the legacy
         // Markor editor keeps its existing appearance and behavior.
         DynamicColors.applyToActivityIfAvailable(this);
@@ -410,6 +415,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
         findViewById(R.id.knowledge_portable_compare_sources).setOnClickListener(
                 view -> requestPortableSourceCompare());
+        findViewById(R.id.knowledge_portable_import_markdown).setOnClickListener(
+                view -> requestPlainMarkdownCompare());
         findViewById(R.id.knowledge_portable_compare_peer).setOnClickListener(
                 view -> requestPortablePeerCompare());
         findViewById(R.id.knowledge_sync_my_device).setOnClickListener(
@@ -3972,6 +3979,134 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }).show();
     }
 
+    /** The other approved route: raw .md over SAF/Syncthing/Android folder. */
+    private void requestPlainMarkdownCompare() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_import_markdown)
+                .setMessage(R.string.knowledge_portable_plain_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_import_markdown, (dialog, which) -> {
+                    final Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    choose.addCategory(Intent.CATEGORY_OPENABLE);
+                    choose.setType("*/*"); // Some SAF providers label .md as octet-stream.
+                    startActivityForResult(choose, REQUEST_IMPORT_PLAIN_MARKDOWN);
+                }).show();
+    }
+
+    private String safMarkdownName(final Uri uri) throws Exception {
+        String name = null;
+        try (android.database.Cursor cursor = getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0))
+                name = cursor.getString(0);
+        }
+        return KnowledgeSafMarkdown.safeName(name);
+    }
+
+    private void closePlainMarkdownStaging(final File staged) {
+        if (pendingPlainMarkdownStaging == staged) {
+            pendingPlainMarkdownStaging = null;
+            staged.delete();
+        }
+    }
+
+    private void comparePlainMarkdownFromUri(final Uri source) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            boolean handedToDialog = false;
+            try {
+                final String filename = safMarkdownName(source);
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    staged = KnowledgeSafMarkdown.stage(input, getCacheDir());
+                }
+                final KnowledgePortableSources.Item item = KnowledgePortableSources.inspectPlain(
+                        staged, notebook, filename);
+                final File confirmed = staged;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        confirmed.delete();
+                        return;
+                    }
+                    if (pendingPlainMarkdownStaging != null) pendingPlainMarkdownStaging.delete();
+                    pendingPlainMarkdownStaging = confirmed;
+                    showPlainMarkdownPreview(confirmed, item, generation);
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (!handedToDialog && staged != null) staged.delete();
+            }
+        });
+    }
+
+    private void showPlainMarkdownPreview(final File staged,
+                                          final KnowledgePortableSources.Item item,
+                                          final int generation) {
+        if (pendingPlainMarkdownStaging != staged) return;
+        final String text = getString(R.string.knowledge_portable_sources_details,
+                item.path, item.status, item.remoteBytes,
+                item.remoteSha.substring(0, 16))
+                + "\n\n" + getString(R.string.knowledge_portable_sources_local)
+                + "\n" + item.localExcerpt
+                + (item.localTruncated ? getString(
+                        R.string.knowledge_portable_sources_truncated) : "")
+                + "\n\n" + getString(R.string.knowledge_portable_sources_foreign)
+                + "\n" + item.remoteExcerpt
+                + (item.remoteTruncated ? getString(
+                        R.string.knowledge_portable_sources_truncated) : "");
+        final MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_import_markdown)
+                .setMessage(text)
+                .setNegativeButton(R.string.knowledge_portable_sources_close,
+                        (d, which) -> closePlainMarkdownStaging(staged))
+                .setOnCancelListener(d -> closePlainMarkdownStaging(staged));
+        if (!"identical".equals(item.status)) dialog.setPositiveButton(
+                R.string.knowledge_portable_sources_keep_both, (d, which) ->
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_portable_sources_keep_both)
+                                .setMessage(getString(R.string.knowledge_portable_sources_save_warning,
+                                        item.path, item.remoteBytes))
+                                .setNegativeButton(android.R.string.cancel, (no, ignored) ->
+                                        showPlainMarkdownPreview(staged, item, generation))
+                                .setOnCancelListener(no -> showPlainMarkdownPreview(
+                                        staged, item, generation))
+                                .setPositiveButton(R.string.knowledge_portable_sources_keep_both,
+                                        (yes, ignored) -> worker.submit(() -> {
+                                            try {
+                                                if (pendingPlainMarkdownStaging != staged)
+                                                    throw new IOException("Expired SAF Markdown");
+                                                final File saved = KnowledgePortableSources.savePlainCopy(
+                                                        staged, notebook, item);
+                                                runOnUiThread(() -> {
+                                                    closePlainMarkdownStaging(staged);
+                                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                                            getString(R.string.knowledge_portable_sources_saved,
+                                                                    saved.getName()), Toast.LENGTH_LONG).show();
+                                                });
+                                            } catch (Exception invalid) {
+                                                runOnUiThread(() -> {
+                                                    closePlainMarkdownStaging(staged);
+                                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                                            R.string.knowledge_portable_sources_failed,
+                                                            Toast.LENGTH_LONG).show();
+                                                });
+                                            }
+                                        }))
+                                .show());
+        dialog.show();
+    }
+
     private void promptPortableSourcePassword(final Uri source) {
         final EditText password = passwordInput(this);
         password.setHint(R.string.knowledge_backup_password);
@@ -5106,6 +5241,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         } else if (requestCode == REQUEST_COMPARE_PORTABLE_SOURCES
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             promptPortableSourcePassword(data.getData());
+        } else if (requestCode == REQUEST_IMPORT_PLAIN_MARKDOWN
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            comparePlainMarkdownFromUri(data.getData());
         } else if (requestCode == REQUEST_EXTERNAL_BACKUP_TREE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             try {
@@ -5336,6 +5474,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (pendingPortableSourceStaging != null) {
             pendingPortableSourceStaging.delete();
             pendingPortableSourceStaging = null;
+        }
+        if (pendingPlainMarkdownStaging != null) {
+            pendingPlainMarkdownStaging.delete();
+            pendingPlainMarkdownStaging = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();
