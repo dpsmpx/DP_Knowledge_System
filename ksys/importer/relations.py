@@ -21,6 +21,8 @@ from .aliases import (AliasSnapshot, MAX_SOURCE_ATOMS, MAX_VARIANTS,
                       one_symbol_variants)
 
 RELATIONS_VERSION = "exact-claim-context-temporal-overlap-v3"
+MAX_EVIDENCE_GROUPS = 16
+MAX_EVIDENCE_DOCUMENTS = 32
 
 
 def _qualifiers(assertion: dict) -> tuple[str | None, dict] | None:
@@ -118,7 +120,8 @@ def related_claims(workspace: Workspace, source_path: str, limit: int = 60,
     if not 1 <= limit <= 100:
         raise ValueError("Relation page size out of bounds")
     if not workspace.db_path.is_file():
-        return {"matches": [], "truncated": False}
+        return {"matches": [], "truncated": False, "alias_search_limited": False,
+                "evidence_groups": [], "evidence_limited": False}
     con = connect(workspace.db_path)
     try:
         return indexed_related_claims(con, source_path, limit, aliases)
@@ -206,8 +209,77 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
     matches.sort(key=lambda m: (m["path"].casefold(), m["other_locator"],
                                 m["source_locator"], m["kind"],
                                 m["source_fragment"], m["other_fragment"]))
+    evidence_groups, evidence_limited = indexed_source_evidence(con, source_path)
     return {"matches": matches[:limit], "truncated": len(matches) > limit,
-            "alias_search_limited": alias_limited}
+            "alias_search_limited": alias_limited,
+            "evidence_groups": evidence_groups, "evidence_limited": evidence_limited}
+
+
+def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
+    """Explain exact cross-file evidence without inventing a confidence score.
+
+    Each Markdown path counts at most once; repeated parser readings, copies,
+    and fragments in a file cannot inflate the corroboration count. Different
+    paths are *not* assumed independent authors or independent observations.
+    Mixed-polarity files never count as either support or opposition. The
+    index is an unapproved snapshot and cannot establish live-source validity.
+    """
+    source = con.execute(
+        "SELECT a.atom_key, MIN(a.locator), MIN(a.predicate), "
+        "MIN(a.negated), MAX(a.negated) "
+        "FROM candidate_atoms a JOIN documents d ON d.path=a.doc "
+        "AND d.status='PARSED' WHERE a.doc=? "
+        "GROUP BY a.atom_key ORDER BY a.atom_key LIMIT ?",
+        (source_path, MAX_EVIDENCE_GROUPS + 1)).fetchall()
+    limited = len(source) > MAX_EVIDENCE_GROUPS
+    groups = []
+    for atom_key, source_locator, predicate, minimum, maximum in source[:MAX_EVIDENCE_GROUPS]:
+        # An exact signature is the predicate + *all* args + context + the
+        # precise interval. Alias and temporal-overlap hints stay separate.
+        rows = con.execute(
+            "SELECT a.doc, MIN(a.locator), MIN(a.negated), MAX(a.negated) "
+            "FROM candidate_atoms a JOIN documents d ON d.path=a.doc "
+            "AND d.status='PARSED' WHERE a.atom_key=? AND a.doc<>? "
+            "GROUP BY a.doc ORDER BY a.doc COLLATE NOCASE LIMIT ?",
+            (atom_key, source_path, MAX_EVIDENCE_DOCUMENTS + 1)).fetchall()
+        group_limited = len(rows) > MAX_EVIDENCE_DOCUMENTS
+        limited = limited or group_limited
+        mixed_source = minimum != maximum
+        corroborating = opposing = mixed = 0
+        evidence = []
+        for doc, locator, low, high in rows[:MAX_EVIDENCE_DOCUMENTS]:
+            if low != high:
+                kind = "mixed"
+                mixed += 1
+            elif mixed_source:
+                kind = "unclassified"  # no single source polarity to compare
+            elif low == minimum:
+                kind = "same_polarity"
+                corroborating += 1
+            else:
+                kind = "opposite_polarity"
+                opposing += 1
+            evidence.append({"path": doc, "locator": locator, "relation": kind})
+        kinds = sum(bool(x) for x in (corroborating, opposing, mixed))
+        groups.append({
+            "predicate": predicate, "source_locator": source_locator,
+            "source_polarity": "mixed" if mixed_source else (
+                "negative" if minimum else "positive"),
+            **atom_qualifiers(atom_key),
+            "evidence_pattern": ("source_mixed" if mixed_source else
+                "cross_source_mixed" if kinds > 1 else
+                "opposition_only" if opposing else
+                "same_polarity_only" if corroborating else
+                "mixed_other_sources" if mixed else "no_exact_other_sources"),
+            "same_polarity_files": corroborating,
+            "opposite_polarity_files": opposing,
+            "mixed_polarity_files": mixed,
+            "indexed_other_files": len(evidence),
+            "other_sources": evidence, "limited": group_limited,
+            "confidence": "not_assessed", "authority": "unapproved_candidates",
+            "source_freshness": "indexed_snapshot_unverified",
+        })
+    return groups, limited
 
 
 def indexed_alias_candidates(con, source_path: str, limit: int,

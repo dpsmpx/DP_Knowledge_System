@@ -179,6 +179,8 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
         "matches": matches["matches"],
         "truncated": matches["truncated"],
         "alias_search_limited": matches["alias_search_limited"],
+        "evidence_groups": matches["evidence_groups"],
+        "evidence_limited": matches["evidence_limited"],
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -932,6 +934,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         })
 
     relations, truncated, index_state = [], False, "absent"
+    evidence_groups, evidence_limited = [], False
     alias_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
@@ -949,6 +952,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 relations = result["matches"]
                 truncated = result["truncated"]
                 alias_limited = result["alias_search_limited"]
+                evidence_groups = result["evidence_groups"]
+                evidence_limited = result["evidence_limited"]
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -964,6 +969,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         "stale_provenance_count": stale_count,
         "historical_count": historical,
         "candidate_relations": relations, "relations_truncated": truncated,
+        "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
         "alias_search_limited": alias_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,

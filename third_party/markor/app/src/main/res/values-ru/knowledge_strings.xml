@@ -151,6 +151,16 @@
     <string name="knowledge_possible_conflict">Возможное противоречие</string>
     <string name="knowledge_possible_temporal_overlap">Периоды пересекаются (нужна проверка; не вывод о противоречии)</string>
     <string name="knowledge_possible_alias">Возможная связь по алиасу, подтверждённому человеком (не доказательство)</string>
+    <string name="knowledge_evidence_title">Свидетельства из разных заметок · кандидаты индекса</string>
+    <string name="knowledge_evidence_show_sources">Посмотреть исходные файлы</string>
+    <string name="knowledge_evidence_file_counts">Другие файлы: та же полярность %1$d · противоположная %2$d · обе внутри файла %3$d</string>
+    <string name="knowledge_evidence_source_mixed">Кандидаты анализа этой заметки содержат обе полярности; однозначной позиции нет.</string>
+    <string name="knowledge_evidence_limited">Результаты ограничены: могут существовать другие файлы и утверждения.</string>
+    <string name="knowledge_evidence_disclaimer">Это не вероятность истинности и не оценка достоверности. Показаны неподтверждённые интерпретации из производного индекса; актуальность файлов не проверена. Несколько заметок могут копировать один источник: количество файлов не равно числу независимых свидетельств. Контекст и период действия должны совпадать точно. Подсказки по псевдонимам и пересечению дат исключены.</string>
+    <string name="knowledge_evidence_same">Та же полярность</string>
+    <string name="knowledge_evidence_opposite">Противоположная полярность</string>
+    <string name="knowledge_evidence_mixed">Обе полярности среди кандидатов одного файла</string>
+    <string name="knowledge_evidence_unclassified">Не классифицировано: исходная заметка противоречива</string>
     <string name="knowledge_relation_alias_source">Сопоставленные имена (утверждённый ключ)</string>
     <string name="knowledge_relation_alias_decisions">ID решений об алиасах</string>
     <string name="knowledge_alias_search_limited">Поиск по алиасам ограничен; часть подсказок пропущена</string>

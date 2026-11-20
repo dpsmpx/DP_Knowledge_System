@@ -1775,6 +1775,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final JSONObject result = KnowledgePythonBridge.relationships(
                         this, workspacePath(), relativePath);
                 final JSONArray matches = result.getJSONArray("matches");
+                final JSONArray evidence = result.optJSONArray("evidence_groups");
                 final String[] labels = new String[matches.length()];
                 for (int i = 0; i < labels.length; i++) {
                     final JSONObject match = matches.getJSONObject(i);
@@ -1804,6 +1805,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     + (result.optBoolean("alias_search_limited")
                                     ? " · " + getString(R.string.knowledge_alias_search_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
+                    if (evidence != null && evidence.length() > 0) {
+                        dialog.setNeutralButton(R.string.knowledge_evidence_title,
+                                (d, w) -> showEvidenceGroups(evidence,
+                                        result.optBoolean("evidence_limited")));
+                    }
                     if (labels.length == 0) {
                         dialog.setMessage(R.string.knowledge_no_semantic_relations);
                     } else {
@@ -1828,6 +1834,49 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void showEvidenceGroups(final JSONArray groups, final boolean limited) {
+        final String[] rows = new String[groups.length()];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = KnowledgeRelationPresentation.evidenceSummary(
+                    this, groups.optJSONObject(i));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.knowledge_evidence_title)
+                        + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : ""))
+                .setItems(rows, (d, which) -> {
+                    final JSONObject group = groups.optJSONObject(which);
+                    if (group != null) showEvidenceDetail(group);
+                })
+                .setPositiveButton(android.R.string.ok, null).show();
+    }
+
+    private void showEvidenceDetail(final JSONObject group) {
+        // The disclosure is shown before the user can inspect another file.
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_evidence_title)
+                .setMessage(KnowledgeRelationPresentation.evidenceDisclosure(this, group))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_evidence_show_sources, (d, w) -> {
+                    final JSONArray sources = group.optJSONArray("other_sources");
+                    if (sources == null || sources.length() == 0) return;
+                    final String[] rows = new String[sources.length()];
+                    for (int i = 0; i < rows.length; i++) {
+                        final JSONObject source = sources.optJSONObject(i);
+                        if (source != null) rows[i] = source.optString("path") + " · "
+                                + source.optString("locator") + " · "
+                                + KnowledgeRelationPresentation.evidenceRelation(
+                                        this, source.optString("relation"));
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_evidence_title)
+                            .setItems(rows, (d2, selected) -> {
+                                final JSONObject source = sources.optJSONObject(selected);
+                                if (source != null) openIndexedNote(source.optString("path"));
+                            })
+                            .setNegativeButton(android.R.string.cancel, null).show();
+                }).show();
     }
 
     private void inspectWithCore(final String relativePath) {

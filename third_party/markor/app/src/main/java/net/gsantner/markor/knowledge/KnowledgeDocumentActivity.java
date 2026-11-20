@@ -897,6 +897,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                                         final boolean unsavedBuffer, final File selectedVault) {
         final JSONArray records = context.optJSONArray("accepted_records");
         final JSONArray relations = context.optJSONArray("candidate_relations");
+        final JSONArray evidenceGroups = context.optJSONArray("evidence_groups");
         final int recordCount = records == null ? 0 : records.length();
         final int relationCount = relations == null ? 0 : relations.length();
         final String countLabel = relationCount
@@ -941,7 +942,15 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     + item.optString("path") + " · " + item.optString("other_locator"),
                     view -> showContextRelation(item, label, selectedVault));
         }
-        if (relationCount == 0) {
+        final int evidenceCount = evidenceGroups == null ? 0 : evidenceGroups.length();
+        for (int i = 0; i < evidenceCount; i++) {
+            final JSONObject group = evidenceGroups.optJSONObject(i);
+            if (group == null) continue;
+            addContextRow(related, getString(R.string.knowledge_evidence_title) + " · "
+                            + KnowledgeRelationPresentation.evidenceSummary(this, group),
+                    view -> showContextEvidence(group, selectedVault));
+        }
+        if (relationCount == 0 && evidenceCount == 0) {
             addContextEmpty(related, R.string.knowledge_editor_context_empty_relations);
         }
 
@@ -951,6 +960,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 R.string.knowledge_editor_context_unsaved);
         if (context.optBoolean("alias_search_limited")) appendContextWarning(warnings,
                 R.string.knowledge_alias_search_limited);
+        if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
+                R.string.knowledge_evidence_limited);
         final String indexState = context.optString("relation_index_state");
         if ("absent".equals(indexState)) {
             appendContextWarning(warnings, R.string.knowledge_editor_context_index_absent);
@@ -1513,6 +1524,25 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         addContextRow(body, getString(R.string.knowledge_editor_context_open),
                 view -> openRelatedNote(relation.optString("path"), selectedVault));
         showDockPage(getString(title), body);
+    }
+
+    private void showContextEvidence(final JSONObject group, final File selectedVault) {
+        final LinearLayout body = newDockContent();
+        body.addView(contextDetailText(
+                KnowledgeRelationPresentation.evidenceDisclosure(this, group)));
+        final JSONArray others = group.optJSONArray("other_sources");
+        if (others != null) {
+            for (int i = 0; i < others.length(); i++) {
+                final JSONObject item = others.optJSONObject(i);
+                if (item == null) continue;
+                addContextRow(body, item.optString("path") + " · "
+                        + item.optString("locator") + " · "
+                        + KnowledgeRelationPresentation.evidenceRelation(this,
+                                item.optString("relation")),
+                        view -> openRelatedNote(item.optString("path"), selectedVault));
+            }
+        }
+        showDockPage(getString(R.string.knowledge_evidence_title), body);
     }
 
     private TextView contextDetailText(final String text) {

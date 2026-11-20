@@ -14,6 +14,29 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_indexed_cross_source_evidence_is_explicitly_unrated_and_navigable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optJSONArray("evidence_groups")', hub)
+        self.assertIn("showEvidenceDetail(group)", hub)
+        self.assertIn("openIndexedNote(source.optString(\"path\"))", hub)
+        self.assertIn('context.optJSONArray("evidence_groups")', editor)
+        self.assertIn('context.optBoolean("evidence_limited")', editor)
+        self.assertIn("showContextEvidence(group, selectedVault)", editor)
+        self.assertIn("openRelatedNote(item.optString(\"path\"), selectedVault)", editor)
+        self.assertIn("evidenceDisclosure(Context context, JSONObject group)", presentation)
+        self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_evidence_title", "knowledge_evidence_file_counts",
+                        "knowledge_evidence_disclaimer", "knowledge_evidence_limited",
+                        "knowledge_evidence_source_mixed"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         button = next(e for e in layout.iter() if e.get(ANDROID + "id")

@@ -50,6 +50,7 @@ class EditorContextTests(unittest.TestCase):
         self.assertTrue(result["relations_are_unapproved"])
         self.assertEqual("saved_markdown", result["source_snapshot"])
         self.assertEqual("absent", result["relation_index_state"])
+        self.assertEqual([], result["evidence_groups"])
         self.assertEqual(0, result["accepted_total"])
         self.assertEqual([], result["candidate_relations"])
         self.assertFalse(self.workspace.exists())
@@ -103,6 +104,12 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual({"b.md", "c.md"}, set(related))
         self.assertEqual("possible_agreement", related["b.md"]["kind"])
         self.assertEqual("possible_conflict", related["c.md"]["kind"])
+        self.assertEqual(1, len(context["evidence_groups"]))
+        self.assertEqual((1, 1, 0), (
+            context["evidence_groups"][0]["same_polarity_files"],
+            context["evidence_groups"][0]["opposite_polarity_files"],
+            context["evidence_groups"][0]["mixed_polarity_files"]))
+        self.assertFalse(context["evidence_limited"])
         self.assertIsNone(related["c.md"]["context"])
         self.assertEqual({"from": None, "to": None}, related["c.md"]["interval"])
         self.assertTrue(all(item["source_locator"] and item["other_locator"]
@@ -114,6 +121,7 @@ class EditorContextTests(unittest.TestCase):
         changed = self.context(self.notes["a.md"] + "\nДругой текст.")
         self.assertEqual("stale", changed["relation_index_state"])
         self.assertEqual([], changed["candidate_relations"])
+        self.assertEqual([], changed["evidence_groups"])
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
 
     def test_editor_alias_hints_cite_owner_journal_without_approving_claim(self):
@@ -149,6 +157,12 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual("проект-а", related["b.md"]["context"])
         self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
                          related["b.md"]["interval"])
+        overview = self.context()["evidence_groups"][0]
+        self.assertEqual(1, overview["same_polarity_files"])
+        self.assertEqual(0, overview["opposite_polarity_files"])
+        self.assertEqual("проект-а", overview["context"])
+        self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
+                         overview["interval"])
 
     def test_editor_shows_temporal_overlap_without_conflict_verdict(self):
         analyze_vault(str(self.workspace), str(self.vault))

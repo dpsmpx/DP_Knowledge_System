@@ -412,6 +412,30 @@ truth, or implement a confidence model. Android on-device UX/accessibility,
 process-death recovery and SAF hardware QA remain unverified; Stage 21 hardware
 debt is still deliberately deferred.
 
+**Stage 18 evidence-pattern review (fifth slice, awaiting device acceptance):**
+For every exact, indexed candidate claim signature in an inspected note, the
+shared library/editor read-only query now reports a bounded cross-file evidence
+overview (at most 16 distinct signatures and 32 *other files* per signature).
+It deduplicates repeated fragments/readings within the same Markdown file,
+separates same versus opposite polarity, and treats a file with both parser
+polarities as **mixed** rather than counting it on both sides. When the source
+note itself has mixed readings, comparison counts are suppressed instead of
+guessing its position. Exact predicates, all arguments, context and interval
+must match; temporal-overlap and alias hints remain separate and never add
+votes to the exact evidence. The bounded source paths and locators are
+inspectable from the relation list and from the editor context panel.
+
+These are **counts of indexed documents, not independent witnesses**: copied
+notes, uncertain parser readings and stale snapshots can mislead. Every group
+therefore explicitly says confidence is **not assessed**, authority remains
+`unapproved_candidates`, and freshness is an unverified index snapshot. Caps
+are labeled as incomplete, not silently presented as exhaustive counts. No
+factual reconciliation, authority promotion, numerical confidence or direct
+journal/source writes occur. The next substantive Stage 18 tasks are identity
+disambiguation beyond reviewed exact symbol aliases, versioned time reasoning,
+evidence provenance freshness and calibrated source reliability. Physical
+Android UI, latency, TalkBack and large-vault acceptance remain open.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

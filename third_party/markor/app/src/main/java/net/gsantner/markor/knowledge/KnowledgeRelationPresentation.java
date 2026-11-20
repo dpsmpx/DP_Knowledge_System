@@ -15,6 +15,41 @@ import org.json.JSONArray;
 final class KnowledgeRelationPresentation {
     private KnowledgeRelationPresentation() { }
 
+    /** Counts of distinct files, not independent witnesses or truth scores. */
+    static String evidenceSummary(Context context, JSONObject group) {
+        if (group == null) return "";
+        final StringBuilder text = new StringBuilder(group.optString("predicate"))
+                .append(" · ").append(group.optString("source_locator"))
+                .append("\n").append(context.getString(R.string.knowledge_evidence_file_counts,
+                        group.optInt("same_polarity_files"),
+                        group.optInt("opposite_polarity_files"),
+                        group.optInt("mixed_polarity_files")));
+        if ("mixed".equals(group.optString("source_polarity"))) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_source_mixed));
+        }
+        if (group.optBoolean("limited")) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_limited));
+        }
+        return text.toString();
+    }
+
+    static String evidenceDisclosure(Context context, JSONObject group) {
+        return context.getString(R.string.knowledge_evidence_disclaimer)
+                + (group.optBoolean("limited") ? "\n"
+                + context.getString(R.string.knowledge_evidence_limited) : "")
+                + "\n\n" + evidenceSummary(context, group)
+                + qualifiers(context, group);
+    }
+
+    static String evidenceRelation(Context context, String relation) {
+        switch (relation) {
+            case "same_polarity": return context.getString(R.string.knowledge_evidence_same);
+            case "opposite_polarity": return context.getString(R.string.knowledge_evidence_opposite);
+            case "mixed": return context.getString(R.string.knowledge_evidence_mixed);
+            default: return context.getString(R.string.knowledge_evidence_unclassified);
+        }
+    }
+
     static String qualifiers(Context context, JSONObject relation) {
         if (relation == null) return "";
         final StringBuilder text = new StringBuilder();

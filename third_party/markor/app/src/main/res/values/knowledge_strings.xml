@@ -151,6 +151,16 @@
     <string name="knowledge_possible_conflict">Potential conflict</string>
     <string name="knowledge_possible_temporal_overlap">Time periods overlap (review; not a conflict verdict)</string>
     <string name="knowledge_possible_alias">Possible link via human-approved alias (review; not proof)</string>
+    <string name="knowledge_evidence_title">Cross-note evidence · indexed candidates</string>
+    <string name="knowledge_evidence_show_sources">Inspect source files</string>
+    <string name="knowledge_evidence_file_counts">Other files: same polarity %1$d · opposite %2$d · internally mixed %3$d</string>
+    <string name="knowledge_evidence_source_mixed">Parser candidates for this note contain both polarities; no clear stance can be assigned.</string>
+    <string name="knowledge_evidence_limited">Bounded results, more files or claims may exist.</string>
+    <string name="knowledge_evidence_disclaimer">Not a confidence or truth score. These are unapproved parser interpretations from a disposable index, not live-verified facts. Separate Markdown files may copy the same source, so counts do not establish independent witnesses. Context and exact validity period must match. Alias and temporal hints are excluded.</string>
+    <string name="knowledge_evidence_same">Same polarity</string>
+    <string name="knowledge_evidence_opposite">Opposite polarity</string>
+    <string name="knowledge_evidence_mixed">Both polarities in one file’s candidates</string>
+    <string name="knowledge_evidence_unclassified">Unclassified; source note is mixed</string>
     <string name="knowledge_relation_alias_source">Compared names (approved canonical)</string>
     <string name="knowledge_relation_alias_decisions">Alias decision IDs</string>
     <string name="knowledge_alias_search_limited">Alias comparison limited; some hints omitted</string>

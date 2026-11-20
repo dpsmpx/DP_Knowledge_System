@@ -22,6 +22,110 @@ from ksys.store.workspace import Workspace
 
 
 class RelationTests(unittest.TestCase):
+    def test_cross_file_evidence_counts_distinct_notes_not_parser_rows(self):
+        self._import()
+        evidence = self._relations("a.md")
+        self.assertFalse(evidence["evidence_limited"])
+        self.assertEqual(1, len(evidence["evidence_groups"]))
+        group = evidence["evidence_groups"][0]
+        self.assertEqual("is_a", group["predicate"])
+        self.assertEqual((2, 1, 0), (group["same_polarity_files"],
+                        group["opposite_polarity_files"], group["mixed_polarity_files"]))
+        self.assertEqual("cross_source_mixed", group["evidence_pattern"])
+        self.assertEqual({"b.md", "c.md", "sub/e.markdown"},
+                         {s["path"] for s in group["other_sources"]})
+        self.assertEqual("not_assessed", group["confidence"])
+        self.assertEqual("unapproved_candidates", group["authority"])
+        self.assertEqual("indexed_snapshot_unverified", group["source_freshness"])
+        self.assertTrue(all(s["locator"] for s in group["other_sources"]))
+
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            # A new candidate interpretation/fragment in the *same* file
+            # must never be counted as another independent source.
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        ("second-reading", *row[1:]))
+        after = self._relations("a.md")["evidence_groups"][0]
+        self.assertEqual((2, 1, 0), (after["same_polarity_files"],
+                        after["opposite_polarity_files"], after["mixed_polarity_files"]))
+
+    def test_mixed_polarity_in_one_file_never_double_votes(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            altered = list(row)
+            altered[6] = 1
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", altered)
+        evidence = self._relations("a.md")["evidence_groups"][0]
+        self.assertEqual((1, 1, 1), (evidence["same_polarity_files"],
+                         evidence["opposite_polarity_files"],
+                         evidence["mixed_polarity_files"]))
+        mixed = next(s for s in evidence["other_sources"] if s["path"] == "b.md")
+        self.assertEqual("mixed", mixed["relation"])
+
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='a.md'").fetchone()
+            altered = list(row)
+            altered[6] = 1
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", altered)
+        source_mixed = self._relations("a.md")["evidence_groups"][0]
+        self.assertEqual("source_mixed", source_mixed["evidence_pattern"])
+        self.assertEqual("mixed", source_mixed["source_polarity"])
+        self.assertEqual(0, source_mixed["same_polarity_files"])
+        self.assertEqual(0, source_mixed["opposite_polarity_files"])
+
+    def test_unrelated_and_aliased_names_are_not_exact_evidence(self):
+        self._import()
+        group = self._relations("d.md")["evidence_groups"][0]
+        self.assertEqual(0, group["indexed_other_files"])
+        journal = Journal(Workspace(self.workspace).journal_path, FixedClock())
+        journal.append("alias", {"alias": "борис", "canonical": "алекс"})
+        result = self._relations("d.md")
+        self.assertTrue(result["matches"])  # separate alias hints still exist
+        self.assertEqual(0, result["evidence_groups"][0]["indexed_other_files"])
+
+    def test_evidence_document_cap_is_labeled_incomplete(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            for i in range(35):
+                path = f"many/note{i:02}.md"
+                con.execute("INSERT INTO documents (path,sha256,size,status,kind) "
+                            "VALUES (?,?,?,?,?)", (path, "0"*64, 12, "PARSED", "markdown"))
+                con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (f"many-{i}", row[1], path, *row[3:]))
+        result = self._relations("a.md")
+        self.assertTrue(result["evidence_limited"])
+        group = result["evidence_groups"][0]
+        self.assertTrue(group["limited"])
+        self.assertEqual(32, group["indexed_other_files"])
+        self.assertEqual(32, len(group["other_sources"]))
+        self.assertEqual("not_assessed", group["confidence"])
+
+    def test_evidence_signature_cap_marks_note_coverage_incomplete(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        from ksys.core.ids import canonical_json
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='a.md'").fetchone()
+            for i in range(18):
+                synthetic = list(row)
+                synthetic[0] = f"source-extra-{i}"
+                synthetic[5] = f"new_predicate_{i:02}"
+                key = json.loads(row[4])
+                key["p"] = synthetic[5]
+                synthetic[4] = canonical_json(key)
+                synthetic[7] = canonical_json({k: v for k, v in key.items() if k != "iv"})
+                con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", synthetic)
+        result = self._relations("a.md")
+        self.assertTrue(result["evidence_limited"])
+        self.assertEqual(16, len(result["evidence_groups"]))
+        self.assertTrue(all(group["confidence"] == "not_assessed"
+                            for group in result["evidence_groups"]))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
