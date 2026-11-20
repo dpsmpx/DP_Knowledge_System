@@ -117,6 +117,24 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn('meta/secrets.json', archive)
         self.assertNotIn("KnowledgePortableSecrets", worker)
 
+    def test_manual_markdown_exchange_never_overwrites_original(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        source = (JAVAS / "KnowledgePortableSources.java").read_text()
+        layout = (SOURCE / "res/layout/knowledge__activity.xml").read_text()
+        self.assertIn("knowledge_portable_compare_sources", layout)
+        self.assertIn("requestPortableSourceCompare()", hub)
+        self.assertIn("KnowledgePortableSources.inspect(", hub)
+        self.assertIn("KnowledgePortableSources.saveCopy(", hub)
+        self.assertIn("KnowledgePortableCipher.decryptToVerifiedStaging", hub)
+        for required in ("StandardOpenOption.CREATE_NEW", "OsConstants.O_EXCL",
+                         '"different".equals(reviewed.status)',
+                         '".peer-" + reviewed.remoteSha.substring(0, 12)',
+                         "Markdown changed since preview; review again",
+                         "length != reviewed.remoteBytes",
+                         "!hex(digest.digest()).equals(reviewed.remoteSha)"):
+            self.assertIn(required, source)
+        self.assertNotIn("StandardOpenOption.TRUNCATE_EXISTING", source)
+
     def test_paged_foreign_events_stay_read_only_and_recheck_commitment(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
         bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()

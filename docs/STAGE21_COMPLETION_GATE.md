@@ -12,6 +12,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Opt-in 24-hour local daily backup | WorkManager, Keystore-sealed passphrase, retention and verified copies | Battery/OEM, reboot, low-storage device QA |
 | Off-device backup | Separately consented SAF tree copy/readback | Real provider durability/revoked-permission tests |
 | Settings | Safe v1/v2 settings remain compatible; v3 explicitly gated secret-entry transfer with unchecked per-export/per-import choice and second export warning; background archives stay v2/no secrets | Android v1/v2/v3 migration, security review of confidential URLs |
+| Original Markdown exchange | Manual SAF encrypted-snapshot browser with hash/excerpt compare, explicit per-file keep-both, atomic exclusive names; no automatic overwrite | Direct `.md` SAF ingestion, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review | External transport/rollback/replay acceptance |
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
@@ -51,8 +52,8 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 1. Implement the **approved** scope in root `TODO.md`: opt-in v3 confidential
    endpoint export/restore is implemented, pending Android CI and device QA;
-   still implement both external and app-managed
-   Markdown exchange with compare-and-keep-both; manual handling of every
+   encrypted-snapshot source compare/keep-both is implemented; still implement
+   direct external `.md` SAF ingestion, manual handling of every
    foreign operation; durable anti-rollback high-water evidence. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.

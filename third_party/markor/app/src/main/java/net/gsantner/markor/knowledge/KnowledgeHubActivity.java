@@ -125,6 +125,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_RESTORE_PORTABLE = 40026;
     private static final int REQUEST_EXTERNAL_BACKUP_TREE = 40027;
     private static final int REQUEST_SYNC_COMPARE_PORTABLE = 40028;
+    private static final int REQUEST_COMPARE_PORTABLE_SOURCES = 40029;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -206,6 +207,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private char[] pendingPortablePassword;
     private boolean pendingPortableSecrets;
     private File pendingPortableStaging;
+    private File pendingPortableSourceStaging;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -406,6 +408,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_portable_export).setOnClickListener(view -> requestPortableExport());
         findViewById(R.id.knowledge_portable_inspect).setOnClickListener(view -> requestPortableInspect());
         findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
+        findViewById(R.id.knowledge_portable_compare_sources).setOnClickListener(
+                view -> requestPortableSourceCompare());
         findViewById(R.id.knowledge_portable_compare_peer).setOnClickListener(
                 view -> requestPortablePeerCompare());
         findViewById(R.id.knowledge_sync_my_device).setOnClickListener(
@@ -3950,6 +3954,202 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }).show();
     }
 
+    /** Manual encrypted exchange via SAF/Android folders, never a background sync. */
+    private void requestPortableSourceCompare() {
+        if (notebook == null || !notebook.isDirectory()) {
+            Toast.makeText(this, R.string.knowledge_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_compare_sources)
+                .setMessage(R.string.knowledge_portable_sources_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_portable_compare_sources, (dialog, which) -> {
+                    final Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    choose.addCategory(Intent.CATEGORY_OPENABLE);
+                    choose.setType("application/octet-stream");
+                    startActivityForResult(choose, REQUEST_COMPARE_PORTABLE_SOURCES);
+                }).show();
+    }
+
+    private void promptPortableSourcePassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_compare_sources)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        loadPortableSources(source, password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    private void closePortableSourceStaging(final File staged) {
+        if (pendingPortableSourceStaging == staged) {
+            pendingPortableSourceStaging = null;
+            staged.delete();
+        }
+    }
+
+    private void loadPortableSources(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File stage = null;
+            boolean handedToDialog = false;
+            try {
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    if (input == null) throw new IOException("Portable source unavailable");
+                    stage = KnowledgePortableCipher.decryptToVerifiedStaging(input,
+                            getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                KnowledgePortableArchive.verify(stage,
+                        () -> Thread.currentThread().isInterrupted());
+                final File verified = stage;
+                handedToDialog = true;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || scanGeneration.get() != generation) {
+                        verified.delete();
+                        return;
+                    }
+                    if (pendingPortableSourceStaging != null)
+                        pendingPortableSourceStaging.delete();
+                    pendingPortableSourceStaging = verified;
+                    showPortableSourcePage(verified, 0, generation);
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (!handedToDialog && stage != null) stage.delete();
+            }
+        });
+    }
+
+    private void showPortableSourcePage(final File staged, final int offset,
+                                        final int generation) {
+        if (pendingPortableSourceStaging != staged) return;
+        worker.submit(() -> {
+            try {
+                final KnowledgePortableSources.Page page = KnowledgePortableSources.page(
+                        staged, offset);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || pendingPortableSourceStaging != staged
+                            || scanGeneration.get() != generation) {
+                        closePortableSourceStaging(staged);
+                        return;
+                    }
+                    final CharSequence[] labels = page.paths.toArray(new CharSequence[0]);
+                    final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                            .setTitle(getString(R.string.knowledge_portable_sources_page,
+                                    Math.min(page.total, offset + 1), page.total))
+                            .setItems(labels, (dialog, selection) -> previewPortableSource(
+                                    staged, page.paths.get(selection), offset, generation))
+                            .setNegativeButton(R.string.knowledge_portable_sources_close,
+                                    (dialog, which) -> closePortableSourceStaging(staged))
+                            .setOnCancelListener(dialog -> closePortableSourceStaging(staged));
+                    if (offset > 0) builder.setNeutralButton(
+                            R.string.knowledge_portable_sources_previous,
+                            (dialog, which) -> showPortableSourcePage(staged,
+                                    Math.max(0, offset - KnowledgePortableSources.PAGE), generation));
+                    if (offset + KnowledgePortableSources.PAGE < page.total)
+                        builder.setPositiveButton(R.string.knowledge_portable_sources_next,
+                                (dialog, which) -> showPortableSourcePage(staged,
+                                        offset + KnowledgePortableSources.PAGE, generation));
+                    builder.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    closePortableSourceStaging(staged);
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void previewPortableSource(final File staged, final String path, final int offset,
+                                       final int generation) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePortableSources.Item item = KnowledgePortableSources.inspect(
+                        staged, notebook, path);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || pendingPortableSourceStaging != staged
+                            || scanGeneration.get() != generation) return;
+                    final String shown = getString(R.string.knowledge_portable_sources_details,
+                            item.path, item.status, item.remoteBytes,
+                            item.remoteSha.substring(0, 16))
+                            + "\n\n" + getString(R.string.knowledge_portable_sources_local)
+                            + "\n" + item.localExcerpt
+                            + (item.localTruncated ? getString(
+                                    R.string.knowledge_portable_sources_truncated) : "")
+                            + "\n\n" + getString(R.string.knowledge_portable_sources_foreign)
+                            + "\n" + item.remoteExcerpt
+                            + (item.remoteTruncated ? getString(
+                                    R.string.knowledge_portable_sources_truncated) : "");
+                    final MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_portable_compare_sources)
+                            .setMessage(shown)
+                            .setNegativeButton(R.string.knowledge_portable_sources_back,
+                                    (d, which) -> showPortableSourcePage(staged, offset, generation))
+                            .setOnCancelListener(d -> showPortableSourcePage(
+                                    staged, offset, generation));
+                    if (!"identical".equals(item.status))
+                        dialog.setPositiveButton(R.string.knowledge_portable_sources_keep_both,
+                                (d, which) -> confirmPortableSourceSave(staged, item,
+                                        offset, generation));
+                    dialog.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                            R.string.knowledge_portable_sources_failed, Toast.LENGTH_LONG).show();
+                    showPortableSourcePage(staged, offset, generation);
+                });
+            }
+        });
+    }
+
+    private void confirmPortableSourceSave(final File staged,
+                                           final KnowledgePortableSources.Item item,
+                                           final int offset, final int generation) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_portable_sources_keep_both)
+                .setMessage(getString(R.string.knowledge_portable_sources_save_warning,
+                        item.path, item.remoteBytes))
+                .setNegativeButton(android.R.string.cancel,
+                        (d, which) -> showPortableSourcePage(staged, offset, generation))
+                .setOnCancelListener(d -> showPortableSourcePage(staged, offset, generation))
+                .setPositiveButton(R.string.knowledge_portable_sources_keep_both, (d, which) -> {
+                    worker.submit(() -> {
+                        try {
+                            if (pendingPortableSourceStaging != staged)
+                                throw new IOException("Expired Markdown review");
+                            final File saved = KnowledgePortableSources.saveCopy(
+                                    staged, notebook, item);
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                        getString(R.string.knowledge_portable_sources_saved,
+                                                saved.getName()), Toast.LENGTH_LONG).show();
+                                showPortableSourcePage(staged, offset, generation);
+                            });
+                        } catch (Exception invalid) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                        R.string.knowledge_portable_sources_failed,
+                                        Toast.LENGTH_LONG).show();
+                                showPortableSourcePage(staged, offset, generation);
+                            });
+                        }
+                    });
+                }).show();
+    }
+
     private void requestPortablePeerCompare() {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.knowledge_sync_compare_peer)
@@ -4903,6 +5103,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         } else if (requestCode == REQUEST_SYNC_COMPARE_PORTABLE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             promptPortablePeerPassword(data.getData());
+        } else if (requestCode == REQUEST_COMPARE_PORTABLE_SOURCES
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortableSourcePassword(data.getData());
         } else if (requestCode == REQUEST_EXTERNAL_BACKUP_TREE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             try {
@@ -5129,6 +5332,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (pendingPortableStaging != null) {
             pendingPortableStaging.delete();
             pendingPortableStaging = null;
+        }
+        if (pendingPortableSourceStaging != null) {
+            pendingPortableSourceStaging.delete();
+            pendingPortableSourceStaging = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();
