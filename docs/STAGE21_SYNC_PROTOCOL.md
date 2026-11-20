@@ -62,12 +62,16 @@ Security note: a portable backup passphrase protects confidentiality, but
 does not by itself prove which device authored a branch. Signed identity and
 explicit local trust are separate requirements.
 
-## Not implemented yet
+## Remaining acceptance gaps (after slice 17)
 
-QR scanning (manual invitation + separately verified code is available),
-causal replay, conflict resolution events, remote polling,
-event acknowledgements and real-device QA.
-Do not label Stage 21 sync as PASS until all these are integrated and tested.
+QR **scanning** is optional because manual invitation + separately verified
+code are available. Manual conflict resolution and branch acknowledgements
+are now implemented as *audit-only causal receipts*; they do not satisfy a
+full deterministic DAG replay for arbitrary operation types. Still absent:
+general automatic causal replay, remote polling, persistent high-water
+rollback evidence after inbox deletion, and real-device QA. Do not label
+Stage 21 sync as PASS until the completion gate is met. See
+[completion checklist](STAGE21_COMPLETION_GATE.md).
 
 ## Encrypted peer inbox slice (pending CI)
 
