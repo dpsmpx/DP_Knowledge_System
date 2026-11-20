@@ -1087,6 +1087,12 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(("source_before_other", 0),
                          (by_path["c.md"]["relative_order"], by_path["c.md"]["gap_days"]))
         self.assertTrue(by_path["c.md"]["opposing_polarity"])
+        self.assertEqual("opposing_dated_readings", by_path["c.md"]["version_review"])
+        self.assertEqual((False, True), (by_path["c.md"]["earlier_negated"],
+                                         by_path["c.md"]["later_negated"]))
+        self.assertEqual("consistent_dated_readings", by_path["b.md"]["version_review"])
+        self.assertEqual((False, False), (by_path["b.md"]["earlier_negated"],
+                                          by_path["b.md"]["later_negated"]))
         self.assertTrue(all(m["authority"] == "unapproved_parser_hint"
                             for m in page["matches"]))
         reverse = next(m for m in self._relations("b.md")["matches"] if m["path"] == "a.md")

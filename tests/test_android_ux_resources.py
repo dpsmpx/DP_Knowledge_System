@@ -335,6 +335,9 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('"temporal_separation".equals(relation.optString("kind"))', presentation)
         self.assertIn('relation.optInt("gap_days")', presentation)
         self.assertIn('relation.optString("relative_order")', presentation)
+        self.assertIn('relation.optString("version_review")', presentation)
+        self.assertIn('relation.optBoolean("earlier_negated")', presentation)
+        self.assertIn('relation.optBoolean("later_negated")', presentation)
         for locale in ("values", "values-ru"):
             strings = {e.get("name"): e.text or "" for e in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
@@ -342,6 +345,11 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_relation_source_earlier",
                          "knowledge_relation_other_earlier",
                          "knowledge_relation_gap_days",
+                         "knowledge_relation_version_review",
+                         "knowledge_relation_earlier_polarity",
+                         "knowledge_relation_later_polarity",
+                         "knowledge_relation_negative",
+                         "knowledge_relation_positive",
                          "knowledge_relation_temporal_separation_warning"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 

@@ -707,6 +707,19 @@ and locator, and hides corrupt/missing provenance rather than attaching
 unrelated text. No index mutation, journal write, model call or original note
 edit is caused by this display. Device UX/accessibility QA remains deferred.
 
+**Stage 18 dated version disagreement review (twenty-third slice, awaiting Android QA):**
+For two explicitly closed, non-overlapping source-provided validity periods,
+the temporal separation hint now carries chronological *earlier/later* claim
+polarities and an explicit `opposing_dated_readings` review marker (or
+`consistent_dated_readings`). In the relation detail and editor context dock,
+opposing readings show both chronological polarities plus an EN/RU prompt to
+inspect both sources. This is a read-only **possible version disagreement**,
+not a detected real-world change, a contradiction in accepted knowledge, an
+automatic decision or a new reliability score. Same-polarity periods receive
+no disagreement prompt. Missing/open periods and overlapping endpoints retain
+their earlier conservative behavior. No changes to source Markdown, journal,
+schema or authority; physical Android QA remains deferred.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

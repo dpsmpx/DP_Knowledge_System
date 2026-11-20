@@ -300,6 +300,12 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
             "relative_order": ("source_before_other" if source_first
                                else "other_before_source"),
             "gap_days": gap_days,
+            # A polarity shift is a question for the owner, not evidence that
+            # the world changed between the two source-supplied intervals.
+            "version_review": ("opposing_dated_readings" if r[5] != r[6]
+                               else "consistent_dated_readings"),
+            "earlier_negated": bool(r[5] if source_first else r[6]),
+            "later_negated": bool(r[6] if source_first else r[5]),
             "authority": "unapproved_parser_hint",
         })
     alias_matches, alias_limited = indexed_alias_candidates(

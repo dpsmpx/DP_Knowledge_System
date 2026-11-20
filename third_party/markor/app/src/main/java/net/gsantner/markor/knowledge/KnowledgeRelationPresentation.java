@@ -274,6 +274,20 @@ final class KnowledgeRelationPresentation {
             if (relation.optBoolean("opposing_polarity")) {
                 text.append("\n").append(context.getString(
                         R.string.knowledge_modal_opposing_info));
+                if ("opposing_dated_readings".equals(relation.optString("version_review"))) {
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_version_review));
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_earlier_polarity,
+                            context.getString(relation.optBoolean("earlier_negated")
+                                    ? R.string.knowledge_relation_negative
+                                    : R.string.knowledge_relation_positive)));
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_later_polarity,
+                            context.getString(relation.optBoolean("later_negated")
+                                    ? R.string.knowledge_relation_negative
+                                    : R.string.knowledge_relation_positive)));
+                }
             }
         }
         if ("temporal_overlap".equals(relation.optString("kind"))
