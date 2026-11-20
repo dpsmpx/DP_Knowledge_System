@@ -62,6 +62,12 @@ final class KnowledgeRelationPresentation {
             text.append("\n").append(context.getString(R.string.knowledge_evidence_identical_count,
                     group.optInt("identical_document_files")));
         }
+        if (group.optInt("reviewed_source_links_current") > 0
+                || group.optInt("reviewed_source_links_historical") > 0) {
+            text.append("\n").append(context.getString(R.string.knowledge_source_lineage_evidence_counts,
+                    group.optInt("reviewed_source_links_current"),
+                    group.optInt("reviewed_source_links_historical")));
+        }
         if ("mixed".equals(group.optString("source_polarity"))) {
             text.append("\n").append(context.getString(R.string.knowledge_evidence_source_mixed));
         }
@@ -105,6 +111,14 @@ final class KnowledgeRelationPresentation {
         if (source.optBoolean("identical_document")) {
             text.append(" · ").append(context.getString(R.string.knowledge_evidence_duplicate_family,
                     source.optString("document_family")));
+        }
+        final String lineage = source.optString("reviewed_source_link_state");
+        if ("current".equals(lineage) || "historical".equals(lineage)) {
+            text.append("\n").append(context.getString("current".equals(lineage)
+                            ? R.string.knowledge_source_lineage_evidence_current
+                            : R.string.knowledge_source_lineage_evidence_historical))
+                    .append(" · J:").append(source.optString("reviewed_source_link_id"))
+                    .append("\n").append(source.optString("reviewed_source_link_reason"));
         }
         return text.toString();
     }

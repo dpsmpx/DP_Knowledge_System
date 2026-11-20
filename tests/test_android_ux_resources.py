@@ -39,6 +39,11 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('source.optString("document_family")', presentation)
         self.assertIn("evidenceFamilyDetails(Context context, JSONArray families, int label)",
                       presentation)
+        self.assertIn('source.optString("reviewed_source_link_state")', presentation)
+        self.assertIn('source.optString("reviewed_source_link_id")', presentation)
+        self.assertIn('group.optInt("reviewed_source_links_current")', presentation)
+        self.assertIn('result.optBoolean("source_lineage_limited")', hub)
+        self.assertIn('context.optBoolean("source_lineage_limited")', editor)
         self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
         self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
         self.assertIn("_verify_evidence_freshness(", bridge)
@@ -59,6 +64,11 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_evidence_repeated_family", "knowledge_evidence_duplicate_family",
                         "knowledge_evidence_family_members",
                         "knowledge_evidence_document_family_members"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_source_lineage_evidence_counts",
+                        "knowledge_source_lineage_evidence_current",
+                        "knowledge_source_lineage_evidence_historical",
+                        "knowledge_source_lineage_evidence_limited"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
     def test_manual_source_lineage_review_is_reversible_and_reachable(self):

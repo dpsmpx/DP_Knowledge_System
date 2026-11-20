@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "third_party/markor/app/src/main/python"))
 
 from ksys_android_bridge import (
     analyze_vault, preview_source_link, record_source_link, source_lineage_decisions,
-    preview_source_unlink, record_source_unlink,
+    preview_source_unlink, record_source_unlink, note_relationships, editor_note_context,
 )
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
@@ -137,6 +137,62 @@ class SourceLineageTests(unittest.TestCase):
         next_decision = self.confirm(self.preview(reason="Повторная проверка"))
         self.assertNotEqual(original["journal_ids"], next_decision["journal_ids"])
         self.assertEqual("Повторная проверка", self.decisions()["active"][0]["reason"])
+
+    def test_manual_link_is_visible_in_relations_without_becoming_a_truth_vote(self):
+        first = self.confirm(self.preview())
+        journal = Workspace(self.workspace).journal_path
+        before = hashlib.sha256(journal.read_bytes()).hexdigest()
+        result = json.loads(note_relationships(str(self.workspace), "a.md", str(self.vault)))
+        group = result["evidence_groups"][0]
+        by_path = {source["path"]: source for source in group["other_sources"]}
+        self.assertFalse(result["source_lineage_limited"])
+        self.assertEqual((1, 0), (group["reviewed_source_links_current"],
+                                  group["reviewed_source_links_historical"]))
+        self.assertEqual("current", by_path["b.md"]["reviewed_source_link_state"])
+        self.assertEqual(first["journal_ids"][0], by_path["b.md"]["reviewed_source_link_id"])
+        self.assertEqual("Один первоисточник", by_path["b.md"]["reviewed_source_link_reason"])
+        self.assertEqual("unapproved_candidates", group["authority"])
+        self.assertEqual("not_assessed", group["confidence"])
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                            self.notes["a.md"], str(self.vault)))
+        self.assertEqual("current", editor["evidence_groups"][0]
+                         ["other_sources"][0]["reviewed_source_link_state"])
+        self.assertEqual(before, hashlib.sha256(journal.read_bytes()).hexdigest())
+
+        # A changed note retains the historical decision, never a live verdict.
+        (self.vault / "b.md").write_text("# B changed\nАлекс является разработчиком.\n",
+                                           encoding="utf-8")
+        historical = json.loads(note_relationships(str(self.workspace), "a.md",
+                                                   str(self.vault)))["evidence_groups"][0]
+        self.assertEqual("historical", historical["other_sources"][0]
+                         ["reviewed_source_link_state"])
+        analyze_vault(str(self.workspace), str(self.vault))
+        reindexed = json.loads(note_relationships(str(self.workspace), "a.md",
+                                                  str(self.vault)))["evidence_groups"][0]
+        self.assertEqual("current", reindexed["other_sources"][0]["verification"])
+        self.assertEqual("historical", reindexed["other_sources"][0]
+                         ["reviewed_source_link_state"])
+
+    def test_only_direct_owner_link_is_shown_and_revocation_removes_it(self):
+        (self.vault / "d.md").write_text(self.notes["a.md"], encoding="utf-8")
+        analyze_vault(str(self.workspace), str(self.vault))
+        a_to_b = self.confirm(self.preview("a.md", "b.md"))
+        self.confirm(self.preview("b.md", "d.md"))
+        result = json.loads(note_relationships(str(self.workspace), "a.md", str(self.vault)))
+        group = result["evidence_groups"][0]
+        self.assertEqual(1, group["reviewed_source_links_current"])
+        by_path = {source["path"]: source for source in group["other_sources"]}
+        self.assertEqual("current", by_path["b.md"]["reviewed_source_link_state"])
+        self.assertNotIn("reviewed_source_link_state", by_path["d.md"])
+
+        revocation = json.loads(preview_source_unlink(
+            str(self.workspace), a_to_b["journal_ids"][0]))
+        record_source_unlink(str(self.workspace), revocation["decision_id"],
+                             revocation["preview_token"], revocation["journal_head"])
+        after = json.loads(note_relationships(str(self.workspace), "a.md", str(self.vault)))
+        self.assertEqual(0, after["evidence_groups"][0]["reviewed_source_links_current"])
+        self.assertTrue(all("reviewed_source_link_state" not in source
+                            for source in after["evidence_groups"][0]["other_sources"]))
 
 
 if __name__ == "__main__":

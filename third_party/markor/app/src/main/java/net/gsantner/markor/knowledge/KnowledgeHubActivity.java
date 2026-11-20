@@ -1814,6 +1814,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 (d, w) -> showEvidenceGroups(evidence,
                                         result.optBoolean("evidence_limited"),
                                         result.optBoolean("evidence_checks_limited"),
+                                        result.optBoolean("source_lineage_limited"),
                                         relativePath));
                     }
                     if (labels.length == 0) {
@@ -1843,7 +1844,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void showEvidenceGroups(final JSONArray groups, final boolean limited,
-                                    final boolean checksLimited, final String sourcePath) {
+                                    final boolean checksLimited, final boolean lineageLimited,
+                                    final String sourcePath) {
         final String[] rows = new String[groups.length()];
         for (int i = 0; i < rows.length; i++) {
             rows[i] = KnowledgeRelationPresentation.evidenceSummary(
@@ -1852,7 +1854,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.knowledge_evidence_title)
                         + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : "")
-                        + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : ""))
+                        + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : "")
+                        + (lineageLimited ? " · " + getString(R.string.knowledge_source_lineage_evidence_limited) : ""))
                 .setItems(rows, (d, which) -> {
                     final JSONObject group = groups.optJSONObject(which);
                     if (group != null) showEvidenceDetail(group, sourcePath);

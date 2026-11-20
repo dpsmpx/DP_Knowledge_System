@@ -508,6 +508,21 @@ automatic; changed notes fail closed, and withdrawal remains reachable
 without an active notebook. Physical UI, lifecycle, TalkBack, 20k-note
 performance and SAF acceptance remain unverified.
 
+**Stage 18 reviewed lineage in evidence (ninth slice, awaiting device QA):**
+The Hub and editor source-evidence lists now display *direct* owner-reviewed
+common-upstream decisions with their journal ID and recorded reason. A manual
+link is marked current only when **both** original Markdown files still match
+their indexed hashes **and** those hashes equal the values saved at the time
+of the owner's decision. Otherwise the link remains visible, but is labeled
+**historical/unverified**, including after reindexing a modified file. The
+checked and historical link counts are separate from indexed claim polarity
+counts and do not enter copy-family detection, truth inference, confidence or
+independence estimates. No chained/transitive human lineage is inferred.
+Revocation immediately removes the active link from new relation views while
+preserving its journal history. Excessive/corrupt source-link journal coverage
+fails closed with an explicit incompleteness warning. No additional source
+I/O or index writes are introduced. Android hardware acceptance remains open.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

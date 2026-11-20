@@ -175,12 +175,15 @@ def note_relationships(workspace_dir: str, relative_path: str,
     aliases = verified_owner_aliases(journal.entries(), journal.actor)
     matches = related_claims(ws, relative_path, aliases=aliases)
     evidence_checks_limited = True
+    source_lineage_limited = False
     if matches["evidence_groups"]:
         con = _decision_index(workspace)
         if con is not None:
             try:
                 evidence_checks_limited = _verify_evidence_freshness(
                     con, vault_dir, relative_path, matches["evidence_groups"])
+                source_lineage_limited = _annotate_reviewed_source_links(
+                    con, journal, relative_path, matches["evidence_groups"])
             finally:
                 con.close()
     return json.dumps({
@@ -192,6 +195,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
         "evidence_groups": matches["evidence_groups"],
         "evidence_limited": matches["evidence_limited"],
         "evidence_checks_limited": evidence_checks_limited,
+        "source_lineage_limited": source_lineage_limited,
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -368,6 +372,63 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
             "independence_assessed": False,
         })
     return limited
+
+
+def _annotate_reviewed_source_links(con, journal: Journal,
+                                    source_path: str, groups: list[dict]) -> bool:
+    """Add only *direct* owner-reviewed provenance links to live evidence rows.
+
+    These annotations are separate from evidence counts and the claim graph.
+    An old human link remains visible as historical/unverified if either file
+    differs from the SHA saved at approval, is unavailable, or was not checked.
+    No transitive propagation or automatic independence verdict is permitted.
+    """
+    try:
+        active, _ = _source_lineage_state(journal)
+    except ValueError:
+        return True
+    direct = {}
+    for decision in active:
+        paths = decision["paths"]
+        if source_path not in paths:
+            continue
+        partner = paths[0] if paths[1] == source_path else paths[1]
+        stored = {source["path"]: source.get("source_sha256")
+                  for source in decision["sources"]}
+        direct[partner] = (decision, stored)
+    if not direct:
+        for group in groups:
+            group["reviewed_source_links_current"] = 0
+            group["reviewed_source_links_historical"] = 0
+        return False
+    source_row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                             (source_path,)).fetchone()
+    source_indexed_sha = source_row[0] if source_row else None
+    for group in groups:
+        current_count = historical_count = 0
+        for evidence in group["other_sources"]:
+            pair = direct.get(evidence["path"])
+            if pair is None:
+                continue
+            decision, stored = pair
+            other_row = con.execute("SELECT sha256 FROM documents "
+                                    "WHERE path=? AND status='PARSED'",
+                                    (evidence["path"],)).fetchone()
+            verified = (group.get("source_verification") == "current" and
+                        evidence.get("verification") == "current" and
+                        source_indexed_sha == stored.get(source_path) and
+                        other_row is not None and other_row[0] == stored.get(evidence["path"]))
+            state = "current" if verified else "historical"
+            evidence["reviewed_source_link_state"] = state
+            evidence["reviewed_source_link_id"] = decision["journal_id"]
+            evidence["reviewed_source_link_reason"] = str(decision["reason"])[:180]
+            if verified:
+                current_count += 1
+            else:
+                historical_count += 1
+        group["reviewed_source_links_current"] = current_count
+        group["reviewed_source_links_historical"] = historical_count
+    return False
 
 
 def _entity_sources(con, root: Path, symbol: str) -> tuple[list[dict], bool]:
@@ -558,11 +619,11 @@ def record_entity_unalias(workspace_dir: str, alias: str,
 MAX_SOURCE_LINEAGE_OPERATIONS = 512
 
 
-def _source_lineage_state(kb) -> tuple[list[dict], list[dict]]:
-    if kb.journal.verify():
+def _source_lineage_state(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
         raise ValueError("Knowledge journal integrity check failed")
-    entries = [entry for entry in kb.journal.entries()
-               if entry.actor == kb.journal.actor and
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
                entry.op in ("source_link", "source_unlink")]
     if len(entries) > MAX_SOURCE_LINEAGE_OPERATIONS:
         raise ValueError("Source lineage journal limit reached")
@@ -597,7 +658,7 @@ def _source_lineage_state(kb) -> tuple[list[dict], list[dict]]:
 def source_lineage_decisions(workspace_dir: str) -> str:
     """Read human provenance annotations even with the notebook disconnected."""
     kb = _kb(workspace_dir)
-    active, recent = _source_lineage_state(kb)
+    active, recent = _source_lineage_state(kb.journal)
     return json.dumps({"protocol": "dpksys.source_lineage.v1",
                        "active": active, "recent": recent,
                        "journal_head": kb.journal.head, "read_only": True,
@@ -638,7 +699,7 @@ def _source_lineage_preview(workspace_dir: str, vault_dir: str,
     if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
         raise ValueError("Explain the common upstream source in 1..500 characters")
     kb = _kb(workspace_dir)
-    active, _ = _source_lineage_state(kb)
+    active, _ = _source_lineage_state(kb.journal)
     if any(item["paths"] == paths for item in active):
         raise ValueError("This source-pair decision is already active; revoke it first")
     owner_ops = sum(entry.actor == kb.journal.actor and
@@ -689,7 +750,7 @@ def record_source_link(workspace_dir: str, vault_dir: str, first_path: str,
 
 def preview_source_unlink(workspace_dir: str, decision_id: str) -> str:
     kb = _kb(workspace_dir)
-    active, _ = _source_lineage_state(kb)
+    active, _ = _source_lineage_state(kb.journal)
     selected = next((item for item in active if item["journal_id"] == decision_id), None)
     if selected is None:
         raise ValueError("No active owner source link for this decision")
@@ -1243,6 +1304,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
     relations, truncated, index_state = [], False, "absent"
     evidence_groups, evidence_limited = [], False
     evidence_checks_limited = True
+    source_lineage_limited = False
     alias_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
@@ -1264,6 +1326,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                 evidence_limited = result["evidence_limited"]
                 evidence_checks_limited = _verify_evidence_freshness(
                     con, vault_dir, relative_path, evidence_groups)
+                source_lineage_limited = _annotate_reviewed_source_links(
+                    con, kb.journal, relative_path, evidence_groups)
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -1281,6 +1345,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
         "candidate_relations": relations, "relations_truncated": truncated,
         "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
         "evidence_checks_limited": evidence_checks_limited,
+        "source_lineage_limited": source_lineage_limited,
         "alias_search_limited": alias_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,
