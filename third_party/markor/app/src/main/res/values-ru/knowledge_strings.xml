@@ -280,6 +280,8 @@
     <string name="knowledge_version_warning">Показаны выдержки из индекса с проверенными текущими SHA-256 файлов. Даты и интерпретации не подтверждены независимо. Фактическая достоверность не присваивается.</string>
     <string name="knowledge_version_recorded">Оценка записана. Её можно отозвать позже.</string>
     <string name="knowledge_version_history">Ручные оценки версий</string>
+    <string name="knowledge_version_active">Действует</string>
+    <string name="knowledge_version_event">Событие журнала</string>
     <string name="knowledge_version_empty">Нет действующих оценок версий.</string>
     <string name="knowledge_version_offline_warning">Оценки могут быть историческими, если заметки изменились или недоступны. Отозвать решение можно без подключения папки.</string>
     <string name="knowledge_version_revoke">Отозвать оценку</string>

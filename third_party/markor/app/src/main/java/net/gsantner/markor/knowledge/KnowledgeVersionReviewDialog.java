@@ -91,7 +91,7 @@ final class KnowledgeVersionReviewDialog {
         }
         final String decisionId = relation.optString("version_review_id", "");
         if (decisionId.isEmpty()) {
-            choose();
+            explainAndChoose();
         } else {
             async(() -> KnowledgePythonBridge.versionReviewDecisions(activity, workspace), data -> {
                 final JSONArray active = data.optJSONArray("active");
@@ -102,9 +102,18 @@ final class KnowledgeVersionReviewDialog {
                         return;
                     }
                 }
-                choose(); // Snapshot changed; backend will revalidate on preview.
+                explainAndChoose(); // Snapshot changed; backend will revalidate on preview.
             });
         }
+    }
+
+    private void explainAndChoose() {
+        new MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.knowledge_version_title)
+                .setMessage(R.string.knowledge_version_scope)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (d, w) -> choose())
+                .show();
     }
 
     private void choose() {
@@ -116,7 +125,6 @@ final class KnowledgeVersionReviewDialog {
         for (int i = 0; i < CHOICES.length; i++) items[i] = activity.getString(LABELS[i]);
         new MaterialAlertDialogBuilder(activity)
                 .setTitle(R.string.knowledge_version_title)
-                .setMessage(R.string.knowledge_version_scope)
                 .setItems(items, (dialog, index) -> enterReason(CHOICES[index]))
                 .setNegativeButton(android.R.string.cancel, null).show();
     }
@@ -183,31 +191,65 @@ final class KnowledgeVersionReviewDialog {
     void history() {
         async(() -> KnowledgePythonBridge.versionReviewDecisions(activity, workspace), data -> {
             final JSONArray active = data.optJSONArray("active");
-            if (active == null || active.length() == 0) {
+            final JSONArray recent = data.optJSONArray("recent");
+            final int activeCount = active == null ? 0 : active.length();
+            final int recentCount = recent == null ? 0 : recent.length();
+            if (activeCount + recentCount == 0) {
                 new MaterialAlertDialogBuilder(activity)
                         .setTitle(R.string.knowledge_version_history)
                         .setMessage(R.string.knowledge_version_empty)
                         .setPositiveButton(android.R.string.ok, null).show();
                 return;
             }
-            final String[] labels = new String[active.length()];
-            for (int i = 0; i < labels.length; i++) {
+            final String[] labels = new String[activeCount + recentCount];
+            for (int i = 0; i < activeCount; i++) {
                 final JSONObject record = active.optJSONObject(i);
                 final JSONArray sources = record == null ? null : record.optJSONArray("sources");
                 final JSONObject first = sources == null ? null : sources.optJSONObject(0);
                 final JSONObject second = sources == null ? null : sources.optJSONObject(1);
-                labels[i] = label(record == null ? "" : record.optString("choice"))
+                labels[i] = activity.getString(R.string.knowledge_version_active) + " · "
+                        + label(record == null ? "" : record.optString("choice"))
                         + " · " + (first == null ? "?" : first.optString("path"))
                         + " ↔ " + (second == null ? "?" : second.optString("path"));
             }
+            for (int i = 0; i < recentCount; i++) {
+                final JSONObject event = recent.optJSONObject(i);
+                labels[activeCount + i] = activity.getString(R.string.knowledge_version_event)
+                        + " · " + (event == null ? "?" : event.optString("op"))
+                        + " · " + (event == null ? "?" : event.optString("time"));
+            }
             new MaterialAlertDialogBuilder(activity)
                     .setTitle(R.string.knowledge_version_history)
-                    .setMessage(R.string.knowledge_version_offline_warning)
                     .setItems(labels, (dialog, index) -> {
-                        final JSONObject item = active.optJSONObject(index);
-                        if (item != null) showActive(item);
+                        if (index < activeCount) {
+                            final JSONObject item = active.optJSONObject(index);
+                            if (item != null) showActive(item);
+                        } else {
+                            final JSONObject event = recent.optJSONObject(index - activeCount);
+                            if (event != null) showHistoryEvent(event);
+                        }
                     }).setNegativeButton(android.R.string.cancel, null).show();
         });
+    }
+
+    private void showHistoryEvent(final JSONObject event) {
+        final JSONArray paths = event.optJSONArray("paths");
+        final StringBuilder details = new StringBuilder(event.optString("op"))
+                .append("\n").append(event.optString("time"))
+                .append("\n").append(event.optString("journal_id"));
+        if (paths != null) for (int i = 0; i < paths.length(); i++) {
+            details.append("\n").append(paths.optString(i));
+        }
+        if (event.has("choice") && !event.isNull("choice")) {
+            details.append("\n").append(label(event.optString("choice")));
+        }
+        if (!event.optString("reason").isEmpty()) {
+            details.append("\n").append(event.optString("reason"));
+        }
+        new MaterialAlertDialogBuilder(activity)
+                .setTitle(R.string.knowledge_version_event)
+                .setMessage(details.toString())
+                .setPositiveButton(android.R.string.ok, null).show();
     }
 
     private void showActive(final JSONObject record) {

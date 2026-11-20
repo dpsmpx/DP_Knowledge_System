@@ -407,8 +407,9 @@ class RelationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.record_version_review(*params, preview["preview_token"],
                                          preview["journal_head"])
-        self.assertEqual([], json.loads(bridge.version_review_decisions(
-            str(self.workspace)))["active"])
+        after_revoke = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual([], after_revoke["active"])
+        self.assertEqual([], after_revoke["recent"])
         (self.vault / "b.md").write_text(self.notes["b.md"], encoding="utf-8")
         with tempfile.TemporaryDirectory() as wrong_folder:
             with self.assertRaises(ValueError):
@@ -427,6 +428,9 @@ class RelationTests(unittest.TestCase):
                          if m["path"] == "b.md" and m["kind"] == "temporal_separation")
         self.assertEqual("current", annotated["version_review_state"])
         self.assertEqual(decision_id, annotated["version_review_id"])
+        accepted = json.loads(editor_note_context(str(self.workspace), "a.md",
+                              self.notes["a.md"], str(self.vault)))
+        self.assertEqual([], accepted["accepted_records"])
         reverse = next(m for m in self._relations("b.md", verified=True)["matches"]
                        if m["path"] == "a.md" and m["kind"] == "temporal_separation")
         self.assertEqual(decision_id, reverse["version_review_id"])
@@ -442,8 +446,11 @@ class RelationTests(unittest.TestCase):
                                            revoke["journal_head"])
         bridge.record_version_unreview(str(self.workspace), decision_id,
                                        revoke["preview_token"], revoke["journal_head"])
-        self.assertEqual([], json.loads(bridge.version_review_decisions(
-            str(self.workspace)))["active"])
+        after_revoke = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual([], after_revoke["active"])
+        self.assertEqual(["version_unreview", "version_review"],
+                         [event["op"] for event in after_revoke["recent"]])
+        self.assertEqual(["a.md", "b.md"], after_revoke["recent"][1]["paths"])
         no_annotation = next(m for m in self._relations("a.md")["matches"]
                              if m["path"] == "b.md" and m["kind"] == "temporal_separation")
         self.assertNotIn("version_review_id", no_annotation)

@@ -280,6 +280,8 @@
     <string name="knowledge_version_warning">Original indexed excerpts and live SHA-256 have been checked. These dates and readings are not independently verified. No factual authority is created.</string>
     <string name="knowledge_version_recorded">Review recorded. You may withdraw it later.</string>
     <string name="knowledge_version_history">Manual version reviews</string>
+    <string name="knowledge_version_active">Active</string>
+    <string name="knowledge_version_event">Journal event</string>
     <string name="knowledge_version_empty">No active version reviews.</string>
     <string name="knowledge_version_offline_warning">Stored decisions may be historical if original notes changed or are unavailable. Withdrawal is possible offline.</string>
     <string name="knowledge_version_revoke">Withdraw review</string>

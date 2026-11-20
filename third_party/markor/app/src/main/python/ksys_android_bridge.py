@@ -1115,7 +1115,13 @@ def _version_review_state(journal: Journal) -> tuple[list[dict], list[dict]]:
         elif key in active and active[key]["journal_id"] == data.get("decision_id"):
             del active[key]
         history.append({"op": entry.op, "key": key, "journal_id": entry.id,
-                        "decision_id": data.get("decision_id"), "time": entry.ts})
+                        "decision_id": data.get("decision_id"), "time": entry.ts,
+                        "choice": data.get("choice"),
+                        "reason": str(data.get("reason", ""))[:500],
+                        "paths": [s.get("path") for s in (data.get("sources")
+                                  if isinstance(data.get("sources"), list) else [])
+                                  if isinstance(s, dict)]
+                        if entry.op == "version_review" else []})
     return [active[k] for k in sorted(active)], list(reversed(history[-40:]))
 
 
