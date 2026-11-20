@@ -18,7 +18,8 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema`, source-anchored `bind`/`resolve`, and active-local-record-checked `revise`/`split`/`merge` | Device UI + concurrent-write review; unsupported event families audited only |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191) and Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668) passed both flavors; APK assembly skipped | New high-water unit tests and physical integration tests |
+| Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668), and Stage21 slice29 [#206](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44725289838) passed both flavors; APK assembly skipped | New Stage21 in-app synthetic QA still requires an Android unit CI run and physical integration tests |
+| Existing device QA buttons | Quick/stress now include isolated `PORTABLE-21` encrypted archive/manifest/tamper and six `SYNC21-*` journal/consent tests; no new button, no real user data touched | Run on physical device; SAF/Keystore pairing, 20k-file vault and OS lifecycle not simulated |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside
@@ -71,7 +72,9 @@ it explicitly skipped package-ID and APK content inspections as requested.
    individually handled families now include `alias`/`label`/`schema`,
    locally anchored `bind`/`resolve`, and active-target-checked
    `revise`/`split`/`merge`. Still review unsupported event families and
-   extend existing Android QA buttons. Owner choices
+   unsupported audit-only events remain hold/reject-only. Existing Android
+   quick/stress QA buttons now include bounded synthetic Stage21 regressions;
+   none substitute for physical QA. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. Physical integration,
@@ -84,7 +87,7 @@ it explicitly skipped package-ID and APK content inspections as requested.
    constrained storage, interruption and SAF provider behavior.
 4. Complete the approved manually reviewed operation handlers and device QA
    for protected high-water transfer to a restored device.
-   Extend the existing in-app QA buttons with safe, synthetic Stage 21 checks.
+   Exercise the new synthetic Stage21 checks in the existing in-app QA buttons.
 5. Re-review security/privacy, provenance, UI accessibility and the PR; only
    then remove the draft label and declare Stage 21 accepted.
 

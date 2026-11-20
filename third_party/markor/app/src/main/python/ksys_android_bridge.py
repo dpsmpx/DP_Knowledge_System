@@ -648,6 +648,157 @@ def stage22_editor_selftest(cache_dir: str) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def stage21_sync_selftest(cache_dir: str) -> str:
+    """Synthetic Stage 21 causal/manual journal tests for existing QA buttons.
+
+    Only a uniquely created app-cache fixture is used. This is NOT a test of
+    paired ECDSA, device Keystore, SAF durability, lifecycle, or human taps.
+    """
+    from ksys.core.clock import FixedClock
+    from ksys.store.journal import Journal
+    from ksys.store.journal_sync import validated_entries
+
+    cache = Path(cache_dir).resolve()
+    if not Path(cache_dir).is_absolute() or not cache.is_dir():
+        raise ValueError("Stage21 synthetic QA requires app-private cache")
+    checks = []
+    signer = "c" * 64  # fixture identity only; never masquerades as ECDSA proof
+
+    def verify(code, action):
+        try:
+            action()
+            checks.append({"code": code, "passed": True})
+        except Exception:
+            # No paths, note text, event payloads or traces leave the cache.
+            checks.append({"code": code, "passed": False})
+
+    with tempfile.TemporaryDirectory(prefix="dpks-stage21-qa-", dir=cache) as temp:
+        root = Path(temp)
+
+        def fixture(name, with_fact=False):
+            ws = Workspace(root / name)
+            ws.init()
+            kb = KnowledgeBase(ws, FixedClock(), use_cache=False)
+            old = kb.accept_text("Стресс приводит к бессоннице.").entries[0].data["node"]["id"] \
+                if with_fact else None
+            local = ws.journal_path.read_text(encoding="utf-8") \
+                if ws.journal_path.is_file() else ""
+            return ws, local, kb.journal.head, old
+
+        def remote(name, local, op, payload):
+            path = root / (name + "-remote.jsonl")
+            path.write_text(local, encoding="utf-8")
+            event = Journal(path, FixedClock()).append(op, payload)
+            journal = path.read_text(encoding="utf-8")
+            return journal, event.id, hashlib.sha256(journal.encode()).hexdigest()
+
+        def causal():
+            ws, local, head, _ = fixture("causal", with_fact=True)
+            foreign, eid, sha = remote("causal", local, "label", {"key": "fixture", "label": "Verified"})
+            _, compared = verified_foreign_event(local, foreign, signer, eid, head, sha)
+            assert compared.local_head == head and compared.remote_sha256 == sha
+            forged = foreign.replace('"actor":"human:me"', '"actor":"forged"', 1)
+            try:
+                validated_entries(forged)
+            except ValueError:
+                return
+            raise AssertionError("Hash-chain tampering accepted")
+        verify("SYNC21-CAUSAL-CHAIN", causal)
+
+        def metadata():
+            ws, local, head, _ = fixture("metadata")
+            foreign, eid, sha = remote("metadata", local, "alias", {
+                "alias": "fixture_alias", "canonical": "fixture_entity"})
+            before = ws.journal_path.read_bytes() if ws.journal_path.is_file() else b""
+            plan = json.loads(journal_sync_metadata_preview(str(ws.root), foreign,
+                                                             signer, eid, head or "", sha))
+            assert plan["read_only"] and plan["requires_human_confirmation"]
+            assert before == (ws.journal_path.read_bytes() if ws.journal_path.is_file() else b"")
+            result = json.loads(journal_sync_metadata_commit(
+                str(ws.root), foreign, signer, eid, head or "", sha, plan["plan_sha256"]))
+            applied = KnowledgeBase(ws, FixedClock(), use_cache=False)
+            assert result["applied"] and not result["automatic_replay"]
+            assert applied.state.aliases["fixture_alias"] == "fixture_entity"
+            assert not applied.journal.verify()
+        verify("SYNC21-METADATA-LOCAL", metadata)
+
+        def stale():
+            ws, local, head, _ = fixture("stale")
+            foreign, eid, sha = remote("stale", local, "label", {
+                "key": "fixture_key", "label": "Fixture label"})
+            plan = json.loads(journal_sync_metadata_preview(str(ws.root), foreign,
+                                                             signer, eid, head or "", sha))
+            Journal(ws.journal_path, FixedClock()).append("defer", {"candidates": ["changed"]})
+            try:
+                journal_sync_metadata_commit(str(ws.root), foreign, signer, eid,
+                                             head or "", sha, plan["plan_sha256"])
+            except ValueError:
+                return
+            raise AssertionError("Stale local head accepted")
+        verify("SYNC21-STALE-REFUSAL", stale)
+
+        def context():
+            ws, local, head, _ = fixture("context")
+            markdown = "Он использует Python."
+            fragment = parse_document("fixture.md", markdown).fragments[0]
+            foreign, eid, sha = remote("context", local, "bind", {
+                "origin": fragment.id, "slot": "c0.0", "entity": "алекс"})
+            plan = json.loads(journal_sync_context_preview(str(ws.root), foreign,
+                                                            signer, eid, head or "", sha,
+                                                            "fixture.md", markdown))
+            try:
+                journal_sync_context_commit(str(ws.root), foreign, signer, eid,
+                                            head or "", sha, "fixture.md", markdown + "!",
+                                            plan["plan_sha256"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Changed source accepted")
+            applied = json.loads(journal_sync_context_commit(str(ws.root), foreign,
+                                                              signer, eid, head or "", sha,
+                                                              "fixture.md", markdown,
+                                                              plan["plan_sha256"]))
+            assert applied["applied"] and not applied["automatic_replay"]
+        verify("SYNC21-CONTEXT-SOURCE", context)
+
+        def structural():
+            ws, local, head, old = fixture("structural", with_fact=True)
+            kb = KnowledgeBase(ws, FixedClock(), use_cache=False)
+            new = kb.preview("Шум вызывает бессонницу.").options[0]["nodes"][0].to_dict()
+            foreign, eid, sha = remote("structural", local, "revise", {
+                "target": old, "node": new, "reason": "synthetic change"})
+            plan = json.loads(journal_sync_structural_preview(str(ws.root), foreign,
+                                                               signer, eid, head or "", sha))
+            assert plan["read_only"] and plan["existing_local"][0]["id"] == old
+            applied = json.loads(journal_sync_structural_commit(
+                str(ws.root), foreign, signer, eid, head or "", sha, plan["plan_sha256"]))
+            kb = KnowledgeBase(ws, FixedClock(), use_cache=False)
+            assert applied["applied"] and not kb.state.active(old)
+            assert kb.state.active(new["id"])
+        verify("SYNC21-STRUCT-TARGET", structural)
+
+        def rejection():
+            ws, local, head, _ = fixture("rejection")
+            foreign, eid, sha = remote("rejection", local, "label", {
+                "key": "rejected", "label": "fixture"})
+            journal_sync_review_commit(str(ws.root), foreign, signer, eid, head or "", sha, "reject")
+            try:
+                journal_sync_metadata_preview(str(ws.root), foreign, signer,
+                                              eid, head or "", sha)
+            except ValueError:
+                return
+            raise AssertionError("Rejected foreign event became active")
+        verify("SYNC21-REJECT-FENCE", rejection)
+
+    return json.dumps({
+        "protocol": "dpksys.stage21_sync_selftest.v1", "checks": checks,
+        "passed": sum(item["passed"] for item in checks),
+        "failed": sum(not item["passed"] for item in checks),
+        "synthetic_only": True, "used_selected_vault": False,
+        "read_only_user_data": True, "requires_manual_device_qa": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
     """Read-only, bounded note context from the *saved* source snapshot.
 

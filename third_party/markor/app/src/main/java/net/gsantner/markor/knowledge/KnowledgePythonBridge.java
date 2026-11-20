@@ -94,6 +94,13 @@ public final class KnowledgePythonBridge {
         return invoke(context, "stage22_editor_selftest", privateCacheDirectory);
     }
 
+    /** Synthetic Stage 21 journal checks in the EXISTING device QA buttons. */
+    public static JSONObject stage21SyncSelfTest(final Context context,
+                                                final String privateCacheDirectory)
+            throws JSONException {
+        return invoke(context, "stage21_sync_selftest", privateCacheDirectory);
+    }
+
     /** Locate the single semantic fragment enclosing a manually selected span. */
     public static JSONObject inspectSelection(final Context context, final String relativePath,
                                               final String markdown, final int codepointStart,
@@ -461,6 +468,7 @@ public final class KnowledgePythonBridge {
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)
+                || "dpksys.stage21_sync_selftest.v1".equals(protocol)
                 || "dpksys.stage22_editor_selftest.v1".equals(protocol);
     }
 }

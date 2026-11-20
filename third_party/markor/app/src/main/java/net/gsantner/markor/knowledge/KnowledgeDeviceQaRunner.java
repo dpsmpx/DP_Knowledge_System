@@ -16,10 +16,13 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 
 import java.io.File;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -134,6 +137,8 @@ public final class KnowledgeDeviceQaRunner {
                 step("CORE-01", this::checkPythonCore);
                 step("EMBED-01", this::checkEmbeddingPrimitives);
                 step("CRYPTO-01", this::checkSyntheticCrypto);
+                step("PORTABLE-21", this::checkSyntheticStage21Portable);
+                step("SYNC-21-SUITE", this::checkSyntheticStage21Sync);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -149,8 +154,12 @@ public final class KnowledgeDeviceQaRunner {
                         "LLM provider, real embedding model and network privacy require consent/testing");
                 report.add("SKIP", "MANUAL-02", 0,
                         "process death, reboot, notifications, battery and schedule timing need device observation");
+                report.add("SKIP", "MANUAL-21", 0,
+                        "real SAF providers, Keystore trust pairing/revocation, multi-device replay, "
+                                + "rotation/TalkBack and 20k source files require observed device QA");
                 report.add("SKIP", "DEBT-01", 0,
-                        "full app backup/restore, automated daily backups, cloud sync and permissions pending development");
+                        "real backup/restore, automatic daily schedule, SAF durability, "
+                                + "revoked permissions and physical two-device transfer still need QA");
                 if (!stress) {
                     report.add("SKIP", "STRESS-20K", 0,
                             "run the separate 20k synthetic button to measure large-vault indexing");
@@ -273,6 +282,95 @@ public final class KnowledgeDeviceQaRunner {
         }
         return "syntheticChecks=" + passed
                 + ", failures=0, temporaryCacheCleaned=true, selectedVaultUntouched=true";
+    }
+
+    /** Isolated Stage 21 synthetic archive; neither the real vault nor journal is opened. */
+    private String checkSyntheticStage21Portable() throws Exception {
+        ensureRunning();
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Synthetic archive sandbox unavailable");
+        final char[] password = "synthetic-stage21-only-passphrase".toCharArray();
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Synthetic vault unavailable");
+            final File note = new File(vault, "sample.md");
+            writeFixture(note, "# Stage21\nSynthetic source only.\n");
+            final byte[] originalHash = sha256(note);
+            final ByteArrayOutputStream destination = new ByteArrayOutputStream();
+            final byte[] highwater = "synthetic-highwater-fixture".getBytes(StandardCharsets.UTF_8);
+            try (OutputStream encrypted = KnowledgePortableCipher.encrypt(destination, password)) {
+                final KnowledgePortableArchive.Summary written = KnowledgePortableArchive.write(
+                        vault, null, "{}".getBytes(StandardCharsets.UTF_8),
+                        null, null, highwater, encrypted, this::isCancelled);
+                if (written.sources != 1 || written.secrets || !written.highWater) {
+                    throw new SyntheticMismatch("verdict=PORTABLE_CONSENT_FLAGS_INVALID");
+                }
+            }
+            ensureRunning();
+            final byte[] encrypted = destination.toByteArray();
+            final File staging = KnowledgePortableCipher.decryptToVerifiedStaging(
+                    new ByteArrayInputStream(encrypted), sandbox, password, this::isCancelled);
+            final KnowledgePortableArchive.Summary verified =
+                    KnowledgePortableArchive.verify(staging, this::isCancelled);
+            if (verified.sources != 1 || !verified.settings || verified.secrets
+                    || !verified.highWater || !Arrays.equals(originalHash, sha256(note))) {
+                throw new SyntheticMismatch("verdict=PORTABLE_MANIFEST_INVALID");
+            }
+            encrypted[encrypted.length - 1] ^= 0x01;
+            boolean rejected = false;
+            try {
+                KnowledgePortableCipher.decryptToVerifiedStaging(
+                        new ByteArrayInputStream(encrypted), sandbox, password, this::isCancelled);
+            } catch (GeneralSecurityException | IOException expected) {
+                rejected = true;
+            }
+            if (!rejected) throw new SyntheticMismatch("verdict=PORTABLE_TAMPER_ACCEPTED");
+            return "synthetic encrypted archive verified, highwater included, "
+                    + "secrets excluded, tampering rejected, source unchanged";
+        } finally {
+            Arrays.fill(password, '\0');
+            removeSandbox(sandbox);
+        }
+    }
+
+    private String checkSyntheticStage21Sync() throws Exception {
+        ensureRunning();
+        final JSONObject result = KnowledgePythonBridge.stage21SyncSelfTest(context,
+                context.getCacheDir().getCanonicalPath());
+        if (!"dpksys.stage21_sync_selftest.v1".equals(result.getString("protocol"))
+                || !result.getBoolean("synthetic_only")
+                || result.getBoolean("used_selected_vault")
+                || !result.getBoolean("read_only_user_data")
+                || !result.getBoolean("requires_manual_device_qa")) {
+            throw new SyntheticMismatch("verdict=UNTRUSTED_STAGE21_QA_CONTRACT");
+        }
+        final JSONArray checks = result.getJSONArray("checks");
+        if (checks.length() < 4 || checks.length() > 20
+                || result.getInt("passed") + result.getInt("failed") != checks.length()) {
+            throw new SyntheticMismatch("verdict=STAGE21_QA_COUNT_MISMATCH");
+        }
+        int passed = 0;
+        int failed = 0;
+        for (int i = 0; i < checks.length(); i++) {
+            ensureRunning();
+            final JSONObject item = checks.getJSONObject(i);
+            if (!item.getString("code").matches("SYNC21-[A-Z0-9-]{4,28}")) {
+                throw new SyntheticMismatch("verdict=STAGE21_QA_CODE_MISMATCH");
+            }
+            final boolean ok = item.getBoolean("passed");
+            report.add(ok ? "PASS" : "FAIL", item.getString("code"), 0,
+                    ok ? "isolated synthetic journal assertions passed"
+                            : "isolated synthetic assertions failed; details withheld");
+            if (ok) passed++; else failed++;
+        }
+        if (failed != 0 || passed != result.getInt("passed")
+                || failed != result.getInt("failed")) {
+            throw new SyntheticMismatch("syntheticChecks=" + checks.length()
+                    + ", failedChecks=" + failed);
+        }
+        return "syntheticChecks=" + passed
+                + ", failures=0, realVaultUntouched=true, trust/device QA still manual";
     }
 
     private String checkRealVaultReadOnly() throws Exception {

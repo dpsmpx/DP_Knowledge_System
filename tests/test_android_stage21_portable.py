@@ -256,6 +256,37 @@ class Stage21PortableWiring(unittest.TestCase):
                       "kb._commit(", '"foreign_causal"', '"automatic_replay": False'):
             self.assertIn(token, structural)
 
+    def test_existing_device_qa_buttons_include_isolated_stage21_scenarios(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        runner = (JAVAS / "KnowledgeDeviceQaRunner.java").read_text()
+        java_bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("runDeviceQa(false, false)", hub)
+        self.assertIn("runDeviceQa(true, false)", hub)
+        self.assertIn('step("PORTABLE-21", this::checkSyntheticStage21Portable)', runner)
+        self.assertIn('step("SYNC-21-SUITE", this::checkSyntheticStage21Sync)', runner)
+        self.assertIn("KnowledgePortableCipher.decryptToVerifiedStaging(", runner)
+        self.assertIn("KnowledgePortableArchive.verify(staging", runner)
+        self.assertIn("KnowledgePythonBridge.stage21SyncSelfTest(", runner)
+        self.assertIn("dpksys.stage21_sync_selftest.v1", java_bridge)
+        self.assertIn("def stage21_sync_selftest(", python)
+        self.assertIn('"used_selected_vault": False', python)
+
+    def test_stage21_synthetic_selftest_passes_and_cleans_private_fixture(self):
+        import json
+        import tempfile
+        from third_party.markor.app.src.main.python.ksys_android_bridge import stage21_sync_selftest
+        with tempfile.TemporaryDirectory() as root:
+            result = json.loads(stage21_sync_selftest(root))
+            self.assertEqual("dpksys.stage21_sync_selftest.v1", result["protocol"])
+            self.assertTrue(result["synthetic_only"])
+            self.assertTrue(result["read_only_user_data"])
+            self.assertFalse(result["used_selected_vault"])
+            self.assertTrue(result["requires_manual_device_qa"])
+            self.assertEqual(6, result["passed"])
+            self.assertEqual(0, result["failed"])
+            self.assertEqual([], list(Path(root).iterdir()))
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
