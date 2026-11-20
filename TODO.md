@@ -223,7 +223,11 @@
   или открытия реального индекса read/write. Android unit CI обеих flavor
   [#44737077549](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44737077549)
   и Python CI [#44737077585](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44737077585)
-  прошли. Дождаться нового аппаратного отчёта с обоими полями; даже `ok/ok`
+  прошли. Подписанный [Stage21 QA prerelease #22](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-22-63ca61e4a7)
+  с этой диагностикой опубликован после успешного
+  [Actions #44737491286](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44737491286);
+  APK и `.sha256` проверены в GitHub Releases. Дождаться нового аппаратного
+  отчёта с обоими полями; даже `ok/ok`
   не приравнивать к
   полной FTS/integrity проверке. Если любой из них не `ok`, нужна отдельная
   ручная проверка без автоматического пересоздания.

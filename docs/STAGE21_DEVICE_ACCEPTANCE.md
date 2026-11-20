@@ -33,7 +33,8 @@
   попадает в диапазон известной upstream-ошибки FTS/read-only PRAGMA;
   это **ещё не доказывает** здоровье пользовательской базы. Не запускать
   пересоздание индекса только ради устранения предупреждения.
-- Следующая QA APK дополнительно выведет `baseTablesQuickCheck` и
+- [Обновлённая подписанная QA APK #22](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-22-63ca61e4a7)
+  дополнительно выводит `baseTablesQuickCheck` и
   `ftsStorageQuickCheck` на том же read-only соединении; оба результата
   необходимо приложить вместе с общим WARN. 20k/SAF/Keystore/две машины,
   фон и доступность остаются отдельными непроверенными пунктами.
