@@ -499,7 +499,14 @@ entity aliases, inferences, Markdown, or confidence/independence ratings.
 Only direct owner decisions are active; no transitive link inference, automatic
 matching, network metadata lookup or merging is performed. The owner journal
 operation list is bounded, and prior decisions remain in history on revocation.
-Android controls and physical acceptance are still being integrated.
+The Android Decisions screen now offers a dedicated manual common-origin
+workflow: two exact relative paths and reason, current excerpt/SHA review,
+source navigation, confirmation, active/history browser and a separate
+withdrawal confirmation. The relation evidence disclosure links directly to
+the same workflow with the inspected note path filled in. No action is
+automatic; changed notes fail closed, and withdrawal remains reachable
+without an active notebook. Physical UI, lifecycle, TalkBack, 20k-note
+performance and SAF acceptance remain unverified.
 
 ## Stage 09 — whole-library contradiction and uncertainty audit
 

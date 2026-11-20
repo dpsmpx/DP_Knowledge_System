@@ -87,6 +87,41 @@ public final class KnowledgePythonBridge {
         return invoke(context, "record_entity_unalias", workspace, alias, token, expectedHead);
     }
 
+    /** Explicit, reversible common-upstream source annotations (not truth votes). */
+    public static JSONObject sourceLineageDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "source_lineage_decisions", workspace);
+    }
+
+    public static JSONObject previewSourceLink(final Context context, final String workspace,
+                                               final String notebook, final String firstPath,
+                                               final String secondPath, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_source_link", workspace, notebook,
+                firstPath, secondPath, reason);
+    }
+
+    public static JSONObject confirmSourceLink(final Context context, final String workspace,
+                                               final String notebook, final String firstPath,
+                                               final String secondPath, final String reason,
+                                               final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_source_link", workspace, notebook,
+                firstPath, secondPath, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewSourceUnlink(final Context context, final String workspace,
+                                                 final String decisionId) throws JSONException {
+        return invoke(context, "preview_source_unlink", workspace, decisionId);
+    }
+
+    public static JSONObject confirmSourceUnlink(final Context context, final String workspace,
+                                                 final String decisionId, final String token,
+                                                 final String expectedHead) throws JSONException {
+        return invoke(context, "record_source_unlink", workspace, decisionId,
+                token, expectedHead);
+    }
+
     public static JSONObject fullAudit(final Context context, final String workspace,
                                        final String notebook, final BulkProgress progress)
             throws JSONException {

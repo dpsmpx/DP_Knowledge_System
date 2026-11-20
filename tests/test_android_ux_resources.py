@@ -21,7 +21,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
         bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
         self.assertIn('result.optJSONArray("evidence_groups")', hub)
-        self.assertIn("showEvidenceDetail(group)", hub)
+        self.assertIn("showEvidenceDetail(group, sourcePath)", hub)
         self.assertIn("openIndexedNote(source.optString(\"path\"))", hub)
         self.assertIn('context.optJSONArray("evidence_groups")', editor)
         self.assertIn('context.optBoolean("evidence_limited")', editor)
@@ -60,6 +60,37 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_evidence_family_members",
                         "knowledge_evidence_document_family_members"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_manual_source_lineage_review_is_reversible_and_reachable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_lineage")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        dialog = (folder / "KnowledgeSourceReviewDialog.java").read_text()
+        self.assertIn("new KnowledgeSourceReviewDialog(this, workspacePath()", hub)
+        self.assertIn("showNew(sourcePath, \"\")", hub)
+        for name in ("sourceLineageDecisions", "previewSourceLink", "confirmSourceLink",
+                     "previewSourceUnlink", "confirmSourceUnlink"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "requires_human_confirmation", "source_link", "source_unlink"):
+            if signal == "requires_human_confirmation":
+                self.assertIn(signal, (ROOT / "python/ksys_android_bridge.py").read_text())
+            else:
+                self.assertIn(signal, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_source_lineage_title", "knowledge_source_lineage_new",
+                         "knowledge_source_lineage_history", "knowledge_source_lineage_reason",
+                         "knowledge_source_lineage_preview", "knowledge_source_lineage_confirm",
+                         "knowledge_source_lineage_revoke", "knowledge_source_lineage_revoke_warning",
+                         "knowledge_source_lineage_error_detail"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()

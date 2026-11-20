@@ -319,6 +319,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_entity_matching).setOnClickListener(view ->
                 new KnowledgeEntityReviewDialog(this, workspacePath(), notebook,
                         decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_source_lineage).setOnClickListener(view ->
+                new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -1810,7 +1813,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         dialog.setNeutralButton(R.string.knowledge_evidence_title,
                                 (d, w) -> showEvidenceGroups(evidence,
                                         result.optBoolean("evidence_limited"),
-                                        result.optBoolean("evidence_checks_limited")));
+                                        result.optBoolean("evidence_checks_limited"),
+                                        relativePath));
                     }
                     if (labels.length == 0) {
                         dialog.setMessage(R.string.knowledge_no_semantic_relations);
@@ -1839,7 +1843,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void showEvidenceGroups(final JSONArray groups, final boolean limited,
-                                    final boolean checksLimited) {
+                                    final boolean checksLimited, final String sourcePath) {
         final String[] rows = new String[groups.length()];
         for (int i = 0; i < rows.length; i++) {
             rows[i] = KnowledgeRelationPresentation.evidenceSummary(
@@ -1851,17 +1855,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : ""))
                 .setItems(rows, (d, which) -> {
                     final JSONObject group = groups.optJSONObject(which);
-                    if (group != null) showEvidenceDetail(group);
+                    if (group != null) showEvidenceDetail(group, sourcePath);
                 })
                 .setPositiveButton(android.R.string.ok, null).show();
     }
 
-    private void showEvidenceDetail(final JSONObject group) {
+    private void showEvidenceDetail(final JSONObject group, final String sourcePath) {
         // The disclosure is shown before the user can inspect another file.
         new AlertDialog.Builder(this)
                 .setTitle(R.string.knowledge_evidence_title)
                 .setMessage(KnowledgeRelationPresentation.evidenceDisclosure(this, group))
                 .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.knowledge_source_lineage_new, (d, w) ->
+                        new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
+                                decisionWorker, this::openIndexedNote,
+                                () -> loadDecisionPage(0)).showNew(sourcePath, ""))
                 .setPositiveButton(R.string.knowledge_evidence_show_sources, (d, w) -> {
                     final JSONArray sources = group.optJSONArray("other_sources");
                     if (sources == null || sources.length() == 0) return;
