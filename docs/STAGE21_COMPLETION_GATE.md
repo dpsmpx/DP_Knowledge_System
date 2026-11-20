@@ -18,7 +18,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | v3 secrets passed in GitHub Actions [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), both flavors, APK skipped; Markdown slice 23 [#200](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44711907439) has an unresolved Java JUnit failure; reporting improved for next run | Fix JUnit regression, then physical integration tests |
+| Java unit suite | v3 secrets passed in [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191). Markdown runs [#200](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44711907439) and [#201](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44712924727) revealed root-directory false positive, patched in next slice; no APK assembly | Verify fresh unit CI, then physical integration tests |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside

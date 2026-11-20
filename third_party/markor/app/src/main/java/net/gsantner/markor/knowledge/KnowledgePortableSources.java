@@ -238,7 +238,10 @@ final class KnowledgePortableSources {
         final File parent = original.getParentFile();
         if (!parent.isDirectory() && !parent.mkdirs())
             throw new IOException("Cannot create destination folders");
-        if (!parent.getCanonicalPath().startsWith(vault.getCanonicalPath() + File.separator))
+        final String canonicalParent = parent.getCanonicalPath();
+        final String canonicalVault = vault.getCanonicalPath();
+        if (!canonicalParent.equals(canonicalVault)
+                && !canonicalParent.startsWith(canonicalVault + File.separator))
             throw new IOException("Destination folder escaped selected library");
         final String filename = original.getName();
         final int dot = filename.lastIndexOf('.');
