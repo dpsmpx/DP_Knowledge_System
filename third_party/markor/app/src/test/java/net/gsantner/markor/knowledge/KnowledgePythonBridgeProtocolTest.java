@@ -21,7 +21,11 @@ public class KnowledgePythonBridgeProtocolTest {
         for (final String protocol : new String[] {
                 "dpksys.inspect.v1", "dpksys.decision.v1", "dpksys.query.v1",
                 "dpksys.backup.v1", "dpksys.bulk.v1", "dpksys.relations.v1",
-                "dpksys.audit.v1"
+                "dpksys.audit.v1", "dpksys.sync-preview.v1", "dpksys.sync-events.v1",
+                "dpksys.sync-review-commit.v1", "dpksys.sync-adopt.v1",
+                "dpksys.sync-conflict-preview.v1", "dpksys.sync-conflict-resolve.v1",
+                "dpksys.sync-ack-commit.v1", "dpksys.sync-retract-preview.v1",
+                "dpksys.sync-retract-commit.v1"
         }) {
             assertTrue(protocol, KnowledgePythonBridge.isSupportedProtocol(protocol));
         }

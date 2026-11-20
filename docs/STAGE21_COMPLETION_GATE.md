@@ -16,6 +16,12 @@ release approval. No APK was built or distributed (owner restriction).
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
 | Java unit suite | New tests cover archive, peer rollback boundary, safe settings, etc. | Android CI not run in this environment |
 
+Local-JVM settings fixtures require the real `org.json` test-only library
+because the Android stub API provides no working `JSONObject` parser outside
+an Android runtime; the dependency does **not** enter the shipped application.
+Protocol allowlist unit cases include the new signed-branch and conflict
+APIs. These Java tests still need an Android SDK/Gradle CI runner.
+
 ## Deliberate non-features
 
 - No automatic journal merge, last-write-wins, schema/alias/revision replay,
