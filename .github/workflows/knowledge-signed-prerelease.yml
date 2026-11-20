@@ -204,6 +204,14 @@ jobs:
           )"
           if [[ "$GITHUB_REF" == 'refs/heads/feature/stage18-context-temporal-relations' ]]; then
             notes="${notes}"$'\n\n'"Stage 18, PR #76 (preview): exact predicate, arguments, context and validity interval are required for unapproved cross-note relationships. The read-only audit and editor show these qualifiers; invalid dates cannot silently become conflicts. No automatic acceptance of facts or entity aliases. SQLite projection keys rebuild on the next semantic refresh."$'\n'"This branch includes the Stage 22 integration baseline, but NOT the unmerged Stage 21 PR #74. Stage 21 real-device QA and read-only FTS warnings remain deferred under PR #75. Signed prerelease is for manual testing, not production acceptance."
+            notes="${notes}"          fi
+          gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$release_title" \
+            --notes "$notes" \
+            --prerelease
+\n'"Fix after #24: journal-only export now checks for actual decisions and encrypts before opening Android's save dialog; the saved SAF document is read back and checked for exact size and SHA-256. An empty journal is reported without creating a 0-byte file. This does not export Markdown notes or replace the Stage 21 full-library backup."
           fi
           gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
             --repo "$GITHUB_REPOSITORY" \
