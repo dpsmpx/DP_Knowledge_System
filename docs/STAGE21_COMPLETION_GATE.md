@@ -14,11 +14,11 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Settings | Safe v1/v2 settings remain compatible; v3 explicitly gated secret-entry transfer with unchecked per-export/per-import choice and second export warning; background archives stay v2/no secrets | Android v1/v2/v3 migration, security review of confidential URLs |
 | Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
-| Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review | External transport/rollback/replay acceptance |
+| Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review, separate AES/Keystore protected proper-prefix high-water history surviving inbox deletion | Device migration/recovery of trust ledger, rollback/replay acceptance |
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | v3 secrets passed in [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191). Markdown runs [#200](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44711907439) and [#201](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44712924727) revealed root-directory false positive, patched in next slice; no APK assembly | Verify fresh unit CI, then physical integration tests |
+| Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191) and Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668) passed both flavors; APK assembly skipped | New high-water unit tests and physical integration tests |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside
@@ -44,9 +44,10 @@ it explicitly skipped package-ID and APK content inspections as requested.
 - Manual SAF/provider transport is the supported path until an owner-approved
   alternative is specified. The provider may not guarantee cloud durability
   immediately after a local readback.
-- The rollback guard applies only while a longer authenticated branch from
-  the same signer remains retained. Globally durable high-water evidence is
-  not yet implemented.
+- Persistent proper-prefix SHA-256 commitments now survive deletion of the
+  encrypted inbox under an independent device Keystore key. A missing ledger
+  with the key still present fails closed. It is not a hardware monotonic
+  counter, and migration/recovery of this evidence is not yet implemented.
 
 ## Closing conditions
 

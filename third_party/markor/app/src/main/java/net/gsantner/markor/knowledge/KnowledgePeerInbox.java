@@ -105,6 +105,10 @@ final class KnowledgePeerInbox {
                 context, proof, new ByteArrayInputStream(content));
         if (!verified.paired) throw new SecurityException("Device is not paired");
         final File root = directory(context);
+        // Independent AEAD/Keystore high-water history survives explicit
+        // deletion of an inbox record. No new branch is accepted until this
+        // monotonic ledger has been durably updated (including old upgrades).
+        KnowledgePeerHighWater.observe(context, verified.fingerprint, journal);
         final File destination = new File(root, recordName(verified.fingerprint, content));
         if (destination.exists()) {
             final Snapshot existing = open(context, destination.getName());

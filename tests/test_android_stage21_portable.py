@@ -86,6 +86,21 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertNotIn("journalRestoreCommit", inbox)
         self.assertNotIn("FileOutputStream(currentLibrary)", inbox)
 
+    def test_antirollback_highwater_survives_inbox_deletion(self):
+        inbox = (JAVAS / "KnowledgePeerInbox.java").read_text()
+        ledger = (JAVAS / "KnowledgePeerHighWater.java").read_text()
+        self.assertIn("KnowledgePeerHighWater.observe(context, verified.fingerprint, journal)", inbox)
+        self.assertLess(inbox.index("KnowledgePeerHighWater.observe("),
+                        inbox.index("if (destination.exists())"))
+        for required in ("getNoBackupFilesDir()", "AndroidKeyStore",
+                         "AES/GCM/NoPadding", "GCMParameterSpec",
+                         "recordProperPrefixes", "wasObservedAsProperPrefix",
+                         "i < bytes.length - 1", "output.getFD().sync()",
+                         "Protected high-water history missing; recovery required",
+                         "KnowledgePeerInbox.list(context)"):
+            self.assertIn(required, ledger)
+        self.assertNotIn("KnowledgePeerHighWater", inbox.split("static void delete(")[1])
+
 
     def test_model_settings_and_separate_opt_in_secrets(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
