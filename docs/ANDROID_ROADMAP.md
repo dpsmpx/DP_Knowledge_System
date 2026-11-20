@@ -585,6 +585,21 @@ falls back to the normal review/history menu; it does not act on a stale ID.
 Every mutation remains guarded by the original journal-head and decision-ID
 checks, with no changes to Markdown or automatic claim status.
 
+**Stage 18 paired evidence excerpts (fifteenth slice, awaiting Android QA):**
+Cross-note evidence now carries an explicitly bounded (up to 240 characters)
+snapshot excerpt and fragment ID per original file, selected deterministically
+from a single source-owned fragment row. The representative locator and
+excerpt hash come from **that same row**, instead of potentially unrelated
+`MIN` aggregates over multiple parser readings. Invalid cross-document
+fragment references cannot leak a different note's excerpt or enter copied
+excerpt warnings. The Hub compares the inspected and selected excerpts
+before offering source navigation or human source-type review, and the editor
+context dock shows the same comparison before opening the other note. Both
+views explicitly warn that indexed snapshots may be stale and that live SHA
+freshness validates bytes, **not** the interpretation or truth of a claim.
+No additional Markdown reads, network access, source edits, automatic
+confidence scores or journal writes are introduced by comparison.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

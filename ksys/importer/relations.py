@@ -23,6 +23,7 @@ from .aliases import (AliasSnapshot, MAX_SOURCE_ATOMS, MAX_VARIANTS,
 RELATIONS_VERSION = "exact-claim-context-temporal-overlap-v3"
 MAX_EVIDENCE_GROUPS = 16
 MAX_EVIDENCE_DOCUMENTS = 32
+MAX_EVIDENCE_EXCERPT_CHARS = 240
 
 
 def _qualifiers(assertion: dict) -> tuple[str | None, dict] | None:
@@ -215,6 +216,29 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
             "evidence_groups": evidence_groups, "evidence_limited": evidence_limited}
 
 
+def _evidence_excerpt(con, path: str, atom_key: str) -> dict | None:
+    """Choose a stable representative *from this document's own fragment*.
+
+    The indexed text is a historical snapshot until a separate live SHA check
+    succeeds. Bounded SQLite substr avoids materializing entire long fragments
+    in relation responses. A corrupt cross-document fragment reference cannot
+    be presented as this file's excerpt or used to claim a repeated excerpt.
+    """
+    row = con.execute(
+        "SELECT a.locator, a.fragment_id, substr(f.plain, 1, ?), "
+        "length(f.plain), f.text_hash "
+        "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id AND f.doc=a.doc "
+        "WHERE a.doc=? AND a.atom_key=? "
+        "ORDER BY f.ordinal, a.locator, a.fragment_id LIMIT 1",
+        (MAX_EVIDENCE_EXCERPT_CHARS, path, atom_key),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"locator": row[0], "fragment_id": row[1], "excerpt": row[2],
+            "excerpt_truncated": row[3] > MAX_EVIDENCE_EXCERPT_CHARS,
+            "excerpt_hash": row[4]}
+
+
 def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
     """Explain exact cross-file evidence without inventing a confidence score.
 
@@ -225,8 +249,8 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
     index is an unapproved snapshot and cannot establish live-source validity.
     """
     source = con.execute(
-        "SELECT a.atom_key, MIN(a.locator), MIN(a.predicate), "
-        "MIN(a.negated), MAX(a.negated), MIN(f.text_hash) "
+        "SELECT a.atom_key, MIN(a.predicate), "
+        "MIN(a.negated), MAX(a.negated) "
         "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
         "JOIN documents d ON d.path=a.doc "
         "AND d.status='PARSED' WHERE a.doc=? "
@@ -234,11 +258,15 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
         (source_path, MAX_EVIDENCE_GROUPS + 1)).fetchall()
     limited = len(source) > MAX_EVIDENCE_GROUPS
     groups = []
-    for atom_key, source_locator, predicate, minimum, maximum, text_hash in source[:MAX_EVIDENCE_GROUPS]:
+    for atom_key, predicate, minimum, maximum in source[:MAX_EVIDENCE_GROUPS]:
+        original = _evidence_excerpt(con, source_path, atom_key)
+        if original is None:
+            limited = True
+            continue
         # An exact signature is the predicate + *all* args + context + the
         # precise interval. Alias and temporal-overlap hints stay separate.
         rows = con.execute(
-            "SELECT a.doc, MIN(a.locator), MIN(a.negated), MAX(a.negated), MIN(f.text_hash) "
+            "SELECT a.doc, MIN(a.negated), MAX(a.negated) "
             "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
             "JOIN documents d ON d.path=a.doc "
             "AND d.status='PARSED' WHERE a.atom_key=? AND a.doc<>? "
@@ -249,7 +277,8 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
         mixed_source = minimum != maximum
         corroborating = opposing = mixed = 0
         evidence = []
-        for doc, locator, low, high, other_hash in rows[:MAX_EVIDENCE_DOCUMENTS]:
+        for doc, low, high in rows[:MAX_EVIDENCE_DOCUMENTS]:
+            excerpt = _evidence_excerpt(con, doc, atom_key)
             if low != high:
                 kind = "mixed"
                 mixed += 1
@@ -261,12 +290,20 @@ def indexed_source_evidence(con, source_path: str) -> tuple[list[dict], bool]:
             else:
                 kind = "opposite_polarity"
                 opposing += 1
-            evidence.append({"path": doc, "locator": locator, "relation": kind,
-                             "excerpt_hash": other_hash})
+            evidence.append({"path": doc, "locator": excerpt["locator"] if excerpt else "",
+                             "relation": kind,
+                             "excerpt_available": excerpt is not None,
+                             "fragment_id": excerpt["fragment_id"] if excerpt else None,
+                             "excerpt": excerpt["excerpt"] if excerpt else None,
+                             "excerpt_truncated": excerpt["excerpt_truncated"] if excerpt else False,
+                             "excerpt_hash": excerpt["excerpt_hash"] if excerpt else None})
         kinds = sum(bool(x) for x in (corroborating, opposing, mixed))
         groups.append({
-            "predicate": predicate, "source_locator": source_locator,
-            "source_excerpt_hash": text_hash,
+            "predicate": predicate, "source_locator": original["locator"],
+            "source_fragment_id": original["fragment_id"],
+            "source_excerpt": original["excerpt"],
+            "source_excerpt_truncated": original["excerpt_truncated"],
+            "source_excerpt_hash": original["excerpt_hash"],
             "source_polarity": "mixed" if mixed_source else (
                 "negative" if minimum else "positive"),
             **atom_qualifiers(atom_key),

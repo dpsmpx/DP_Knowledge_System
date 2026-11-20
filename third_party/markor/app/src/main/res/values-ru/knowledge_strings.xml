@@ -108,6 +108,11 @@
     <string name="knowledge_source_assessment_evidence_current">Актуальная ручная пометка типа; хеш файла совпадает с решением</string>
     <string name="knowledge_source_assessment_evidence_historical">Историческая пометка типа; файл изменился или не проверен</string>
     <string name="knowledge_source_assessment_evidence_limited">Проверка ручных типов источников недоступна или достигнут предел безопасности.</string>
+    <string name="knowledge_evidence_comparison_warning">Выдержки из снимка индекса — не доказательство истинности утверждений. Актуальный SHA означает совпадение файла с индексом, не верность интерпретации. Устаревшие или непроверенные выдержки могут отличаться от оригинала.</string>
+    <string name="knowledge_evidence_comparison_inspected">Выдержка просматриваемой заметки из индекса</string>
+    <string name="knowledge_evidence_comparison_selected">Выдержка выбранной заметки из индекса</string>
+    <string name="knowledge_evidence_comparison_missing">В индексе нет выдержки, однозначно привязанной к фрагменту этого файла.</string>
+    <string name="knowledge_evidence_comparison_truncated">… [выдержка сокращена]</string>
     <string name="knowledge_decisions_search">Поиск решений и источников</string>
     <string name="knowledge_decisions_loading">Загрузка локальных решений…</string>
     <string name="knowledge_decisions_empty">В этой категории нет записей. Запустите анализ библиотеки или выберите другую категорию.</string>

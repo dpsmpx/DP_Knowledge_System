@@ -136,6 +136,42 @@ final class KnowledgeRelationPresentation {
         return text.toString();
     }
 
+    /** Snapshot-only text comparison; status means SHA freshness, not truth. */
+    static String evidenceExcerptComparison(Context context, JSONObject group,
+                                            JSONObject selected, String sourcePath) {
+        final StringBuilder text = new StringBuilder(context.getString(
+                R.string.knowledge_evidence_comparison_warning));
+        text.append("\n\n").append(context.getString(
+                R.string.knowledge_evidence_comparison_inspected))
+                .append(" · ").append(sourcePath)
+                .append(" · ").append(group.optString("source_locator"))
+                .append(" · ").append(evidenceVerification(context,
+                        group.optString("source_verification", "not_checked")))
+                .append("\n").append(excerptDisplay(context,
+                        group.optString("source_excerpt", ""),
+                        group.optBoolean("source_excerpt_truncated"), true));
+        if (selected != null) {
+            text.append("\n\n").append(context.getString(
+                    R.string.knowledge_evidence_comparison_selected))
+                    .append(" · ").append(selected.optString("path"))
+                    .append(" · ").append(selected.optString("locator"))
+                    .append(" · ").append(evidenceVerification(context,
+                            selected.optString("verification", "not_checked")))
+                    .append("\n").append(excerptDisplay(context,
+                            selected.optString("excerpt", ""),
+                            selected.optBoolean("excerpt_truncated"),
+                            selected.optBoolean("excerpt_available")));
+        }
+        return text.toString();
+    }
+
+    private static String excerptDisplay(Context context, String excerpt,
+                                         boolean truncated, boolean available) {
+        if (!available) return context.getString(R.string.knowledge_evidence_comparison_missing);
+        return excerpt + (truncated
+                ? context.getString(R.string.knowledge_evidence_comparison_truncated) : "");
+    }
+
     /** Manual provenance label, not a reliability or independence estimate. */
     private static String sourceAssessmentLabel(Context context, JSONObject source) {
         final String state = source.optString("source_assessment_state");

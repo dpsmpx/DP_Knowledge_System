@@ -22,12 +22,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
         self.assertIn('result.optJSONArray("evidence_groups")', hub)
         self.assertIn("showEvidenceDetail(group, sourcePath)", hub)
-        self.assertIn('source.optString("path"),', hub)
-        self.assertIn("if (index == 0) openIndexedNote(path)", hub)
+        self.assertIn("evidenceSourceActions(group, source, sourcePath)", hub)
+        self.assertIn("(d, w) -> openIndexedNote(path)", hub)
         self.assertIn('context.optJSONArray("evidence_groups")', editor)
         self.assertIn('context.optBoolean("evidence_limited")', editor)
-        self.assertIn("showContextEvidence(group, selectedVault)", editor)
-        self.assertIn("openRelatedNote(item.optString(\"path\"), selectedVault)", editor)
+        self.assertIn("showContextEvidence(group, selectedVault, context.optString", editor)
+        self.assertIn("openRelatedNote(selected.optString(\"path\"), selectedVault)", editor)
         self.assertIn("evidenceDisclosure(Context context, JSONObject group)", presentation)
         self.assertIn("evidenceSourceLabel(Context context, JSONObject source)", presentation)
         self.assertIn('context.optBoolean("evidence_checks_limited")', editor)
@@ -148,6 +148,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
         bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
         self.assertIn("sourceAssessmentLabel(context, group)", presentation)
         self.assertIn("sourceAssessmentLabel(context, source)", presentation)
@@ -170,7 +171,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
-        self.assertIn("evidenceSourceActions(sourcePath", hub)
+        self.assertIn("evidenceSourceActions(group, null, sourcePath)", hub)
         self.assertIn("sources.optJSONObject(selected - 1)", hub)
         self.assertIn('if (!"current".equals(verification))', hub)
         self.assertIn("if (alreadyReviewed) dialog.showReviewed(path)", hub)
@@ -181,6 +182,32 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         # UI prefill is not an approval bypass: its preview invokes the
         # existing live source/hash and journal verification bridge.
         self.assertIn("KnowledgePythonBridge.previewSourceAssessment", dialog)
+
+    def test_exact_bounded_excerpts_are_disclosed_before_source_actions(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        index = (Path(__file__).resolve().parents[1] / "ksys/importer/relations.py").read_text()
+        self.assertIn("evidenceExcerptComparison(Context context, JSONObject group", presentation)
+        self.assertIn('group.optString("source_excerpt"', presentation)
+        self.assertIn('selected.optString("excerpt"', presentation)
+        self.assertIn("R.string.knowledge_evidence_comparison_warning", presentation)
+        self.assertIn("evidenceExcerptComparison(\n                        this, group, selected, sourcePath)", hub)
+        self.assertIn("showContextEvidenceComparison(group, item, sourcePath, selectedVault)", editor)
+        self.assertIn("KnowledgeRelationPresentation.evidenceExcerptComparison(", editor)
+        self.assertIn("MAX_EVIDENCE_EXCERPT_CHARS = 240", index)
+        self.assertIn("f.doc=a.doc", index)
+        self.assertIn("substr(f.plain, 1, ?)", index)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_evidence_comparison_warning",
+                         "knowledge_evidence_comparison_inspected",
+                         "knowledge_evidence_comparison_selected",
+                         "knowledge_evidence_comparison_missing",
+                         "knowledge_evidence_comparison_truncated"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
 
     def test_existing_source_review_opens_exact_active_decision_for_withdrawal(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"

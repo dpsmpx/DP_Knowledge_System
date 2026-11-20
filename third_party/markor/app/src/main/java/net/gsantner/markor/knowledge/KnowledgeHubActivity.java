@@ -1892,46 +1892,47 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setTitle(R.string.knowledge_evidence_title)
                             .setItems(rows, (d2, selected) -> {
                                 if (selected == 0) {
-                                    evidenceSourceActions(sourcePath,
-                                            group.optString("source_verification"),
-                                            group.has("source_assessment_kind"));
+                                    evidenceSourceActions(group, null, sourcePath);
                                 } else {
                                     final JSONObject source = sources.optJSONObject(selected - 1);
-                                    if (source != null) evidenceSourceActions(
-                                            source.optString("path"),
-                                            source.optString("verification"),
-                                            source.has("source_assessment_kind"));
+                                    if (source != null) evidenceSourceActions(group, source, sourcePath);
                                 }
                             })
                             .setNegativeButton(android.R.string.cancel, null).show();
                 }).show();
     }
 
-    private void evidenceSourceActions(final String path, final String verification,
-                                       final boolean alreadyReviewed) {
+    private void evidenceSourceActions(final JSONObject group, final JSONObject selected,
+                                       final String sourcePath) {
+        final String path = selected == null ? sourcePath : selected.optString("path");
+        final String verification = selected == null
+                ? group.optString("source_verification") : selected.optString("verification");
+        final boolean alreadyReviewed = selected == null
+                ? group.has("source_assessment_kind") : selected.has("source_assessment_kind");
+        final AlertDialog.Builder comparison = new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_evidence_title)
+                .setMessage(KnowledgeRelationPresentation.evidenceExcerptComparison(
+                        this, group, selected, sourcePath))
+                .setNegativeButton(android.R.string.cancel, null);
         if (!"current".equals(verification)) {
-            // The owner may inspect a stale file, but cannot prefill it as
-            // hash-verified evidence until a fresh notebook analysis.
-            openIndexedNote(path);
+            // Snapshot text may be stale, so offer only inspection, not a
+            // preverified classification shortcut. The editor reopens source.
+            comparison.setPositiveButton(R.string.knowledge_entity_view_source,
+                    (d, w) -> openIndexedNote(path)).show();
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.knowledge_evidence_title)
-                .setItems(new String[]{getString(R.string.knowledge_entity_view_source),
-                        getString(alreadyReviewed
-                                ? R.string.knowledge_source_assessment_history
-                                : R.string.knowledge_source_assessment_new)}, (d, index) -> {
-                    if (index == 0) openIndexedNote(path);
-                    else {
-                        final KnowledgeSourceAssessmentDialog dialog =
-                                new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
-                                        decisionWorker, this::openIndexedNote,
-                                        () -> loadDecisionPage(0));
-                        if (alreadyReviewed) dialog.showReviewed(path);
-                        else dialog.showNew(path);
-                    }
-                })
-                .setNegativeButton(android.R.string.cancel, null).show();
+        comparison.setNeutralButton(R.string.knowledge_entity_view_source,
+                        (d, w) -> openIndexedNote(path))
+                .setPositiveButton(alreadyReviewed
+                        ? R.string.knowledge_source_assessment_history
+                        : R.string.knowledge_source_assessment_new, (d, w) -> {
+                    final KnowledgeSourceAssessmentDialog dialog =
+                            new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
+                                    decisionWorker, this::openIndexedNote,
+                                    () -> loadDecisionPage(0));
+                    if (alreadyReviewed) dialog.showReviewed(path);
+                    else dialog.showNew(path);
+                }).show();
     }
 
     private void chooseLineagePartner(final JSONObject group, final String sourcePath) {

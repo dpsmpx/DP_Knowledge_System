@@ -50,6 +50,54 @@ class RelationTests(unittest.TestCase):
         self.assertEqual((2, 1, 0), (after["same_polarity_files"],
                         after["opposite_polarity_files"], after["mixed_polarity_files"]))
 
+    def test_excerpt_representation_is_bounded_and_matches_one_source_fragment(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        baseline = self._relations(verified=True)["evidence_groups"][0]
+        self.assertIn("Алекс является разработчиком", baseline["source_excerpt"])
+        self.assertFalse(baseline["source_excerpt_truncated"])
+        first = next(x for x in baseline["other_sources"] if x["path"] == "b.md")
+        self.assertTrue(first["excerpt_available"])
+        self.assertIn("Алекс является разработчиком", first["excerpt"])
+        self.assertFalse(first["excerpt_truncated"])
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT id, locator, text_hash FROM fragments "
+                              "WHERE doc='b.md' ORDER BY ordinal LIMIT 1").fetchone()
+            original = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            # Simulated extra parser reading, attached to an earlier fragment.
+            # The locator, ID, excerpt and hash must all come from one row.
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        ("synthetic-second-reading", row[0], "b.md", row[1],
+                         *original[4:]))
+        matched = next(x for x in self._relations()["evidence_groups"][0]["other_sources"]
+                       if x["path"] == "b.md")
+        self.assertEqual(row[0], matched["fragment_id"])
+        self.assertEqual(row[1], matched["locator"])
+        self.assertEqual(row[2], matched["excerpt_hash"])
+
+        with sqlite3.connect(db) as con:
+            con.execute("UPDATE fragments SET plain=? WHERE id=?", ("X" * 600, row[0]))
+        clipped = next(x for x in self._relations()["evidence_groups"][0]["other_sources"]
+                       if x["path"] == "b.md")
+        self.assertEqual("X" * 240, clipped["excerpt"])
+        self.assertTrue(clipped["excerpt_truncated"])
+
+    def test_wrong_document_fragment_cannot_be_presented_as_its_excerpt(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='b.md'").fetchone()
+            con.execute("INSERT INTO documents(path,sha256,size,status,kind) "
+                        "VALUES('ghost.md',?,20,'PARSED','markdown')", ("0" * 64,))
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        ("ghost-reading", row[1], "ghost.md", *row[3:]))
+        group = self._relations()["evidence_groups"][0]
+        ghost = next(x for x in group["other_sources"] if x["path"] == "ghost.md")
+        self.assertFalse(ghost["excerpt_available"])
+        self.assertIsNone(ghost["excerpt"])
+        self.assertIsNone(ghost["excerpt_hash"])
+        self.assertEqual("", ghost["locator"])
+
     def test_live_hash_checks_and_possible_duplicate_excerpts_do_not_approve_claims(self):
         original = {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
                     for name in self.notes}

@@ -108,6 +108,11 @@
     <string name="knowledge_source_assessment_evidence_current">Current manual source-type note; original hash matches approval</string>
     <string name="knowledge_source_assessment_evidence_historical">Historical manual source-type note; original changed or not checked</string>
     <string name="knowledge_source_assessment_evidence_limited">Manual source-type journal coverage is unavailable or over its safety cap.</string>
+    <string name="knowledge_evidence_comparison_warning">Indexed excerpt snapshots, not proof of the claims. A current SHA status verifies the file bytes against the index, not the interpretation. Stale or unchecked snapshots may differ from the original.</string>
+    <string name="knowledge_evidence_comparison_inspected">Inspected indexed excerpt</string>
+    <string name="knowledge_evidence_comparison_selected">Selected indexed excerpt</string>
+    <string name="knowledge_evidence_comparison_missing">No matching fragment excerpt is available in this index.</string>
+    <string name="knowledge_evidence_comparison_truncated">… [excerpt shortened]</string>
     <string name="knowledge_decisions_search">Search decisions and sources</string>
     <string name="knowledge_decisions_loading">Loading local decisions…</string>
     <string name="knowledge_decisions_empty">No entries in this category. Analyze the library to extract suggestions, or choose another category.</string>

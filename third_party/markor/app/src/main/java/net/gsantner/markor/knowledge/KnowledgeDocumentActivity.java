@@ -948,7 +948,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             if (group == null) continue;
             addContextRow(related, getString(R.string.knowledge_evidence_title) + " · "
                             + KnowledgeRelationPresentation.evidenceSummary(this, group),
-                    view -> showContextEvidence(group, selectedVault));
+                    view -> showContextEvidence(group, selectedVault, context.optString("path")));
         }
         if (relationCount == 0 && evidenceCount == 0) {
             addContextEmpty(related, R.string.knowledge_editor_context_empty_relations);
@@ -1532,7 +1532,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         showDockPage(getString(title), body);
     }
 
-    private void showContextEvidence(final JSONObject group, final File selectedVault) {
+    private void showContextEvidence(final JSONObject group, final File selectedVault,
+                                     final String sourcePath) {
         final LinearLayout body = newDockContent();
         body.addView(contextDetailText(
                 KnowledgeRelationPresentation.evidenceDisclosure(this, group)));
@@ -1542,9 +1543,19 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 final JSONObject item = others.optJSONObject(i);
                 if (item == null) continue;
                 addContextRow(body, KnowledgeRelationPresentation.evidenceSourceLabel(this, item),
-                        view -> openRelatedNote(item.optString("path"), selectedVault));
+                        view -> showContextEvidenceComparison(group, item, sourcePath, selectedVault));
             }
         }
+        showDockPage(getString(R.string.knowledge_evidence_title), body);
+    }
+
+    private void showContextEvidenceComparison(final JSONObject group, final JSONObject selected,
+                                               final String sourcePath, final File selectedVault) {
+        final LinearLayout body = newDockContent();
+        body.addView(contextDetailText(KnowledgeRelationPresentation.evidenceExcerptComparison(
+                this, group, selected, sourcePath)));
+        addContextRow(body, getString(R.string.knowledge_editor_context_open),
+                view -> openRelatedNote(selected.optString("path"), selectedVault));
         showDockPage(getString(R.string.knowledge_evidence_title), body);
     }
 
