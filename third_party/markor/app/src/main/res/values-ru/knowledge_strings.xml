@@ -210,6 +210,7 @@
     <string name="knowledge_possible_agreement">Возможное согласие</string>
     <string name="knowledge_possible_conflict">Возможное противоречие</string>
     <string name="knowledge_possible_temporal_overlap">Периоды пересекаются (нужна проверка; не вывод о противоречии)</string>
+    <string name="knowledge_possible_temporal_separation">Периоды разделены по датам (нужна проверка; не доказательство изменения факта)</string>
     <string name="knowledge_possible_modal_contrast">Разная модальность высказываний (ручная проверка; не согласие и не конфликт)</string>
     <string name="knowledge_possible_alias">Возможная связь по алиасу, подтверждённому человеком (не доказательство)</string>
     <string name="knowledge_evidence_title">Свидетельства из разных заметок · кандидаты индекса</string>
@@ -259,6 +260,10 @@
     <string name="knowledge_modal_historical_pair">Один или оба файла изменены, недоступны или не проверены. Сопоставление — только историческая подсказка из индекса.</string>
     <string name="knowledge_relation_other_interval">Период другой заметки</string>
     <string name="knowledge_relation_overlap_interval">Общий период</string>
+    <string name="knowledge_relation_source_earlier">Период исследуемого источника раньше.</string>
+    <string name="knowledge_relation_other_earlier">Период другого источника раньше.</string>
+    <string name="knowledge_relation_gap_days">Календарных дней между периодами: %1$d</string>
+    <string name="knowledge_relation_temporal_separation_warning">Порядок дат и противоположная полярность не доказывают изменение факта, согласие или противоречие. Это неподтверждённые прочтения из индекса; проверьте исходные заметки.</string>
     <string name="knowledge_no_semantic_relations">Точных совпадений и осторожных подсказок по периодам/подтверждённым алиасам нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
     <string name="knowledge_semantic_failed">Не удалось проверить смысловые связи. Заметки и журнал решений не изменены.</string>
     <string name="knowledge_semantic_limited">только первые 60</string>

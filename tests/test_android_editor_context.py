@@ -222,6 +222,33 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual(before, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
                                   for p in self.notes})
 
+    def test_editor_shows_separated_dated_readings_without_claiming_change(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        db = Workspace(self.workspace).db_path
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end in (("a.md", "2023-01-01", "2023-12-31"),
+                                     ("b.md", "2024-01-01", "2024-12-31")):
+                assertion = {"mod": "asserted", "neg": path == "b.md", "atom": atom,
+                             "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "synthetic", "nodes": [
+                    {"type": "claim", "assertion": assertion}
+                ]}, path, "F:synthetic", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], row[6], path))
+        before = hashlib.sha256(db.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        result = [r for r in context["candidate_relations"] if r["path"] == "b.md"]
+        self.assertEqual(1, len(result))
+        self.assertEqual("temporal_separation", result[0]["kind"])
+        self.assertEqual("source_before_other", result[0]["relative_order"])
+        self.assertEqual(0, result[0]["gap_days"])
+        self.assertTrue(result[0]["opposing_polarity"])
+        self.assertTrue(context["relations_are_unapproved"])
+        self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
     def test_accepted_opposites_show_possible_journal_conflict(self):
         for path in ("a.md", "c.md"):
             note = self.notes[path]

@@ -210,6 +210,7 @@
     <string name="knowledge_possible_agreement">Potential agreement</string>
     <string name="knowledge_possible_conflict">Potential conflict</string>
     <string name="knowledge_possible_temporal_overlap">Time periods overlap (review; not a conflict verdict)</string>
+    <string name="knowledge_possible_temporal_separation">Dated periods are separate (review; not proof of a change)</string>
     <string name="knowledge_possible_modal_contrast">Different statement modality (manual review; not an agreement or conflict)</string>
     <string name="knowledge_possible_alias">Possible link via human-approved alias (review; not proof)</string>
     <string name="knowledge_evidence_title">Cross-note evidence · indexed candidates</string>
@@ -259,6 +260,10 @@
     <string name="knowledge_modal_historical_pair">One or both original files are stale, unavailable or unchecked. Treat this contrast as an indexed historical hint only.</string>
     <string name="knowledge_relation_other_interval">Other note period</string>
     <string name="knowledge_relation_overlap_interval">Shared period</string>
+    <string name="knowledge_relation_source_earlier">The inspected source period is earlier.</string>
+    <string name="knowledge_relation_other_earlier">The other source period is earlier.</string>
+    <string name="knowledge_relation_gap_days">Calendar days between these periods: %1$d</string>
+    <string name="knowledge_relation_temporal_separation_warning">Date order and opposite polarity do not prove a change, agreement or contradiction. These are unapproved indexed readings; inspect the original notes.</string>
     <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>
     <string name="knowledge_semantic_failed">Could not inspect semantic relationships. Original notes and decisions are unchanged.</string>
     <string name="knowledge_semantic_limited">first 60 only</string>

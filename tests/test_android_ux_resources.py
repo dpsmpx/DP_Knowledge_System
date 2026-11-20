@@ -296,6 +296,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_relation_overlap_interval"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
+    def test_time_separation_hints_show_order_gap_and_anti_conflict_warning(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_separation".equals(kind)', hub)
+        self.assertIn('"temporal_separation".equals(kind)', editor)
+        self.assertIn('"temporal_separation".equals(relation.optString("kind"))', presentation)
+        self.assertIn('relation.optInt("gap_days")', presentation)
+        self.assertIn('relation.optString("relative_order")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_temporal_separation",
+                         "knowledge_relation_source_earlier",
+                         "knowledge_relation_other_earlier",
+                         "knowledge_relation_gap_days",
+                         "knowledge_relation_temporal_separation_warning"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

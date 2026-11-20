@@ -880,9 +880,11 @@ class RelationTests(unittest.TestCase):
             assign(con, "c.md", "2025-02-02", "2025-12-31")
             self.assertEqual(0, _source_conflict_count(con))
         relations = self._relations()["matches"]
-        self.assertEqual(["b.md"], [x["path"] for x in relations])
-        overlap = relations[0]
+        self.assertEqual({"b.md", "c.md"}, {x["path"] for x in relations})
+        overlap = next(x for x in relations if x["path"] == "b.md")
         self.assertEqual("temporal_overlap", overlap["kind"])
+        self.assertEqual("temporal_separation", next(x for x in relations
+                         if x["path"] == "c.md")["kind"])
         self.assertFalse(overlap["opposing_polarity"])
         self.assertEqual({"from": "2024-01-01", "to": "2024-12-31"},
                          overlap["interval"])
@@ -898,16 +900,83 @@ class RelationTests(unittest.TestCase):
             self.assertEqual(0, _source_conflict_count(con))
             assign(con, "b.md", "2024-12-31", "2024-12-31")
         boundary = self._relations()["matches"]
-        self.assertEqual(["b.md"], [x["path"] for x in boundary])
-        self.assertTrue(boundary[0]["opposing_polarity"])
+        self.assertEqual({"b.md", "c.md"}, {x["path"] for x in boundary})
+        self.assertTrue(next(x for x in boundary if x["path"] == "b.md")["opposing_polarity"])
         self.assertEqual({"from": "2024-12-31", "to": "2024-12-31"},
-                         boundary[0]["overlap_interval"])
+                         next(x for x in boundary if x["path"] == "b.md")["overlap_interval"])
         with sqlite3.connect(db) as con:
             assign(con, "b.md", "2024-12-31", "2025-02-01", context="проект-б")
-        self.assertEqual([], self._relations()["matches"])
+        final = self._relations()["matches"]
+        self.assertEqual(["c.md"], [x["path"] for x in final])
+        self.assertEqual("temporal_separation", final[0]["kind"])
         self.assertEqual(original, {
             name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
             for name in self.notes})
+        self.assertFalse((self.workspace / "data").exists())
+
+    def test_separated_explicit_time_ranges_show_order_and_gap_not_version_truth(self):
+        source_hashes = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                         for p in self.notes}
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+
+        def assign(con, path, start, end, context="проект-а", negated=False):
+            assertion = {"mod": "asserted", "neg": negated, "atom": atom,
+                         "ctx": context, "iv": {"from": start, "to": end}}
+            row = projected_atoms({"id": "test", "nodes": [
+                {"type": "claim", "assertion": assertion},
+            ]}, path, "F:test", "test:1")[0]
+            con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                        "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                        (row[4], row[7], row[8], row[9], row[6], path))
+
+        with sqlite3.connect(db) as con:
+            assign(con, "a.md", "2025-02-01", "2025-02-28")
+            assign(con, "b.md", "2024-01-01", "2024-12-31")
+            assign(con, "c.md", "2025-03-01", "2025-03-31", negated=True)
+            self.assertEqual(0, _source_conflict_count(con))
+        before = hashlib.sha256(db.read_bytes()).hexdigest()
+        page = self._relations("a.md")
+        self.assertEqual({"b.md", "c.md"}, {m["path"] for m in page["matches"]})
+        self.assertTrue(all(m["kind"] == "temporal_separation" for m in page["matches"]))
+        by_path = {m["path"]: m for m in page["matches"]}
+        self.assertEqual(("other_before_source", 31),
+                         (by_path["b.md"]["relative_order"], by_path["b.md"]["gap_days"]))
+        self.assertEqual(("source_before_other", 0),
+                         (by_path["c.md"]["relative_order"], by_path["c.md"]["gap_days"]))
+        self.assertTrue(by_path["c.md"]["opposing_polarity"])
+        self.assertTrue(all(m["authority"] == "unapproved_parser_hint"
+                            for m in page["matches"]))
+        reverse = next(m for m in self._relations("b.md")["matches"] if m["path"] == "a.md")
+        self.assertEqual("source_before_other", reverse["relative_order"])
+        self.assertEqual(31, reverse["gap_days"])
+        self.assertEqual("2025-02-01", reverse["other_interval"]["from"])
+        self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+        # A distinct context and an open endpoint never qualify as two
+        # complete, date-separated historical versions.
+        with sqlite3.connect(db) as con:
+            assign(con, "b.md", "2024-01-01", "2024-12-31", context="проект-б")
+            assign(con, "c.md", "2025-03-01", None, negated=True)
+        self.assertFalse(any(m["kind"] == "temporal_separation"
+                             for m in self._relations("a.md")["matches"]))
+
+        # The inclusive shared endpoint belongs to overlap, not separation.
+        with sqlite3.connect(db) as con:
+            assign(con, "c.md", "2025-02-28", "2025-03-31", negated=True)
+        touching = [m for m in self._relations("a.md")["matches"] if m["path"] == "c.md"]
+        self.assertEqual(["temporal_overlap"], [m["kind"] for m in touching])
+        self.assertEqual({"from": "2025-02-28", "to": "2025-02-28"},
+                         touching[0]["overlap_interval"])
+
+        with sqlite3.connect(db) as con:
+            assign(con, "b.md", "2024-01-01", "2024-12-31")
+            con.execute("UPDATE candidate_atoms SET valid_to='2024-12-30' WHERE doc='b.md'")
+        self.assertFalse(any(m["kind"] == "temporal_separation" and m["path"] == "b.md"
+                             for m in self._relations("a.md")["matches"]))
+        self.assertEqual(source_hashes, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                                         for p in self.notes})
         self.assertFalse((self.workspace / "data").exists())
 
     def test_open_ended_intervals_require_actual_bounds_on_both_sides(self):

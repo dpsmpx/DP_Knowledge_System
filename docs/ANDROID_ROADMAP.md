@@ -648,6 +648,20 @@ Original notes, approved decisions and the append-only human journal remain
 unchanged. No automatic conflict vote, source reliability or independence
 assessment is introduced; physical Android QA remains open.
 
+**Stage 18 time-separated source readings (nineteenth slice, awaiting Android QA):**
+The bounded cross-note relation query now adds a distinct, read-only
+`temporal_separation` hint for two asserted, fully closed, non-overlapping
+date intervals describing the **same exact predicate, arguments and context**.
+The UI shows both precise date ranges, which is earlier and the number of
+calendar days strictly between them (0 for adjacent periods). These are
+source-supplied validity intervals, **not** observations of when a fact changed.
+Unspecified/open bounds never yield a separation hint; a shared endpoint is
+still an overlap, not a gap. Opposite polarity remains metadata only. Neither
+this hint nor any date order participates in the exact-key agreement/conflict
+audit, source evidence counts or accepted knowledge. Library and editor expose
+the same bounded results with EN/RU warnings against inferred version truth.
+No index migration, original Markdown change or human journal write occurs.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

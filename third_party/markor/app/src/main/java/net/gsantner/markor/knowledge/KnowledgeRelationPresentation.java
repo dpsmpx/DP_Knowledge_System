@@ -237,6 +237,22 @@ final class KnowledgeRelationPresentation {
             appendInterval(text, context, R.string.knowledge_relation_overlap_interval,
                     relation.optJSONObject("overlap_interval"));
         }
+        if ("temporal_separation".equals(relation.optString("kind"))) {
+            appendInterval(text, context, R.string.knowledge_relation_other_interval,
+                    relation.optJSONObject("other_interval"));
+            text.append("\n").append(context.getString(
+                    "source_before_other".equals(relation.optString("relative_order"))
+                    ? R.string.knowledge_relation_source_earlier
+                    : R.string.knowledge_relation_other_earlier));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_gap_days, relation.optInt("gap_days")));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_temporal_separation_warning));
+            if (relation.optBoolean("opposing_polarity")) {
+                text.append("\n").append(context.getString(
+                        R.string.knowledge_modal_opposing_info));
+            }
+        }
         if ("alias_candidate".equals(relation.optString("kind"))) {
             final JSONObject evidence = relation.optJSONObject("alias_evidence");
             if (evidence != null) {

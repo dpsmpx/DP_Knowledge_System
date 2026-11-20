@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date
 
 from ..core.errors import KSError
 from ..core.ids import canonical_json
@@ -218,6 +219,23 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
         (source_path, source_path, limit + 1)
     ).fetchall()
 
+    # Unlike the overlap hint, an ordering/gap requires *both* endpoints of
+    # *both* date ranges to be explicitly recorded. An open or unspecified
+    # side is not permission to infer the start/end of a historical version.
+    separated_filter = (
+        "AND a.atom_key<>b.atom_key "
+        "AND a.valid_from IS NOT NULL AND a.valid_to IS NOT NULL "
+        "AND b.valid_from IS NOT NULL AND b.valid_to IS NOT NULL "
+        "AND (a.valid_to<b.valid_from OR b.valid_to<a.valid_from) "
+    )
+    separated = con.execute(
+        select + "FROM candidate_atoms a JOIN candidate_atoms b ON a.scope_key=b.scope_key "
+        + documents + "WHERE a.doc=? AND b.doc<>? " + separated_filter
+        + "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator, "
+          "a.fragment_id, b.fragment_id LIMIT ?",
+        (source_path, source_path, limit + 1)
+    ).fetchall()
+
     matches = []
     for r in exact:
         matches.append({
@@ -250,6 +268,39 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
             "interval": source_interval.to_dict(),
             "other_interval": other_interval.to_dict(),
             "overlap_interval": overlap.to_dict(),
+        })
+    for r in separated:
+        try:
+            source_interval = Interval(r[10], r[11])
+            other_interval = Interval(r[12], r[13])
+        except (KSError, TypeError, ValueError):
+            continue
+        source_qual = atom_qualifiers(r[8])
+        other_qual = atom_qualifiers(r[9])
+        if (None in (source_interval.start, source_interval.end,
+                     other_interval.start, other_interval.end)
+                or source_interval.intersect(other_interval) is not None
+                or source_qual["context"] != other_qual["context"]
+                or source_qual["interval"] != source_interval.to_dict()
+                or other_qual["interval"] != other_interval.to_dict()):
+            continue
+        source_first = source_interval.end < other_interval.start
+        earlier_end = source_interval.end if source_first else other_interval.end
+        later_start = other_interval.start if source_first else source_interval.start
+        gap_days = (date.fromisoformat(later_start)
+                    - date.fromisoformat(earlier_end)).days - 1
+        matches.append({
+            "path": r[0], "source_locator": r[1], "other_locator": r[2],
+            "source_fragment": r[3], "other_fragment": r[4],
+            "kind": "temporal_separation", "predicate": r[7],
+            "opposing_polarity": r[5] != r[6],
+            "context": source_qual["context"],
+            "interval": source_interval.to_dict(),
+            "other_interval": other_interval.to_dict(),
+            "relative_order": ("source_before_other" if source_first
+                               else "other_before_source"),
+            "gap_days": gap_days,
+            "authority": "unapproved_parser_hint",
         })
     alias_matches, alias_limited = indexed_alias_candidates(
         con, source_path, limit, aliases)

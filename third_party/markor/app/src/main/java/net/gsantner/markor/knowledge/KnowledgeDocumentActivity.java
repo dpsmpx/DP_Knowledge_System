@@ -935,6 +935,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     ? R.string.knowledge_possible_alias
                     : "temporal_overlap".equals(kind)
                     ? R.string.knowledge_possible_temporal_overlap
+                    : "temporal_separation".equals(kind)
+                    ? R.string.knowledge_possible_temporal_separation
                     : "modal_contrast".equals(kind)
                     ? R.string.knowledge_possible_modal_contrast
                     : "possible_conflict".equals(kind)
