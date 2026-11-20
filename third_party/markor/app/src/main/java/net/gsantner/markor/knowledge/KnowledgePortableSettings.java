@@ -15,10 +15,11 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-/** Versioned allowlist of non-secret preferences. Endpoints/tokens stay local. */
+/** Versioned allowlist of non-secret preferences; optional secret data has a separate entry. */
 final class KnowledgePortableSettings {
     private static final String SCHEMA_V1 = "dpks-safe-settings-v1";
     private static final String SCHEMA_V2 = "dpks-safe-settings-v2";
+    private static final String SCHEMA_V3 = "dpks-safe-settings-v3";
     private static final String[] MODELS = {"knowledge_embedding_model", "knowledge_llm_model"};
     private static final String ANALYZE_ON_REFRESH = "semantic_analysis_on_refresh";
 
@@ -31,9 +32,15 @@ final class KnowledgePortableSettings {
     }
 
     static byte[] snapshot(final SharedPreferences preferences) throws Exception {
+        return snapshot(preferences, false);
+    }
+
+    /** Only explicit manual exports can request v3 with a separate secret entry. */
+    static byte[] snapshot(final SharedPreferences preferences,
+                           final boolean includeSecrets) throws Exception {
         final JSONObject safe = new JSONObject();
-        safe.put("schema", SCHEMA_V2);
-        safe.put("secrets_exported", false);
+        safe.put("schema", includeSecrets ? SCHEMA_V3 : SCHEMA_V2);
+        safe.put("secrets_exported", includeSecrets);
         safe.put("derived_indexes_exported", false);
         if (preferences != null) {
             for (final String key : MODELS) {
@@ -71,15 +78,18 @@ final class KnowledgePortableSettings {
             final JSONObject json = new JSONObject(new String(bytes.toByteArray(),
                     StandardCharsets.UTF_8));
             final String schema = json.optString("schema");
-            if (!(SCHEMA_V1.equals(schema) || SCHEMA_V2.equals(schema))
-                    || json.optBoolean("secrets_exported", true)
-                    || json.optBoolean("derived_indexes_exported", true))
+            final boolean secrets = SCHEMA_V3.equals(schema);
+            if (!(SCHEMA_V1.equals(schema) || SCHEMA_V2.equals(schema) || secrets)
+                    || !(json.opt("secrets_exported") instanceof Boolean)
+                    || json.optBoolean("secrets_exported") != secrets
+                    || (zip.getEntry(KnowledgePortableArchive.SECRETS) != null) != secrets
+                    || !Boolean.FALSE.equals(json.opt("derived_indexes_exported")))
                 throw new SecurityException("Unsupported or unsafe portable settings");
             for (final String key : MODELS) {
                 final String value = json.optString(key, "");
                 if (safeModel(value)) models.put(key, value);
             }
-            if (SCHEMA_V2.equals(schema) && json.has(ANALYZE_ON_REFRESH)) {
+            if ((SCHEMA_V2.equals(schema) || secrets) && json.has(ANALYZE_ON_REFRESH)) {
                 final Object value = json.get(ANALYZE_ON_REFRESH);
                 if (!(value instanceof Boolean))
                     throw new SecurityException("Invalid portable analysis preference");

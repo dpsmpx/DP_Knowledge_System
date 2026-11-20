@@ -87,7 +87,7 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertNotIn("FileOutputStream(currentLibrary)", inbox)
 
 
-    def test_optional_model_settings_migrate_without_endpoints_or_secrets(self):
+    def test_model_settings_and_separate_opt_in_secrets(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
         settings = (JAVAS / "KnowledgePortableSettings.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
@@ -95,14 +95,27 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("KnowledgePortableSettings.read(staged)", hub)
         self.assertIn("KnowledgePortableSettings.apply(", hub)
         self.assertIn("KnowledgePortableSettings.snapshot(null)", worker)
+        secrets = (JAVAS / "KnowledgePortableSecrets.java").read_text()
+        archive = (JAVAS / "KnowledgePortableArchive.java").read_text()
         for required in ("knowledge_embedding_model", "knowledge_llm_model",
-                         '"secrets_exported", false',
+                         'return snapshot(preferences, false)',
                          '"derived_indexes_exported", false',
                          "Unsupported or unsafe portable settings"):
             self.assertIn(required, settings)
         for secret in ("knowledge_embedding_endpoint", "knowledge_llm_endpoint",
                        "API_KEY", "SharedPreferences.getAll"):
             self.assertNotIn(secret, settings)
+        for required in ("migrateSecrets.setChecked(false)",
+                         "includeSecrets.setChecked(false)",
+                         "KnowledgePortableSecrets.snapshot(prefs)",
+                         "KnowledgePortableSecrets.read(verifiedZip)"):
+            self.assertIn(required, hub)
+        for required in ("knowledge_embedding_endpoint", "knowledge_llm_endpoint",
+                         'dpks-portable-secrets-v1', "validateEndpoint",
+                         "Unexpected secret field"):
+            self.assertIn(required, secrets)
+        self.assertIn('meta/secrets.json', archive)
+        self.assertNotIn("KnowledgePortableSecrets", worker)
 
     def test_paged_foreign_events_stay_read_only_and_recheck_commitment(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()

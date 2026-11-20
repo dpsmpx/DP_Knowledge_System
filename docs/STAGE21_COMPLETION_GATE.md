@@ -11,7 +11,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Encrypted full snapshot + manifest | Versioned authenticated ciphertext, write/readback verification, clean-library restore; Android unit CI passed | Independent device restore |
 | Opt-in 24-hour local daily backup | WorkManager, Keystore-sealed passphrase, retention and verified copies | Battery/OEM, reboot, low-storage device QA |
 | Off-device backup | Separately consented SAF tree copy/readback | Real provider durability/revoked-permission tests |
-| Settings | Model labels plus v2 typed analysis preference, opt-in restore; all secrets excluded | Owner decision on portable secrets, v1/v2 device migration |
+| Settings | Safe v1/v2 settings remain compatible; v3 explicitly gated secret-entry transfer with unchecked per-export/per-import choice and second export warning; background archives stay v2/no secrets | Android v1/v2/v3 migration, security review of confidential URLs |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review | External transport/rollback/replay acceptance |
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
@@ -30,6 +30,11 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 - No automatic journal merge, last-write-wins, schema/alias/revision replay,
   remote Markdown overwrite, network peer polling, or model download.
+- LLM API keys currently live only in the foreground session, not in app
+  preferences, and cannot be transferred. The v3 secret allowlist handles
+  only persisted embedding/LLM endpoints, including credentials embedded in
+  their URLs. Android Keystore private keys are never exported. No background
+  backup code path can attach the v3 secret entry.
 - A valid signature proves a paired signing key, not human approval. Each
   accepted/retracted decision is a new local journal event, with local source
   and causal validation appropriate to that operation.
@@ -44,8 +49,9 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 ## Closing conditions
 
-1. Implement the **approved** scope in root `TODO.md`: opt-in export of
-   portable secrets on every manual snapshot; both external and app-managed
+1. Implement the **approved** scope in root `TODO.md`: opt-in v3 confidential
+   endpoint export/restore is implemented, pending Android CI and device QA;
+   still implement both external and app-managed
    Markdown exchange with compare-and-keep-both; manual handling of every
    foreign operation; durable anti-rollback high-water evidence. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
