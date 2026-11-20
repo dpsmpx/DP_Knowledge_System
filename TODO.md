@@ -209,6 +209,21 @@
   только подсчитан: 760 source/FTS, без пропусков/сирот; оба отдельных
   B-tree статуса `ok`. Два прежних SQLite WARN сохраняются, `STRESS-20K`
   и ручная QA (SAF, Keystore, два устройства, фон, доступность) ещё SKIP.
+  **Четвёртый отчёт владельца 20.11.2026 — 20k stress:** APK #23,
+  `com.dpsmpx.dpks` 2026.10.0-1304, Android API 35/arm64-v8a,
+  26,599 мс: **PASS=24 WARN=2 FAIL=0 SKIP=4**. `STRESS-20K: PASS`:
+  `syntheticNotes=20000`, `indexed=20000`, `sources=20000`, `fts=20000`,
+  `missingFts=0`, `orphanFts=0`, `structuralHealthy=true`, `paging=true`,
+  `indexingMillis=5594`, весь шаг 10,134 мс. Хеш тестового оригинала не
+  изменился, файлы изолированы в app cache. Два SQLite WARN идентичны
+  предыдущим (`read-only=not-ok`, synthetic read/write=`ok`, B-tree=`ok/ok`);
+  пользовательский vault лишь подсчитан (760 заметок), **20k реальных
+  пользовательских файлов не проверялись**. `QA-21-10` остаётся открытым
+  для SAF/Keystore, двух устройств, отмены/перезагрузки, батареи и TalkBack.
+- [x] **QA-21-10-SYNTH — quick + 20k на Android 15.** На подписанном
+  APK #23 владелец подтвердил `PORTABLE-21`, все семь `SYNC21-*`, чистое
+  восстановление двух тестовых файлов, быстрый и 20k стрессовый сценарии.
+  Это узкая синтетическая аппаратная проверка, **не** закрытие `QA-21-10`.
 - [x] **TODO-21-04 — ранее запущенные GitHub Actions (факт установлен).**
   До изменения `.github/workflows/android-knowledge-ci.yml` CI при push в
   PR #74 **действительно собрал unsigned debug APK** на временном runner:
