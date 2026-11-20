@@ -122,6 +122,41 @@ public final class KnowledgePythonBridge {
                 token, expectedHead);
     }
 
+    /** User-authored source *type*, never a reliability score or fact approval. */
+    public static JSONObject sourceAssessmentDecisions(final Context context,
+                                                       final String workspace) throws JSONException {
+        return invoke(context, "source_assessment_decisions", workspace);
+    }
+
+    public static JSONObject previewSourceAssessment(final Context context, final String workspace,
+                                                     final String notebook, final String path,
+                                                     final String kind, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_source_assessment", workspace, notebook,
+                path, kind, reason);
+    }
+
+    public static JSONObject confirmSourceAssessment(final Context context, final String workspace,
+                                                     final String notebook, final String path,
+                                                     final String kind, final String reason,
+                                                     final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_source_assessment", workspace, notebook,
+                path, kind, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewSourceUnassessment(final Context context, final String workspace,
+                                                       final String decisionId) throws JSONException {
+        return invoke(context, "preview_source_unassessment", workspace, decisionId);
+    }
+
+    public static JSONObject confirmSourceUnassessment(final Context context, final String workspace,
+                                                       final String decisionId, final String token,
+                                                       final String expectedHead) throws JSONException {
+        return invoke(context, "record_source_unassessment", workspace, decisionId,
+                token, expectedHead);
+    }
+
     public static JSONObject fullAudit(final Context context, final String workspace,
                                        final String notebook, final BulkProgress progress)
             throws JSONException {

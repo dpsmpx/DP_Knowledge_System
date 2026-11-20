@@ -107,6 +107,41 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_source_lineage_historical_warning"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_manual_source_type_review_does_not_rate_truth(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_assessment")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("new KnowledgeSourceAssessmentDialog(this, workspacePath()", hub)
+        for method in ("sourceAssessmentDecisions", "previewSourceAssessment",
+                       "confirmSourceAssessment", "previewSourceUnassessment",
+                       "confirmSourceUnassessment"):
+            self.assertIn(method + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + method + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "source_assess", "source_unassess", "setTextIsSelectable(true)"):
+            self.assertIn(signal, dialog)
+        self.assertIn('"changes_claim_authority": False', python)
+        self.assertIn('"reliability_score": None', python)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_title",
+                        "knowledge_source_assessment_primary",
+                        "knowledge_source_assessment_secondary",
+                        "knowledge_source_assessment_republication",
+                        "knowledge_source_assessment_unclassified",
+                        "knowledge_source_assessment_preview_warning",
+                        "knowledge_source_assessment_revoke_warning",
+                        "knowledge_source_assessment_history",
+                        "knowledge_source_assessment_error_detail"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         button = next(e for e in layout.iter() if e.get(ANDROID + "id")

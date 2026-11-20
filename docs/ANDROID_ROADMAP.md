@@ -545,7 +545,12 @@ event. `source_unassess` references that exact event and works offline;
 historical records are never deleted. Neither event modifies authority,
 claims, aliases, inferences, Markdown or the source index. The active/history
 API and operation cap are separate from the common-upstream link workflow.
-Android authoring UI and device QA are the next integration steps.
+The Android Decisions screen now exposes a separate source-type review button.
+It offers a localized descriptive-type choice, original excerpt/SHA preview,
+explicit confirmation, source navigation, owner history and a separate offline
+withdrawal confirmation. These are UI/journal metadata only. No automatic
+epistemic authority, source ranking or hidden classification is introduced;
+physical Android, accessibility and SAF acceptance remain unverified.
 
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
