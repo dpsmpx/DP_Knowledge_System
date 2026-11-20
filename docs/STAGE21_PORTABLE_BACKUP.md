@@ -116,3 +116,13 @@ committed by this path. Existing unsigned archives can be compared read-only.
 
 This is **not** finished synchronization. Multi-device causal storage,
 reviewed conflict-resolution events and non-overwriting replay remain open.
+
+## Sixth slice: encrypted offline branch holding area (pending CI)
+
+After comparing a verified encrypted snapshot with a **paired** peer, the
+user may explicitly retain the foreign journal in an Android Keystore-sealed
+inbox. Saved branches can be inspected by comparing their hash chains again
+and deleted individually with confirmation. Reimport of an identical signed
+branch is idempotent. No source notes or accepted journal decisions are
+changed by this retention mechanism. Active causal replay and manual conflict
+resolution have not yet been implemented.

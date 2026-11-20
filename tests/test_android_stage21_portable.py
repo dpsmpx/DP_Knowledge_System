@@ -68,6 +68,25 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn('static final String PEER = "meta/peer.json"', archive)
         self.assertNotIn("journalRestoreCommit(this, workspacePath(), foreign)", hub)
 
+    def test_foreign_journal_inbox_is_encrypted_and_never_replayed(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        inbox = (JAVAS / "KnowledgePeerInbox.java").read_text()
+        root = ET.parse(SOURCE / "res/layout/knowledge__activity.xml").getroot()
+        ids = [e.get(ANDROID + "id") for e in root.iter()]
+        self.assertEqual(ids.count("@+id/knowledge_sync_inbox"), 1)
+        self.assertIn("R.id.knowledge_sync_inbox", hub)
+        self.assertIn("KnowledgePeerInbox.save(", hub)
+        self.assertIn("KnowledgePeerInbox.open(this, name)", hub)
+        self.assertIn("KnowledgePortableRestore.peerProof(staged)", hub)
+        for required in ("getNoBackupFilesDir()", "AndroidKeyStore",
+                         "AES/GCM/NoPadding", "cipher.updateAAD(MAGIC)",
+                         "KnowledgePeerIdentity.verifyJournal(", "if (!verified.paired)",
+                         "MAX_RECORDS = 100", "return false; // Retry"):
+            self.assertIn(required, inbox)
+        self.assertNotIn("journalRestoreCommit", inbox)
+        self.assertNotIn("FileOutputStream(currentLibrary)", inbox)
+
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()

@@ -65,6 +65,20 @@ explicit local trust are separate requirements.
 ## Not implemented yet
 
 QR scanning (manual invitation + separately verified code is available),
-durable inbox, causal replay, conflict resolution events, remote polling,
+causal replay, conflict resolution events, remote polling,
 event acknowledgements and real-device QA.
 Do not label Stage 21 sync as PASS until all these are integrated and tested.
+
+## Encrypted peer inbox slice (pending CI)
+
+Only after archive ciphertext, ZIP manifest, P-256 journal signature,
+locally pinned peer identity, and **both Python journal chains** have been
+validated, the user may press **Save authenticated branch**. The app stores
+an independently AES-256-GCM-encrypted copy under Android's private no-backup
+directory with a nonexportable Keystore key. Repeated imports of the same
+signed journal are idempotent; the local inbox is bounded to 100 entries and
+8 MiB per signed journal. The user can review a saved branch again or
+explicitly remove it. Revoking a peer disables trust for its saved branches.
+
+The inbox is *not* authoritative and never accepts, replays, merges, or
+overwrites decisions. It is a holding area for later manual causal review.

@@ -29,21 +29,31 @@ final class KnowledgePortableRestore {
             if (proof == null) return null; // Older unsigned backups cannot sync.
             final ZipEntry journal = zip.getEntry(KnowledgePortableArchive.JOURNAL);
             if (journal == null) throw new IOException("Signed archive missing journal");
-            if (proof.getSize() < 1 || proof.getSize() > 4096)
-                throw new IOException("Invalid peer proof length");
-            final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            try (InputStream input = zip.getInputStream(proof)) {
-                final byte[] buf = new byte[4096];
-                int n;
-                while ((n = input.read(buf)) != -1) {
-                    if (bytes.size() + n > 4096)
-                        throw new IOException("Oversized peer proof");
-                    bytes.write(buf, 0, n);
-                }
-            }
-            return KnowledgePeerIdentity.verifyJournal(context, bytes.toByteArray(),
+            return KnowledgePeerIdentity.verifyJournal(context, readProof(zip, proof),
                     zip.getInputStream(journal));
         }
+    }
+
+    static byte[] peerProof(final File verifiedZip) throws Exception {
+        try (ZipFile zip = new ZipFile(verifiedZip)) {
+            final ZipEntry proof = zip.getEntry(KnowledgePortableArchive.PEER);
+            return proof == null ? null : readProof(zip, proof);
+        }
+    }
+
+    private static byte[] readProof(final ZipFile zip, final ZipEntry proof) throws Exception {
+        if (proof.getSize() < 1 || proof.getSize() > 4096)
+            throw new IOException("Invalid peer proof length");
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (InputStream input = zip.getInputStream(proof)) {
+            final byte[] buf = new byte[4096];
+            int n;
+            while ((n = input.read(buf)) != -1) {
+                if (bytes.size() + n > 4096) throw new IOException("Oversized peer proof");
+                bytes.write(buf, 0, n);
+            }
+        }
+        return bytes.toByteArray();
     }
 
     static String journalText(final File verifiedZip) throws Exception {

@@ -396,6 +396,15 @@
     <string name="knowledge_sync_no_peers">Нет связанных устройств.</string>
     <string name="knowledge_sync_revoke_warning">Отозвать доверие к этому устройству? Ранее сохранённые решения не удалятся, новые недоверенные обновления будут отклонены.</string>
     <string name="knowledge_sync_revoke">Отозвать доверие</string>
+    <string name="knowledge_sync_inbox">Сохранённые ветки других устройств (без автоприменения)</string>
+    <string name="knowledge_sync_inbox_empty">Сохранённых проверенных журналов нет. Сначала сравните зашифрованный архив сопряжённого устройства.</string>
+    <string name="knowledge_sync_save_branch">Сохранить подтверждённую ветку</string>
+    <string name="knowledge_sync_branch_saved">Зашифрованная внешняя ветка сохранена локально. Ни одно решение не импортировано.</string>
+    <string name="knowledge_sync_branch_duplicate">Такой подписанный журнал уже сохранён. Изменений нет.</string>
+    <string name="knowledge_sync_branch_failed">Не удалось сохранить или прочитать внешнюю ветку. Местный журнал не изменился.</string>
+    <string name="knowledge_sync_branch_review">Внешний журнал хранится отдельно. Сопряжённое устройство: %1$b. Связь историй: %2$s. Только местных событий: %3$d. Только внешних: %4$d. Пересекающихся целей: %5$d. Решения не применены.</string>
+    <string name="knowledge_sync_delete_branch">Удалить сохранённую ветку</string>
+    <string name="knowledge_sync_delete_warning">Удалить эту локальную зашифрованную копию внешнего журнала? Основной журнал не изменится. Сохраните исходный архив для повторного сравнения.</string>
     <string name="knowledge_daily_backup_title">Ежедневные локальные шифрованные копии</string>
     <string name="knowledge_daily_backup_running">Создание и проверка зашифрованного локального архива…</string>
     <string name="knowledge_daily_backup_enable">Включить ежедневно</string>

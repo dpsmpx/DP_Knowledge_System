@@ -396,6 +396,15 @@
     <string name="knowledge_sync_no_peers">No devices are paired.</string>
     <string name="knowledge_sync_revoke_warning">Remove trust in this device? Its archived decisions will not be deleted; new untrusted updates must be rejected.</string>
     <string name="knowledge_sync_revoke">Revoke trust</string>
+    <string name="knowledge_sync_inbox">Saved foreign branches (never automatically applied)</string>
+    <string name="knowledge_sync_inbox_empty">No verified foreign journals have been saved. Compare a paired device’s encrypted snapshot first.</string>
+    <string name="knowledge_sync_save_branch">Save authenticated branch</string>
+    <string name="knowledge_sync_branch_saved">Encrypted foreign branch saved locally. No knowledge decisions were imported.</string>
+    <string name="knowledge_sync_branch_duplicate">This same signed journal is already saved. No changes were made.</string>
+    <string name="knowledge_sync_branch_failed">Cannot save or read this foreign branch. Local journal is unchanged.</string>
+    <string name="knowledge_sync_branch_review">Foreign journal is stored separately. Paired identity: %1$b. Relationship: %2$s. Local-only events: %3$d. Foreign-only events: %4$d. Overlapping targets: %5$d. No decisions have been applied.</string>
+    <string name="knowledge_sync_delete_branch">Remove saved branch</string>
+    <string name="knowledge_sync_delete_warning">Remove this encrypted local copy of the foreign journal? The authoritative journal will not change. Keep the original archive if you might need to compare it again.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

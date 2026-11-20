@@ -413,6 +413,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 view -> promptPeerPair());
         findViewById(R.id.knowledge_sync_trusted).setOnClickListener(
                 view -> showPairedPeers());
+        findViewById(R.id.knowledge_sync_inbox).setOnClickListener(
+                view -> showPeerInbox());
         findViewById(R.id.knowledge_daily_backup_toggle).setOnClickListener(
                 view -> toggleDailyBackup());
         findViewById(R.id.knowledge_daily_backup_now).setOnClickListener(view -> {
@@ -3982,14 +3984,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     final String inviteValue = invitation.getText().toString().trim();
                     final String codeValue = code.getText().toString().trim();
                     worker.submit(() -> {
-                        final boolean paired;
+                        boolean success = false;
                         try {
                             KnowledgePeerIdentity.pair(this, inviteValue, codeValue);
-                            paired = true;
+                            success = true;
                         } catch (Exception invalid) {
                             // Invalid pairing data never changes trust state.
-                            paired = false;
                         }
+                        final boolean paired = success;
                         runOnUiThread(() -> Toast.makeText(this,
                                 paired ? R.string.knowledge_sync_paired
                                         : R.string.knowledge_sync_pair_failed,
@@ -4016,6 +4018,72 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         .setPositiveButton(R.string.knowledge_sync_revoke,
                                 (confirm, selected) -> KnowledgePeerIdentity.revoke(this, peers[which]))
                         .show()).show();
+    }
+
+    private void showPeerInbox() {
+        final String[] names;
+        try { names = KnowledgePeerInbox.list(this); }
+        catch (Exception failure) {
+            Toast.makeText(this, R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (names.length == 0) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_sync_inbox)
+                    .setMessage(R.string.knowledge_sync_inbox_empty)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        final String[] labels = new String[names.length];
+        for (int i = 0; i < names.length; i++) {
+            labels[i] = names[i].substring(0, 12) + "… / "
+                    + names[i].substring(65, 77) + "…";
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_inbox)
+                .setItems(labels, (dialog, index) -> reviewPeerInbox(names[index]))
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    private void reviewPeerInbox(final String name) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                // This separately validates both hash chains on each review.
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), snapshot.journal);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(name.substring(0, 12) + "…")
+                            .setMessage(getString(R.string.knowledge_sync_branch_review,
+                                    snapshot.peer.paired, comparison.optString("relation"),
+                                    comparison.optInt("local_only"),
+                                    comparison.optInt("remote_only"),
+                                    comparison.optInt("possible_target_conflicts")))
+                            .setPositiveButton(android.R.string.ok, null)
+                            .setNeutralButton(R.string.knowledge_sync_delete_branch,
+                                    (dialog, which) -> new MaterialAlertDialogBuilder(this)
+                                            .setTitle(R.string.knowledge_sync_delete_branch)
+                                            .setMessage(R.string.knowledge_sync_delete_warning)
+                                            .setNegativeButton(android.R.string.cancel, null)
+                                            .setPositiveButton(R.string.knowledge_sync_delete_branch,
+                                                    (confirmed, selected) -> {
+                                                        try {
+                                                            KnowledgePeerInbox.delete(this, name);
+                                                        } catch (Exception failed) {
+                                                            Toast.makeText(this,
+                                                                    R.string.knowledge_sync_branch_failed,
+                                                                    Toast.LENGTH_LONG).show();
+                                                        }
+                                                    }).show())
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void promptPortablePeerPassword(final Uri source) {
@@ -4049,13 +4117,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         () -> Thread.currentThread().isInterrupted());
                 final KnowledgePeerIdentity.Verification peer =
                         KnowledgePortableRestore.verifyPeer(this, staged);
+                final byte[] proof = peer == null ? null
+                        : KnowledgePortableRestore.peerProof(staged);
                 final String foreign = KnowledgePortableRestore.journalText(staged);
                 if (foreign == null) throw new IOException("Peer backup lacks a journal");
                 final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
                         this, workspacePath(), foreign);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
-                        new AlertDialog.Builder(this)
+                        final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
                                 .setTitle(R.string.knowledge_sync_compare_peer)
                                 .setMessage(getString(R.string.knowledge_sync_compare_result,
                                         comparison.optString("relation"),
@@ -4068,8 +4138,25 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         : getString(R.string.knowledge_sync_peer_signer,
                                                 peer.fingerprint.substring(0, 12),
                                                 peer.paired)))
-                                .setPositiveButton(android.R.string.ok, null)
-                                .show();
+                                .setPositiveButton(android.R.string.ok, null);
+                        if (peer != null && peer.paired && proof != null) {
+                            builder.setNeutralButton(R.string.knowledge_sync_save_branch,
+                                    (dialog, which) -> worker.submit(() -> {
+                                        try {
+                                            final boolean created = KnowledgePeerInbox.save(
+                                                    this, proof, foreign);
+                                            runOnUiThread(() -> Toast.makeText(this,
+                                                    created ? R.string.knowledge_sync_branch_saved
+                                                            : R.string.knowledge_sync_branch_duplicate,
+                                                    Toast.LENGTH_LONG).show());
+                                        } catch (Exception invalid) {
+                                            runOnUiThread(() -> Toast.makeText(this,
+                                                    R.string.knowledge_sync_branch_failed,
+                                                    Toast.LENGTH_LONG).show());
+                                        }
+                                    }));
+                        }
+                        builder.show();
                     }
                 });
             } catch (Exception invalid) {

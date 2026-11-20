@@ -879,6 +879,14 @@
                                 android:text="@string/knowledge_sync_trusted" />
                         </LinearLayout>
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/knowledge_sync_inbox"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/knowledge_sync_inbox" />
+
                         <TextView
                             style="@style/TextAppearance.Material3.TitleSmall"
                             android:layout_width="match_parent"
