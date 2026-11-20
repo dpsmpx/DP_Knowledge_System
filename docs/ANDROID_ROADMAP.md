@@ -767,6 +767,18 @@ existing editor/entity/source-review APIs and adds a cross-language regression
 that enumerates **all** emitted Python protocols. See
 `docs/STAGE18_COMPLETION_GATE.md` for the precise sign-off boundary.
 
+**Stage 18 on-device synthetic version QA (twenty-seventh slice, awaiting
+physical execution):** The existing quick/stress Device QA runner now invokes
+`VERSION-18-SUITE`, an isolated Python test with six checks for dated pair
+indexing, two-SHA preview, stale-token rejection, journal commit, symmetric
+review lookup, stale-source annotation and exact offline withdrawal. The only
+input is an existing **app-private cache directory**; all source Markdown and
+journal files are generated within an automatically removed temporary folder.
+No selected user notebook, real journal or network service is opened. Results
+are count-only, bounded and validated by the Java transport before inclusion
+in the redacted QA report. This adds no automatic acceptance and does not
+replace real touch/accessibility/process-lifecycle observation.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

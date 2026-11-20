@@ -27,6 +27,18 @@ from ksys.store.workspace import Workspace
 
 
 class RelationTests(unittest.TestCase):
+    def test_stage18_synthetic_device_suite_isolated_and_count_only(self):
+        before = sorted(p.name for p in self.base.iterdir())
+        report = json.loads(bridge.stage18_version_selftest(str(self.base)))
+        self.assertEqual("dpksys.stage18_version_selftest.v1", report["protocol"])
+        self.assertEqual((6, 0), (report["passed"], report["failed"]))
+        self.assertTrue(report["read_only_user_data"])
+        self.assertFalse(report["used_selected_vault"])
+        self.assertTrue(all(row["passed"] for row in report["checks"]))
+        self.assertEqual(before, sorted(p.name for p in self.base.iterdir()))
+        self.assertEqual(self.notes["a.md"],
+                         (self.vault / "a.md").read_text(encoding="utf-8"))
+
     def test_cross_file_evidence_counts_distinct_notes_not_parser_rows(self):
         self._import()
         evidence = self._relations("a.md")

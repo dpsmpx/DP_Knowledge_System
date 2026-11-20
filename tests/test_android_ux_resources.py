@@ -47,6 +47,21 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_version_historical", "knowledge_version_limited"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_stage18_version_device_suite_has_isolated_transport(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        transport = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("VERSION-18-SUITE", "checkSyntheticStage18Versions",
+                       "getCacheDir().getCanonicalPath()", "selectedVaultUntouched=true"):
+            self.assertIn(marker, runner)
+        self.assertIn('"dpksys.stage18_version_selftest.v1".equals(protocol)', transport)
+        self.assertIn('invoke(context, "stage18_version_selftest", cacheDir)', transport)
+        for marker in ("def stage18_version_selftest(",
+                       '"used_selected_vault": False',
+                       '"requires_manual_ui_qa": True'):
+            self.assertIn(marker, python)
+
     def test_relation_pair_detail_previews_both_sources_before_navigation(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

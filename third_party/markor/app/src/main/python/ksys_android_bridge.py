@@ -20,7 +20,7 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
-from ksys.importer.relations import related_claims, indexed_related_claims
+from ksys.importer.relations import related_claims, indexed_related_claims, projected_atoms
 from ksys.importer.aliases import (verified_owner_aliases, MAX_ALIAS_OPERATIONS,
                                    MAX_ALIASES_PER_CANONICAL)
 from ksys.core.ids import canonical_json
@@ -1281,6 +1281,120 @@ def record_version_unreview(workspace_dir: str, decision_id: str,
                        "decision": "version_unreview", "journal_ids": [event.id],
                        "journal_head": kb.journal.head}, ensure_ascii=False,
                       sort_keys=True, separators=(",", ":"))
+
+
+def stage18_version_selftest(cache_dir: str) -> str:
+    """Isolated, count-only device check using synthetic notes and journal.
+
+    The *only* caller input is a private cache root. Never opens the selected
+    notebook, real workspace, journal, credentials or network endpoints.
+    UI touch/accessibility/process lifecycle still require observed QA.
+    """
+    cache = Path(cache_dir).resolve()
+    if not Path(cache_dir).is_absolute() or not cache.is_dir():
+        raise ValueError("Version QA requires an existing private cache folder")
+    checks = []
+
+    def verify(code, fn):
+        try:
+            fn()
+            checks.append({"code": code, "passed": True,
+                           "detail": "synthetic assertions passed"})
+        except Exception as error:
+            checks.append({"code": code, "passed": False,
+                           "detail": "synthetic mismatch (" + type(error).__name__ + ")"})
+
+    with tempfile.TemporaryDirectory(prefix="dpks-stage18-", dir=cache) as temp:
+        root = Path(temp)
+        vault = root / "synthetic_notes"
+        vault.mkdir()
+        workspace = str(root / "private_workspace")
+        notes = {"a.md": "# A\nАлекс является разработчиком.\n",
+                 "b.md": "# B\nАлекс не является разработчиком.\n"}
+        for path, content in notes.items():
+            (vault / path).write_text(content, encoding="utf-8")
+        state = {}
+
+        def setup():
+            json.loads(analyze_vault(workspace, str(vault)))
+            db = Path(workspace) / "var/ks.sqlite"
+            atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+            with sqlite3.connect(db) as con:
+                for path, start, end, negative in (
+                        ("a.md", "2024-01-01", "2024-12-31", False),
+                        ("b.md", "2025-01-01", "2025-12-31", True)):
+                    assertion = {"mod": "asserted", "neg": negative, "atom": atom,
+                                 "iv": {"from": start, "to": end}}
+                    row = projected_atoms({"id": "version-qa", "nodes": [
+                        {"type": "claim", "assertion": assertion}]},
+                        path, "F:version-qa", "version-qa:1")[0]
+                    con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                                "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                                (row[4], row[7], row[8], row[9], row[6], path))
+            page = json.loads(note_relationships(workspace, "a.md", str(vault)))
+            found = [r for r in page["matches"]
+                     if r["kind"] == "temporal_separation" and r["path"] == "b.md"]
+            assert len(found) == 1 and found[0]["live_source_pair"]
+            state["relation"] = json.dumps(found[0])
+        verify("VERSION-INDEX-18", setup)
+
+        def preview():
+            args = (workspace, str(vault), "a.md", state["relation"],
+                    "possibly_changed", "synthetic manual explanation")
+            result = json.loads(preview_version_review(*args))
+            assert result["read_only"] and not result["changes_claim_authority"]
+            assert len(result["sources"]) == 2
+            assert all(src["excerpt"] and src["source_sha256"] for src in result["sources"])
+            state["args"], state["preview"] = args, result
+        verify("VERSION-PREVIEW-18", preview)
+
+        def confirm():
+            pre = state["preview"]
+            with_stale_token = pre["preview_token"] + "x"
+            try:
+                record_version_review(*state["args"], with_stale_token,
+                                      pre["journal_head"])
+                raise AssertionError("Invalid preview token accepted")
+            except ValueError:
+                pass
+            record = json.loads(record_version_review(*state["args"],
+                               pre["preview_token"], pre["journal_head"]))
+            state["id"] = record["journal_ids"][0]
+            assert len(json.loads(version_review_decisions(workspace))["active"]) == 1
+        verify("VERSION-COMMIT-18", confirm)
+
+        def symmetric():
+            matches = json.loads(note_relationships(workspace, "b.md", str(vault)))["matches"]
+            marked = [m for m in matches if m["path"] == "a.md"
+                      and m["kind"] == "temporal_separation"]
+            assert len(marked) == 1 and marked[0]["version_review_id"] == state["id"]
+            assert marked[0]["version_review_state"] == "current"
+        verify("VERSION-SYMMETRY-18", symmetric)
+
+        def stale():
+            (vault / "b.md").write_text(notes["b.md"] + "\n", encoding="utf-8")
+            matches = json.loads(note_relationships(workspace, "a.md", str(vault)))["matches"]
+            marked = [m for m in matches if m.get("version_review_id") == state["id"]]
+            assert len(marked) == 1 and marked[0]["version_review_state"] == "historical"
+        verify("VERSION-STALE-18", stale)
+
+        def withdraw():
+            preview = json.loads(preview_version_unreview(workspace, state["id"]))
+            result = json.loads(record_version_unreview(workspace, state["id"],
+                                preview["preview_token"], preview["journal_head"]))
+            after = json.loads(version_review_decisions(workspace))
+            assert result["decision"] == "version_unreview" and not after["active"]
+            assert [e["op"] for e in after["recent"]] == [
+                "version_unreview", "version_review"]
+            assert (vault / "a.md").read_text(encoding="utf-8") == notes["a.md"]
+        verify("VERSION-WITHDRAW-18", withdraw)
+
+    passed = sum(x["passed"] for x in checks)
+    return json.dumps({"protocol": "dpksys.stage18_version_selftest.v1", "checks": checks,
+                       "passed": passed, "failed": len(checks) - passed,
+                       "synthetic_only": True, "read_only_user_data": True,
+                       "used_selected_vault": False, "requires_manual_ui_qa": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _validate_note_input(relative_path: str, markdown: str) -> None:

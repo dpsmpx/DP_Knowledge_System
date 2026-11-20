@@ -17,6 +17,7 @@ reviewable candidate accurately, not that the original assertion is true.
 | Manual version-pair review | Exact pair selection, two original excerpts and SHA, user explanation, human confirmation, symmetric review ID and offline withdrawal | New `version_review`/`version_unreview` tests; Android CI/device QA pending |
 | Partial results | 100-relation response cap, shared 16-file live SHA budget, `truncated` true when SQL caps precede integrity filtering | 62-corrupt-row regression |
 | Bridge compatibility | All Python response protocol IDs explicitly allowed by Java | Cross-language protocol-enumeration regression plus Android JVM CI |
+| On-device synthetic version regression | Six count-only checks in `VERSION-18-SUITE` using app-private temporary Markdown/journal only | Python regression and unsigned Android CI; actual device execution pending |
 
 ## Mandatory physical Android sign-off — pending
 

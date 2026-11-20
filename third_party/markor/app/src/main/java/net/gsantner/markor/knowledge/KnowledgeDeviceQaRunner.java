@@ -146,6 +146,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("SPLIT-17", this::checkSyntheticSplit);
                 step("MERGE-17", this::checkSyntheticMerge);
                 step("BATCH-17", this::checkSyntheticClaimBatch);
+                step("VERSION-18-SUITE", this::checkSyntheticStage18Versions);
                 step("BG-01", () -> "scheduler preference readable; enabled="
                         + KnowledgeBackgroundScheduler.isEnabled(context)
                         + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -278,6 +279,43 @@ public final class KnowledgeDeviceQaRunner {
         }
         return "syntheticChecks=" + passed
                 + ", failures=0, temporaryCacheCleaned=true, selectedVaultUntouched=true";
+    }
+
+    /** Private synthetic source-pair and journal test; no selected vault reads. */
+    private String checkSyntheticStage18Versions() throws Exception {
+        ensureRunning();
+        final JSONObject result = KnowledgePythonBridge.stage18VersionSelfTest(context,
+                context.getCacheDir().getCanonicalPath());
+        if (!"dpksys.stage18_version_selftest.v1".equals(result.getString("protocol"))
+                || !result.getBoolean("synthetic_only")
+                || result.getBoolean("used_selected_vault")
+                || !result.getBoolean("read_only_user_data")
+                || !result.getBoolean("requires_manual_ui_qa")) {
+            throw new SyntheticMismatch("verdict=UNTRUSTED_VERSION_QA_CONTRACT");
+        }
+        final JSONArray checks = result.getJSONArray("checks");
+        if (checks.length() != 6
+                || result.getInt("passed") + result.getInt("failed") != checks.length()) {
+            throw new SyntheticMismatch("verdict=VERSION_QA_COUNT_MISMATCH");
+        }
+        int failures = 0;
+        for (int i = 0; i < checks.length(); i++) {
+            ensureRunning();
+            final JSONObject row = checks.getJSONObject(i);
+            if (!row.getString("code").matches("VERSION-[A-Z0-9-]{4,28}")) {
+                throw new SyntheticMismatch("verdict=VERSION_QA_CODE_MISMATCH");
+            }
+            if (!row.getBoolean("passed")) failures++;
+            report.add(row.getBoolean("passed") ? "PASS" : "FAIL", row.getString("code"), 0,
+                    row.getBoolean("passed") ? "isolated version bridge assertions passed"
+                            : "isolated version bridge assertions failed");
+        }
+        if (failures != 0 || result.getInt("failed") != failures) {
+            throw new SyntheticMismatch("syntheticChecks=" + checks.length()
+                    + ", failedChecks=" + failures);
+        }
+        return "syntheticChecks=6, failures=0, temporaryCacheCleaned=true, "
+                + "selectedVaultUntouched=true";
     }
 
     private String checkRealVaultReadOnly() throws Exception {

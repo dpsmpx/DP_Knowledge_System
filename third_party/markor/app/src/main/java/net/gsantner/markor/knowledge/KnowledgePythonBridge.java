@@ -192,6 +192,12 @@ public final class KnowledgePythonBridge {
                 token, expectedHead);
     }
 
+    /** Synthetic-only Stage 18 journal/index regression in app-private cache. */
+    public static JSONObject stage18VersionSelfTest(final Context context, final String cacheDir)
+            throws JSONException {
+        return invoke(context, "stage18_version_selftest", cacheDir);
+    }
+
     public static JSONObject fullAudit(final Context context, final String workspace,
                                        final String notebook, final BulkProgress progress)
             throws JSONException {
@@ -434,6 +440,7 @@ public final class KnowledgePythonBridge {
                 || "dpksys.source_lineage.v1".equals(protocol)
                 || "dpksys.source_assessment.v1".equals(protocol)
                 || "dpksys.version_review.v1".equals(protocol)
+                || "dpksys.stage18_version_selftest.v1".equals(protocol)
                 || "dpksys.editor_context.v1".equals(protocol)
                 || "dpksys.editor_highlights.v1".equals(protocol)
                 || "dpksys.editor_record_evidence.v1".equals(protocol)
