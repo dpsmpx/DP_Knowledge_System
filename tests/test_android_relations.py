@@ -373,6 +373,52 @@ class RelationTests(unittest.TestCase):
             return con.execute(
                 "SELECT doc, atom_key, negated FROM candidate_atoms ORDER BY doc").fetchall()
 
+    def test_invalid_index_rows_cannot_hide_bounded_relation_query_exhaustion(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+
+        def indexed(path, identifier, start, end):
+            assertion = {"mod": "asserted", "neg": False, "atom": atom,
+                         "iv": {"from": start, "to": end}}
+            return projected_atoms({"id": identifier, "nodes": [
+                {"type": "claim", "assertion": assertion}]},
+                path, "F:synthetic", "synthetic:1")[0]
+
+        with sqlite3.connect(db) as con:
+            con.execute("DELETE FROM candidate_atoms")
+            con.execute("DELETE FROM candidate_modal_atoms")
+            con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        indexed("a.md", "source-2024", "2024-01-01", "2024-01-31"))
+            for idx in range(62):
+                row = list(indexed("b.md", f"tampered-{idx}", "2024-02-01",
+                                   "2024-02-28"))
+                row[3] = f"synthetic:{idx}"  # distinct visible SQL rows
+                row[9] = "2024-03-15"  # conflicts with atom_key interval
+                con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", row)
+            self.assertEqual(62, con.execute("SELECT count(*) FROM candidate_atoms a "
+                    "JOIN candidate_atoms b ON a.scope_key=b.scope_key "
+                    "WHERE a.doc='a.md' AND b.doc='b.md'").fetchone()[0])
+            self.assertEqual(62, con.execute("SELECT count(*) FROM candidate_atoms a "
+                    "JOIN candidate_atoms b ON a.scope_key=b.scope_key "
+                    "JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
+                    "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' "
+                    "WHERE a.doc='a.md' AND b.doc='b.md' AND a.atom_key<>b.atom_key "
+                    "AND a.valid_from IS NOT NULL AND a.valid_to IS NOT NULL "
+                    "AND b.valid_from IS NOT NULL AND b.valid_to IS NOT NULL "
+                    "AND (a.valid_to<b.valid_from OR b.valid_to<a.valid_from)").fetchone()[0])
+            page = indexed_related_claims(con, "a.md", limit=1)
+        self.assertEqual([], page["matches"])
+        self.assertTrue(page["truncated"])  # SQL rows were capped before rejection
+        bridge = self._relations("a.md")
+        self.assertEqual([], bridge["matches"])
+        self.assertTrue(bridge["truncated"])  # library warns despite an empty visible page
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                            self.notes["a.md"], str(self.vault)))
+        self.assertEqual("current", editor["relation_index_state"])
+        self.assertEqual([], editor["candidate_relations"])
+        self.assertTrue(editor["relations_truncated"])  # editor also warns
+
     def test_precise_agreement_and_opposition_have_two_source_locators(self):
         before = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
                   for p in self.notes}

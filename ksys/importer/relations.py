@@ -255,6 +255,12 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
         (source_path, source_path, limit + 1)
     ).fetchall()
 
+    # The SQL cap is applied *before* Python validates the disposable rows.
+    # Even if corrupt rows are rejected below, valid rows may have been
+    # displaced beyond LIMIT; never advertise that partial page as complete.
+    sql_page_limited = any(len(page) > limit for page in
+                           (exact, temporal, separated, uncertain))
+
     matches = []
     for r in exact:
         matches.append({
@@ -360,7 +366,8 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
                                 m["source_locator"], m["kind"],
                                 m["source_fragment"], m["other_fragment"]))
     evidence_groups, evidence_limited = indexed_source_evidence(con, source_path)
-    return {"matches": matches[:limit], "truncated": len(matches) > limit,
+    return {"matches": matches[:limit],
+            "truncated": len(matches) > limit or sql_page_limited,
             "alias_search_limited": alias_limited,
             "modal_search_limited": modal_limited,
             "evidence_groups": evidence_groups, "evidence_limited": evidence_limited}

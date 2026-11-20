@@ -733,6 +733,18 @@ decisions or source independence. The existing 100-result relation cap and
 shared 16-file SHA-verification budget remain in force. Physical device QA
 is deferred separately.
 
+**Stage 18 bounded relation completeness (twenty-fifth slice, awaiting Android
+QA):** The indexed relation query now marks `truncated` whenever *any* of its
+bounded exact/temporal SQL windows exhaust the per-kind `limit + 1` budget,
+even when the raw rows fail subsequent integrity checks and the final visible
+result is empty. Previously, filtering invalid disposable atom/interval rows
+could hide all displayed matches and incorrectly clear the existing truncation
+warning. Both the library and editor already present this warning via the
+same read-only response field, without a protocol change. Synthetic regression
+with 62 mismatched indexed intervals checks that invalid hints stay hidden
+while both surfaces explicitly signal incomplete coverage. No extra SQLite
+scan beyond the existing cap, source edit or human-journal mutation occurs.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the
