@@ -79,6 +79,18 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("KnowledgeExternalBackup.configure(this, data.getData()", hub)
         self.assertNotIn("KnowledgeExternalBackup.configure(this, notebook", hub)
 
+    def test_peer_journal_comparison_is_explicit_and_read_only(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python_bridge = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("R.id.knowledge_portable_compare_peer", hub)
+        self.assertIn("KnowledgePythonBridge.journalSyncPreview(", hub)
+        self.assertIn("KnowledgePortableArchive.verify(staged", hub)
+        self.assertIn("KnowledgePortableRestore.journalText(staged)", hub)
+        self.assertIn('"dpksys.sync-preview.v1".equals(protocol)', bridge)
+        self.assertIn("def journal_sync_preview(workspace_dir:", python_bridge)
+        self.assertIn("preview_journals(local_text, foreign_text)", python_bridge)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -90,3 +90,16 @@ This differs from local daily backups: selecting an external provider is
 revocation, quotas or missing provider support leave local backups intact.
 
 No private vaults or credentials are used in fixtures or CI.
+
+## Fourth slice: read-only offline journal branch comparison
+
+The owner approved SAF/Syncthing/Drive as transport, explicit device pairing
+and manual handling of divergent knowledge. A strict offline branch comparator
+now validates both full hash chains and identifies identical, prefix,
+diverged, and unrelated histories without modifying either journal.
+The Android shell has a read-only action for selecting and comparing a
+password-protected snapshot from another device. It does **not** import
+foreign decisions without authenticated device pairing.
+
+The separate [sync protocol](STAGE21_SYNC_PROTOCOL.md) defines the remaining
+identity, causal inbox, conflict-resolution and transport contracts.

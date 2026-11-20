@@ -376,6 +376,10 @@
     <string name="knowledge_portable_restore_preview">Verified source files: %1$d\nUncompressed bytes: %2$d\nJournal present: %3$b\n\nRestore into a NEW library folder next to the current library? This cannot overwrite the current vault. Non-secret settings are reported but not imported automatically; secrets and indexes are excluded.</string>
     <string name="knowledge_portable_restored">Source files restored to a new library (%1$d files). The original library was preserved.</string>
     <string name="knowledge_portable_restore_failed">Restore stopped. The original library was preserved. A newly created recovery folder may remain if journal import failed.</string>
+    <string name="knowledge_sync_compare_peer">Compare another device’s journal</string>
+    <string name="knowledge_sync_compare_warning">Choose the other device’s encrypted portable DPKS snapshot. This is a READ-ONLY comparison. It never merges, overwrites or accepts decisions. Only explicitly paired and authenticated devices will be eligible for later synchronization.</string>
+    <string name="knowledge_sync_compare_result">Journal relationship: %1$s\nCommon events: %2$d\nOnly on this device: %3$d\nOnly in the other archive: %4$d\nPossible overlapping knowledge targets: %5$d\n\nNo events have been imported. Different offline branches require a separate confirmation; hashes alone do not prove the identity of the other device.</string>
+    <string name="knowledge_sync_compare_failed">Could not verify the other journal. Local knowledge remains unchanged.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

@@ -124,6 +124,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_INSPECT_PORTABLE = 40025;
     private static final int REQUEST_RESTORE_PORTABLE = 40026;
     private static final int REQUEST_EXTERNAL_BACKUP_TREE = 40027;
+    private static final int REQUEST_SYNC_COMPARE_PORTABLE = 40028;
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -404,6 +405,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_portable_export).setOnClickListener(view -> requestPortableExport());
         findViewById(R.id.knowledge_portable_inspect).setOnClickListener(view -> requestPortableInspect());
         findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
+        findViewById(R.id.knowledge_portable_compare_peer).setOnClickListener(
+                view -> requestPortablePeerCompare());
         findViewById(R.id.knowledge_daily_backup_toggle).setOnClickListener(
                 view -> toggleDailyBackup());
         findViewById(R.id.knowledge_daily_backup_now).setOnClickListener(view -> {
@@ -3902,6 +3905,78 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }).show();
     }
 
+    private void requestPortablePeerCompare() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_sync_compare_peer)
+                .setMessage(R.string.knowledge_sync_compare_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_compare_peer, (dialog, which) -> {
+                    final Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("application/octet-stream");
+                    startActivityForResult(pick, REQUEST_SYNC_COMPARE_PORTABLE);
+                }).show();
+    }
+
+    private void promptPortablePeerPassword(final Uri source) {
+        final EditText password = passwordInput(this);
+        password.setHint(R.string.knowledge_backup_password);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_sync_compare_peer)
+                .setMessage(R.string.knowledge_sync_compare_warning)
+                .setView(password)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_backup_decrypt, (dialog, which) ->
+                        comparePortablePeerFromUri(source,
+                                password.getText().toString().toCharArray()))
+                .show();
+    }
+
+    /** No event from this method is ever committed or accepted. */
+    private void comparePortablePeerFromUri(final Uri source, final char[] password) {
+        final int generation = scanGeneration.get();
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            File staged = null;
+            try {
+                try (InputStream input = getContentResolver().openInputStream(source)) {
+                    if (input == null) throw new IOException("Selected peer backup unavailable");
+                    staged = KnowledgePortableCipher.decryptToVerifiedStaging(
+                            input, getCacheDir(), password,
+                            () -> Thread.currentThread().isInterrupted());
+                }
+                KnowledgePortableArchive.verify(staged,
+                        () -> Thread.currentThread().isInterrupted());
+                final String foreign = KnowledgePortableRestore.journalText(staged);
+                if (foreign == null) throw new IOException("Peer backup lacks a journal");
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), foreign);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        new AlertDialog.Builder(this)
+                                .setTitle(R.string.knowledge_sync_compare_peer)
+                                .setMessage(getString(R.string.knowledge_sync_compare_result,
+                                        comparison.optString("relation"),
+                                        comparison.optInt("common_events"),
+                                        comparison.optInt("local_only"),
+                                        comparison.optInt("remote_only"),
+                                        comparison.optInt("possible_target_conflicts")))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation)
+                        status.setText(R.string.knowledge_sync_compare_failed);
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (staged != null) staged.delete();
+            }
+        });
+    }
+
     private byte[] portableSettingsSnapshot() throws Exception {
         final JSONObject safe = new JSONObject();
         // Only explicit, non-secret metadata. Neither API keys nor opaque
@@ -4196,6 +4271,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         } else if (requestCode == REQUEST_RESTORE_PORTABLE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             promptPortableRestorePassword(data.getData());
+        } else if (requestCode == REQUEST_SYNC_COMPARE_PORTABLE
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            promptPortablePeerPassword(data.getData());
         } else if (requestCode == REQUEST_EXTERNAL_BACKUP_TREE
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
             try {

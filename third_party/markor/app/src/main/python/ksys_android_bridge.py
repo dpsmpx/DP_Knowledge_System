@@ -27,6 +27,7 @@ from ksys.ir.nodes import node_from_dict
 from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
+from ksys.store.journal_sync import preview_journals
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1646,6 +1647,20 @@ def knowledge_diagnostics(workspace_dir: str) -> str:
 
 
 MAX_JOURNAL_BYTES = 8_000_000
+
+
+def journal_sync_preview(workspace_dir: str, foreign_text: str) -> str:
+    """Compare signed-transport candidate histories; NEVER overwrite either one.
+
+    A separate, explicit peer-pairing/trust step is required before applying
+    even a fast-forward. This method exposes only counts and hash commitments.
+    """
+    kb = _kb(workspace_dir)
+    local_path = kb.ws.journal_path
+    local_text = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
+    result = preview_journals(local_text, foreign_text)
+    return json.dumps(result.summary(), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
 
 
 def journal_export_info(workspace_dir: str) -> str:

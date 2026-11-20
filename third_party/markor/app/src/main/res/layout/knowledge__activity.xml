@@ -827,6 +827,14 @@
                             android:layout_marginTop="8dp"
                             android:text="@string/knowledge_portable_restore" />
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/knowledge_portable_compare_peer"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/knowledge_sync_compare_peer" />
+
                         <TextView
                             style="@style/TextAppearance.Material3.TitleSmall"
                             android:layout_width="match_parent"
