@@ -132,6 +132,15 @@ activity-specific model settings from a background process. Full non-secret
 app preferences migration and user-approved portable secret recovery remain
 open and must be specified before being implemented.
 
+## Eighth slice: detailed offline branch inspection (pending CI)
+
+The signed, paired, encrypted inbox gains a paged review of foreign-only
+journal events. List rows disclose only operation types, short IDs and
+possible overlap markers; the user must explicitly open a particular event
+to read potentially sensitive source provenance and payload. Only the
+on-device detail display receives these data. The event list never commits
+or merges foreign knowledge, and the original local Markdown is untouched.
+
 ## Sixth slice: encrypted offline branch holding area (pending CI)
 
 After comparing a verified encrypted snapshot with a **paired** peer, the

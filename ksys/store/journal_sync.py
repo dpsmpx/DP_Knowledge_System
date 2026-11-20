@@ -151,3 +151,72 @@ def preview_journals(local_content: str, remote_content: str) -> JournalBranchPr
         local_sha256=hashlib.sha256(local_content.encode("utf-8")).hexdigest(),
         remote_sha256=hashlib.sha256(remote_content.encode("utf-8")).hexdigest(),
     )
+
+
+def review_foreign_events(local_content: str, remote_content: str,
+                          offset: int = 0, limit: int = 40) -> dict[str, Any]:
+    """Bounded event-by-event review plan. Every event remains uncommitted."""
+    if type(offset) is not int or type(limit) is not int or not 0 <= offset <= 100_000 \
+            or not 1 <= limit <= 80:
+        raise ValueError("Invalid sync review page")
+    comparison = preview_journals(local_content, remote_content)
+    local = validated_entries(local_content)
+    remote = validated_entries(remote_content)
+    remote_only = remote[comparison.common_events:]
+    local_targets = set().union(*(
+        change for event in local[comparison.common_events:]
+        if (change := _targets(event)) is not None))
+    local_unknown = any(_targets(e) is None for e in local[comparison.common_events:])
+    rows = []
+    for event in remote_only[offset:offset + limit]:
+        targets = _targets(event)
+        rows.append({
+            "seq": event.seq,
+            "event_id": event.id,
+            "operation": event.op,
+            "target_count": len(targets) if targets is not None else None,
+            "possible_conflict": local_unknown or targets is None
+            or bool(targets & local_targets),
+            "review_required": True,
+        })
+    return {
+        "protocol": "dpksys.sync-events.v1",
+        "relation": comparison.relation,
+        "local_sha256": comparison.local_sha256,
+        "remote_sha256": comparison.remote_sha256,
+        "foreign_total": len(remote_only),
+        "offset": offset,
+        "has_more": offset + len(rows) < len(remote_only),
+        "events": rows,
+        "read_only": True,
+    }
+
+
+def inspect_foreign_event(remote_content: str, event_id: str,
+                          expected_sha256: str) -> dict[str, Any]:
+    """Return one chosen event's evidence for an explicit on-device detail view.
+
+    This result may contain private note provenance: never log/upload it or
+    expose it in a summary, notification or exchange manifest.
+    """
+    if not isinstance(event_id, str) or len(event_id) > 160:
+        raise ValueError("Invalid event identifier")
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+        raise ValueError("Invalid branch commitment")
+    if hashlib.sha256(remote_content.encode("utf-8")).hexdigest() != expected_sha256:
+        raise ValueError("Foreign journal changed since event review")
+    events = validated_entries(remote_content)
+    for event in events:
+        if event.id == event_id:
+            return {
+                "protocol": "dpksys.sync-event-detail.v1",
+                "seq": event.seq,
+                "event_id": event.id,
+                "operation": event.op,
+                "data": event.data,
+                "note": event.note,
+                "timestamp": event.ts,
+                "actor": event.actor,
+                "read_only": True,
+            }
+    raise ValueError("Foreign event not found")

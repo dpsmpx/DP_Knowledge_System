@@ -104,6 +104,19 @@ class Stage21PortableWiring(unittest.TestCase):
                        "API_KEY", "SharedPreferences.getAll"):
             self.assertNotIn(secret, settings)
 
+    def test_paged_foreign_events_stay_read_only_and_recheck_commitment(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        android_bridge = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("KnowledgePythonBridge.journalSyncEvents(", hub)
+        self.assertIn("KnowledgePythonBridge.journalSyncEventDetail(", hub)
+        self.assertIn('"dpksys.sync-events.v1".equals(protocol)', bridge)
+        self.assertIn('"dpksys.sync-event-detail.v1".equals(protocol)', bridge)
+        self.assertIn("def journal_sync_event_list(", android_bridge)
+        self.assertIn("def journal_sync_event_detail(", android_bridge)
+        self.assertIn("if (!snapshot.peer.paired)", hub)
+        self.assertNotIn("journalRestoreCommit(this, workspacePath(), snapshot.journal)", hub)
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()

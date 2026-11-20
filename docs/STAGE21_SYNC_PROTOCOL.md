@@ -82,3 +82,15 @@ explicitly remove it. Revoking a peer disables trust for its saved branches.
 
 The inbox is *not* authoritative and never accepts, replays, merges, or
 overwrites decisions. It is a holding area for later manual causal review.
+
+## Eighth slice: event-level causal review (pending CI)
+
+A user may page through saved foreign-only events (40 at a time), inspect
+operation type and possible target overlap, and explicitly open one event to
+view its full local-only detail and provenance. The listing contains no
+event data or note text, while the detail view warns that its contents may
+be personal. Each request checks the encrypted inbox signature and current
+pairing trust. Event listings validate both hash chains; detail views
+revalidate the foreign chain and expected remote journal SHA before showing
+a specific payload. No action in this review
+commits any foreign event; actual manual resolution remains unimplemented.

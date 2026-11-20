@@ -4062,6 +4062,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     comparison.optInt("remote_only"),
                                     comparison.optInt("possible_target_conflicts")))
                             .setPositiveButton(android.R.string.ok, null)
+                            .setNegativeButton(R.string.knowledge_sync_events,
+                                    (dialog, which) -> showPeerBranchEvents(name, 0))
                             .setNeutralButton(R.string.knowledge_sync_delete_branch,
                                     (dialog, which) -> new MaterialAlertDialogBuilder(this)
                                             .setTitle(R.string.knowledge_sync_delete_branch)
@@ -4078,6 +4080,82 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                                         }
                                                     }).show())
                             .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void showPeerBranchEvents(final String name, final int offset) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                if (!snapshot.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject page = KnowledgePythonBridge.journalSyncEvents(
+                        this, workspacePath(), snapshot.journal, offset);
+                final JSONArray events = page.getJSONArray("events");
+                final String[] labels = new String[events.length() + 1];
+                final String[] ids = new String[events.length()];
+                labels[0] = getString(R.string.knowledge_sync_events_warning,
+                        page.optInt("foreign_total"), offset + 1);
+                for (int i = 0; i < events.length(); i++) {
+                    final JSONObject event = events.getJSONObject(i);
+                    ids[i] = event.getString("event_id");
+                    labels[i + 1] = "#" + event.getInt("seq") + " · "
+                            + event.getString("operation") + " · " + ids[i].substring(0, 15)
+                            + (event.optBoolean("possible_conflict") ? " ⚠" : "");
+                }
+                final String expectedHash = page.getString("remote_sha256");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_events)
+                            .setItems(labels, (dialog, index) -> {
+                                if (index > 0) showPeerEventDetail(
+                                        name, ids[index - 1], expectedHash);
+                            });
+                    if (page.optBoolean("has_more")) builder.setPositiveButton(
+                            R.string.knowledge_sync_next_page,
+                            (dialog, which) -> showPeerBranchEvents(name, offset + 40));
+                    else builder.setPositiveButton(android.R.string.ok, null);
+                    if (offset > 0) builder.setNegativeButton(
+                            R.string.knowledge_sync_previous_page,
+                            (dialog, which) -> showPeerBranchEvents(name, offset - 40));
+                    else builder.setNegativeButton(android.R.string.cancel, null);
+                    builder.show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void showPeerEventDetail(final String name, final String eventId,
+                                     final String expectedHash) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot snapshot = KnowledgePeerInbox.open(this, name);
+                if (!snapshot.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject detail = KnowledgePythonBridge.journalSyncEventDetail(
+                        this, snapshot.journal, eventId, expectedHash);
+                String payload = detail.toString(2);
+                if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
+                final String shown = payload;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final TextView text = new TextView(this);
+                    text.setText(shown);
+                    text.setTextIsSelectable(true);
+                    final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                    text.setPadding(pad, pad, pad, pad);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_event_detail)
+                            .setMessage(R.string.knowledge_sync_event_detail_warning)
+                            .setView(text)
+                            .setPositiveButton(android.R.string.ok, null).show();
                 });
             } catch (Exception invalid) {
                 runOnUiThread(() -> Toast.makeText(this,

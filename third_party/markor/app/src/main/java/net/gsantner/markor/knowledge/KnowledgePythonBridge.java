@@ -257,6 +257,18 @@ public final class KnowledgePythonBridge {
         return invoke(context, "journal_sync_preview", workspace, foreignText);
     }
 
+    public static JSONObject journalSyncEvents(final Context context, final String workspace,
+                                               final String foreignText, final int offset)
+            throws JSONException {
+        return invoke(context, "journal_sync_event_list", workspace, foreignText, offset, 40);
+    }
+
+    public static JSONObject journalSyncEventDetail(final Context context,
+                                                    final String foreignText, final String eventId,
+                                                    final String expectedHash) throws JSONException {
+        return invoke(context, "journal_sync_event_detail", foreignText, eventId, expectedHash);
+    }
+
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
         synchronized (KnowledgePythonBridge.class) {
@@ -281,6 +293,8 @@ public final class KnowledgePythonBridge {
                 || "dpksys.query.v1".equals(protocol)
                 || "dpksys.backup.v1".equals(protocol)
                 || "dpksys.sync-preview.v1".equals(protocol)
+                || "dpksys.sync-events.v1".equals(protocol)
+                || "dpksys.sync-event-detail.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)

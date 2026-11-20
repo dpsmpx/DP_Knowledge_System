@@ -8,7 +8,8 @@ from pathlib import Path
 
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
-from ksys.store.journal_sync import preview_journals, validated_entries
+from ksys.store.journal_sync import (preview_journals, validated_entries,
+                                     review_foreign_events, inspect_foreign_event)
 
 
 def journal_string(path: Path, operations: tuple[tuple[str, dict], ...]) -> str:
@@ -81,6 +82,38 @@ class JournalSyncPreviewTests(unittest.TestCase):
         rendered = json.dumps(preview)
         self.assertNotIn("sample-a", rendered)
         self.assertTrue(preview["read_only"])
+
+    def test_review_page_exposes_operations_not_private_payload(self):
+        path = self.root / "review.jsonl"
+        path.write_text(self.base, encoding="utf-8")
+        journal = Journal(path, FixedClock())
+        journal.append("reject", {"candidates": ["secret-private-candidate"]})
+        journal.append("defer", {"candidates": ["another-candidate"]})
+        foreign = path.read_text(encoding="utf-8")
+        first = review_foreign_events(self.base, foreign, 0, 1)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(2, first["foreign_total"])
+        self.assertEqual("reject", first["events"][0]["operation"])
+        self.assertTrue(first["events"][0]["review_required"])
+        self.assertNotIn("secret-private-candidate", json.dumps(first))
+        second = review_foreign_events(self.base, foreign, 1, 1)
+        self.assertEqual(1, len(second["events"]))
+        self.assertFalse(second["has_more"])
+        with self.assertRaises(ValueError):
+            review_foreign_events(self.base, foreign, 0, 1000)
+
+    def test_explicit_detail_rechecks_exact_signed_branch_commitment(self):
+        content = journal_string(self.root / "detail.jsonl", (
+            ("defer", {"candidates": ["private-candidate"]}),
+        ))
+        import hashlib
+        commitment = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        entry = validated_entries(content)[0]
+        detail = inspect_foreign_event(content, entry.id, commitment)
+        self.assertEqual("private-candidate", detail["data"]["candidates"][0])
+        self.assertTrue(detail["read_only"])
+        with self.assertRaises(ValueError):
+            inspect_foreign_event(content, entry.id, "0" * 64)
 
 
 if __name__ == "__main__":

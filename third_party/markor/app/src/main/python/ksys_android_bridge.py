@@ -27,7 +27,8 @@ from ksys.ir.nodes import node_from_dict
 from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
-from ksys.store.journal_sync import preview_journals
+from ksys.store.journal_sync import (preview_journals, review_foreign_events,
+                                     inspect_foreign_event)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1660,6 +1661,24 @@ def journal_sync_preview(workspace_dir: str, foreign_text: str) -> str:
     local_text = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
     result = preview_journals(local_text, foreign_text)
     return json.dumps(result.summary(), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_event_list(workspace_dir: str, foreign_text: str,
+                            offset: int, limit: int) -> str:
+    """Explicit, paged on-device review; summaries expose no journal payloads."""
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    return json.dumps(review_foreign_events(local, foreign_text, offset, limit),
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_event_detail(foreign_text: str, event_id: str,
+                              expected_sha256: str) -> str:
+    """The user explicitly selects a record; private payload stays on-device."""
+    return json.dumps(inspect_foreign_event(foreign_text, event_id,
+                                             expected_sha256), ensure_ascii=False,
                       sort_keys=True, separators=(",", ":"))
 
 

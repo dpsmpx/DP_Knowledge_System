@@ -408,6 +408,12 @@
     <string name="knowledge_sync_branch_review">Foreign journal is stored separately. Paired identity: %1$b. Relationship: %2$s. Local-only events: %3$d. Foreign-only events: %4$d. Overlapping targets: %5$d. No decisions have been applied.</string>
     <string name="knowledge_sync_delete_branch">Remove saved branch</string>
     <string name="knowledge_sync_delete_warning">Remove this encrypted local copy of the foreign journal? The authoritative journal will not change. Keep the original archive if you might need to compare it again.</string>
+    <string name="knowledge_sync_events">Review foreign events</string>
+    <string name="knowledge_sync_events_warning">Foreign-only events: %1$d. Displayed from #%2$d. Warning symbols indicate possible collisions or effects which cannot yet be proved independent. No event will be applied.</string>
+    <string name="knowledge_sync_next_page">Next events</string>
+    <string name="knowledge_sync_previous_page">Previous events</string>
+    <string name="knowledge_sync_event_detail">Foreign event details (read-only)</string>
+    <string name="knowledge_sync_event_detail_warning">This view may contain personal note provenance. It stays on this device and is never committed to local knowledge. Only inspect on a trusted screen.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>
