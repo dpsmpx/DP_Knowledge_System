@@ -259,11 +259,18 @@ final class KnowledgeRelationPresentation {
             text.append("\n").append(context.getString(R.string.knowledge_modal_source))
                     .append(": ").append(modalityLabel(context,
                             relation.optString("source_modality"),
-                            relation.optString("source_node_kind")));
+                            relation.optString("source_node_kind")))
+                    .append(" · ").append(evidenceVerification(context,
+                            relation.optString("source_verification", "not_checked")));
             text.append("\n").append(context.getString(R.string.knowledge_modal_other))
                     .append(": ").append(modalityLabel(context,
                             relation.optString("other_modality"),
-                            relation.optString("other_node_kind")));
+                            relation.optString("other_node_kind")))
+                    .append(" · ").append(evidenceVerification(context,
+                            relation.optString("other_verification", "not_checked")));
+            text.append("\n").append(context.getString(relation.optBoolean("live_source_pair")
+                    ? R.string.knowledge_modal_current_pair
+                    : R.string.knowledge_modal_historical_pair));
             if (relation.optBoolean("opposing_polarity")) {
                 text.append("\n").append(context.getString(R.string.knowledge_modal_opposing_info));
             }

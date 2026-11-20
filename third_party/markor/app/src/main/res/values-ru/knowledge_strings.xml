@@ -254,6 +254,9 @@
     <string name="knowledge_modal_hypothesis">Гипотеза</string>
     <string name="knowledge_modal_opposing_info">Противоположная полярность — только сведения для проверки, не вывод о противоречии.</string>
     <string name="knowledge_modal_limited">Подсказки по модальности недоступны или неполны; для полного охвата повторите анализ локального индекса.</string>
+    <string name="knowledge_modal_checks_limited">Не все исходные файлы подсказок проверены по SHA: непроверенные подсказки остаются историческими снимками.</string>
+    <string name="knowledge_modal_current_pair">SHA обоих исходных файлов совпадают с версиями в индексе; прочтения всё ещё не подтверждены человеком.</string>
+    <string name="knowledge_modal_historical_pair">Один или оба файла изменены, недоступны или не проверены. Сопоставление — только историческая подсказка из индекса.</string>
     <string name="knowledge_relation_other_interval">Период другой заметки</string>
     <string name="knowledge_relation_overlap_interval">Общий период</string>
     <string name="knowledge_no_semantic_relations">Точных совпадений и осторожных подсказок по периодам/подтверждённым алиасам нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>

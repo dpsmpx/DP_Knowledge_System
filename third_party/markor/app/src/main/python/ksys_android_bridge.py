@@ -175,14 +175,17 @@ def note_relationships(workspace_dir: str, relative_path: str,
     aliases = verified_owner_aliases(journal.entries(), journal.actor)
     matches = related_claims(ws, relative_path, aliases=aliases)
     evidence_checks_limited = True
+    modal_checks_limited = False
     source_lineage_limited = False
     source_assessment_limited = False
-    if matches["evidence_groups"]:
+    if matches["evidence_groups"] or any(
+            item["kind"] == "modal_contrast" for item in matches["matches"]):
         con = _decision_index(workspace)
         if con is not None:
             try:
-                evidence_checks_limited = _verify_evidence_freshness(
-                    con, vault_dir, relative_path, matches["evidence_groups"])
+                evidence_checks_limited, modal_checks_limited = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, matches["evidence_groups"],
+                    matches["matches"])
                 source_lineage_limited = _annotate_reviewed_source_links(
                     con, journal, relative_path, matches["evidence_groups"])
                 source_assessment_limited = _annotate_source_assessments(
@@ -196,6 +199,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
         "truncated": matches["truncated"],
         "alias_search_limited": matches["alias_search_limited"],
         "modal_search_limited": matches["modal_search_limited"],
+        "modal_checks_limited": modal_checks_limited,
         "evidence_groups": matches["evidence_groups"],
         "evidence_limited": matches["evidence_limited"],
         "evidence_checks_limited": evidence_checks_limited,
@@ -254,7 +258,8 @@ def _entity_live_hash(root: Path, relative_path: str) -> str | None:
 
 
 def _verify_evidence_freshness(con, vault_dir: str | None,
-                               source_path: str, groups: list[dict]) -> bool:
+                               source_path: str, groups: list[dict],
+                               matches: list[dict] | None = None) -> tuple[bool, bool]:
     """Verify a bounded set of current file hashes without indexing or writes.
 
     The supplied selected notebook must match the import's recorded root;
@@ -262,7 +267,9 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
     fragment hashes allow only exact-text-repeat notices, never claims of
     independent authorship, truth, or factual corroboration. Each copy family
     marks *every* verified member, including the inspected source and the
-    first occurrence. Neither new file hashes nor inferred links are stored.
+    first occurrence. Modality contrasts reuse the *same* 16-file budget,
+    including checks already done for exact evidence. Neither new file hashes
+    nor inferred links are stored. SHA freshness is not semantic approval.
     """
     root = None
     if isinstance(vault_dir, str) and Path(vault_dir).is_absolute():
@@ -376,7 +383,20 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
             "document_families": document_families,
             "independence_assessed": False,
         })
-    return limited
+    evidence_limited = limited
+    modal_limited = False
+    for match in matches or []:
+        if match.get("kind") != "modal_contrast":
+            continue
+        source_state, _ = check(source_path)
+        other_state, _ = check(match["path"])
+        match["source_verification"] = source_state
+        match["other_verification"] = other_state
+        # A stale, missing or unchecked Markdown source makes the indexed
+        # contrast historical only. Neither polarity nor modality is a vote.
+        match["live_source_pair"] = source_state == other_state == "current"
+        modal_limited = modal_limited or "not_checked" in (source_state, other_state)
+    return evidence_limited, modal_limited
 
 
 def _annotate_reviewed_source_links(con, journal: Journal,
@@ -1500,6 +1520,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
     relations, truncated, index_state = [], False, "absent"
     evidence_groups, evidence_limited = [], False
     evidence_checks_limited = True
+    modal_checks_limited = False
     source_lineage_limited = False
     source_assessment_limited = False
     alias_limited = False
@@ -1523,8 +1544,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                 modal_limited = result["modal_search_limited"]
                 evidence_groups = result["evidence_groups"]
                 evidence_limited = result["evidence_limited"]
-                evidence_checks_limited = _verify_evidence_freshness(
-                    con, vault_dir, relative_path, evidence_groups)
+                evidence_checks_limited, modal_checks_limited = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, evidence_groups, relations)
                 source_lineage_limited = _annotate_reviewed_source_links(
                     con, kb.journal, relative_path, evidence_groups)
                 source_assessment_limited = _annotate_source_assessments(
@@ -1546,6 +1567,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
         "candidate_relations": relations, "relations_truncated": truncated,
         "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
         "evidence_checks_limited": evidence_checks_limited,
+        "modal_checks_limited": modal_checks_limited,
         "source_lineage_limited": source_lineage_limited,
         "source_assessment_limited": source_assessment_limited,
         "alias_search_limited": alias_limited,

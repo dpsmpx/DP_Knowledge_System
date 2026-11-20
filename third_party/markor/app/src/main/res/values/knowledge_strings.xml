@@ -254,6 +254,9 @@
     <string name="knowledge_modal_hypothesis">Hypothesis</string>
     <string name="knowledge_modal_opposing_info">Opposite polarity is metadata, not a conflict verdict.</string>
     <string name="knowledge_modal_limited">Modal hints unavailable or incomplete; re-analyze the local index before relying on coverage.</string>
+    <string name="knowledge_modal_checks_limited">Some modality sources could not be SHA-checked; those hints are unverified historical snapshots.</string>
+    <string name="knowledge_modal_current_pair">Both original file hashes match the analyzed versions; the readings remain unapproved.</string>
+    <string name="knowledge_modal_historical_pair">One or both original files are stale, unavailable or unchecked. Treat this contrast as an indexed historical hint only.</string>
     <string name="knowledge_relation_other_interval">Other note period</string>
     <string name="knowledge_relation_overlap_interval">Shared period</string>
     <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>

@@ -634,6 +634,20 @@ incompleteness. No natural-language semantic equivalence, numerical
 confidence, independence estimate, user approval or truth propagation is
 inferred from a source modality. Physical Android QA remains separate.
 
+**Stage 18 modal source freshness (eighteenth slice, awaiting Android QA):**
+Modal/hypothesis comparison rows now show the current saved-file SHA status
+of both original Markdown sources: current, stale, unavailable or not checked.
+An indexed modal contrast is described as a live-source pair only if **both**
+file hashes match the versions in the disposable index; even then parser
+readings remain unapproved. Without a matching selected notebook root, all
+checks stay explicitly unchecked. The Hub and editor show historical-only
+warnings, including when checks are capped. Modal comparisons reuse the same
+16-unique-file budget as exact-evidence checks (maximum 32 MiB of live
+Markdown reads per query), with no duplicate hashing of shared files.
+Original notes, approved decisions and the append-only human journal remain
+unchanged. No automatic conflict vote, source reliability or independence
+assessment is introduced; physical Android QA remains open.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

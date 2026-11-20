@@ -48,6 +48,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
         self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
         self.assertIn("_verify_evidence_freshness(", bridge)
+        self.assertIn('result.optBoolean("modal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("modal_checks_limited")', editor)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        self.assertIn('"modal_checks_limited": modal_checks_limited', bridge)
         for locale in ("values", "values-ru"):
             strings = {e.get("name"): e.text or "" for e in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
@@ -70,6 +76,9 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_source_lineage_evidence_current",
                         "knowledge_source_lineage_evidence_historical",
                         "knowledge_source_lineage_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_modal_checks_limited", "knowledge_modal_current_pair",
+                        "knowledge_modal_historical_pair"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
     def test_manual_source_lineage_review_is_reversible_and_reachable(self):

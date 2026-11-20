@@ -1814,7 +1814,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     + (result.optBoolean("alias_search_limited")
                                     ? " · " + getString(R.string.knowledge_alias_search_limited) : "")
                                     + (result.optBoolean("modal_search_limited")
-                                    ? " · " + getString(R.string.knowledge_modal_limited) : ""))
+                                    ? " · " + getString(R.string.knowledge_modal_limited) : "")
+                                    + (result.optBoolean("modal_checks_limited")
+                                    ? " · " + getString(R.string.knowledge_modal_checks_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
                     if (evidence != null && evidence.length() > 0) {
                         dialog.setNeutralButton(R.string.knowledge_evidence_title,

@@ -8,10 +8,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
+import ksys_android_bridge as bridge
 from ksys_android_bridge import analyze_vault, note_relationships, editor_note_context
 from ksys.audit.library import _source_conflict_count, _source_conflict_page
 from ksys.importer.relations import (RELATIONS_VERSION, projected_atoms,
@@ -639,6 +641,97 @@ class RelationTests(unittest.TestCase):
                              for row in self._relations("a.md")["matches"]))
         self.assertEqual(original, {path: hashlib.sha256((self.vault / path).read_bytes()).hexdigest()
                                     for path in self.notes})
+
+    def test_modal_contrasts_require_both_original_sha_checks_for_live_status(self):
+        self.notes["b.md"] = "# B\nВозможно, Алекс является разработчиком.\n"
+        self.notes["c.md"] = "# C\nОбычно Алекс является разработчиком.\n"
+        for path in ("b.md", "c.md"):
+            (self.vault / path).write_text(self.notes[path], encoding="utf-8")
+        self._import()
+
+        historical = self._relations("a.md")
+        hints = [m for m in historical["matches"] if m["kind"] == "modal_contrast"]
+        self.assertTrue(historical["modal_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            and not m["live_source_pair"] for m in hints))
+
+        current = self._relations("a.md", verified=True)
+        verified = [m for m in current["matches"] if m["kind"] == "modal_contrast"]
+        self.assertFalse(current["modal_checks_limited"])
+        self.assertTrue({"b.md", "c.md"}.issubset({m["path"] for m in verified}))
+        self.assertTrue(all(m["source_verification"] == "current"
+                            and m["other_verification"] == "current"
+                            and m["live_source_pair"] for m in verified))
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                            self.notes["a.md"], str(self.vault)))
+        self.assertFalse(editor["modal_checks_limited"])
+        self.assertTrue(all(m["live_source_pair"] for m in editor["candidate_relations"]
+                            if m["kind"] == "modal_contrast"))
+
+        # b.md contains only a modal claim: its own evidence groups are empty,
+        # but its pair against the other modal note must still be SHA-checked.
+        modal_only = self._relations("b.md", verified=True)
+        self.assertEqual([], modal_only["evidence_groups"])
+        self.assertFalse(modal_only["modal_checks_limited"])
+        self.assertTrue(any(m["live_source_pair"] for m in modal_only["matches"]
+                            if m["kind"] == "modal_contrast" and m["path"] == "c.md"))
+
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        (self.vault / "c.md").unlink()
+        changed = self._relations("a.md", verified=True)
+        statuses = {m["path"]: m["other_verification"] for m in changed["matches"]
+                    if m["kind"] == "modal_contrast"}
+        self.assertEqual("stale", statuses["b.md"])
+        self.assertEqual("unavailable", statuses["c.md"])
+        self.assertFalse(changed["modal_checks_limited"])  # checked, but not current
+        self.assertTrue(all(not m["live_source_pair"] for m in changed["matches"]
+                            if m["kind"] == "modal_contrast"))
+
+        (self.vault / "a.md").write_text(self.notes["a.md"] + "\n", encoding="utf-8")
+        stale_source = self._relations("a.md", verified=True)
+        self.assertTrue(all(m["source_verification"] == "stale"
+                            and not m["live_source_pair"] for m in stale_source["matches"]
+                            if m["kind"] == "modal_contrast"))
+
+        with tempfile.TemporaryDirectory() as wrong_root:
+            wrong = json.loads(note_relationships(str(self.workspace), "a.md", wrong_root))
+        self.assertTrue(wrong["modal_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            for m in wrong["matches"] if m["kind"] == "modal_contrast"))
+
+    def test_modal_and_exact_evidence_share_one_sixteen_file_sha_budget(self):
+        self.notes["b.md"] = "# B\nВозможно, Алекс является разработчиком.\n"
+        (self.vault / "b.md").write_text(self.notes["b.md"], encoding="utf-8")
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            row = con.execute("SELECT * FROM candidate_atoms WHERE doc='sub/e.markdown'").fetchone()
+            for i in range(25):
+                path = f"00-extra-{i:02}.md"
+                con.execute("INSERT INTO documents(path,sha256,size,status,kind) "
+                            "VALUES(?,? ,12,'PARSED','markdown')", (path, "0" * 64))
+                con.execute("INSERT INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (f"extra-{i}", row[1], path, *row[3:]))
+        checked_paths = []
+        original_hash = bridge._entity_live_hash
+
+        def counted_hash(root, path):
+            checked_paths.append(path)
+            return original_hash(root, path)
+
+        with patch.object(bridge, "_entity_live_hash", side_effect=counted_hash):
+            result = self._relations("a.md", verified=True)
+        self.assertTrue(result["evidence_checks_limited"])
+        self.assertTrue(result["modal_checks_limited"])
+        self.assertEqual(bridge.MAX_EVIDENCE_LIVE_CHECKS, len(checked_paths))
+        self.assertEqual(len(checked_paths), len(set(checked_paths)))
+        hints = [m for m in result["matches"] if m["kind"] == "modal_contrast"]
+        self.assertTrue(hints)
+        self.assertTrue(all(m["source_verification"] == "current"
+                            and m["other_verification"] == "not_checked"
+                            and not m["live_source_pair"] for m in hints))
 
     def test_modal_index_uses_exact_qualifiers_and_clears_after_note_reanalysis(self):
         self.notes["b.md"] = "# B\nВозможно, Алекс является разработчиком.\n"
