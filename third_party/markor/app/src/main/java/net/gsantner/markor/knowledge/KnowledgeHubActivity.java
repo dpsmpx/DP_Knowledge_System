@@ -1870,9 +1870,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setMessage(KnowledgeRelationPresentation.evidenceDisclosure(this, group))
                 .setNegativeButton(android.R.string.cancel, null)
                 .setNeutralButton(R.string.knowledge_source_lineage_new, (d, w) ->
-                        new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
-                                decisionWorker, this::openIndexedNote,
-                                () -> loadDecisionPage(0)).showNew(sourcePath, ""))
+                        chooseLineagePartner(group, sourcePath))
                 .setPositiveButton(R.string.knowledge_evidence_show_sources, (d, w) -> {
                     final JSONArray sources = group.optJSONArray("other_sources");
                     if (sources == null || sources.length() == 0) return;
@@ -1890,6 +1888,29 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             })
                             .setNegativeButton(android.R.string.cancel, null).show();
                 }).show();
+    }
+
+    private void chooseLineagePartner(final JSONObject group, final String sourcePath) {
+        final JSONArray sources = group.optJSONArray("other_sources");
+        final ArrayList<String> paths = new ArrayList<>();
+        final ArrayList<String> labels = new ArrayList<>();
+        if (sources != null) for (int i = 0; i < sources.length(); i++) {
+            final JSONObject source = sources.optJSONObject(i);
+            if (source == null || !"current".equals(source.optString("verification"))
+                    || sourcePath.equals(source.optString("path"))) continue;
+            paths.add(source.optString("path"));
+            labels.add(source.optString("path") + " · "
+                    + getString(R.string.knowledge_evidence_current));
+        }
+        labels.add(getString(R.string.knowledge_source_lineage_manual_path));
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_source_lineage_choose_candidate)
+                .setItems(labels.toArray(new String[0]), (d, index) ->
+                        new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
+                                decisionWorker, this::openIndexedNote,
+                                () -> loadDecisionPage(0)).showNew(
+                                        sourcePath, index < paths.size() ? paths.get(index) : ""))
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void inspectWithCore(final String relativePath) {

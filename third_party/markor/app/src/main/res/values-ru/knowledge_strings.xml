@@ -74,6 +74,9 @@
     <string name="knowledge_source_lineage_error">Проверка происхождения не завершена</string>
     <string name="knowledge_source_lineage_error_detail">Новое решение не подтверждено. Проверьте пути, папку библиотеки, хеши файлов, индекс и журнал; изменённые заметки нужно переиндексировать.</string>
     <string name="knowledge_source_lineage_saved">Решение об источниках записано в закрытый журнал.</string>
+    <string name="knowledge_source_lineage_choose_candidate">Выберите второй файл из индекса для проверки</string>
+    <string name="knowledge_source_lineage_manual_path">Ввести путь другого файла вручную</string>
+    <string name="knowledge_source_lineage_historical_warning">Фрагменты и хеши сохранены в момент подтверждения и могли устареть. Откройте оригиналы, чтобы проверить актуальное содержимое.</string>
     <string name="knowledge_source_lineage_evidence_counts">Прямые ручные решения об общем источнике: актуальны %1$d · исторические/не проверены %2$d. Это не оценка истины или независимости.</string>
     <string name="knowledge_source_lineage_evidence_current">Связь источников подтверждена человеком; оба хеша совпадают с моментом решения</string>
     <string name="knowledge_source_lineage_evidence_historical">Историческое решение человека; источник изменился или не проверен</string>

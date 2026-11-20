@@ -81,7 +81,9 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         bridge = (folder / "KnowledgePythonBridge.java").read_text()
         dialog = (folder / "KnowledgeSourceReviewDialog.java").read_text()
         self.assertIn("new KnowledgeSourceReviewDialog(this, workspacePath()", hub)
-        self.assertIn("showNew(sourcePath, \"\")", hub)
+        self.assertIn("chooseLineagePartner(group, sourcePath)", hub)
+        self.assertIn('"current".equals(source.optString("verification"))', hub)
+        self.assertIn("paths.get(index) : \"\"", hub)
         for name in ("sourceLineageDecisions", "previewSourceLink", "confirmSourceLink",
                      "previewSourceUnlink", "confirmSourceUnlink"):
             self.assertIn(name + "(", bridge)
@@ -99,7 +101,10 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_source_lineage_history", "knowledge_source_lineage_reason",
                          "knowledge_source_lineage_preview", "knowledge_source_lineage_confirm",
                          "knowledge_source_lineage_revoke", "knowledge_source_lineage_revoke_warning",
-                         "knowledge_source_lineage_error_detail"):
+                         "knowledge_source_lineage_error_detail",
+                         "knowledge_source_lineage_choose_candidate",
+                         "knowledge_source_lineage_manual_path",
+                         "knowledge_source_lineage_historical_warning"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):

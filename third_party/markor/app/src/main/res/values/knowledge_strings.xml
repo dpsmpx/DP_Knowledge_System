@@ -74,6 +74,9 @@
     <string name="knowledge_source_lineage_error">Source review was not completed</string>
     <string name="knowledge_source_lineage_error_detail">No new decision was confirmed. Check the exact paths, notebook root, current file hashes, index and journal state; re-analyze changed notes.</string>
     <string name="knowledge_source_lineage_saved">Source decision recorded in the private journal.</string>
+    <string name="knowledge_source_lineage_choose_candidate">Choose the other indexed file to review</string>
+    <string name="knowledge_source_lineage_manual_path">Enter another file path manually</string>
+    <string name="knowledge_source_lineage_historical_warning">These excerpts and hashes were saved at approval time and may no longer match the files on disk. Reopen the originals to verify current content.</string>
     <string name="knowledge_source_lineage_evidence_counts">Direct owner-reviewed common-origin links: %1$d current · %2$d historical/unverified. Not a truth or independence score.</string>
     <string name="knowledge_source_lineage_evidence_current">Human-reviewed upstream link; both file hashes still match the decision</string>
     <string name="knowledge_source_lineage_evidence_historical">Historical human upstream link; source changed or was not verified</string>

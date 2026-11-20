@@ -523,6 +523,16 @@ preserving its journal history. Excessive/corrupt source-link journal coverage
 fails closed with an explicit incompleteness warning. No additional source
 I/O or index writes are introduced. Android hardware acceptance remains open.
 
+**Stage 18 source-link navigation (tenth slice, awaiting device QA):**
+The Hub's evidence disclosure offers an explicit choice of the *other* source
+from already hash-current indexed candidates, then pre-fills both exact note
+paths in the human common-origin review dialog. Stale, missing and unchecked
+files are not offered as verified candidates; a manual-path fallback remains
+available and the backend still validates both sources again at preview and
+commit. Saved active-link excerpts are separately labeled **historical**
+because their original hashes may no longer match current Markdown. This is
+navigation and disclosure only, not automatic source matching or approval.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

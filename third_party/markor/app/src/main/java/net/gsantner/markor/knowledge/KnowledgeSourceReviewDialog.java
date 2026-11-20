@@ -253,6 +253,7 @@ final class KnowledgeSourceReviewDialog {
             final JSONObject source = sources.optJSONObject(i);
             if (source != null) message.append("\n\n").append(detail(source));
         }
+        message.append("\n\n").append(s(R.string.knowledge_source_lineage_historical_warning));
         message.append("\n\n").append(s(R.string.knowledge_source_lineage_revoke_warning));
         final AlertDialog.Builder dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle(R.string.knowledge_source_lineage_active)
