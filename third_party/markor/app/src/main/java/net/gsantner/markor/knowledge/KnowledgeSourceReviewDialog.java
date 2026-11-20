@@ -93,7 +93,7 @@ final class KnowledgeSourceReviewDialog {
         final LinearLayout fields = new LinearLayout(activity);
         fields.setOrientation(LinearLayout.VERTICAL);
         final int pad = (int) (20 * activity.getResources().getDisplayMetrics().density);
-        fields.setPadding(pad, pad / 2, pad, pad, pad / 2);
+        fields.setPadding(pad, pad / 2, pad, pad / 2);
         final EditText first = new EditText(activity);
         first.setHint(R.string.knowledge_source_lineage_first);
         first.setSingleLine(true);
