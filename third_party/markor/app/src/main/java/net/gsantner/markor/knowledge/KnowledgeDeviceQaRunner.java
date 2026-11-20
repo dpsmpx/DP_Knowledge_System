@@ -15,11 +15,15 @@ import android.os.SystemClock;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -134,6 +138,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("CORE-01", this::checkPythonCore);
                 step("EMBED-01", this::checkEmbeddingPrimitives);
                 step("CRYPTO-01", this::checkSyntheticCrypto);
+                step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -390,6 +395,40 @@ public final class KnowledgeDeviceQaRunner {
             Arrays.fill(passphrase, '\0');
             Arrays.fill(input, (byte) 0);
         }
+    }
+
+    private String checkSyntheticBackupWriter() throws IOException {
+        final byte[] fixture = "synthetic encrypted data; not a real journal"
+                .getBytes(StandardCharsets.UTF_8);
+        final ByteArrayOutputStream saved = new ByteArrayOutputStream();
+        KnowledgeJournalExportWriter.writeAndVerify(new KnowledgeJournalExportWriter.Destination() {
+            @Override public OutputStream openWrite() { return saved; }
+            @Override public InputStream openRead() {
+                return new ByteArrayInputStream(saved.toByteArray());
+            }
+        }, fixture);
+        if (!Arrays.equals(fixture, saved.toByteArray())) {
+            throw new SyntheticMismatch("verdict=SYNTHETIC_BACKUP_WRITE_MISMATCH");
+        }
+        boolean refusedEmptyProvider = false;
+        try {
+            KnowledgeJournalExportWriter.writeAndVerify(
+                    new KnowledgeJournalExportWriter.Destination() {
+                        @Override public OutputStream openWrite() {
+                            return new ByteArrayOutputStream();
+                        }
+                        @Override public InputStream openRead() {
+                            return new ByteArrayInputStream(new byte[0]);
+                        }
+                    }, fixture);
+        } catch (IOException expected) {
+            refusedEmptyProvider = true;
+        }
+        if (!refusedEmptyProvider) {
+            throw new SyntheticMismatch("verdict=EMPTY_BACKUP_PROVIDER_NOT_REJECTED");
+        }
+        return "synthetic stream closed/read-back verified, zero-byte provider rejected; "
+                + "real SAF/document picker still requires manual device QA";
     }
 
     private String checkSyntheticIndex() throws Exception {

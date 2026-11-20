@@ -214,7 +214,7 @@ No LLM invocation or external connection is part of this milestone.
 Because a human-approved knowledge journal is authoritative and irreplaceable,
 the next integration PR prioritizes portable backup/recovery before optional
 LLM transport. The Knowledge Library exposes two Android Storage Access
-Framework actions: **Encrypted export** and **Restore backup**. Only the user
+Framework actions: **Export decisions journal** and **Restore backup**. Only the user
 chooses the destination/source document.
 
 The export verifies the existing Python journal's hash chain and compares its
@@ -235,6 +235,20 @@ temporary file. **An existing nonempty journal is never replaced or merged.**
 There is an 8 MB plaintext limit for this initial portable format. User
 passphrases must contain at least 12 characters, and users are responsible
 for keeping both the encrypted archive and the passphrase safe.
+
+**Export regression found in Stage 18 Preview #24 (2026-11-20):** A newly
+created SAF destination could remain **0 bytes** if the journal was empty or
+encryption failed *after* the document picker had already created it. The
+follow-up fix checks the journal, validates its SHA-256 and encrypts the
+payload **before** asking Android to create a file. No decisions now means an
+explicit message without launching the picker. Once saved, the entire closed
+encrypted payload is read back and compared before showing success; a failed
+provider may leave a partial file, and the user is warned to remove it
+manually. The in-app synthetic quick QA includes `BACKUP-WRITE-01`, which
+checks successful stream read-back and rejects a synthetic zero-byte provider;
+real SAF providers, rotation/process death, and physical export/restore remain
+unverified. **Journal export does not include original Markdown notes or the
+full Stage 21 portable backup.**
 
 **Limitations:** no scheduled automatic backup, password recovery, key
 rotation, multi-device merge, atomic guarantees across an external cloud

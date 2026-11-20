@@ -197,7 +197,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             R.id.knowledge_nav_library, R.id.knowledge_nav_decisions,
             R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
     private KnowledgeProcessHistory processHistory;
-    private char[] pendingExportPassword;
+    // Prepared only after verifying and encrypting the existing journal.
+    // No SAF destination is created for an empty or unreadable journal.
+    private byte[] pendingExportEnvelope;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -3701,6 +3703,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void requestJournalExport() {
+        final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+        if (!journal.isFile() || journal.length() == 0L) {
+            status.setText(R.string.knowledge_backup_export_empty);
+            Toast.makeText(this, R.string.knowledge_backup_export_empty,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         final android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
         fields.setOrientation(android.widget.LinearLayout.VERTICAL);
         fields.setPadding(24, 0, 24, 0);
@@ -3722,17 +3731,77 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
-                    if (pendingExportPassword != null) {
-                        Arrays.fill(pendingExportPassword, '\0');
+                    prepareJournalExport(first.toCharArray());
+                })
+                .show();
+    }
+
+    private void prepareJournalExport(final char[] password) {
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            byte[] plaintext = null;
+            byte[] envelope = null;
+            try {
+                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+                if (!journal.isFile() || journal.length() == 0L) {
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            status.setText(R.string.knowledge_backup_export_empty);
+                            Toast.makeText(this, R.string.knowledge_backup_export_empty,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                    return;
+                }
+                final JSONObject metadata = KnowledgePythonBridge.journalExportInfo(
+                        this, workspacePath());
+                if (metadata.optInt("count", 0) < 1) {
+                    throw new IOException("No journal decisions to export");
+                }
+                try (FileInputStream in = new FileInputStream(journal)) {
+                    plaintext = readLimited(in, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES);
+                }
+                if (!sha256Hex(plaintext).equals(metadata.getString("sha256"))) {
+                    throw new IOException("Journal changed while preparing backup");
+                }
+                envelope = KnowledgeJournalCrypto.encrypt(plaintext, password);
+                final byte[] prepared = envelope;
+                envelope = null;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) {
+                        Arrays.fill(prepared, (byte) 0);
+                        return;
                     }
-                    pendingExportPassword = first.toCharArray();
+                    if (pendingExportEnvelope != null) {
+                        Arrays.fill(pendingExportEnvelope, (byte) 0);
+                    }
+                    pendingExportEnvelope = prepared;
                     final Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType("application/octet-stream");
                     intent.putExtra(Intent.EXTRA_TITLE, "DP_Knowledge_Journal.dpks");
-                    startActivityForResult(intent, REQUEST_EXPORT_JOURNAL);
-                })
-                .show();
+                    try {
+                        startActivityForResult(intent, REQUEST_EXPORT_JOURNAL);
+                    } catch (RuntimeException unavailable) {
+                        Arrays.fill(prepared, (byte) 0);
+                        pendingExportEnvelope = null;
+                        status.setText(R.string.knowledge_backup_failed);
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_failed);
+                        Toast.makeText(this, R.string.knowledge_backup_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (plaintext != null) Arrays.fill(plaintext, (byte) 0);
+                if (envelope != null) Arrays.fill(envelope, (byte) 0);
+            }
+        });
     }
 
     private void requestJournalImport() {
@@ -3753,15 +3822,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_EXPORT_JOURNAL) {
-            final char[] password = pendingExportPassword;
-            pendingExportPassword = null;
-            if (password == null) {
+            final byte[] envelope = pendingExportEnvelope;
+            pendingExportEnvelope = null;
+            if (envelope == null) {
+                status.setText(R.string.knowledge_backup_export_incomplete);
                 return;
             }
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                exportJournalToUri(data.getData(), password);
+                exportJournalToUri(data.getData(), envelope);
             } else {
-                Arrays.fill(password, '\0');
+                Arrays.fill(envelope, (byte) 0);
             }
         } else if (requestCode == REQUEST_IMPORT_JOURNAL
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
@@ -3792,31 +3862,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return result.toString();
     }
 
-    private void exportJournalToUri(final Uri destination, final char[] password) {
-        final int scan = scanGeneration.get();
+    private void exportJournalToUri(final Uri destination, final byte[] envelope) {
         status.setText(R.string.knowledge_backup_working);
         worker.submit(() -> {
-            byte[] plaintext = null;
             try {
-                final JSONObject metadata = KnowledgePythonBridge.journalExportInfo(
-                        this, workspacePath());
-                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
-                try (FileInputStream in = new FileInputStream(journal)) {
-                    plaintext = readLimited(in, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES);
-                }
-                if (!sha256Hex(plaintext).equals(metadata.getString("sha256"))) {
-                    throw new IOException("Journal changed while exporting");
-                }
-                final byte[] ciphertext = KnowledgeJournalCrypto.encrypt(plaintext, password);
-                try (OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
-                    if (output == null) {
-                        throw new IOException("Cannot open user-selected destination");
-                    }
-                    output.write(ciphertext);
-                    output.flush();
-                }
+                KnowledgeJournalExportWriter.writeAndVerify(
+                        new KnowledgeJournalExportWriter.Destination() {
+                            @Override public OutputStream openWrite() throws IOException {
+                                return getContentResolver().openOutputStream(destination, "wt");
+                            }
+                            @Override public InputStream openRead() throws IOException {
+                                return getContentResolver().openInputStream(destination);
+                            }
+                        }, envelope);
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_exported);
                         Toast.makeText(this, R.string.knowledge_backup_exported,
                                 Toast.LENGTH_LONG).show();
                         if (syncResult != null && snapshot != null) {
@@ -3824,17 +3885,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                     }
                 });
-            } catch (Exception ignored) {
+            } catch (Exception failed) {
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
-                        status.setText(R.string.knowledge_backup_failed);
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_export_incomplete);
+                        Toast.makeText(this, R.string.knowledge_backup_export_incomplete,
+                                Toast.LENGTH_LONG).show();
                     }
                 });
             } finally {
-                Arrays.fill(password, '\0');
-                if (plaintext != null) {
-                    Arrays.fill(plaintext, (byte) 0);
-                }
+                Arrays.fill(envelope, (byte) 0);
             }
         });
     }
@@ -3957,9 +4017,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (runningSearch != null) {
             runningSearch.cancel(true);
         }
-        if (pendingExportPassword != null) {
-            Arrays.fill(pendingExportPassword, '\0');
-            pendingExportPassword = null;
+        if (pendingExportEnvelope != null) {
+            Arrays.fill(pendingExportEnvelope, (byte) 0);
+            pendingExportEnvelope = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();

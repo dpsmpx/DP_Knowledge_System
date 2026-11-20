@@ -14,6 +14,30 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_journal_export_prepares_before_saf_and_verifies_destination(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        prepare = hub[hub.index("private void prepareJournalExport("):
+                      hub.index("private void requestJournalImport(")]
+        self.assertLess(prepare.index("KnowledgePythonBridge.journalExportInfo("),
+                        prepare.index("KnowledgeJournalCrypto.encrypt("))
+        self.assertLess(prepare.index("KnowledgeJournalCrypto.encrypt("),
+                        prepare.index("startActivityForResult(intent, REQUEST_EXPORT_JOURNAL)"))
+        self.assertIn("journal.length() == 0L", prepare)
+        self.assertIn("KnowledgeJournalExportWriter.writeAndVerify(", hub)
+        self.assertIn('openOutputStream(destination, "wt")', hub)
+        self.assertIn("openInputStream(destination)", hub)
+        self.assertNotIn("pendingExportPassword", hub)
+        self.assertTrue((ROOT.parent / "test/java/net/gsantner/markor/knowledge/"
+                         "KnowledgeJournalExportWriterTest.java").exists())
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter)', runner)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_backup_export_empty"])
+            self.assertTrue(strings["knowledge_backup_export_incomplete"])
+
     def test_stage22_first_open_guide_is_private_and_accessible(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         buttons = [element for element in layout.iter()
