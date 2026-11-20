@@ -173,7 +173,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("evidenceSourceActions(sourcePath", hub)
         self.assertIn("sources.optJSONObject(selected - 1)", hub)
         self.assertIn('if (!"current".equals(verification))', hub)
-        self.assertIn("if (alreadyReviewed) dialog.show()", hub)
+        self.assertIn("if (alreadyReviewed) dialog.showReviewed(path)", hub)
         self.assertIn("else dialog.showNew(path)", hub)
         self.assertIn("void showNew(final String initialPath)", dialog)
         self.assertIn("chooseKind(initialPath)", dialog)
@@ -181,6 +181,17 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         # UI prefill is not an approval bypass: its preview invokes the
         # existing live source/hash and journal verification bridge.
         self.assertIn("KnowledgePythonBridge.previewSourceAssessment", dialog)
+
+    def test_existing_source_review_opens_exact_active_decision_for_withdrawal(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("void showReviewed(final String exactPath)", dialog)
+        self.assertIn('exactPath.equals(record.optString("path"))', dialog)
+        self.assertIn("showActive(record)", dialog)
+        self.assertIn("KnowledgePythonBridge.sourceAssessmentDecisions", dialog)
+        self.assertIn("KnowledgePythonBridge.previewSourceUnassessment", dialog)
+        self.assertIn("KnowledgePythonBridge.confirmSourceUnassessment", dialog)
+        self.assertIn("show();", dialog)  # Stale evidence gracefully reopens menu.
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()

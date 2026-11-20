@@ -575,6 +575,16 @@ inspection. Prefill never counts as confirmation: the existing backend still
 checks the selected root, live SHA, fragment, preview token and journal head.
 This adds no automatic classification or source authority.
 
+**Stage 18 direct review and withdrawal (fourteenth slice, awaiting Android QA):**
+Selecting a currently annotated source from the evidence file picker opens
+that **exact active owner decision** instead of requiring a search through
+all decisions. The panel displays stored reasons, source snapshot and journal
+ID, and offers the existing independent withdrawal preview and confirmation.
+If the decision changed between evidence display and selection, the panel
+falls back to the normal review/history menu; it does not act on a stale ID.
+Every mutation remains guarded by the original journal-head and decision-ID
+checks, with no changes to Markdown or automatic claim status.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

@@ -104,6 +104,23 @@ final class KnowledgeSourceAssessmentDialog {
         chooseKind(initialPath);
     }
 
+    /** Open the exact reviewed note, without requiring a full-history search. */
+    void showReviewed(final String exactPath) {
+        async(() -> KnowledgePythonBridge.sourceAssessmentDecisions(activity, workspace), data -> {
+            final JSONArray active = data.optJSONArray("active");
+            if (active != null) for (int i = 0; i < active.length(); i++) {
+                final JSONObject record = active.optJSONObject(i);
+                if (record != null && exactPath.equals(record.optString("path"))) {
+                    showActive(record);
+                    return;
+                }
+            }
+            // Journal changed since the read-only evidence display. Let the
+            // owner choose a fresh review or history; never act on a stale ID.
+            show();
+        });
+    }
+
     private void chooseKind() {
         chooseKind("");
     }

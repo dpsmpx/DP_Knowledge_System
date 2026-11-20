@@ -1927,7 +1927,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
                                         decisionWorker, this::openIndexedNote,
                                         () -> loadDecisionPage(0));
-                        if (alreadyReviewed) dialog.show();
+                        if (alreadyReviewed) dialog.showReviewed(path);
                         else dialog.showNew(path);
                     }
                 })
