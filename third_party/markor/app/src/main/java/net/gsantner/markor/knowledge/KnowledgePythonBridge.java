@@ -269,6 +269,29 @@ public final class KnowledgePythonBridge {
         return invoke(context, "journal_sync_event_detail", foreignText, eventId, expectedHash);
     }
 
+    public static JSONObject journalSyncMetadataPreview(final Context context,
+                                                        final String workspace,
+                                                        final String foreignText,
+                                                        final String fingerprint,
+                                                        final String eventId,
+                                                        final String localHead,
+                                                        final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_metadata_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncMetadataCommit(final Context context,
+                                                       final String workspace,
+                                                       final String foreignText,
+                                                       final String fingerprint,
+                                                       final String eventId,
+                                                       final String localHead,
+                                                       final String remoteSha,
+                                                       final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_metadata_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, planSha);
+    }
+
     public static JSONObject journalSyncReviewCommit(final Context context, final String workspace,
                                                      final String foreignText,
                                                      final String fingerprint,
@@ -360,6 +383,8 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-preview.v1".equals(protocol)
                 || "dpksys.sync-events.v1".equals(protocol)
                 || "dpksys.sync-event-detail.v1".equals(protocol)
+                || "dpksys.sync-metadata-preview.v1".equals(protocol)
+                || "dpksys.sync-metadata-commit.v1".equals(protocol)
                 || "dpksys.sync-review-commit.v1".equals(protocol)
                 || "dpksys.sync-ack-commit.v1".equals(protocol)
                 || "dpksys.sync-adopt.v1".equals(protocol)

@@ -4,7 +4,8 @@ from xml.etree import ElementTree as ET
 import unittest
 
 
-SOURCE = Path(__file__).resolve().parents[1] / "third_party/markor/app/src/main"
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "third_party/markor/app/src/main"
 JAVAS = SOURCE / "java/net/gsantner/markor/knowledge"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 
@@ -194,6 +195,29 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("def journal_sync_event_detail(", android_bridge)
         self.assertIn("if (!snapshot.peer.paired)", hub)
         self.assertNotIn("journalRestoreCommit(this, workspacePath(), snapshot.journal)", hub)
+
+    def test_foreign_metadata_has_individual_manual_causal_approval(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        manual = (ROOT / "ksys/store/journal_sync_manual.py").read_text()
+        for required in ("previewPeerMetadata(", "confirmPeerMetadata(",
+                         "KnowledgePythonBridge.journalSyncMetadataPreview(",
+                         "KnowledgePythonBridge.journalSyncMetadataCommit(",
+                         "if (!branch.peer.paired)"):
+            self.assertIn(required, hub)
+        self.assertIn("dpksys.sync-metadata-preview.v1", bridge)
+        self.assertIn("dpksys.sync-metadata-commit.v1", bridge)
+        self.assertIn("journal_sync_metadata_preview", python)
+        self.assertIn("journal_sync_metadata_commit", python)
+        for required in ("verified_foreign_event(", "MANUAL_METADATA_OPS",
+                         "Foreign metadata was explicitly rejected",
+                         "plan_sha256", "kb.journal.head != local_head",
+                         '"foreign_causal"', '"automatic_replay": False'):
+            if "Foreign metadata was explicitly rejected" == required:
+                self.assertIn(required, python)
+            else:
+                self.assertIn(required, manual)
 
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()

@@ -31,6 +31,8 @@ from ksys.store.journal_sync import (preview_journals, review_foreign_events,
                                      inspect_foreign_event, prepare_peer_review,
                                      prepare_peer_adoption, prepare_peer_ack,
                                      prepare_peer_retraction)
+from ksys.store.journal_sync_manual import (plan_foreign_metadata,
+                                            commit_foreign_metadata)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1710,6 +1712,43 @@ def journal_sync_event_detail(foreign_text: str, event_id: str,
     return json.dumps(inspect_foreign_event(foreign_text, event_id,
                                              expected_sha256), ensure_ascii=False,
                       sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_metadata_preview(workspace_dir: str, foreign_text: str,
+                                  peer_fingerprint: str, event_id: str,
+                                  expected_local_head: str,
+                                  expected_remote_sha256: str) -> str:
+    """Event-specific read-only alias/label/schema review; never auto-apply."""
+    kb = _kb(workspace_dir)
+    local_path = kb.ws.journal_path
+    local = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
+    prior = kb.state.peer_reviews.get((peer_fingerprint, expected_remote_sha256, event_id))
+    if prior and prior[0] == "reject":
+        raise ValueError("Foreign metadata was explicitly rejected")
+    plan = plan_foreign_metadata(kb, local, foreign_text, peer_fingerprint,
+                                 event_id, expected_local_head or None,
+                                 expected_remote_sha256)
+    return json.dumps({"protocol": "dpksys.sync-metadata-preview.v1", **plan},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_metadata_commit(workspace_dir: str, foreign_text: str,
+                                 peer_fingerprint: str, event_id: str,
+                                 expected_local_head: str,
+                                 expected_remote_sha256: str,
+                                 expected_plan_sha256: str) -> str:
+    """Write only a new LOCAL event after a fresh, explicit review and CAS."""
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    prior = kb.state.peer_reviews.get((peer_fingerprint, expected_remote_sha256, event_id))
+    if prior and prior[0] == "reject":
+        raise ValueError("Foreign metadata was explicitly rejected")
+    result = commit_foreign_metadata(kb, local, foreign_text, peer_fingerprint,
+                                     event_id, expected_local_head or None,
+                                     expected_remote_sha256, expected_plan_sha256)
+    return json.dumps({"protocol": "dpksys.sync-metadata-commit.v1", **result},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def journal_sync_review_commit(workspace_dir: str, foreign_text: str,

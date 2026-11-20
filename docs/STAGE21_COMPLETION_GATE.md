@@ -15,7 +15,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox; separate AES/Keystore-protected high-water history survives inbox deletion; opt-in encrypted checkpoint export and monotonic restore | Real device migration, trust pairing and rollback/replay acceptance |
-| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
+| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved, bounded `alias`/`label`/`schema` translation to new local causal events | Device UI + concurrent-write review; other operations pending |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
 | Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191) and Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668) passed both flavors; APK assembly skipped | New high-water unit tests and physical integration tests |
@@ -31,6 +31,10 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 - No automatic journal merge, last-write-wins, schema/alias/revision replay,
   remote Markdown overwrite, network peer polling, or model download.
+- `alias`, `label` and `schema` can now be translated **only** after a full
+  bounded per-event preview and two deliberate UI actions. Foreign records are
+  never appended verbatim, and conflicting local metadata is not overwritten.
+  This does not authorize `bind`/`resolve`/`revise`/`split`/`merge` translation.
 - LLM API keys currently live only in the foreground session, not in app
   preferences, and cannot be transferred. The v3 secret allowlist handles
   only persisted embedding/LLM endpoints, including credentials embedded in
@@ -57,7 +61,8 @@ it explicitly skipped package-ID and APK content inspections as requested.
    endpoint export/restore is implemented, pending Android CI and device QA;
    encrypted-snapshot and plain Markdown SAF compare/keep-both are implemented;
    high-water storage and explicit migration are implemented pending device QA;
-   still implement manual handling of every foreign operation. Owner choices
+   `alias`/`label`/`schema` are now handled manually; still implement the
+   remaining event families. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. Physical integration,

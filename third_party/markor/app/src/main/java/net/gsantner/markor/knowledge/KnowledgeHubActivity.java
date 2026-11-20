@@ -4560,6 +4560,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final String localHead = comparison.isNull("local_head") ? ""
                         : comparison.getString("local_head");
                 final String operation = detail.optString("operation");
+                final boolean metadata = "alias".equals(operation)
+                        || "label".equals(operation) || "schema".equals(operation);
                 String payload = detail.toString(2);
                 if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
                 final String shown = payload;
@@ -4578,12 +4580,17 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             ? R.string.knowledge_sync_adopt_preview
                                             : "retract".equals(operation)
                                             ? R.string.knowledge_sync_retract_preview
+                                            : metadata
+                                            ? R.string.knowledge_sync_metadata_preview
                                             : android.R.string.ok,
                                     "accept".equals(operation)
                                             ? (dialog, which) -> previewPeerAdoption(
                                             name, eventId, expectedHash, localHead)
                                             : "retract".equals(operation)
                                             ? (dialog, which) -> previewPeerRetraction(
+                                            name, eventId, expectedHash, localHead)
+                                            : metadata
+                                            ? (dialog, which) -> previewPeerMetadata(
                                             name, eventId, expectedHash, localHead)
                                             : null)
                             .setNeutralButton(R.string.knowledge_sync_review_hold,
@@ -4599,6 +4606,76 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
             }
         });
+    }
+
+    /** Foreign schema/alias/label is never directly replayed as a journal line. */
+    private void previewPeerMetadata(final String name, final String eventId,
+                                     final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject plan = KnowledgePythonBridge.journalSyncMetadataPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!plan.optBoolean("read_only", false)
+                        || !plan.optBoolean("requires_human_confirmation", false))
+                    throw new SecurityException("Unsafe metadata preview");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_metadata_warning)
+                        + "\n\n" + plan.getString("operation")
+                        + " / " + plan.getString("risk")
+                        + "\n\n" + plan.getJSONObject("data").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_metadata_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_metadata_apply,
+                                    (dialog, which) -> confirmPeerMetadata(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_metadata_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerMetadata(final String name, final String eventId,
+                                     final String remoteSha, final String localHead,
+                                     final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_metadata_apply)
+                .setMessage(R.string.knowledge_sync_metadata_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_metadata_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final JSONObject result = KnowledgePythonBridge.journalSyncMetadataCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true))
+                                    throw new SecurityException("Metadata translation not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
+                                            R.string.knowledge_sync_metadata_saved,
+                                            Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_metadata_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
     }
 
     private void confirmPeerReview(final String name, final String eventId,
