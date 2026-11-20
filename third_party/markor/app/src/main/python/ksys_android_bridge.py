@@ -195,6 +195,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
         "matches": matches["matches"],
         "truncated": matches["truncated"],
         "alias_search_limited": matches["alias_search_limited"],
+        "modal_search_limited": matches["modal_search_limited"],
         "evidence_groups": matches["evidence_groups"],
         "evidence_limited": matches["evidence_limited"],
         "evidence_checks_limited": evidence_checks_limited,
@@ -1502,6 +1503,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
     source_lineage_limited = False
     source_assessment_limited = False
     alias_limited = False
+    modal_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
         try:
@@ -1518,6 +1520,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                 relations = result["matches"]
                 truncated = result["truncated"]
                 alias_limited = result["alias_search_limited"]
+                modal_limited = result["modal_search_limited"]
                 evidence_groups = result["evidence_groups"]
                 evidence_limited = result["evidence_limited"]
                 evidence_checks_limited = _verify_evidence_freshness(
@@ -1546,6 +1549,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
         "source_lineage_limited": source_lineage_limited,
         "source_assessment_limited": source_assessment_limited,
         "alias_search_limited": alias_limited,
+        "modal_search_limited": modal_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,
         "requires_human_review": True,

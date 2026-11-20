@@ -12,10 +12,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party" / "markor" / "app" / "src" / "main" / "python"))
 
-from ksys_android_bridge import analyze_vault, note_relationships
+from ksys_android_bridge import analyze_vault, note_relationships, editor_note_context
 from ksys.audit.library import _source_conflict_count, _source_conflict_page
-from ksys.importer.relations import (RELATIONS_VERSION, projected_atoms, related_claims,
-                                     indexed_source_evidence, _evidence_excerpts)
+from ksys.importer.relations import (RELATIONS_VERSION, projected_atoms,
+                                     projected_modal_atoms, related_claims,
+                                     indexed_related_claims, indexed_source_evidence,
+                                     _evidence_excerpts)
 from ksys.importer.aliases import verified_owner_aliases, one_symbol_variants
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
@@ -561,6 +563,118 @@ class RelationTests(unittest.TestCase):
         ]}
         self.assertEqual(1, len(projected_atoms(example, "a.md", "F:abc", "a:1")))
 
+    def test_unapproved_modal_and_hypothetical_nodes_never_become_claim_votes(self):
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"},
+                                       {"k": "sym", "v": "разработчик"}]}
+        asserted = {"type": "claim", "assertion": {
+            "mod": "asserted", "neg": False, "atom": atom}}
+        possible = {"type": "hypothesis", "assertion": {
+            "mod": "possible", "neg": True, "atom": atom}}
+        usual = {"type": "claim", "assertion": {
+            "mod": "usually", "neg": False, "atom": atom}}
+        assumption = {"type": "hypothesis", "assertion": {
+            "mod": "asserted", "neg": False, "atom": atom}}
+        example = {"id": "synthetic", "nodes": [asserted, possible, usual, assumption]}
+        strict = projected_atoms(example, "a.md", "F:test", "a:1")
+        modals = projected_modal_atoms(example, "a.md", "F:test", "a:1")
+        self.assertEqual(1, len(strict))
+        self.assertEqual(3, len(modals))
+        self.assertEqual({("possible", "hypothesis"), ("usually", "claim"),
+                          ("asserted", "hypothesis")}, {(x[7], x[8]) for x in modals})
+        self.assertEqual({strict[0][4]}, {x[4] for x in modals})
+        invalid = {"id": "bad", "nodes": [
+            {"type": "hypothesis", "assertion": dict(possible["assertion"],
+                 iv={"from": "2026-02-30", "to": None})},
+            {"type": "claim", "assertion": dict(usual["assertion"], neg="false")},
+            {"type": "hypothesis", "assertion": dict(possible["assertion"],
+                 atom={"p": "is_a", "args": [{"k": "var", "v": "x"}]})},
+        ]}
+        self.assertEqual([], projected_modal_atoms(invalid, "a.md", "F:test", "a:1"))
+
+    def test_modal_contrasts_are_exact_scoped_read_only_non_conflict_hints(self):
+        self.notes["b.md"] = "# B\nВозможно, Алекс является разработчиком.\n"
+        self.notes["c.md"] = "# C\nОбычно Алекс является разработчиком.\n"
+        for path in ("b.md", "c.md"):
+            (self.vault / path).write_text(self.notes[path], encoding="utf-8")
+        original = {path: hashlib.sha256((self.vault / path).read_bytes()).hexdigest()
+                    for path in self.notes}
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            rows = con.execute("SELECT doc, modality, node_kind FROM candidate_modal_atoms "
+                               "WHERE doc IN ('b.md','c.md') ORDER BY doc").fetchall()
+            self.assertTrue(any(path == "b.md" and mode == "possible"
+                                for path, mode, _ in rows), rows)
+            self.assertTrue(any(path == "c.md" and mode == "usually"
+                                for path, mode, _ in rows), rows)
+            self.assertEqual(0, _source_conflict_count(con))
+        result = self._relations("a.md")
+        self.assertFalse(result["modal_search_limited"])
+        contrasts = [row for row in result["matches"] if row["kind"] == "modal_contrast"]
+        self.assertTrue({"b.md", "c.md"}.issubset({r["path"] for r in contrasts}), contrasts)
+        self.assertTrue(all(r["source_modality"] == "asserted"
+                            and r["other_modality"] in ("possible", "usually")
+                            and r["authority"] == "unapproved_parser_hint"
+                            for r in contrasts if r["path"] in ("b.md", "c.md")))
+        other_modal = [row for row in self._relations("b.md")["matches"]
+                       if row["kind"] == "modal_contrast" and row["path"] == "c.md"]
+        self.assertTrue(any(row["source_modality"] == "possible"
+                            and row["other_modality"] == "usually" for row in other_modal))
+        evidence = result["evidence_groups"][0]
+        self.assertEqual("not_assessed", evidence["confidence"])
+        self.assertFalse({"b.md", "c.md"} &
+                         {source["path"] for source in evidence["other_sources"]})
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                             self.notes["a.md"], str(self.vault)))
+        self.assertFalse(editor["modal_search_limited"])
+        self.assertTrue(any(x["kind"] == "modal_contrast"
+                            for x in editor["candidate_relations"]))
+        with sqlite3.connect(db) as con:
+            con.execute("UPDATE candidate_modal_atoms SET negated=1 WHERE doc='b.md'")
+            self.assertEqual(0, _source_conflict_count(con))
+        polarity = [row for row in self._relations("a.md")["matches"]
+                    if row["kind"] == "modal_contrast" and row["path"] == "b.md"]
+        self.assertTrue(polarity and all(row["opposing_polarity"] for row in polarity))
+        self.assertFalse(any(row["kind"] == "possible_conflict" and row["path"] == "b.md"
+                             for row in self._relations("a.md")["matches"]))
+        self.assertEqual(original, {path: hashlib.sha256((self.vault / path).read_bytes()).hexdigest()
+                                    for path in self.notes})
+
+    def test_modal_index_uses_exact_qualifiers_and_clears_after_note_reanalysis(self):
+        self.notes["b.md"] = "# B\nВозможно, Алекс является разработчиком.\n"
+        (self.vault / "b.md").write_text(self.notes["b.md"], encoding="utf-8")
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            self.assertTrue(con.execute("SELECT 1 FROM candidate_modal_atoms "
+                                        "WHERE doc='b.md' LIMIT 1").fetchone())
+            con.execute("UPDATE candidate_modal_atoms SET atom_key=? WHERE doc='b.md'",
+                        ('{"ctx":"other-context","iv":{"from":null,"to":null},'
+                         '"p":"is_a","args":[]}',))
+        self.assertNotIn("b.md", {row["path"] for row in self._relations("a.md")["matches"]
+                                  if row["kind"] == "modal_contrast"})
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        self._import()
+        self.assertIn("b.md", {row["path"] for row in self._relations("a.md")["matches"]
+                                 if row["kind"] == "modal_contrast"})
+        (self.vault / "b.md").write_text("# B\nАлекс является разработчиком.\n",
+                                          encoding="utf-8")
+        self._import()
+        with sqlite3.connect(db) as con:
+            self.assertFalse(con.execute("SELECT 1 FROM candidate_modal_atoms "
+                                         "WHERE doc='b.md' LIMIT 1").fetchone())
+        self.assertFalse(any(row["kind"] == "modal_contrast" and row["path"] == "b.md"
+                             for row in self._relations("a.md")["matches"]))
+
+    def test_missing_modal_table_reports_incompleteness_without_crash(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            con.execute("DROP TABLE candidate_modal_atoms")
+            result = indexed_related_claims(con, "a.md")
+        self.assertTrue(result["modal_search_limited"])
+        self.assertTrue(result["matches"])
+
     def test_context_and_time_must_match_before_candidate_claims_are_related(self):
         atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
 
@@ -770,7 +884,7 @@ class RelationTests(unittest.TestCase):
         self._import()
         self.assertEqual(fixture, journal.read_text(encoding="utf-8"))
         with sqlite3.connect(old_index) as con:
-            self.assertEqual("5", con.execute(
+            self.assertEqual("6", con.execute(
                 "SELECT value FROM meta WHERE key='db_schema'").fetchone()[0])
         self.assertTrue(self._atoms())
 

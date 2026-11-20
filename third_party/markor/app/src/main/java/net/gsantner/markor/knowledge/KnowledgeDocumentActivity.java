@@ -935,6 +935,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                     ? R.string.knowledge_possible_alias
                     : "temporal_overlap".equals(kind)
                     ? R.string.knowledge_possible_temporal_overlap
+                    : "modal_contrast".equals(kind)
+                    ? R.string.knowledge_possible_modal_contrast
                     : "possible_conflict".equals(kind)
                             ? R.string.knowledge_editor_context_conflict
                             : R.string.knowledge_editor_context_agreement;
@@ -960,6 +962,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 R.string.knowledge_editor_context_unsaved);
         if (context.optBoolean("alias_search_limited")) appendContextWarning(warnings,
                 R.string.knowledge_alias_search_limited);
+        if (context.optBoolean("modal_search_limited")) appendContextWarning(warnings,
+                R.string.knowledge_modal_limited);
         if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
                 R.string.knowledge_evidence_limited);
         if (evidenceCount > 0 && context.optBoolean("evidence_checks_limited"))

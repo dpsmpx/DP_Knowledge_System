@@ -11,6 +11,7 @@ or mutates the human knowledge journal and never changes original Markdown.
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from ..core.errors import KSError
 from ..core.ids import canonical_json
@@ -20,7 +21,7 @@ from ..store.workspace import Workspace
 from .aliases import (AliasSnapshot, MAX_SOURCE_ATOMS, MAX_VARIANTS,
                       one_symbol_variants)
 
-RELATIONS_VERSION = "exact-claim-context-temporal-overlap-v3"
+RELATIONS_VERSION = "exact-claim-context-temporal-modality-v4"
 MAX_EVIDENCE_GROUPS = 16
 MAX_EVIDENCE_DOCUMENTS = 32
 MAX_EVIDENCE_EXCERPT_CHARS = 240
@@ -53,6 +54,31 @@ def _qualifiers(assertion: dict) -> tuple[str | None, dict] | None:
     return context, bounds
 
 
+def _projectable_signature(assertion: dict) -> tuple | None:
+    """Shared exact key validation for disjoint assertion/modality projections."""
+    if not isinstance(assertion, dict) or not isinstance(assertion.get("neg"), bool):
+        return None
+    atom = assertion.get("atom")
+    if not isinstance(atom, dict):
+        return None
+    predicate, args = atom.get("p"), atom.get("args")
+    if not isinstance(predicate, str) or not predicate or not isinstance(args, list):
+        return None
+    if not args or any(not isinstance(a, dict) or a.get("k") not in ("sym", "num", "str")
+                       or not isinstance(a.get("v"), str) for a in args):
+        return None
+    qualifiers = _qualifiers(assertion)
+    if qualifiers is None:
+        return None
+    context, interval = qualifiers
+    signature = canonical_json({"p": predicate, "args": args,
+                                "ctx": context, "iv": interval})
+    scope_key = canonical_json({"p": predicate, "args": args, "ctx": context})
+    if len(signature) > 2048 or len(scope_key) > 2048:
+        return None
+    return signature, scope_key, predicate, int(assertion["neg"]), interval
+
+
 def projected_atoms(candidate: dict, source_path: str, fragment_id: str,
                     locator: str) -> list[tuple]:
     """Project only fully specified asserted claim atoms from a reading."""
@@ -62,34 +88,54 @@ def projected_atoms(candidate: dict, source_path: str, fragment_id: str,
         if not isinstance(node, dict) or node.get("type") != "claim":
             continue
         assertion = node.get("assertion")
-        if not isinstance(assertion, dict) or assertion.get("mod") != "asserted" \
-                or not isinstance(assertion.get("neg"), bool):
+        if not isinstance(assertion, dict) or assertion.get("mod") != "asserted":
             continue
-        atom = assertion.get("atom")
-        if not isinstance(atom, dict):
+        projected = _projectable_signature(assertion)
+        if projected is None:
             continue
-        predicate, args = atom.get("p"), atom.get("args")
-        if not isinstance(predicate, str) or not predicate or not isinstance(args, list):
-            continue
-        if not args or any(not isinstance(a, dict) or a.get("k") not in ("sym", "num", "str")
-                           or not isinstance(a.get("v"), str) for a in args):
-            continue
-        qualifiers = _qualifiers(assertion)
-        if qualifiers is None:
-            continue
-        context, interval = qualifiers
-        signature = canonical_json({"p": predicate, "args": args,
-                                    "ctx": context, "iv": interval})
-        scope_key = canonical_json({"p": predicate, "args": args, "ctx": context})
-        if len(signature) > 2048 or len(scope_key) > 2048:
-            continue  # never allocate unbounded SQL index keys from note text
-        key = (signature, int(assertion["neg"]))
+        signature, scope_key, predicate, negated, interval = projected
+        key = (signature, negated)
         if key in seen:
             continue
         seen.add(key)
         rows.append((candidate["id"], fragment_id, source_path, locator,
-                     signature, predicate, int(assertion["neg"]), scope_key,
+                     signature, predicate, negated, scope_key,
                      interval["from"], interval["to"]))
+    return rows
+
+
+def projected_modal_atoms(candidate: dict, source_path: str, fragment_id: str,
+                          locator: str) -> list[tuple]:
+    """Separate unapproved modality/hypothesis hints, never exact-claim votes.
+
+    Asserted `claim` nodes stay solely in `candidate_atoms`. Modal or
+    explicitly hypothetical nodes are indexed for *contrast* only; these may
+    not enter exact conflict, agreement, evidence-family or audit queries.
+    """
+    rows = []
+    seen = set()
+    for node in candidate.get("nodes", []):
+        if not isinstance(node, dict) or node.get("type") not in ("claim", "hypothesis"):
+            continue
+        assertion = node.get("assertion")
+        if not isinstance(assertion, dict):
+            continue
+        modality = assertion.get("mod")
+        if modality not in ("asserted", "possible", "usually"):
+            continue
+        node_kind = node["type"]
+        if node_kind == "claim" and modality == "asserted":
+            continue
+        projected = _projectable_signature(assertion)
+        if projected is None:
+            continue
+        signature, _, predicate, negated, _ = projected
+        key = (signature, negated, modality, node_kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((candidate["id"], fragment_id, source_path, locator,
+                     signature, predicate, negated, modality, node_kind))
     return rows
 
 
@@ -122,6 +168,7 @@ def related_claims(workspace: Workspace, source_path: str, limit: int = 60,
         raise ValueError("Relation page size out of bounds")
     if not workspace.db_path.is_file():
         return {"matches": [], "truncated": False, "alias_search_limited": False,
+                "modal_search_limited": True,
                 "evidence_groups": [], "evidence_limited": False}
     con = connect(workspace.db_path)
     try:
@@ -207,13 +254,77 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
     alias_matches, alias_limited = indexed_alias_candidates(
         con, source_path, limit, aliases)
     matches.extend(alias_matches)
+    modal_matches, modal_limited = indexed_modal_contrasts(con, source_path, limit)
+    matches.extend(modal_matches)
     matches.sort(key=lambda m: (m["path"].casefold(), m["other_locator"],
                                 m["source_locator"], m["kind"],
                                 m["source_fragment"], m["other_fragment"]))
     evidence_groups, evidence_limited = indexed_source_evidence(con, source_path)
     return {"matches": matches[:limit], "truncated": len(matches) > limit,
             "alias_search_limited": alias_limited,
+            "modal_search_limited": modal_limited,
             "evidence_groups": evidence_groups, "evidence_limited": evidence_limited}
+
+
+def indexed_modal_contrasts(con, source_path: str, limit: int) -> tuple[list[dict], bool]:
+    """Strictly equal key, differing modality/kind; never a conflict vote.
+
+    Modal and explicit hypothesis nodes are stored apart from asserted claims.
+    They are allowed only in this read-only hint, never the audit or evidence
+    aggregate. A pre-migration read-only index may lack the table: report
+    incomplete coverage and ask for a fresh analysis rather than silently
+    treating its absence as proof that no uncertainty exists.
+    """
+    select = ("SELECT DISTINCT b.doc, a.locator, b.locator, a.fragment_id, "
+              "b.fragment_id, {left_mode}, {right_mode}, {left_kind}, {right_kind}, "
+              "a.negated, b.negated, a.predicate, a.atom_key ")
+    documents = ("JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
+                 "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' ")
+    tail = ("WHERE a.doc=? AND b.doc<>? {condition}"
+            "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator, "
+            "a.fragment_id, b.fragment_id LIMIT ?")
+    joins = (
+        ("candidate_modal_atoms", "candidate_atoms", "a.modality", "'asserted'",
+         "a.node_kind", "'claim'", ""),
+        ("candidate_atoms", "candidate_modal_atoms", "'asserted'", "b.modality",
+         "'claim'", "b.node_kind", ""),
+        ("candidate_modal_atoms", "candidate_modal_atoms", "a.modality", "b.modality",
+         "a.node_kind", "b.node_kind",
+         "AND (a.modality<>b.modality OR a.node_kind<>b.node_kind) "),
+    )
+    rows = []
+    limited = False
+    try:
+        for left, right, left_mode, right_mode, left_kind, right_kind, condition in joins:
+            sql = (select.format(left_mode=left_mode, right_mode=right_mode,
+                                 left_kind=left_kind, right_kind=right_kind)
+                   + f"FROM {left} a JOIN {right} b ON a.atom_key=b.atom_key "
+                   + documents + tail.format(condition=condition))
+            page = con.execute(sql, (source_path, source_path, limit + 1)).fetchall()
+            limited = limited or len(page) > limit
+            rows.extend(page[:limit])
+    except sqlite3.Error:
+        return [], True
+    matches = []
+    for row in rows:
+        if (row[5] not in ("asserted", "possible", "usually") or
+                row[6] not in ("asserted", "possible", "usually") or
+                row[7] not in ("claim", "hypothesis") or
+                row[8] not in ("claim", "hypothesis")):
+            continue
+        qualifiers = atom_qualifiers(row[12])
+        if qualifiers["interval"] is None:
+            continue
+        matches.append({
+            "path": row[0], "source_locator": row[1], "other_locator": row[2],
+            "source_fragment": row[3], "other_fragment": row[4],
+            "source_modality": row[5], "other_modality": row[6],
+            "source_node_kind": row[7], "other_node_kind": row[8],
+            "opposing_polarity": row[9] != row[10],
+            "predicate": row[11], "kind": "modal_contrast",
+            "authority": "unapproved_parser_hint", **qualifiers,
+        })
+    return matches, limited
 
 
 def _evidence_excerpts(con, atom_key: str, paths: list[str]) -> dict[str, dict]:

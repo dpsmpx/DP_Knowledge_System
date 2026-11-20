@@ -210,6 +210,7 @@
     <string name="knowledge_possible_agreement">Potential agreement</string>
     <string name="knowledge_possible_conflict">Potential conflict</string>
     <string name="knowledge_possible_temporal_overlap">Time periods overlap (review; not a conflict verdict)</string>
+    <string name="knowledge_possible_modal_contrast">Different statement modality (manual review; not an agreement or conflict)</string>
     <string name="knowledge_possible_alias">Possible link via human-approved alias (review; not proof)</string>
     <string name="knowledge_evidence_title">Cross-note evidence · indexed candidates</string>
     <string name="knowledge_evidence_show_sources">Inspect source files</string>
@@ -244,6 +245,15 @@
     <string name="knowledge_relation_alias_source">Compared names (approved canonical)</string>
     <string name="knowledge_relation_alias_decisions">Alias decision IDs</string>
     <string name="knowledge_alias_search_limited">Alias comparison limited; some hints omitted</string>
+    <string name="knowledge_modal_source">Inspected source reading</string>
+    <string name="knowledge_modal_other">Other source reading</string>
+    <string name="knowledge_modal_asserted">Asserted (unapproved)</string>
+    <string name="knowledge_modal_possible">Possible</string>
+    <string name="knowledge_modal_usually">Usually</string>
+    <string name="knowledge_modal_claim">Source claim</string>
+    <string name="knowledge_modal_hypothesis">Hypothesis</string>
+    <string name="knowledge_modal_opposing_info">Opposite polarity is metadata, not a conflict verdict.</string>
+    <string name="knowledge_modal_limited">Modal hints unavailable or incomplete; re-analyze the local index before relying on coverage.</string>
     <string name="knowledge_relation_other_interval">Other note period</string>
     <string name="knowledge_relation_overlap_interval">Shared period</string>
     <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>

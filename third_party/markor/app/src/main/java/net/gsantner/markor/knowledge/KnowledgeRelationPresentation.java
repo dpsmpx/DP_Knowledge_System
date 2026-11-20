@@ -255,7 +255,32 @@ final class KnowledgeRelationPresentation {
                 }
             }
         }
+        if ("modal_contrast".equals(relation.optString("kind"))) {
+            text.append("\n").append(context.getString(R.string.knowledge_modal_source))
+                    .append(": ").append(modalityLabel(context,
+                            relation.optString("source_modality"),
+                            relation.optString("source_node_kind")));
+            text.append("\n").append(context.getString(R.string.knowledge_modal_other))
+                    .append(": ").append(modalityLabel(context,
+                            relation.optString("other_modality"),
+                            relation.optString("other_node_kind")));
+            if (relation.optBoolean("opposing_polarity")) {
+                text.append("\n").append(context.getString(R.string.knowledge_modal_opposing_info));
+            }
+        }
         return text.toString();
+    }
+
+    private static String modalityLabel(Context context, String modality, String nodeKind) {
+        final int type = "hypothesis".equals(nodeKind)
+                ? R.string.knowledge_modal_hypothesis : R.string.knowledge_modal_claim;
+        final int strength;
+        switch (modality) {
+            case "possible": strength = R.string.knowledge_modal_possible; break;
+            case "usually": strength = R.string.knowledge_modal_usually; break;
+            default: strength = R.string.knowledge_modal_asserted; break;
+        }
+        return context.getString(type) + " · " + context.getString(strength);
     }
 
     private static void appendInterval(final StringBuilder text, final Context context,

@@ -209,6 +209,31 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_evidence_comparison_truncated"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_modal_contrasts_are_separate_from_asserted_conflict_ui(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        schema = (Path(__file__).resolve().parents[1] / "ksys/store/db.py").read_text()
+        for view in (hub, editor):
+            self.assertIn('"modal_contrast".equals(kind)', view)
+            self.assertIn('"modal_search_limited"', view)
+            self.assertIn("R.string.knowledge_possible_modal_contrast", view)
+        self.assertIn('"modal_contrast".equals(relation.optString("kind"))', presentation)
+        self.assertIn("R.string.knowledge_modal_opposing_info", presentation)
+        self.assertIn('"modal_search_limited": modal_limited', bridge)
+        self.assertIn("CREATE TABLE IF NOT EXISTS candidate_modal_atoms", schema)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_modal_contrast", "knowledge_modal_source",
+                         "knowledge_modal_other", "knowledge_modal_asserted",
+                         "knowledge_modal_possible", "knowledge_modal_usually",
+                         "knowledge_modal_claim", "knowledge_modal_hypothesis",
+                         "knowledge_modal_opposing_info", "knowledge_modal_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_existing_source_review_opens_exact_active_decision_for_withdrawal(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()

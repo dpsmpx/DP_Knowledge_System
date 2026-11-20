@@ -612,6 +612,28 @@ Tests compare the displayed excerpts and verify the per-group query budget;
 this is a bounded implementation improvement, **not** a measured Android
 20k-vault latency claim or a change of evidence authority.
 
+**Stage 18 nonasserted modality contrasts (seventeenth slice, awaiting Android QA):**
+An independent disposable `candidate_modal_atoms` table now projects only
+explicit `possible`/`usually` claim readings and hypothesis readings, with
+the same strict ground-atom validation, exact context and interval as the
+existing asserted-claim index. Asserted `claim` rows remain only in
+`candidate_atoms`; neither modal nor hypothetical rows may enter its exact
+agreement/conflict, evidence-file counts, copied-excerpt families or
+whole-library conflict audit. Index schema v6 and relation projection v4
+trigger a **derived-only** rebuild on refresh; private Markdown and the
+append-only human knowledge journal remain untouched.
+
+The Hub and editor now show a distinct **modality contrast** hint when the
+same strict atom signature is reported with different degrees/kinds of
+certainty (asserted, usually, possible, explicitly hypothetical). Both
+modalities, node kinds, source locators, context, exact period and any opposite
+polarity are displayed; the latter is **not** a factual conflict verdict.
+Queries are bounded by the existing relation page limit and one additional
+SQL index. Missing/pre-migration modal tables or capped coverage report
+incompleteness. No natural-language semantic equivalence, numerical
+confidence, independence estimate, user approval or truth propagation is
+inferred from a source modality. Physical Android QA remains separate.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

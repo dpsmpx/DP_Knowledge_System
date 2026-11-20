@@ -30,7 +30,7 @@ from ..source.model import Fragment
 from ..store.db import connect, get_meta, set_meta
 from ..store.workspace import Workspace
 from .classify import Classification, classify
-from .relations import projected_atoms, RELATIONS_VERSION
+from .relations import projected_atoms, projected_modal_atoms, RELATIONS_VERSION
 
 SERVICE_DIRS = {".git", ".obsidian", ".makemd", ".space", ".stversions", ".stfolder", ".stfolder (1)",
                 ".trash", ".smart-env", ".smart-connections"}
@@ -147,7 +147,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
         # A changed notebook must not mix another person's old private
         # candidate interpretations into the newly selected library.
         # This affects only disposable source projections, not the journal.
-        for table in ("candidate_atoms", "candidates", "fragments", "documents"):
+        for table in ("candidate_atoms", "candidate_modal_atoms", "candidates", "fragments", "documents"):
             con.execute(f"DELETE FROM {table}")
         set_meta(con, "vault_root", str(vault))
     existing = {row[0]: (row[1], row[2]) for row in con.execute("SELECT path, sha256, versions FROM documents")}
@@ -205,6 +205,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             entry.update(status=status, kind=kind, sha256=None)
             con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
             con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM candidate_modal_atoms WHERE doc=?", (rel,))
             con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
             con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
                         " VALUES(?,?,?,?,?,?,0,?)", (rel, None, size, status, kind, "[]", versions_key))
@@ -215,6 +216,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             # Never present interpretations from an earlier, smaller version.
             con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
             con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM candidate_modal_atoms WHERE doc=?", (rel,))
             con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
             con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
                         " VALUES(?,?,?,?,?,?,0,?)", (rel, None, size, entry["status"], "markdown", "[]", versions_key))
@@ -256,6 +258,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             entry.update(status="REGISTERED_BINARY")
             con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
             con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+            con.execute("DELETE FROM candidate_modal_atoms WHERE doc=?", (rel,))
             con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
             con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions)"
                         " VALUES(?,?,?,?,?,?,0,?)", (rel, sha, size, "REGISTERED_BINARY", kind, json.dumps(flags), versions_key))
@@ -275,6 +278,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
             coverage_failures.append(rel)
         con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (rel,))
         con.execute("DELETE FROM candidate_atoms WHERE doc=?", (rel,))
+        con.execute("DELETE FROM candidate_modal_atoms WHERE doc=?", (rel,))
         con.execute("DELETE FROM fragments WHERE doc=?", (rel,))
         doc_context = {"path": rel, "frontmatter": parsed.frontmatter, "flags": flags}
         for frag in parsed.fragments:
@@ -295,6 +299,8 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
                              canonical_json(cand.get("ambiguity") or {}), cand["input_hash"], frag.span[0]))
                 for row in projected_atoms(cand, rel, frag.id, frag.locator):
                     con.execute("INSERT OR IGNORE INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", row)
+                for row in projected_modal_atoms(cand, rel, frag.id, frag.locator):
+                    con.execute("INSERT OR IGNORE INTO candidate_modal_atoms VALUES(?,?,?,?,?,?,?,?,?)", row)
         con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions, error)"
                     " VALUES(?,?,?,?,?,?,?,?,?)", (rel, sha, size, "PARSED", kind, json.dumps(flags),
                                                    len(parsed.fragments), versions_key,
@@ -307,6 +313,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
         for gone in sorted(set(existing) - seen_paths):  # complete vault walk only
             con.execute("DELETE FROM candidates WHERE origin IN (SELECT id FROM fragments WHERE doc=?)", (gone,))
             con.execute("DELETE FROM candidate_atoms WHERE doc=?", (gone,))
+            con.execute("DELETE FROM candidate_modal_atoms WHERE doc=?", (gone,))
             con.execute("DELETE FROM fragments WHERE doc=?", (gone,))
             con.execute("DELETE FROM documents WHERE path=?", (gone,))
     if cancelled is not None and cancelled():

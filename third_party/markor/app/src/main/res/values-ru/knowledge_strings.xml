@@ -210,6 +210,7 @@
     <string name="knowledge_possible_agreement">Возможное согласие</string>
     <string name="knowledge_possible_conflict">Возможное противоречие</string>
     <string name="knowledge_possible_temporal_overlap">Периоды пересекаются (нужна проверка; не вывод о противоречии)</string>
+    <string name="knowledge_possible_modal_contrast">Разная модальность высказываний (ручная проверка; не согласие и не конфликт)</string>
     <string name="knowledge_possible_alias">Возможная связь по алиасу, подтверждённому человеком (не доказательство)</string>
     <string name="knowledge_evidence_title">Свидетельства из разных заметок · кандидаты индекса</string>
     <string name="knowledge_evidence_show_sources">Посмотреть исходные файлы</string>
@@ -244,6 +245,15 @@
     <string name="knowledge_relation_alias_source">Сопоставленные имена (утверждённый ключ)</string>
     <string name="knowledge_relation_alias_decisions">ID решений об алиасах</string>
     <string name="knowledge_alias_search_limited">Поиск по алиасам ограничен; часть подсказок пропущена</string>
+    <string name="knowledge_modal_source">Прочтение исследуемого источника</string>
+    <string name="knowledge_modal_other">Прочтение другого источника</string>
+    <string name="knowledge_modal_asserted">Утверждается (не подтверждено)</string>
+    <string name="knowledge_modal_possible">Возможно</string>
+    <string name="knowledge_modal_usually">Обычно</string>
+    <string name="knowledge_modal_claim">Заявление источника</string>
+    <string name="knowledge_modal_hypothesis">Гипотеза</string>
+    <string name="knowledge_modal_opposing_info">Противоположная полярность — только сведения для проверки, не вывод о противоречии.</string>
+    <string name="knowledge_modal_limited">Подсказки по модальности недоступны или неполны; для полного охвата повторите анализ локального индекса.</string>
     <string name="knowledge_relation_other_interval">Период другой заметки</string>
     <string name="knowledge_relation_overlap_interval">Общий период</string>
     <string name="knowledge_no_semantic_relations">Точных совпадений и осторожных подсказок по периодам/подтверждённым алиасам нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>

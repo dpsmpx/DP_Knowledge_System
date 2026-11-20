@@ -1791,6 +1791,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             ? R.string.knowledge_possible_alias
                             : "temporal_overlap".equals(kind)
                             ? R.string.knowledge_possible_temporal_overlap
+                            : "modal_contrast".equals(kind)
+                            ? R.string.knowledge_possible_modal_contrast
                             : "possible_conflict".equals(kind)
                                     ? R.string.knowledge_possible_conflict
                                     : R.string.knowledge_possible_agreement;
@@ -1810,7 +1812,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     + (result.optBoolean("truncated")
                                     ? " · " + getString(R.string.knowledge_semantic_limited) : "")
                                     + (result.optBoolean("alias_search_limited")
-                                    ? " · " + getString(R.string.knowledge_alias_search_limited) : ""))
+                                    ? " · " + getString(R.string.knowledge_alias_search_limited) : "")
+                                    + (result.optBoolean("modal_search_limited")
+                                    ? " · " + getString(R.string.knowledge_modal_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
                     if (evidence != null && evidence.length() > 0) {
                         dialog.setNeutralButton(R.string.knowledge_evidence_title,
