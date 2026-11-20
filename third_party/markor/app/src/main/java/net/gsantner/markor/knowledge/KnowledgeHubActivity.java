@@ -4204,6 +4204,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     throw new SecurityException("Peer branch changed since review");
                 final String localHead = comparison.isNull("local_head") ? ""
                         : comparison.getString("local_head");
+                final String operation = detail.optString("operation");
                 String payload = detail.toString(2);
                 if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
                 final String shown = payload;
@@ -4218,11 +4219,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setTitle(R.string.knowledge_sync_event_detail)
                             .setMessage(R.string.knowledge_sync_event_detail_warning)
                             .setView(text)
-                            .setPositiveButton("accept".equals(detail.optString("operation"))
+                            .setPositiveButton("accept".equals(operation)
                                             ? R.string.knowledge_sync_adopt_preview
+                                            : "retract".equals(operation)
+                                            ? R.string.knowledge_sync_retract_preview
                                             : android.R.string.ok,
-                                    "accept".equals(detail.optString("operation"))
+                                    "accept".equals(operation)
                                             ? (dialog, which) -> previewPeerAdoption(
+                                            name, eventId, expectedHash, localHead)
+                                            : "retract".equals(operation)
+                                            ? (dialog, which) -> previewPeerRetraction(
                                             name, eventId, expectedHash, localHead)
                                             : null)
                             .setNeutralButton(R.string.knowledge_sync_review_hold,
@@ -4273,6 +4279,62 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         Toast.LENGTH_LONG).show());
                             }
                         })).show();
+    }
+
+    private void previewPeerRetraction(final String name, final String eventId,
+                                       final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject preview = KnowledgePythonBridge.journalSyncRetractPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                final String shown = getString(R.string.knowledge_sync_retract_warning,
+                        preview.optInt("affected_derived"), preview.optInt("rederived"))
+                        + "\n\n" + preview.optString("role") + " · "
+                        + preview.optString("summary");
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_retract_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_retract_confirm,
+                                    (dialog, which) -> commitPeerRetraction(
+                                            name, eventId, remoteSha, localHead))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_retract_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void commitPeerRetraction(final String name, final String eventId,
+                                      final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject result = KnowledgePythonBridge.journalSyncRetractCommit(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha);
+                if (!result.optBoolean("applied", false))
+                    throw new SecurityException("Local retraction was not committed");
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, R.string.knowledge_sync_retract_saved,
+                                Toast.LENGTH_LONG).show();
+                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_retract_failed, Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void previewPeerAdoption(final String name, final String eventId,

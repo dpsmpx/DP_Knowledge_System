@@ -353,3 +353,35 @@ def prepare_peer_ack(local_content: str, remote_content: str,
         "activates_knowledge": False,
         "protocol_version": 1,
     }
+
+
+def prepare_peer_retraction(local_content: str, remote_content: str,
+                            peer_fingerprint: str, remote_event_id: str,
+                            expected_local_head: str | None,
+                            expected_remote_sha256: str) -> tuple[Entry, dict[str, Any]]:
+    """Inspect a foreign retract without modifying or importing any knowledge.
+
+    Only a target with a preceding accepted node in the signed source chain
+    is eligible for a new, separately confirmed LOCAL human retraction.
+    """
+    event, compared = verified_foreign_event(
+        local_content, remote_content, peer_fingerprint, remote_event_id,
+        expected_local_head, expected_remote_sha256)
+    target = event.data.get("target")
+    if event.op != "retract" or not isinstance(target, str) or not target.startswith(
+            ("F:", "C:", "H:", "R:", "K:")):
+        raise ValueError("Only an individual foreign retraction may be reviewed")
+    remote = validated_entries(remote_content)
+    if not any(previous.op == "accept" and isinstance(previous.data.get("node"), dict)
+               and previous.data["node"].get("id") == target
+               and previous.seq < event.seq for previous in remote):
+        raise ValueError("Foreign retraction lacks an earlier accepted target")
+    return event, {
+        "peer_fingerprint": peer_fingerprint,
+        "remote_sha256": expected_remote_sha256,
+        "remote_head": compared.remote_head,
+        "remote_event_id": remote_event_id,
+        "common_head": compared.common_head,
+        "local_head_at_review": expected_local_head,
+        "protocol_version": 1,
+    }

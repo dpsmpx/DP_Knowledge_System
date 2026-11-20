@@ -440,6 +440,11 @@
     <string name="knowledge_sync_ack_saved">Authenticated foreign branch acknowledged in your local journal.</string>
     <string name="knowledge_sync_rollback_title">Older signed peer branch blocked</string>
     <string name="knowledge_sync_rollback_warning">This signed journal is a strict older prefix of another retained verified branch from the same paired device. It was NOT added to the inbox. Keep the newer branch and check the other device for an outdated export or rollback. Different legitimate forks remain separately reviewable. Deleting the retained newer branch also removes this local comparison evidence.</string>
+    <string name="knowledge_sync_retract_preview">Review foreign retraction</string>
+    <string name="knowledge_sync_retract_confirm">Retract my local record</string>
+    <string name="knowledge_sync_retract_warning">You are explicitly choosing to RETRACT an active local record after reviewing one signed foreign retraction. This is a NEW local decision, not an automatic replay. The original note stays unchanged. Estimated derived consequences removed: %1$d; rederived: %2$d. Review the exact local record below before confirming.</string>
+    <string name="knowledge_sync_retract_saved">Explicit local retraction saved with both causal branch references.</string>
+    <string name="knowledge_sync_retract_failed">Cannot retract: peer, journal, target or preview changed. No local decision was modified.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

@@ -318,6 +318,22 @@ public final class KnowledgePythonBridge {
                 fingerprint, eventId, localHead, remoteSha, sourcePath, markdown, verdict);
     }
 
+    public static JSONObject journalSyncRetractPreview(final Context context, final String workspace,
+                                                       final String foreignText, final String fingerprint,
+                                                       final String eventId, final String localHead,
+                                                       final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_retract_preview", workspace,
+                foreignText, fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncRetractCommit(final Context context, final String workspace,
+                                                      final String foreignText, final String fingerprint,
+                                                      final String eventId, final String localHead,
+                                                      final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_retract_commit", workspace,
+                foreignText, fingerprint, eventId, localHead, remoteSha);
+    }
+
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
         synchronized (KnowledgePythonBridge.class) {
@@ -349,6 +365,8 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-adopt.v1".equals(protocol)
                 || "dpksys.sync-conflict-preview.v1".equals(protocol)
                 || "dpksys.sync-conflict-resolve.v1".equals(protocol)
+                || "dpksys.sync-retract-preview.v1".equals(protocol)
+                || "dpksys.sync-retract-commit.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)

@@ -29,7 +29,8 @@ from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
 from ksys.store.journal_sync import (preview_journals, review_foreign_events,
                                      inspect_foreign_event, prepare_peer_review,
-                                     prepare_peer_adoption, prepare_peer_ack)
+                                     prepare_peer_adoption, prepare_peer_ack,
+                                     prepare_peer_retraction)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1767,6 +1768,75 @@ def journal_sync_ack_commit(workspace_dir: str, foreign_text: str,
     return json.dumps({"protocol": "dpksys.sync-ack-commit.v1",
                        "receipt_id": saved.id, "journal_head": kb.journal.head,
                        "duplicate": False, "activates_knowledge": False},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def _peer_retraction_plan(kb: KnowledgeBase, foreign_text: str,
+                          peer_fingerprint: str, event_id: str,
+                          expected_local_head: str, expected_remote_sha256: str) -> tuple:
+    local_path = kb.ws.journal_path
+    local = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
+    event, causal = prepare_peer_retraction(
+        local, foreign_text, peer_fingerprint, event_id,
+        expected_local_head or None, expected_remote_sha256)
+    prior = kb.state.peer_reviews.get((peer_fingerprint, expected_remote_sha256, event_id))
+    if prior and prior[0] == "reject":
+        raise ValueError("Foreign retraction was explicitly rejected")
+    return event, causal
+
+
+def journal_sync_retract_preview(workspace_dir: str, foreign_text: str,
+                                 peer_fingerprint: str, event_id: str,
+                                 expected_local_head: str,
+                                 expected_remote_sha256: str) -> str:
+    """Show local impact before a human adopts one foreign retraction."""
+    kb = _kb(workspace_dir)
+    event, _ = _peer_retraction_plan(kb, foreign_text, peer_fingerprint,
+                                    event_id, expected_local_head, expected_remote_sha256)
+    target = event.data["target"]
+    rec = kb.state.records.get(target)
+    if rec is None or not kb.state.active(target):
+        raise ValueError("Foreign target has no active local counterpart")
+    delta = kb.what_if_retract(target)
+    return json.dumps({"protocol": "dpksys.sync-retract-preview.v1",
+                       "record_id": target, "role": rec.role,
+                       "summary": rec.node.ksf()[:2000],
+                       "affected_derived": len(delta.removed),
+                       "rederived": len(delta.rederived),
+                       "local_head": kb.journal.head, "remote_event_id": event_id,
+                       "requires_explicit_decision": True, "read_only": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_retract_commit(workspace_dir: str, foreign_text: str,
+                                peer_fingerprint: str, event_id: str,
+                                expected_local_head: str,
+                                expected_remote_sha256: str) -> str:
+    """New LOCAL retraction, with signed foreign causal proof; no remote replay."""
+    kb = _kb(workspace_dir)
+    event, causal = _peer_retraction_plan(kb, foreign_text, peer_fingerprint,
+                                         event_id, expected_local_head, expected_remote_sha256)
+    for entry in reversed(kb.journal.entries()):
+        existing = entry.data.get("foreign_event", {}) if entry.op == "retract" else {}
+        if all(existing.get(key) == causal[key] for key in
+               ("peer_fingerprint", "remote_sha256", "remote_event_id")):
+            return json.dumps({"protocol": "dpksys.sync-retract-commit.v1",
+                               "journal_id": entry.id, "journal_head": kb.journal.head,
+                               "duplicate": True, "applied": True},
+                              sort_keys=True, separators=(",", ":"))
+    target = event.data["target"]
+    if not kb.state.active(target):
+        raise ValueError("Local target was retracted or superseded")
+    kb.ws.init()
+    receipt, _, _ = kb._commit("retract", {
+        "target": target, "reason": "Explicit human adoption of paired peer retraction",
+        "foreign_event": causal,
+    })
+    if kb.journal.verify() or kb.state.active(target):
+        raise ValueError("Local peer retraction did not verify")
+    return json.dumps({"protocol": "dpksys.sync-retract-commit.v1",
+                       "journal_id": receipt.id, "journal_head": kb.journal.head,
+                       "duplicate": False, "applied": True},
                       sort_keys=True, separators=(",", ":"))
 
 

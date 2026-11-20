@@ -19,7 +19,8 @@ from third_party.markor.app.src.main.python.ksys_android_bridge import (
     inspect_note, preview_fragment, record_decision, journal_sync_adopt,
     journal_sync_review_commit, journal_sync_conflict_preview,
     journal_sync_conflict_commit, decision_overview, decision_detail,
-    knowledge_diagnostics)
+    knowledge_diagnostics, journal_sync_retract_preview,
+    journal_sync_retract_commit)
 
 
 class ManualForeignAdoptionTests(unittest.TestCase):
@@ -186,6 +187,50 @@ class ManualForeignAdoptionTests(unittest.TestCase):
             journal_sync_conflict_commit(*args, "contested")
         with self.assertRaises(ValueError):
             journal_sync_conflict_commit(*args[:4], "J:outdated", *args[5:], "contested")
+        self.assertFalse(Workspace(self.local).journal_path.exists())
+
+    def test_foreign_retraction_is_new_reviewed_local_decision(self):
+        foreign, accepted_id, checksum = self.foreign("fact")
+        adopted = self.adopt(foreign, accepted_id, checksum)
+        local_head = adopted["journal_head"]
+        remote_journal = Journal(Workspace(self.remote).journal_path, FixedClock())
+        target = remote_journal.entries()[0].data["node"]["id"]
+        remote_retract = remote_journal.append("retract", {
+            "target": target, "reason": "synthetic source was reconsidered"})
+        remote = Workspace(self.remote).journal_path.read_text()
+        remote_sha = hashlib.sha256(remote.encode()).hexdigest()
+        args = (str(self.local), remote, self.peer, remote_retract.id,
+                local_head, remote_sha)
+        preview = json.loads(journal_sync_retract_preview(*args))
+        self.assertEqual("dpksys.sync-retract-preview.v1", preview["protocol"])
+        self.assertTrue(preview["read_only"])
+        self.assertEqual(target, preview["record_id"])
+        self.assertEqual(1, len(KnowledgeBase(Workspace(self.local), FixedClock(),
+                                               use_cache=False).state.authoritative()))
+        result = json.loads(journal_sync_retract_commit(*args))
+        self.assertTrue(result["applied"])
+        kb = KnowledgeBase(Workspace(self.local), FixedClock(), use_cache=False)
+        self.assertEqual(0, len(kb.state.authoritative()))
+        self.assertEqual([], kb.journal.verify())
+        self.assertEqual(local_head,
+                         kb.journal.entries()[-1].data["foreign_event"]["local_head_at_review"])
+        self.assertEqual(remote_retract.id,
+                         kb.journal.entries()[-1].data["foreign_event"]["remote_event_id"])
+        duplicate = json.loads(journal_sync_retract_commit(
+            *args[:4], result["journal_head"], remote_sha))
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(2, len(kb.journal.entries()))
+        with self.assertRaises(ValueError):
+            journal_sync_retract_commit(*args)  # stale local head
+
+    def test_unanchored_foreign_retraction_is_never_accepted(self):
+        bogus = Journal(Workspace(self.remote).journal_path, FixedClock())
+        event = bogus.append("retract", {"target": "F:unseen"})
+        content = Workspace(self.remote).journal_path.read_text()
+        checksum = hashlib.sha256(content.encode()).hexdigest()
+        args = (str(self.local), content, self.peer, event.id, "", checksum)
+        with self.assertRaises(ValueError):
+            journal_sync_retract_preview(*args)
         self.assertFalse(Workspace(self.local).journal_path.exists())
 
 

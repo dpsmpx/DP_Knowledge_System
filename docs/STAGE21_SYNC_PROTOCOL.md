@@ -213,3 +213,21 @@ Intentionally deleting the newest encrypted inbox entry removes the evidence
 needed for that comparison. A stronger signed high-water policy, verified
 across device migration/recovery, remains an acceptance gate. No automatic
 deletion of old observations is performed.
+
+## Sixteenth slice: reviewed peer retractions (pending CI)
+
+An individual foreign `retract` can now be proposed for manual action only
+if its target was previously accepted in the **same signed foreign journal**
+and an active local counterpart with the exact canonical record ID exists.
+After Android reopens the paired encrypted inbox, Python validates both hash
+chains, selected foreign-only event and expected heads, then previews the
+local record and the what-if consequences of removal. The user must explicitly
+confirm **Retract my local record**. On confirmation, the same checks are
+repeated and one **new local `retract`** is appended with a provenance link to
+both causal heads and the signed foreign event. The original Markdown and
+foreign journal are unchanged. Duplicate decisions are idempotent and stale
+confirmations, absent targets or unanchored foreign retractions fail closed.
+
+Other foreign operations (including schema, alias and arbitrary revisions)
+remain quarantined for individual review, defer or rejection. They are not
+automatically replayed into the authoritative linear journal.
