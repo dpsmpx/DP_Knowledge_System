@@ -396,6 +396,54 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(before, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
                                   for p in self.notes})
 
+    def test_exact_claim_pairs_require_both_live_markdown_hashes(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            before = sorted(con.iterdump())
+        unchecked = self._relations("a.md")
+        self.assertTrue(unchecked["relation_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            and not m["live_source_pair"] for m in unchecked["matches"]))
+
+        verified = self._relations("a.md", verified=True)
+        self.assertFalse(verified["relation_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "current"
+                            and m["other_verification"] == "current"
+                            and m["live_source_pair"] for m in verified["matches"]))
+        with sqlite3.connect(db) as con:
+            self.assertEqual(before, sorted(con.iterdump()))
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                            self.notes["a.md"], str(self.vault)))
+        self.assertFalse(editor["relation_checks_limited"])
+        self.assertTrue(all(m["live_source_pair"] for m in editor["candidate_relations"]
+                            if m["kind"] in ("possible_agreement", "possible_conflict")))
+
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        (self.vault / "c.md").unlink()
+        historical = self._relations("a.md", verified=True)
+        statuses = {m["path"]: m["other_verification"] for m in historical["matches"]}
+        self.assertEqual("stale", statuses["b.md"])
+        self.assertEqual("unavailable", statuses["c.md"])
+        self.assertEqual("current", statuses["sub/e.markdown"])
+        self.assertFalse(historical["relation_checks_limited"])  # checked != current
+        self.assertFalse(next(m for m in historical["matches"]
+                              if m["path"] == "b.md")["live_source_pair"])
+        self.assertTrue(next(m for m in historical["matches"]
+                             if m["path"] == "sub/e.markdown")["live_source_pair"])
+
+        (self.vault / "a.md").write_text(self.notes["a.md"] + "\n", encoding="utf-8")
+        stale_source = self._relations("a.md", verified=True)
+        self.assertTrue(all(m["source_verification"] == "stale"
+                            and not m["live_source_pair"] for m in stale_source["matches"]))
+        with tempfile.TemporaryDirectory() as wrong_root:
+            wrong = json.loads(note_relationships(str(self.workspace), "a.md", wrong_root))
+        self.assertTrue(wrong["relation_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            for m in wrong["matches"]))
+
     def test_unrelated_entities_are_not_equated(self):
         self._import()
         self.assertEqual([], self._relations("d.md")["matches"])
@@ -424,6 +472,21 @@ class RelationTests(unittest.TestCase):
             self.assertEqual({"from": None, "to": None}, relation["interval"])
         self.assertTrue(next(r for r in hinted["matches"] if r["path"] == "c.md")
                         ["opposing_polarity"])
+        unchecked_alias = self._relations("d.md")
+        self.assertTrue(unchecked_alias["relation_checks_limited"])
+        self.assertTrue(all(not r["live_source_pair"] for r in unchecked_alias["matches"]))
+        current_alias = self._relations("d.md", verified=True)
+        self.assertFalse(current_alias["relation_checks_limited"])
+        self.assertTrue(all(r["source_verification"] == "current"
+                            and r["other_verification"] == "current"
+                            and r["live_source_pair"] for r in current_alias["matches"]))
+        (self.vault / "a.md").write_text(self.notes["a.md"] + "\n", encoding="utf-8")
+        stale_alias = self._relations("d.md", verified=True)
+        a = next(r for r in stale_alias["matches"] if r["path"] == "a.md")
+        self.assertEqual("stale", a["other_verification"])
+        self.assertFalse(a["live_source_pair"])
+        self.assertEqual([decision.id], a["alias_evidence"]["journal_ids"])
+        (self.vault / "a.md").write_text(self.notes["a.md"], encoding="utf-8")
         # An alias never creates an exact-key conflict in the source audit.
         with sqlite3.connect(self.workspace / "var" / "ks.sqlite") as con:
             self.assertEqual(1, _source_conflict_count(con))  # existing Алекс vs not Алекс
@@ -434,6 +497,36 @@ class RelationTests(unittest.TestCase):
                                     for p in self.notes})
         self.assertEqual(["alias"], [e.op for e in journal.entries()])
         self.assertEqual(before_atoms, self._atoms())
+
+    def test_exact_and_alias_checks_cannot_escape_shared_sixteen_file_budget(self):
+        self._import()
+        journal = Journal(Workspace(self.workspace).journal_path, FixedClock())
+        journal.append("alias", {"alias": "борис", "canonical": "алекс"})
+        actual = self._relations("d.md")["matches"]
+        self.assertTrue(actual and all(m["kind"] == "alias_candidate" for m in actual))
+        matches = actual + [{"kind": "alias_candidate", "path": f"missing-{i:02}.md"}
+                            for i in range(20)]
+        checked_paths = []
+        hash_file = bridge._entity_live_hash
+
+        def counted_hash(root, path):
+            checked_paths.append(path)
+            return hash_file(root, path)
+
+        with sqlite3.connect(self.workspace / "var/ks.sqlite") as con:
+            with patch.object(bridge, "_entity_live_hash", side_effect=counted_hash):
+                evidence, modal, temporal, relation = bridge._verify_evidence_freshness(
+                    con, str(self.vault), "d.md", [], matches)
+        self.assertFalse(evidence)
+        self.assertFalse(modal)
+        self.assertFalse(temporal)
+        self.assertTrue(relation)
+        self.assertEqual(bridge.MAX_EVIDENCE_LIVE_CHECKS, len(checked_paths))
+        self.assertEqual(len(checked_paths), len(set(checked_paths)))
+        self.assertTrue(all(m["live_source_pair"] for m in actual))
+        self.assertTrue(any(m["other_verification"] == "not_checked"
+                            and not m["live_source_pair"] for m in matches[len(actual):]))
+        self.assertEqual(["alias"], [entry.op for entry in journal.entries()])
 
     def test_rebound_cycle_and_non_owner_aliases_are_not_trusted(self):
         self._import()
@@ -723,7 +816,7 @@ class RelationTests(unittest.TestCase):
 
         with patch.object(bridge, "_entity_live_hash", side_effect=counted_hash):
             result = self._relations("a.md", verified=True)
-        self.assertTrue(result["evidence_checks_limited"])
+            self.assertTrue(result["evidence_checks_limited"])
         self.assertTrue(result["modal_checks_limited"])
         self.assertEqual(bridge.MAX_EVIDENCE_LIVE_CHECKS, len(checked_paths))
         self.assertEqual(len(checked_paths), len(set(checked_paths)))
@@ -1056,12 +1149,13 @@ class RelationTests(unittest.TestCase):
                 return hash_file(root, path)
 
             with patch.object(bridge, "_entity_live_hash", side_effect=counted_hash):
-                evidence_limited, modal_limited, temporal_limited = (
+                evidence_limited, modal_limited, temporal_limited, relation_limited = (
                     bridge._verify_evidence_freshness(
                         con, str(self.vault), "a.md", original, matches))
             self.assertFalse(evidence_limited)
             self.assertFalse(modal_limited)
             self.assertTrue(temporal_limited)
+            self.assertFalse(relation_limited)
             self.assertEqual(bridge.MAX_EVIDENCE_LIVE_CHECKS, len(checked_paths))
             self.assertEqual(len(checked_paths), len(set(checked_paths)))
             self.assertEqual("current", matches[0]["other_verification"])

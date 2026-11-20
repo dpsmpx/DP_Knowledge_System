@@ -285,6 +285,21 @@ final class KnowledgeRelationPresentation {
                 }
             }
         }
+        if ("possible_agreement".equals(relation.optString("kind"))
+                || "possible_conflict".equals(relation.optString("kind"))
+                || "alias_candidate".equals(relation.optString("kind"))) {
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_source_sha,
+                    evidenceVerification(context,
+                            relation.optString("source_verification", "not_checked"))));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_other_sha,
+                    evidenceVerification(context,
+                            relation.optString("other_verification", "not_checked"))));
+            text.append("\n").append(context.getString(relation.optBoolean("live_source_pair")
+                    ? R.string.knowledge_relation_current_pair
+                    : R.string.knowledge_relation_historical_pair));
+        }
         if ("modal_contrast".equals(relation.optString("kind"))) {
             text.append("\n").append(context.getString(R.string.knowledge_modal_source))
                     .append(": ").append(modalityLabel(context,

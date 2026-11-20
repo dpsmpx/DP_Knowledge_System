@@ -269,6 +269,11 @@
     <string name="knowledge_temporal_current_pair">Both original file hashes match the index. The date ranges remain unapproved source readings.</string>
     <string name="knowledge_temporal_historical_pair">At least one original file is changed, unavailable or unchecked: this dated relation is an unverified historical index snapshot.</string>
     <string name="knowledge_temporal_checks_limited">Some dated relation sources were not SHA-checked; temporal hints are incomplete or historical.</string>
+    <string name="knowledge_relation_source_sha">Inspected file SHA: %1$s</string>
+    <string name="knowledge_relation_other_sha">Other file SHA: %1$s</string>
+    <string name="knowledge_relation_current_pair">Both original file hashes match the index. An exact candidate or owner-approved alias still does not establish that the claim is true.</string>
+    <string name="knowledge_relation_historical_pair">At least one original file changed, is unavailable or unchecked: this exact/alias relation is an unverified index snapshot, not current evidence.</string>
+    <string name="knowledge_relation_checks_limited">Some exact or alias relation sources could not be SHA-checked; those hints remain historical or incomplete.</string>
     <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>
     <string name="knowledge_semantic_failed">Could not inspect semantic relationships. Original notes and decisions are unchanged.</string>
     <string name="knowledge_semantic_limited">first 60 only</string>

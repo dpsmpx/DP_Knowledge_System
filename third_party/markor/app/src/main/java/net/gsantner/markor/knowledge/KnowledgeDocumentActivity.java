@@ -970,6 +970,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 R.string.knowledge_modal_checks_limited);
         if (context.optBoolean("temporal_checks_limited")) appendContextWarning(warnings,
                 R.string.knowledge_temporal_checks_limited);
+        if (context.optBoolean("relation_checks_limited")) appendContextWarning(warnings,
+                R.string.knowledge_relation_checks_limited);
         if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
                 R.string.knowledge_evidence_limited);
         if (evidenceCount > 0 && context.optBoolean("evidence_checks_limited"))

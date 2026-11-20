@@ -676,6 +676,21 @@ with explicit incompleteness warnings in Hub and editor. Changes affect
 read-only API annotations, EN/RU UI, tests and documentation only. Original
 Markdown, derived knowledge authority and human decision journal are untouched.
 
+**Stage 18 live original-source checks for exact/alias relations (twenty-first
+slice, awaiting Android QA):** The remaining cross-note relation kinds
+(`possible_agreement`, `possible_conflict`, `alias_candidate`) now expose the
+same independent **current/stale/unavailable/not_checked** file-hash status
+for both original Markdown paths and a strict `live_source_pair` flag. Even
+when an owner-reviewed alias remains active in the integrity-verified journal,
+the *source text* is historical/unverified if its live SHA differs from the
+indexed version, is inaccessible or was not checked. Exact candidate matches
+and owner decisions are not automatically promoted to true claims. The Hub and
+editor display individual file statuses and EN/RU warnings. All five relation
+kinds, alongside exact evidence, now share the same bounded 16-file SHA cache
+(maximum 32 MiB per query); incomplete coverage is explicit. No original
+Markdown, disposable projection, accepted knowledge or human journal is
+modified by this read-only verification.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

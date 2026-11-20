@@ -336,6 +336,29 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_temporal_checks_limited"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_exact_and_alias_hints_show_live_sha_and_unapproved_disclaimer(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("relation_checks_limited")', hub)
+        self.assertIn('context.optBoolean("relation_checks_limited")', editor)
+        self.assertIn('"relation_checks_limited": relation_checks_limited', bridge)
+        self.assertIn('"possible_agreement".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"possible_conflict".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"alias_candidate".equals(relation.optString("kind"))', presentation)
+        self.assertIn('R.string.knowledge_relation_source_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_other_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_historical_pair', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_source_sha", "knowledge_relation_other_sha",
+                         "knowledge_relation_current_pair", "knowledge_relation_historical_pair",
+                         "knowledge_relation_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
