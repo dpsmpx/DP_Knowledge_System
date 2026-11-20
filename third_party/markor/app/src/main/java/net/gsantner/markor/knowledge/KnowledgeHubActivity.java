@@ -609,6 +609,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     : " · " + item.optString("locator")));
                             final String path = item.optString("path");
                             row.put("summary", (path.isEmpty() ? "" : path + "\n")
+                                    + (item.optInt("peer_contested") > 0
+                                    ? getString(R.string.knowledge_sync_contested_indicator,
+                                            item.optInt("peer_contested")) + "\n" : "")
                                     + item.optString("summary"));
                             decisionRows.add(row);
                         }
@@ -730,6 +733,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 provenance.length() == 0 ? getString(R.string.knowledge_decision_not_available)
                         : provenance.toString().trim());
         final StringBuilder diagnostics = new StringBuilder();
+        if (item.optInt("peer_contested") > 0) {
+            diagnostics.append(getString(R.string.knowledge_sync_contested_indicator,
+                    item.optInt("peer_contested"))).append('\n')
+                    .append(getString(R.string.knowledge_sync_contested_qualification))
+                    .append("\n\n");
+        }
+        if (item.optInt("peer_kept_local") > 0) {
+            diagnostics.append(getString(R.string.knowledge_sync_keep_local_indicator,
+                    item.optInt("peer_kept_local"))).append("\n\n");
+        }
         if (item.optBoolean("conflicts_available")) {
             final JSONArray conflicts = item.optJSONArray("conflicts");
             if (conflicts == null || conflicts.length() == 0) {
@@ -3547,6 +3560,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private String formatQueryResult(final JSONObject result) {
         final StringBuilder out = new StringBuilder();
+        if (result.optInt("unresolved_peer_disputes") > 0) {
+            out.append(getString(R.string.knowledge_sync_query_dispute_warning,
+                    result.optInt("unresolved_peer_disputes"))).append("\n\n");
+        }
         out.append(getString(R.string.knowledge_query_status, result.optString("status")))
                 .append("\n\n").append(result.optString("answer"));
         final JSONObject sections = result.optJSONObject("sections");

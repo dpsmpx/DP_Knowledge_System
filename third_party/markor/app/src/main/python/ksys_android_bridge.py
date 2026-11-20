@@ -1134,6 +1134,21 @@ def _journal_label(entry: Entry) -> str:
     return (entry.note or entry.op)[:220]
 
 
+def _peer_disputes_by_assertion(kb: KnowledgeBase) -> dict[str, dict[str, int]]:
+    """Project quarantined cross-device disputes without touching proof state."""
+    counts: dict[str, dict[str, int]] = {}
+    for verdict, targets, _ in kb.state.peer_resolutions.values():
+        for assertion in targets:
+            item = counts.setdefault(assertion, {"contested": 0, "keep_local": 0})
+            item[verdict] += 1
+    return counts
+
+
+def _peer_dispute_count(kb: KnowledgeBase) -> int:
+    return sum(verdict == "contested" for verdict, _, _
+               in kb.state.peer_resolutions.values())
+
+
 def decision_overview(workspace_dir: str, category: str = "pending",
                       offset: int = 0, search: str = "") -> str:
     """Bounded pages across proposals, records and journal events.
@@ -1146,6 +1161,7 @@ def decision_overview(workspace_dir: str, category: str = "pending",
             or len(search) > 120:
         raise ValueError("Invalid decision view query")
     kb = _kb(workspace_dir)
+    disputes = _peer_disputes_by_assertion(kb)
     records = sorted(kb.state.records.values(),
                      key=lambda r: (r.updated_at, r.id), reverse=True)
     events = list(reversed(kb.state.entries))
@@ -1201,10 +1217,14 @@ def decision_overview(workspace_dir: str, category: str = "pending",
         if category in groups:
             for rec in groups[category]:
                 provenance = rec.provenance[-1] if rec.provenance else {}
+                assertion = getattr(rec.node, "assertion", None)
+                sync = disputes.get(assertion.id if assertion is not None else "", {})
                 add({"kind": "record", "id": rec.id, "role": rec.role,
                      "status": rec.status.value, "path": provenance.get("document", ""),
                      "locator": provenance.get("locator", ""),
-                     "summary": rec.node.ksf()[:220]})
+                     "summary": rec.node.ksf()[:220],
+                     "peer_contested": sync.get("contested", 0),
+                     "peer_kept_local": sync.get("keep_local", 0)})
         else:
             for event in {"rejected": rejected, "deferred": deferred,
                           "history": events}[category]:
@@ -1216,6 +1236,7 @@ def decision_overview(workspace_dir: str, category: str = "pending",
         "protocol": "dpksys.decision.v1", "category": category,
         "journal_head": kb.journal.head, "offset": offset,
         "total": total, "counts": counts, "items": filtered,
+        "unresolved_peer_disputes": _peer_dispute_count(kb),
         "next_offset": offset + len(filtered) if offset + DECISION_PAGE_SIZE < total else None,
         "read_only": True, "requires_human_review": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1276,6 +1297,9 @@ def decision_detail(workspace_dir: str, kind: str, identifier: str) -> str:
         if rec is None:
             raise ValueError("Knowledge record is unavailable")
         provenance = rec.provenance[-1] if rec.provenance else {}
+        assertion = getattr(rec.node, "assertion", None)
+        sync = _peer_disputes_by_assertion(kb).get(
+            assertion.id if assertion is not None else "", {})
         related_events = [e for e in kb.state.entries if e.id in rec.journal][-12:]
         detail.update({"role": rec.role, "status": rec.status.value,
                        "path": provenance.get("document", ""),
@@ -1294,6 +1318,8 @@ def decision_detail(workspace_dir: str, kind: str, identifier: str) -> str:
                        "superseded_by_many": rec.superseded_by_many[:10],
                        "history": [{"id": e.id, "op": e.op, "time": e.ts}
                                    for e in related_events], "conflicts": [],
+                       "peer_contested": sync.get("contested", 0),
+                       "peer_kept_local": sync.get("keep_local", 0),
                        "diagnostics": []})
     else:
         event = next((e for e in kb.state.entries if e.id == identifier), None)
@@ -1624,6 +1650,7 @@ def ask_knowledge(workspace_dir: str, question: str) -> str:
         "status": response.status,
         "answer": response.answer,
         "sections": response.sections,
+        "unresolved_peer_disputes": _peer_dispute_count(kb),
         "journal_head": kb.journal.head,
         "read_only": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1642,6 +1669,7 @@ def knowledge_diagnostics(workspace_dir: str) -> str:
         "authoritative_count": len(kb.state.authoritative()),
         "claim_count": len(kb.state.claims()),
         "contradiction_count": len(contradictions),
+        "unresolved_peer_disputes": _peer_dispute_count(kb),
         "contradictions": contradictions[:12],
         "unknowns": unknowns,
         "read_only": True,

@@ -18,7 +18,8 @@ from ksys.store.workspace import Workspace
 from third_party.markor.app.src.main.python.ksys_android_bridge import (
     inspect_note, preview_fragment, record_decision, journal_sync_adopt,
     journal_sync_review_commit, journal_sync_conflict_preview,
-    journal_sync_conflict_commit)
+    journal_sync_conflict_commit, decision_overview, decision_detail,
+    knowledge_diagnostics)
 
 
 class ManualForeignAdoptionTests(unittest.TestCase):
@@ -151,6 +152,14 @@ class ManualForeignAdoptionTests(unittest.TestCase):
         self.assertEqual(remote_id, details["remote_event_id"])
         self.assertEqual(local_head, details["local_head_at_review"])
         self.assertEqual([], kb.journal.verify())
+        page = json.loads(decision_overview(str(self.local), "facts"))
+        self.assertEqual(1, page["unresolved_peer_disputes"])
+        self.assertEqual(1, page["items"][0]["peer_contested"])
+        record = json.loads(decision_detail(str(self.local), "record",
+                                            page["items"][0]["id"]))
+        self.assertEqual(1, record["peer_contested"])
+        self.assertEqual(1, json.loads(knowledge_diagnostics(
+            str(self.local)))["unresolved_peer_disputes"])
 
         following_args = (*args[:4], contest["journal_head"], *args[5:])
         duplicate = json.loads(journal_sync_conflict_commit(*following_args, "contested"))
@@ -162,6 +171,9 @@ class ManualForeignAdoptionTests(unittest.TestCase):
         self.assertEqual("keep_local", kb.state.peer_resolutions[key][0])
         self.assertEqual(1, len(kb.state.authoritative()))
         self.assertEqual([], kb.journal.verify())
+        page = json.loads(decision_overview(str(self.local), "facts"))
+        self.assertEqual(0, page["unresolved_peer_disputes"])
+        self.assertEqual(1, page["items"][0]["peer_kept_local"])
         with self.assertRaises(ValueError):
             journal_sync_conflict_commit(*following_args, "automatic_merge")
 

@@ -165,3 +165,16 @@ files; if the exact Markdown is unavailable, the operation is blocked.
 Outstanding: durable branch acknowledgements, a full policy for applying
 every other journal operation, user-visible cross-device contest indicators
 in general search/query views, parallel-concurrency and physical-device QA.
+
+## Twelfth slice: honest dispute indicators (pending CI)
+
+The deterministic replay projection now counts the latest **contested**
+foreign resolutions separately from **keep-local** verdicts. The Android
+decision list marks local facts/claims whose underlying assertion was named
+in such a dispute; the detailed decision view explains that peer knowledge
+was not activated. General knowledge query results display a prominent
+warning whenever any unresolved cross-device dispute remains, so a locally
+proved answer is not mistaken for a globally reconciled one. Diagnostics
+also expose the pending-dispute count. No foreign node text or peer identity
+is added to general-query outputs. Turning a dispute into **keep local**
+clears the unresolved warning for that event, while retaining its audit.

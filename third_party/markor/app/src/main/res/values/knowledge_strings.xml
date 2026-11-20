@@ -431,6 +431,10 @@
     <string name="knowledge_sync_conflict_keep_local">Keep local</string>
     <string name="knowledge_sync_conflict_confirm">Record this explicit decision in your local, hash-chained audit journal? Both causal branch heads and the conflicting assertion IDs will be recorded; foreign knowledge will not be activated. You can revisit the foreign branch later.</string>
     <string name="knowledge_sync_conflict_saved">Your manual foreign conflict resolution was recorded; no source file or local fact was modified.</string>
+    <string name="knowledge_sync_contested_indicator">⚠ %1$d unresolved peer dispute(s)</string>
+    <string name="knowledge_sync_keep_local_indicator">%1$d peer disagreement(s): local decision retained</string>
+    <string name="knowledge_sync_contested_qualification">This is a separately recorded cross-device dispute, not a claim that the local inference engine applied the peer assertion. Open the authenticated peer inbox to review it.</string>
+    <string name="knowledge_sync_query_dispute_warning">⚠ %1$d unresolved cross-device dispute(s) exist in the journal. This answer uses local authoritative knowledge only and has NOT automatically reconciled the foreign branches. Check the decision workspace and authenticated peer inbox before relying on a contested claim.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

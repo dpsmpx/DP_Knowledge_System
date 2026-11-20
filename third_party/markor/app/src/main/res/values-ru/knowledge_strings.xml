@@ -431,6 +431,10 @@
     <string name="knowledge_sync_conflict_keep_local">Оставить локальное</string>
     <string name="knowledge_sync_conflict_confirm">Записать это решение в локальный журнал с хеш-цепочкой? Будут сохранены ссылки на обе ветви и идентификаторы противоречащих утверждений; чужие знания не активируются. К чужой ветви можно будет вернуться позже.</string>
     <string name="knowledge_sync_conflict_saved">Решение по конфликту записано; исходные файлы и локальные факты не изменены.</string>
+    <string name="knowledge_sync_contested_indicator">⚠ Неразрешённых споров с другими устройствами: %1$d</string>
+    <string name="knowledge_sync_keep_local_indicator">Споров с другими устройствами с сохранением локального решения: %1$d</string>
+    <string name="knowledge_sync_contested_qualification">Это отдельно зарегистрированный спор между устройствами, а не применение чужого утверждения движком вывода. Для рассмотрения откройте защищённый список ветвей сопряжённых устройств.</string>
+    <string name="knowledge_sync_query_dispute_warning">⚠ В журнале есть неразрешённые споры между устройствами: %1$d. Ответ использует только локально авторитетные знания; чужие ветви НЕ объединялись автоматически. Перед использованием спорного вывода проверьте решения и ветви сопряжённых устройств.</string>
     <string name="knowledge_daily_backup_title">Ежедневные локальные шифрованные копии</string>
     <string name="knowledge_daily_backup_running">Создание и проверка зашифрованного локального архива…</string>
     <string name="knowledge_daily_backup_enable">Включить ежедневно</string>
