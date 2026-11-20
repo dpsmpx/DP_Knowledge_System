@@ -14,7 +14,7 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Settings | Safe v1/v2 settings remain compatible; v3 explicitly gated secret-entry transfer with unchecked per-export/per-import choice and second export warning; background archives stay v2/no secrets | Android v1/v2/v3 migration, security review of confidential URLs |
 | Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
-| Divergent branches | Signed encrypted inbox, strict hash comparison, paged human review, separate AES/Keystore protected proper-prefix high-water history surviving inbox deletion | Device migration/recovery of trust ledger, rollback/replay acceptance |
+| Divergent branches | Signed encrypted inbox; separate AES/Keystore-protected high-water history survives inbox deletion; opt-in encrypted checkpoint export and monotonic restore | Real device migration, trust pairing and rollback/replay acceptance |
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction | Device UI + concurrent-write review |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
@@ -44,18 +44,20 @@ it explicitly skipped package-ID and APK content inspections as requested.
 - Manual SAF/provider transport is the supported path until an owner-approved
   alternative is specified. The provider may not guarantee cloud durability
   immediately after a local readback.
-- Persistent proper-prefix SHA-256 commitments now survive deletion of the
-  encrypted inbox under an independent device Keystore key. A missing ledger
-  with the key still present fails closed. It is not a hardware monotonic
-  counter, and migration/recovery of this evidence is not yet implemented.
+- Persistent proper-prefix SHA-256 commitments survive deletion of encrypted
+  inbox under an independent device Keystore key. A missing ledger with the
+  key still present fails closed until explicit manual recovery. Its encrypted
+  portable checkpoint can be migrated with separate opt-in, documented in
+  `docs/STAGE21_HIGHWATER_RECOVERY.md`. It is **not** a hardware monotonic
+  counter; two-device and lost-key QA remain open.
 
 ## Closing conditions
 
 1. Implement the **approved** scope in root `TODO.md`: opt-in v3 confidential
    endpoint export/restore is implemented, pending Android CI and device QA;
    encrypted-snapshot and plain Markdown SAF compare/keep-both are implemented;
-   still implement manual handling of every
-   foreign operation; durable anti-rollback high-water evidence. Owner choices
+   high-water storage and explicit migration are implemented pending device QA;
+   still implement manual handling of every foreign operation. Owner choices
    were collected via polls on 20 November 2026; unimplemented behavior must
    remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. Physical integration,
@@ -66,8 +68,8 @@ it explicitly skipped package-ID and APK content inspections as requested.
    under the old workflow did build unsigned, unpublished ephemeral APKs.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior.
-4. Complete the approved manually reviewed operation handlers and protected
-   high-water ledger, including controlled transfer to a restored device.
+4. Complete the approved manually reviewed operation handlers and device QA
+   for protected high-water transfer to a restored device.
    Extend the existing in-app QA buttons with safe, synthetic Stage 21 checks.
 5. Re-review security/privacy, provenance, UI accessibility and the PR; only
    then remove the draft label and declare Stage 21 accepted.

@@ -6,6 +6,10 @@ import org.junit.Test;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 import static org.junit.Assert.*;
 
@@ -45,5 +49,49 @@ public class KnowledgePeerHighWaterTest {
             fail("Unbounded ledger input accepted");
         } catch (java.io.IOException expected) { /* Fail closed. */ }
         assertTrue(ledger.isEmpty());
+    }
+
+    @Test public void portableCheckpointRoundTripMergesWithoutDowngrading() throws Exception {
+        final Map<String, Set<String>> local = new HashMap<>();
+        final Map<String, Set<String>> foreign = new HashMap<>();
+        KnowledgePeerHighWater.recordProperPrefixes(local, PEER, "one\ntwo\nthree\n");
+        KnowledgePeerHighWater.recordProperPrefixes(foreign, PEER, "one\ntwo\nfork\n");
+        KnowledgePeerHighWater.recordProperPrefixes(foreign, OTHER, "a\nb\n");
+        final byte[] portable = KnowledgePeerHighWater.encode(foreign);
+        final Map<String, Set<String>> decoded = KnowledgePeerHighWater.decode(portable);
+        assertEquals(foreign, decoded);
+        final int localBefore = local.get(PEER).size();
+        KnowledgePeerHighWater.mergeMonotonic(local, decoded);
+        assertTrue(local.get(PEER).size() >= localBefore);
+        assertTrue(local.containsKey(OTHER));
+        assertTrue(KnowledgePeerHighWater.wasObservedAsProperPrefix(local, PEER,
+                "one\ntwo\n"));
+        final byte[] corrupted = portable.clone();
+        corrupted[3] ^= 127;
+        try { KnowledgePeerHighWater.decode(corrupted); fail("Bad checkpoint version accepted"); }
+        catch (SecurityException expected) { /* Fail closed. */ }
+    }
+
+    @Test public void encryptedArchiveManifestCoversPortableHighWaterCheckpoint()
+            throws Exception {
+        final File parent = Files.createTempDirectory("stage21-highwater-archive-").toFile();
+        final File vault = new File(parent, "vault");
+        assertTrue(vault.mkdir());
+        Files.write(new File(vault, "note.md").toPath(),
+                "safe source fixture".getBytes(StandardCharsets.UTF_8));
+        final Map<String, Set<String>> history = new HashMap<>();
+        KnowledgePeerHighWater.recordProperPrefixes(history, PEER, "first\nsecond\n");
+        final byte[] checkpoint = KnowledgePeerHighWater.encode(history);
+        final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        final KnowledgePortableArchive.Summary written = KnowledgePortableArchive.write(
+                vault, null, null, null, null, checkpoint, output, () -> false);
+        assertTrue(written.highWater);
+        final File zip = new File(parent, "checkpoint.zip");
+        Files.write(zip.toPath(), output.toByteArray());
+        try {
+            assertTrue(KnowledgePortableArchive.verify(zip, () -> false).highWater);
+            assertEquals(1, KnowledgePeerHighWater.portablePrefixCount(zip));
+            assertEquals(1, KnowledgePeerHighWater.portableSignerCount(zip));
+        } finally { assertTrue(zip.delete()); }
     }
 }

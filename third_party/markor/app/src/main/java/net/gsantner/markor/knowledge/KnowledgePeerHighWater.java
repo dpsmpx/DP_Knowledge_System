@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
@@ -22,6 +23,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -137,6 +140,12 @@ final class KnowledgePeerHighWater {
         cipher.updateAAD(MAGIC);
         final byte[] plain = cipher.doFinal(packet, MAGIC.length + IV_BYTES,
                 packet.length - MAGIC.length - IV_BYTES);
+        try {
+            return decode(plain);
+        } finally { Arrays.fill(plain, (byte) 0); }
+    }
+
+    static Map<String, Set<String>> decode(final byte[] plain) throws Exception {
         try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(plain))) {
             if (input.readInt() != VERSION) throw new SecurityException("Unknown high-water version");
             final int count = input.readInt();
@@ -151,11 +160,10 @@ final class KnowledgePeerHighWater {
             }
             if (input.available() != 0) throw new SecurityException("Trailing high-water data");
             return result;
-        } finally { Arrays.fill(plain, (byte) 0); }
+        }
     }
 
-    private static void commit(final File destination, final SecretKey key,
-                               final Map<String, Set<String>> history) throws Exception {
+    static byte[] encode(final Map<String, Set<String>> history) throws Exception {
         final ByteArrayOutputStream data = new ByteArrayOutputStream();
         try (DataOutputStream output = new DataOutputStream(data)) {
             output.writeInt(VERSION);
@@ -170,7 +178,15 @@ final class KnowledgePeerHighWater {
                 }
             }
         }
-        final byte[] plain = data.toByteArray();
+        final byte[] result = data.toByteArray();
+        if (result.length > MAX_ENCRYPTED_BYTES - MAGIC.length - IV_BYTES - 16)
+            throw new IOException("High-water history exceeds portable bound");
+        return result;
+    }
+
+    private static void commit(final File destination, final SecretKey key,
+                               final Map<String, Set<String>> history) throws Exception {
+        final byte[] plain = encode(history);
         final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key, new SecureRandom());
         cipher.updateAAD(MAGIC);
@@ -192,6 +208,86 @@ final class KnowledgePeerHighWater {
             }
             if (!temp.renameTo(destination)) throw new IOException("Cannot commit high-water ledger");
         } finally { temp.delete(); }
+    }
+
+    /** Authenticated by the outer password-encrypted ZIP; no Keystore key is exported. */
+    static synchronized byte[] exportPortable(final Context context) throws Exception {
+        final File file = new File(context.getNoBackupFilesDir(), FILE);
+        final KeyStore keys = store();
+        final boolean hasKey = keys.containsAlias(ALIAS);
+        if (!hasKey && !file.exists()) return null;
+        if (!hasKey || !file.isFile())
+            throw new SecurityException("High-water recovery required before export");
+        return encode(read(file, secret(keys, false)));
+    }
+
+    private static Map<String, Set<String>> readPortable(final File verifiedZip)
+            throws Exception {
+        try (ZipFile zip = new ZipFile(verifiedZip)) {
+            final ZipEntry entry = zip.getEntry(KnowledgePortableArchive.HIGHWATER);
+            if (entry == null) return null;
+            if (entry.getSize() < 8 || entry.getSize() > MAX_ENCRYPTED_BYTES)
+                throw new IOException("Invalid portable high-water size");
+            final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (InputStream input = zip.getInputStream(entry)) {
+                final byte[] block = new byte[32 * 1024];
+                int n;
+                while ((n = input.read(block)) != -1) {
+                    if (bytes.size() + n > MAX_ENCRYPTED_BYTES)
+                        throw new IOException("Oversized high-water checkpoint");
+                    bytes.write(block, 0, n);
+                }
+            }
+            final byte[] plain = bytes.toByteArray();
+            try { return decode(plain); }
+            finally { Arrays.fill(plain, (byte) 0); }
+        }
+    }
+
+    static int portablePrefixCount(final File verifiedZip) throws Exception {
+        final Map<String, Set<String>> values = readPortable(verifiedZip);
+        if (values == null) return 0;
+        int count = 0;
+        for (final Set<String> hashes : values.values()) count += hashes.size();
+        return count;
+    }
+
+    static int portableSignerCount(final File verifiedZip) throws Exception {
+        final Map<String, Set<String>> values = readPortable(verifiedZip);
+        return values == null ? 0 : values.size();
+    }
+
+    /** Union-only migration, no ever-accepted prefix can disappear. */
+    static void mergeMonotonic(final Map<String, Set<String>> current,
+                               final Map<String, Set<String>> imported) throws IOException {
+        int total = 0;
+        for (final Map.Entry<String, Set<String>> entry : imported.entrySet()) {
+            current.computeIfAbsent(entry.getKey(), ignored -> new HashSet<>())
+                    .addAll(entry.getValue());
+        }
+        for (final Set<String> values : current.values()) {
+            total += values.size();
+            if (total > MAX_PREFIXES) throw new IOException("Merged high-water ledger full");
+        }
+    }
+
+    /** Foreground manual recovery only, merges high-water data monotonically. */
+    static synchronized void importPortable(final Context context, final File verifiedZip)
+            throws Exception {
+        final Map<String, Set<String>> imported = readPortable(verifiedZip);
+        if (imported == null) throw new IOException("No protected history in backup");
+        final File file = new File(context.getNoBackupFilesDir(), FILE);
+        final KeyStore keys = store();
+        final boolean hasKey = keys.containsAlias(ALIAS);
+        if (!hasKey && file.exists())
+            throw new SecurityException("Old high-water key unavailable; manual recovery required");
+        final SecretKey key = secret(keys, !hasKey);
+        // A missing ledger with an existing key can be recovered only here,
+        // after a complete encrypted-backup verification and separate UI consent.
+        final Map<String, Set<String>> current = file.isFile()
+                ? read(file, key) : new HashMap<>();
+        mergeMonotonic(current, imported);
+        commit(file, key, current);
     }
 
     /** Call after signature validation and before writing an inbox entry. */

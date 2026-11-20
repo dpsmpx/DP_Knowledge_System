@@ -32,6 +32,7 @@ final class KnowledgePortableArchive {
     static final String JOURNAL = "meta/journal.jsonl";
     static final String SETTINGS = "meta/settings.json";
     static final String SECRETS = "meta/secrets.json";
+    static final String HIGHWATER = "meta/highwater.bin";
     static final String PEER = "meta/peer.json";
     static final int MAX_FILES = 300_000;
     static final long MAX_FILE_BYTES = 512L * 1024 * 1024;
@@ -58,6 +59,7 @@ final class KnowledgePortableArchive {
         final boolean journal;
         final boolean settings;
         final boolean secrets;
+        final boolean highWater;
 
         Summary(final int sources, final long bytes, final boolean journal, final boolean settings) {
             this(sources, bytes, journal, settings, false);
@@ -65,11 +67,17 @@ final class KnowledgePortableArchive {
 
         Summary(final int sources, final long bytes, final boolean journal,
                 final boolean settings, final boolean secrets) {
+            this(sources, bytes, journal, settings, secrets, false);
+        }
+
+        Summary(final int sources, final long bytes, final boolean journal,
+                final boolean settings, final boolean secrets, final boolean highWater) {
             this.sources = sources;
             this.bytes = bytes;
             this.journal = journal;
             this.settings = settings;
             this.secrets = secrets;
+            this.highWater = highWater;
         }
     }
 
@@ -93,6 +101,16 @@ final class KnowledgePortableArchive {
     static Summary write(final File selectedVault, final File journal,
                          final byte[] settingsJson, final byte[] peerProof,
                          final byte[] secretJson, final OutputStream encryptedOutput,
+                         final Cancellation cancelled) throws Exception {
+        return write(selectedVault, journal, settingsJson, peerProof, secretJson,
+                null, encryptedOutput, cancelled);
+    }
+
+    /** Human-approved recovery metadata only; never include in daily backups. */
+    static Summary write(final File selectedVault, final File journal,
+                         final byte[] settingsJson, final byte[] peerProof,
+                         final byte[] secretJson, final byte[] highWater,
+                         final OutputStream encryptedOutput,
                          final Cancellation cancelled) throws Exception {
         if (selectedVault == null || !selectedVault.isDirectory() || encryptedOutput == null) {
             throw new IOException("Selected source library unavailable");
@@ -131,6 +149,13 @@ final class KnowledgePortableArchive {
                 inventory.add(e);
                 sum = plusBounded(sum, e.bytes);
             }
+            if (highWater != null) {
+                if (highWater.length > 18_000_000 || highWater.length < 8)
+                    throw new IOException("Invalid protected high-water checkpoint");
+                final Entry e = appendBytes(zip, HIGHWATER, highWater);
+                inventory.add(e);
+                sum = plusBounded(sum, e.bytes);
+            }
             if (peerProof != null) {
                 if (peerProof.length > 4096 || journal == null || !journal.isFile())
                     throw new IOException("Invalid peer proof");
@@ -151,7 +176,8 @@ final class KnowledgePortableArchive {
             zip.closeEntry();
         }
         return new Summary(sources.size(), sum,
-                journal != null && journal.isFile(), settingsJson != null, secretJson != null);
+                journal != null && journal.isFile(), settingsJson != null, secretJson != null,
+                highWater != null);
     }
 
     /** Validate the whole, fully decrypted and authenticated staging ZIP. No writes. */
@@ -181,7 +207,7 @@ final class KnowledgePortableArchive {
                     actual.put(name, new Entry(name, manifest.length, hash(manifest)));
                     continue;
                 }
-                if (actual.size() >= MAX_FILES + 4) throw new IOException("Too many entries");
+                if (actual.size() >= MAX_FILES + 5) throw new IOException("Too many entries");
                 final MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 long size = 0;
                 try (InputStream in = zip.getInputStream(z)) {
@@ -222,7 +248,8 @@ final class KnowledgePortableArchive {
         }
         if (recorded != actual.size() - 1) throw new IOException("Unlisted backup payload");
         return new Summary(sources, bytes, actual.containsKey(JOURNAL),
-                actual.containsKey(SETTINGS), actual.containsKey(SECRETS));
+                actual.containsKey(SETTINGS), actual.containsKey(SECRETS),
+                actual.containsKey(HIGHWATER));
     }
 
     private static byte[] readBounded(final InputStream input, final int max,
@@ -301,7 +328,8 @@ final class KnowledgePortableArchive {
         if (name == null || name.length() > 1000 || name.isEmpty() || name.startsWith("/")
                 || name.contains("\\") || name.indexOf('\0') >= 0 || name.contains("//")) return false;
         if (!name.startsWith("notes/") && !JOURNAL.equals(name)
-                && !SETTINGS.equals(name) && !SECRETS.equals(name) && !PEER.equals(name)
+                && !SETTINGS.equals(name) && !SECRETS.equals(name)
+                && !HIGHWATER.equals(name) && !PEER.equals(name)
                 && !MANIFEST.equals(name)) return false;
         for (final String component : name.split("/", -1)) {
             if (component.isEmpty() || ".".equals(component) || "..".equals(component)) return false;

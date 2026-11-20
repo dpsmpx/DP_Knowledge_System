@@ -101,6 +101,23 @@ class Stage21PortableWiring(unittest.TestCase):
             self.assertIn(required, ledger)
         self.assertNotIn("KnowledgePeerHighWater", inbox.split("static void delete(")[1])
 
+    def test_highwater_checkpoint_transfer_only_with_manual_restore_consent(self):
+        ledger = (JAVAS / "KnowledgePeerHighWater.java").read_text()
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        archive = (JAVAS / "KnowledgePortableArchive.java").read_text()
+        daily = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
+        for required in ("exportPortable", "importPortable", "mergeMonotonic",
+                         "High-water recovery required before export",
+                         "Old high-water key unavailable"):
+            self.assertIn(required, ledger)
+        for required in ("migrateHighWater.setChecked(false)",
+                         "KnowledgePeerHighWater.portablePrefixCount(staged)",
+                         "KnowledgePeerHighWater.exportPortable(this)",
+                         "KnowledgePeerHighWater.importPortable(this, verifiedZip)"):
+            self.assertIn(required, hub)
+        self.assertIn('meta/highwater.bin', archive)
+        self.assertNotIn("KnowledgePeerHighWater", daily)
+
 
     def test_model_settings_and_separate_opt_in_secrets(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()

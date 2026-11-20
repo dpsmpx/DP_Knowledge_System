@@ -368,7 +368,7 @@
     <string name="knowledge_portable_inspect">Verify snapshot</string>
     <string name="knowledge_portable_privacy">Includes selected notes, attachments, the journal and reviewed non-secret settings. Secrets are EXCLUDED by default. You may separately approve confidential server URLs for this single encrypted manual export. Keep the password safe: anyone with the archive and password can read its contents. Derived indexes and hardware-only Android Keystore keys are never included. Scheduled backups never include secrets.</string>
     <string name="knowledge_portable_inspect_warning">Select an encrypted DPKS portable snapshot. This read-only check authenticates every block, then validates every file against its SHA-256 manifest; it does not restore or overwrite anything.</string>
-    <string name="knowledge_portable_verified">Fully verified snapshot.\nSource files: %1$d\nUncompressed bytes: %2$d\nKnowledge journal present: %3$b\nSettings present: %4$b\nConfidential server endpoints present: %5$b\n\nNo files or decisions were restored.</string>
+    <string name="knowledge_portable_verified">Fully verified snapshot.\nSource files: %1$d\nUncompressed bytes: %2$d\nKnowledge journal present: %3$b\nSettings present: %4$b\nConfidential server endpoints present: %5$b\nProtected high-water checkpoint present: %6$b\n\nNo files or decisions were restored.</string>
     <string name="knowledge_portable_exported">Encrypted source snapshot saved and verified (%1$d files).</string>
     <string name="knowledge_portable_failed">Portable snapshot failed verification or transfer. Local notes and journal were not changed; the destination may contain an incomplete backup.</string>
     <string name="knowledge_portable_restore">Restore into a new library</string>
@@ -383,6 +383,9 @@
     <string name="knowledge_portable_secrets_approve">Include secrets this time</string>
     <string name="knowledge_portable_secrets_restore_choice">Also restore confidential server endpoints; this overwrites matching local endpoint preferences (off by default)</string>
     <string name="knowledge_portable_secrets_restore_preview">Encrypted sensitive fields available: %1$s. Values are hidden. These fields can contain tokens/passwords. Explicitly check the separate option to restore them.</string>
+    <string name="knowledge_portable_highwater_restore_choice">Also migrate protected peer anti-rollback history to this device (off by default)</string>
+    <string name="knowledge_portable_highwater_restore_preview">Protected anti-rollback checkpoint: %1$d signer(s), %2$d recorded prefix commitments. Explicit migration preserves old-prefix rejection after moving devices. A password-encrypted archive authenticates the checkpoint but cannot prove the sender’s physical device; re-pair and verify peer identities out of band. Never replace a stronger local ledger with a weaker imported one.</string>
+    <string name="knowledge_portable_highwater_restore_failed">Notes were restored, but the protected peer history could not be migrated. Do not accept old peer branches until manual recovery is verified.</string>
     <string name="knowledge_portable_compare_sources">Compare original Markdown from encrypted snapshot</string>
     <string name="knowledge_portable_sources_warning">Manually choose a DPKS encrypted snapshot via Android files, Syncthing or SAF. Only original Markdown is listed. No existing note will be replaced, merged or automatically imported. Select a file to compare; saving a copy always requires its own confirmation.</string>
     <string name="knowledge_portable_sources_page">Markdown source files (%1$d of %2$d)</string>

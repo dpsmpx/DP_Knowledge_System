@@ -4928,12 +4928,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         prefs, secretsApproved);
                 final byte[] secretBundle = secretsApproved
                         ? KnowledgePortableSecrets.snapshot(prefs) : null;
+                // The ledger is metadata only. Exportable checkpoint hashes
+                // are inside this manually password-encrypted backup; the
+                // device Keystore AES key itself is never serialized.
+                final byte[] portableHighWater = KnowledgePeerHighWater.exportPortable(this);
                 final KnowledgePortableArchive.Summary exported;
                 try (OutputStream saf = getContentResolver().openOutputStream(destination, "w")) {
                     if (saf == null) throw new IOException("Backup destination unavailable");
                     exported = KnowledgePortableArchive.write(vault,
                             journal.isFile() ? journal : null, safeSettings,
-                            peerProof, secretBundle,
+                            peerProof, secretBundle, portableHighWater,
                             KnowledgePortableCipher.encrypt(saf, password),
                             () -> Thread.currentThread().isInterrupted());
                 }
@@ -4950,7 +4954,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 if (peerProof != null) KnowledgePortableRestore.verifyPeer(this, staging);
                 if (exported.sources != verified.sources || exported.bytes != verified.bytes
                         || exported.journal != verified.journal || !verified.settings
-                        || exported.secrets != verified.secrets) {
+                        || exported.secrets != verified.secrets
+                        || exported.highWater != verified.highWater) {
                     throw new IOException("Written backup is incomplete");
                 }
                 runOnUiThread(() -> {
@@ -5021,6 +5026,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final Map<String, String> safeModels = KnowledgePortableSettings.read(staged);
                 final List<String> secretFields = summary.secrets
                         ? KnowledgePortableSecrets.fieldNames(staged) : Collections.emptyList();
+                final int highWaterPrefixes = summary.highWater
+                        ? KnowledgePeerHighWater.portablePrefixCount(staged) : 0;
+                final int highWaterSigners = summary.highWater
+                        ? KnowledgePeerHighWater.portableSignerCount(staged) : 0;
                 final File confirmedStaging = staged;
                 handedToDialog = true;
                 runOnUiThread(() -> {
@@ -5035,11 +5044,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     final CheckBox migrateSecrets = new CheckBox(this);
                     migrateSecrets.setText(R.string.knowledge_portable_secrets_restore_choice);
                     migrateSecrets.setChecked(false);
+                    final CheckBox migrateHighWater = new CheckBox(this);
+                    migrateHighWater.setText(R.string.knowledge_portable_highwater_restore_choice);
+                    migrateHighWater.setChecked(false);
                     final LinearLayout options = new LinearLayout(this);
                     options.setOrientation(LinearLayout.VERTICAL);
                     options.setPadding(24, 0, 24, 0);
                     if (!safeModels.isEmpty()) options.addView(migrateModels);
                     if (summary.secrets) options.addView(migrateSecrets);
+                    if (summary.highWater) options.addView(migrateHighWater);
                     final AlertDialog.Builder builder = new AlertDialog.Builder(this)
                             .setTitle(R.string.knowledge_portable_restore)
                             .setMessage(getString(R.string.knowledge_portable_restore_preview,
@@ -5049,7 +5062,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                                     safeModels.values().toString()))
                                     + (summary.secrets ? "\n\n" + getString(
                                             R.string.knowledge_portable_secrets_restore_preview,
-                                            secretFields.toString()) : ""))
+                                            secretFields.toString()) : "")
+                                    + (summary.highWater ? "\n\n" + getString(
+                                            R.string.knowledge_portable_highwater_restore_preview,
+                                            highWaterSigners, highWaterPrefixes) : ""))
                             .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
                                 confirmedStaging.delete();
                                 pendingPortableStaging = null;
@@ -5063,8 +5079,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             summary, journalPreview, generation,
                                             migrateModels.isChecked() ? safeModels
                                                     : Collections.emptyMap(),
-                                            migrateSecrets.isChecked()));
-                    if (!safeModels.isEmpty() || summary.secrets) builder.setView(options);
+                                            migrateSecrets.isChecked(),
+                                            migrateHighWater.isChecked()));
+                    if (!safeModels.isEmpty() || summary.secrets || summary.highWater)
+                        builder.setView(options);
                     builder.show();
                 });
             } catch (Exception failed) {
@@ -5083,7 +5101,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                       final KnowledgePortableArchive.Summary summary,
                                       final JSONObject journalPreview, final int generation,
                                       final Map<String, String> safeModels,
-                                      final boolean secretsApproved) {
+                                      final boolean secretsApproved,
+                                      final boolean highWaterApproved) {
         status.setText(R.string.knowledge_backup_working);
         worker.submit(() -> {
             try {
@@ -5103,6 +5122,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         getPreferences(MODE_PRIVATE), safeModels);
                 final boolean secretsRestored = !secretsApproved || KnowledgePortableSecrets.apply(
                         getPreferences(MODE_PRIVATE), KnowledgePortableSecrets.read(verifiedZip));
+                boolean ledgerRestored = !highWaterApproved;
+                if (highWaterApproved) {
+                    try {
+                        KnowledgePeerHighWater.importPortable(this, verifiedZip);
+                        ledgerRestored = true;
+                    } catch (Exception badCheckpoint) {
+                        ledgerRestored = false;
+                    }
+                }
+                final boolean highWaterRestored = ledgerRestored;
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         ((TextView) findViewById(R.id.knowledge_root)).setText(
@@ -5112,6 +5141,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         summary.sources), Toast.LENGTH_LONG).show();
                         if (!modelsRestored || !secretsRestored) Toast.makeText(this,
                                 R.string.knowledge_portable_settings_failed,
+                                Toast.LENGTH_LONG).show();
+                        if (!highWaterRestored) Toast.makeText(this,
+                                R.string.knowledge_portable_highwater_restore_failed,
                                 Toast.LENGTH_LONG).show();
                         recreate();
                     }
@@ -5150,7 +5182,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 .setTitle(R.string.knowledge_portable_inspect)
                                 .setMessage(getString(R.string.knowledge_portable_verified,
                                         summary.sources, summary.bytes, summary.journal,
-                                        summary.settings, summary.secrets))
+                                        summary.settings, summary.secrets, summary.highWater))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
                     }
