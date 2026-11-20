@@ -781,6 +781,149 @@ def record_source_unlink(workspace_dir: str, decision_id: str,
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# An owner's descriptive source-type annotation is *not* a quality score.
+# In particular, "primary_record" never promotes a parser candidate to fact.
+SOURCE_PROVENANCE_KINDS = ("primary_record", "secondary_summary",
+                           "republication", "unclassified")
+MAX_SOURCE_ASSESSMENT_OPERATIONS = 512
+
+
+def _source_assessments(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
+               entry.op in ("source_assess", "source_unassess")]
+    if len(entries) > MAX_SOURCE_ASSESSMENT_OPERATIONS:
+        raise ValueError("Source assessment journal limit reached")
+    active: dict[str, dict] = {}
+    recent = []
+    for entry in entries:
+        data = entry.data
+        path = data.get("path") if isinstance(data, dict) else None
+        if not isinstance(path, str) or not path:
+            continue
+        if entry.op == "source_assess":
+            source = data.get("source")
+            if (path in active or data.get("kind") not in SOURCE_PROVENANCE_KINDS or
+                    not isinstance(source, dict) or source.get("path") != path):
+                continue
+            active[path] = {"path": path, "kind": data["kind"],
+                            "reason": str(data.get("reason", ""))[:500],
+                            "source": source, "journal_id": entry.id, "time": entry.ts}
+        else:
+            previous = active.get(path)
+            if previous and previous["journal_id"] == data.get("decision_id"):
+                del active[path]
+        recent.append({"op": entry.op, "path": path, "journal_id": entry.id,
+                       "decision_id": data.get("decision_id"), "time": entry.ts})
+    return [active[path] for path in sorted(active)], list(reversed(recent[-40:]))
+
+
+def source_assessment_decisions(workspace_dir: str) -> str:
+    """Read owner source-type choices without a notebook or internet access."""
+    kb = _kb(workspace_dir)
+    active, recent = _source_assessments(kb.journal)
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "active": active, "recent": recent, "journal_head": kb.journal.head,
+                       "read_only": True, "changes_claim_authority": False,
+                       "reliability_score": None}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def _assessment_preview(workspace_dir: str, vault_dir: str, path: str,
+                        kind: str, reason: str) -> dict:
+    if (not isinstance(path, str) or not path or path.startswith("/") or
+            "\\" in path or ".." in path.split("/") or len(path) > 500 or
+            not path.lower().endswith((".md", ".markdown"))):
+        raise ValueError("Choose an exact relative Markdown source path")
+    if kind not in SOURCE_PROVENANCE_KINDS:
+        raise ValueError("Choose a descriptive source type")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain this source-type choice in 1..500 characters")
+    kb = _kb(workspace_dir)
+    active, _ = _source_assessments(kb.journal)
+    if any(record["path"] == path for record in active):
+        raise ValueError("Source has an active assessment; revoke it before reassessing")
+    owner_ops = sum(entry.actor == kb.journal.actor and
+                    entry.op in ("source_assess", "source_unassess")
+                    for entry in kb.journal.entries())
+    if owner_ops >= MAX_SOURCE_ASSESSMENT_OPERATIONS:
+        raise ValueError("Source assessment journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        source = _lineage_source(con, root, path)
+    finally:
+        con.close()
+    payload = {"path": path, "kind": kind, "source": source,
+               "reason": reason.strip(), "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.source_assessment.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "changes_claim_authority": False,
+            "reliability_score": None, "changes_original_markdown": False}
+
+
+def preview_source_assessment(workspace_dir: str, vault_dir: str, path: str,
+                              kind: str, reason: str) -> str:
+    return json.dumps(_assessment_preview(workspace_dir, vault_dir, path, kind, reason),
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_assessment(workspace_dir: str, vault_dir: str, path: str,
+                             kind: str, reason: str, expected_token: str,
+                             expected_head: str | None) -> str:
+    preview = _assessment_preview(workspace_dir, vault_dir, path, kind, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source or journal changed after assessment preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("source_assess", {key: preview[key]
+                          for key in ("path", "kind", "source", "reason")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "decision": "source_assess", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def preview_source_unassessment(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _source_assessments(kb.journal)
+    selected = next((record for record in active if record["journal_id"] == decision_id), None)
+    if selected is None:
+        raise ValueError("No active owner source assessment with this decision ID")
+    payload = {"path": selected["path"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.source_assessment.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_unassessment(workspace_dir: str, decision_id: str,
+                               expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_source_unassessment(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Assessment or journal changed before revocation")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.journal.append("source_unassess",
+                              {"path": preview["path"], "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "decision": "source_unassess", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
 def _validate_note_input(relative_path: str, markdown: str) -> None:
     if not isinstance(relative_path, str) or not isinstance(markdown, str):
         raise ValueError("Expected relative path and Markdown content")

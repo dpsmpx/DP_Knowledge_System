@@ -533,6 +533,20 @@ commit. Saved active-link excerpts are separately labeled **historical**
 because their original hashes may no longer match current Markdown. This is
 navigation and disclosure only, not automatic source matching or approval.
 
+**Stage 18 manual source-type annotations (eleventh slice, journal API):**
+An owner may explicitly classify a single original Markdown note as
+`primary_record`, `secondary_summary`, `republication`, or `unclassified`,
+with a human explanation. These are **descriptive provenance types, not
+reliability scores or correctness rankings**. The read-only preview displays
+the selected original excerpt, locator, and verified file SHA-256. The
+confirmation rechecks the notebook root, current file hash, preview token,
+active decision and journal head before appending the distinct `source_assess`
+event. `source_unassess` references that exact event and works offline;
+historical records are never deleted. Neither event modifies authority,
+claims, aliases, inferences, Markdown or the source index. The active/history
+API and operation cap are separate from the common-upstream link workflow.
+Android authoring UI and device QA are the next integration steps.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the
