@@ -44,7 +44,7 @@ def verified_owner_aliases(entries, owner_actor: str) -> AliasSnapshot:
     limited = False
     count = 0
     for entry in entries:
-        if entry.op != "alias" or entry.actor != owner_actor:
+        if entry.op not in ("alias", "unalias") or entry.actor != owner_actor:
             continue
         count += 1
         if count > MAX_ALIAS_OPERATIONS:
@@ -53,6 +53,13 @@ def verified_owner_aliases(entries, owner_actor: str) -> AliasSnapshot:
         if not isinstance(data, dict):
             continue
         name, target = data.get("alias"), data.get("canonical")
+        if entry.op == "unalias":
+            # Only the exact decision can be withdrawn. A forged/stale
+            # retraction does not remove somebody else's alias decision.
+            if (isinstance(name, str) and name in direct
+                    and direct[name] == (target, data.get("decision_id"))):
+                direct.pop(name)
+            continue
         if not isinstance(name, str) or not isinstance(target, str):
             continue
         valid = (1 <= len(name) <= 128 and 1 <= len(target) <= 128

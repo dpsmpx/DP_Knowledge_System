@@ -41,6 +41,51 @@ public final class KnowledgePythonBridge {
         return invoke(context, "note_relationships", workspace, relativePath);
     }
 
+    /** Strict manual entity lifecycle: no inferred merges or Markdown changes. */
+    public static JSONObject entityAliasWorkspace(final Context context, final String workspace,
+                                                 final String notebook, final String alias,
+                                                 final String canonical) throws JSONException {
+        return invoke(context, "entity_alias_workspace", workspace, notebook, alias, canonical);
+    }
+
+    public static JSONObject entityAliasDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "entity_alias_decisions", workspace);
+    }
+
+    public static JSONObject previewEntityAlias(final Context context, final String workspace,
+                                                final String notebook, final String alias,
+                                                final String canonical, final String aliasPath,
+                                                final String aliasFragment, final String canonicalPath,
+                                                final String canonicalFragment, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_entity_alias", workspace, notebook, alias, canonical,
+                aliasPath, aliasFragment, canonicalPath, canonicalFragment, reason);
+    }
+
+    public static JSONObject confirmEntityAlias(final Context context, final String workspace,
+                                                final String notebook, final String alias,
+                                                final String canonical, final String aliasPath,
+                                                final String aliasFragment, final String canonicalPath,
+                                                final String canonicalFragment, final String reason,
+                                                final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_entity_alias", workspace, notebook, alias, canonical,
+                aliasPath, aliasFragment, canonicalPath, canonicalFragment, reason,
+                token, expectedHead);
+    }
+
+    public static JSONObject previewEntityUnalias(final Context context, final String workspace,
+                                                  final String alias) throws JSONException {
+        return invoke(context, "preview_entity_unalias", workspace, alias);
+    }
+
+    public static JSONObject confirmEntityUnalias(final Context context, final String workspace,
+                                                  final String alias, final String token,
+                                                  final String expectedHead) throws JSONException {
+        return invoke(context, "record_entity_unalias", workspace, alias, token, expectedHead);
+    }
+
     public static JSONObject fullAudit(final Context context, final String workspace,
                                        final String notebook, final BulkProgress progress)
             throws JSONException {

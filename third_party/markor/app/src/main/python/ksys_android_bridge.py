@@ -21,7 +21,10 @@ from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
 from ksys.importer.relations import related_claims, indexed_related_claims
-from ksys.importer.aliases import verified_owner_aliases
+from ksys.importer.aliases import (verified_owner_aliases, MAX_ALIAS_OPERATIONS,
+                                   MAX_ALIASES_PER_CANONICAL)
+from ksys.core.ids import canonical_json
+from ksys.ir.terms import SYMBOL_RE
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.ir.nodes import node_from_dict
@@ -180,6 +183,233 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
         "read_only": True,
         "requires_human_review": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+# Stage 18: deliberate owner-only entity decisions. Sources come from an
+# unapproved, disposable projection, so every source must be rechecked against
+# the original file's SHA before a preview or journal append.
+ENTITY_SOURCE_PAGE = 24
+
+
+def _entity_symbol(symbol: str) -> str:
+    if (not isinstance(symbol, str) or not 1 <= len(symbol) <= 128
+            or not SYMBOL_RE.fullmatch(symbol)):
+        raise ValueError("Use an exact formal symbol (1..128 characters)")
+    return symbol
+
+
+def _entity_index(workspace_dir: str, vault_dir: str):
+    workspace, vault = Path(workspace_dir), Path(vault_dir)
+    if not workspace.is_absolute() or not vault.is_absolute() or not vault.is_dir():
+        raise ValueError("Select an accessible notebook and private knowledge workspace")
+    con = _decision_index(workspace)
+    if con is None:
+        raise ValueError("Analyze the notebook before reviewing entity sources")
+    indexed_root = con.execute(
+        "SELECT value FROM meta WHERE key='vault_root'").fetchone()
+    if not indexed_root or indexed_root[0] != str(vault.resolve()):
+        con.close()
+        raise ValueError("Notebook changed since analysis; analyze again")
+    return con, vault.resolve()
+
+
+def _entity_live_hash(root: Path, relative_path: str) -> str | None:
+    if (not isinstance(relative_path, str) or not relative_path
+            or relative_path.startswith("/") or "\\" in relative_path
+            or ".." in relative_path.split("/")
+            or not relative_path.lower().endswith((".md", ".markdown"))):
+        return None
+    source = (root / relative_path).resolve()
+    if not source.is_relative_to(root) or not source.is_file():
+        return None
+    try:
+        if source.stat().st_size > MAX_IMPORT_BYTES:
+            return None
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except (OSError, PermissionError):
+        return None
+
+
+def _entity_sources(con, root: Path, symbol: str) -> tuple[list[dict], bool]:
+    # Exact canonical JSON argument, not substring/name similarity. A candidate
+    # atom is only a proposal: UI explicitly names this epistemic status.
+    needle = canonical_json({"k": "sym", "v": symbol})
+    rows = con.execute(
+        "SELECT DISTINCT a.doc, a.fragment_id, f.locator, f.text, d.sha256 "
+        "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
+        "JOIN documents d ON d.path=a.doc AND d.status='PARSED' "
+        "WHERE instr(a.atom_key, ?) > 0 "
+        "ORDER BY a.doc COLLATE NOCASE, f.locator, a.fragment_id LIMIT ?",
+        (needle, ENTITY_SOURCE_PAGE + 1)).fetchall()
+    sources = []
+    for path, fragment, locator, excerpt, sha in rows[:ENTITY_SOURCE_PAGE]:
+        sources.append({"path": path, "fragment_id": fragment,
+                        "locator": locator, "excerpt": excerpt[:360],
+                        "source_sha256": sha,
+                        "current": _entity_live_hash(root, path) == sha})
+    return sources, len(rows) > ENTITY_SOURCE_PAGE
+
+
+def _owner_aliases(kb: KnowledgeBase) -> tuple[dict, bool]:
+    snapshot = verified_owner_aliases(kb.journal.entries(), kb.journal.actor)
+    by_id = {e.id: e for e in kb.journal.entries()}
+    active = {}
+    for name, evidence in snapshot.by_symbol.items():
+        if evidence.journal_id is None:
+            continue
+        event = by_id[evidence.journal_id]
+        active[name] = {"alias": name, "canonical": evidence.canonical,
+                        "journal_id": event.id, "time": event.ts,
+                        "reason": event.note or "",
+                        "sources": event.data.get("evidence", [])[:2]
+                        if isinstance(event.data.get("evidence"), list) else []}
+    return active, snapshot.limited
+
+
+def entity_alias_workspace(workspace_dir: str, vault_dir: str,
+                           alias: str, canonical: str) -> str:
+    """Read-only source choices and approved history for the Android screen."""
+    a, c = _entity_symbol(alias), _entity_symbol(canonical)
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        left, left_limited = _entity_sources(con, root, a)
+        right, right_limited = _entity_sources(con, root, c)
+    finally:
+        con.close()
+    return json.dumps({
+        "protocol": "dpksys.entities.v1", "alias": a, "canonical": c,
+        "alias_sources": left, "canonical_sources": right,
+        "sources_limited": left_limited or right_limited,
+        "active": [active[k] for k in sorted(active)],
+        "journal_limited": limited, "journal_head": kb.journal.head,
+        "read_only": True, "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def entity_alias_decisions(workspace_dir: str) -> str:
+    """List reversible owner decisions even when the notebook is unavailable."""
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    recent = [{"op": e.op, "alias": e.data.get("alias"),
+               "canonical": e.data.get("canonical"), "journal_id": e.id,
+               "time": e.ts} for e in reversed(kb.journal.entries())
+              if e.actor == kb.journal.actor and e.op in ("alias", "unalias")][:40]
+    return json.dumps({"protocol": "dpksys.entities.v1",
+                       "active": [active[k] for k in sorted(active)],
+                       "recent": recent, "journal_limited": limited,
+                       "read_only": True}, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
+def _entity_selected(con, root: Path, symbol: str, path: str, fragment_id: str) -> dict:
+    if not isinstance(fragment_id, str) or len(fragment_id) > 120:
+        raise ValueError("Invalid source fragment")
+    sources, limited = _entity_sources(con, root, symbol)
+    selected = next((s for s in sources if s["path"] == path
+                     and s["fragment_id"] == fragment_id), None)
+    if selected is None or not selected["current"]:
+        raise ValueError("Source missing, changed or not in the reviewed list; analyze again")
+    return selected
+
+
+def _entity_preview(workspace_dir: str, vault_dir: str,
+                    alias: str, canonical: str, alias_path: str,
+                    alias_fragment: str, canonical_path: str,
+                    canonical_fragment: str, reason: str) -> dict:
+    a, c = _entity_symbol(alias), _entity_symbol(canonical)
+    if a == c or not isinstance(reason, str) or len(reason.strip()) > 500:
+        raise ValueError("Specify two different symbols and a reason of at most 500 characters")
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    snapshot = verified_owner_aliases(kb.journal.entries(), kb.journal.actor)
+    count = sum(e.op in ("alias", "unalias") and e.actor == kb.journal.actor
+                for e in kb.journal.entries())
+    if (limited or count >= MAX_ALIAS_OPERATIONS or a in snapshot.by_symbol
+            or a in kb.state.aliases or c in kb.state.aliases
+            or c in active or len(snapshot.groups.get(c, ())) > MAX_ALIASES_PER_CANONICAL):
+        raise ValueError("Alias is already mapped, would form a chain, or journal limit reached")
+    if (alias_path, alias_fragment) == (canonical_path, canonical_fragment):
+        raise ValueError("Choose distinct source fragments for the two symbols")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        left = _entity_selected(con, root, a, alias_path, alias_fragment)
+        right = _entity_selected(con, root, c, canonical_path, canonical_fragment)
+    finally:
+        con.close()
+    evidence = [{"symbol": symbol, "path": src["path"],
+                 "fragment_id": src["fragment_id"], "locator": src["locator"],
+                 "source_sha256": src["source_sha256"], "excerpt": src["excerpt"]}
+                for symbol, src in ((a, left), (c, right))]
+    payload = {"alias": a, "canonical": c, "evidence": evidence,
+               "reason": reason.strip(), "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.entities.v1", **payload, "preview_token": token,
+            "read_only": True, "requires_human_confirmation": True,
+            "changes_original_markdown": False}
+
+
+def preview_entity_alias(workspace_dir: str, vault_dir: str, alias: str,
+                         canonical: str, alias_path: str, alias_fragment: str,
+                         canonical_path: str, canonical_fragment: str,
+                         reason: str) -> str:
+    return json.dumps(_entity_preview(workspace_dir, vault_dir, alias, canonical,
+                      alias_path, alias_fragment, canonical_path,
+                      canonical_fragment, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_entity_alias(workspace_dir: str, vault_dir: str, alias: str,
+                        canonical: str, alias_path: str, alias_fragment: str,
+                        canonical_path: str, canonical_fragment: str, reason: str,
+                        expected_token: str, expected_head: str | None) -> str:
+    preview = _entity_preview(workspace_dir, vault_dir, alias, canonical,
+                              alias_path, alias_fragment, canonical_path,
+                              canonical_fragment, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Sources or journal changed after review; start a new preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.alias_reviewed(alias, canonical, preview["evidence"], reason.strip())
+    if kb.journal.verify():
+        raise ValueError("Journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.entities.v1", "decision": "alias",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preview_entity_unalias(workspace_dir: str, alias: str) -> str:
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    if limited or alias not in active:
+        raise ValueError("No unambiguous active owner alias to revoke")
+    mapping = active[alias]
+    token = hashlib.sha256(canonical_json({"mapping": mapping,
+                     "head": kb.journal.head}).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.entities.v1", **mapping,
+                       "journal_head": kb.journal.head, "preview_token": token,
+                       "read_only": True, "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_entity_unalias(workspace_dir: str, alias: str,
+                          expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_entity_unalias(workspace_dir, alias))
+    if preview["journal_head"] != expected_head or preview["preview_token"] != expected_token:
+        raise ValueError("Alias or journal changed after revocation preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.unalias(alias, preview["canonical"], preview["journal_id"])
+    if kb.journal.verify():
+        raise ValueError("Journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.entities.v1", "decision": "unalias",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _validate_note_input(relative_path: str, markdown: str) -> None:

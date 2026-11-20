@@ -316,6 +316,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 view -> navigateToDecisions("pending"));
         findViewById(R.id.knowledge_active_decisions).setOnClickListener(
                 view -> navigateToDecisions("active"));
+        findViewById(R.id.knowledge_entity_matching).setOnClickListener(view ->
+                new KnowledgeEntityReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 

@@ -385,6 +385,33 @@ confidence calibration and cross-source reconciliation remain on the roadmap.
 Synthetic Python and Android CI cover the code; real Android UI acceptance
 is still open. The separately deferred Stage 21 hardware debt is unchanged.
 
+**Stage 18 manual entity lifecycle (fourth slice, awaiting device acceptance):**
+The Android **Decisions → Manual entity matching and withdrawal** entry now
+provides an explicit workflow to enter two exact parsed entity symbols, browse
+up to 24 indexed source fragments per symbol, inspect the original excerpts,
+open either note, choose two distinct source fragments, enter a reason, inspect
+a combined preview and consciously confirm. A successful approval appends an
+owner-authored `alias` event to the private hash-chained human journal with the
+exact symbol pair, two source paths/locators, source SHA-256 values and excerpts;
+the original Markdown and disposable claim keys remain unchanged. Before both
+preview and commit, the bridge checks the saved index's notebook root, exact
+parsed symbols, source SHA-256 against the current files, unchanged journal
+head, source selection and preview token. Stale or missing sources, rebinding,
+chains, cycles and over-limit alias groups fail closed. These are decisions
+*based on unapproved parser interpretations*, not objective identity proofs.
+The same screen lists owner-approved mappings, recorded evidence and recent
+journal events. A separate revocation preview plus confirmation appends an
+`unalias` event that references the exact original alias decision; this stops
+new alias-backed relationship hints without destroying the old record, and
+revocation remains accessible even when the notebook is disconnected. Reapproval
+after revocation requires a new full source review and new journal event.
+Legacy CLI aliases without stored excerpts remain visible by symbol and journal
+ID, but cannot retroactively acquire invented evidence. This slice does not
+automatically reconcile old inferences, infer entity identities, prove source
+truth, or implement a confidence model. Android on-device UX/accessibility,
+process-death recovery and SAF hardware QA remain unverified; Stage 21 hardware
+debt is still deliberately deferred.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

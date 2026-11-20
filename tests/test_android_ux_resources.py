@@ -14,6 +14,31 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_entity_matching")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeEntityReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        self.assertIn("new KnowledgeEntityReviewDialog(this, workspacePath()", hub)
+        for name in ("entityAliasWorkspace", "previewEntityAlias", "confirmEntityAlias",
+                     "entityAliasDecisions", "previewEntityUnalias", "confirmEntityUnalias"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for name in ("source_sha256", "fragment_id", "preview_token", "journal_head",
+                     "openNote.accept", "knowledge_entity_revoke_warning"):
+            self.assertIn(name, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_entity_matching", "knowledge_entity_source_a",
+                         "knowledge_entity_source_b", "knowledge_entity_confirm_warning",
+                         "knowledge_entity_revoke_warning", "knowledge_entity_saved"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_temporal_overlap_hints_have_distinct_labels_and_both_intervals(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
