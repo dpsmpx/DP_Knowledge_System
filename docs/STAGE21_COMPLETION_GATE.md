@@ -44,8 +44,12 @@ it explicitly skipped package-ID and APK content inspections as requested.
 
 ## Closing conditions
 
-1. Resolve **TODO-21-01..03** in root `TODO.md`; preserve safe defaults until
-   the owner explicitly chooses anything broader.
+1. Implement the **approved** scope in root `TODO.md`: opt-in export of
+   portable secrets on every manual snapshot; both external and app-managed
+   Markdown exchange with compare-and-keep-both; manual handling of every
+   foreign operation; durable anti-rollback high-water evidence. Owner choices
+   were collected via polls on 20 November 2026; unimplemented behavior must
+   remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. Physical integration,
    real APK installation and release need a new explicit owner instruction.
    The Stage 21 draft PR's *new* Android CI job is restricted to unit tests:
@@ -54,8 +58,9 @@ it explicitly skipped package-ID and APK content inspections as requested.
    under the old workflow did build unsigned, unpublished ephemeral APKs.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior.
-4. Agree on policy for unsupported journal operations and whether a stronger
-   persistent rollback high-water ledger is required for the release target.
+4. Complete the approved manually reviewed operation handlers and protected
+   high-water ledger, including controlled transfer to a restored device.
+   Extend the existing in-app QA buttons with safe, synthetic Stage 21 checks.
 5. Re-review security/privacy, provenance, UI accessibility and the PR; only
    then remove the draft label and declare Stage 21 accepted.
 
