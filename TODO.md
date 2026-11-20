@@ -220,8 +220,11 @@
   (https://www.sqlite.org/changes.html). Добавлена отдельная диагностика
   `baseTablesQuickCheck` и `ftsStorageQuickCheck` через table-scoped
   `PRAGMA quick_check` на **том же read-only соединении**. Никакой repair
-  или открытия реального индекса read/write. Дождаться Android CI и нового
-  аппаратного отчёта с обоими полями; даже `ok/ok` не приравнивать к
+  или открытия реального индекса read/write. Android unit CI обеих flavor
+  [#44737077549](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44737077549)
+  и Python CI [#44737077585](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44737077585)
+  прошли. Дождаться нового аппаратного отчёта с обоими полями; даже `ok/ok`
+  не приравнивать к
   полной FTS/integrity проверке. Если любой из них не `ok`, нужна отдельная
   ручная проверка без автоматического пересоздания.
 
