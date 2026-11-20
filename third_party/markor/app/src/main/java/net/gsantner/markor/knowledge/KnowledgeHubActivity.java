@@ -325,6 +325,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_source_assessment).setOnClickListener(view ->
                 new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
                         decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_version_reviews).setOnClickListener(view ->
+                new KnowledgeVersionReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, null, null, () -> loadDecisionPage(0)).history());
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -1825,7 +1828,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     + (result.optBoolean("temporal_checks_limited")
                                     ? " · " + getString(R.string.knowledge_temporal_checks_limited) : "")
                                     + (result.optBoolean("relation_checks_limited")
-                                    ? " · " + getString(R.string.knowledge_relation_checks_limited) : ""))
+                                    ? " · " + getString(R.string.knowledge_relation_checks_limited) : "")
+                                    + (result.optBoolean("version_review_limited")
+                                    ? " · " + getString(R.string.knowledge_version_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
                     if (evidence != null && evidence.length() > 0) {
                         dialog.setNeutralButton(R.string.knowledge_evidence_title,
@@ -1864,16 +1869,28 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void showSemanticRelationDetail(final String sourcePath, final JSONObject relation,
                                             final int title) {
-        new AlertDialog.Builder(this)
+        final boolean dated = "temporal_overlap".equals(relation.optString("kind"))
+                || "temporal_separation".equals(relation.optString("kind"))
+                || "temporal_uncertainty".equals(relation.optString("kind"));
+        final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(KnowledgeRelationPresentation.relationComparison(
                         this, relation, sourcePath))
-                .setNeutralButton(R.string.knowledge_relation_open_inspected,
-                        (dialog, which) -> openIndexedNote(sourcePath))
                 .setPositiveButton(R.string.knowledge_relation_open_other,
-                        (dialog, which) -> openIndexedNote(relation.optString("path")))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                        (d, which) -> openIndexedNote(relation.optString("path")));
+        if (dated) {
+            dialog.setNeutralButton(R.string.knowledge_version_action,
+                    (d, which) -> new KnowledgeVersionReviewDialog(this, workspacePath(),
+                            notebook, decisionWorker, sourcePath, relation,
+                            () -> showSemanticRelations(sourcePath)).show());
+            dialog.setNegativeButton(R.string.knowledge_relation_open_inspected,
+                    (d, which) -> openIndexedNote(sourcePath));
+        } else {
+            dialog.setNeutralButton(R.string.knowledge_relation_open_inspected,
+                    (d, which) -> openIndexedNote(sourcePath));
+            dialog.setNegativeButton(android.R.string.cancel, null);
+        }
+        dialog.show();
     }
 
     private void showEvidenceGroups(final JSONArray groups, final boolean limited,

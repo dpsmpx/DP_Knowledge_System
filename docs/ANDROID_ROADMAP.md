@@ -745,6 +745,40 @@ with 62 mismatched indexed intervals checks that invalid hints stay hidden
 while both surfaces explicitly signal incomplete coverage. No extra SQLite
 scan beyond the existing cap, source edit or human-journal mutation occurs.
 
+**Stage 18 manual version interpretation (twenty-sixth slice, code complete;
+Android acceptance pending):** An owner can now review a particular dated
+cross-note relation (`temporal_overlap`, `temporal_separation`, or
+`temporal_uncertainty`) by reading both original source paths, exact indexed
+fragments and live SHA-256 values. One of four *descriptive* interpretations
+can be recorded with a mandatory explanation: unresolved, possibly changed,
+not comparable, or compatible readings. A read-only preview token binds the
+pair's exact fragment/locator/date/context/polarity selection to both current
+Markdown hashes and the journal head. Confirmation fully rechecks these
+inputs and appends an owner-only `version_review` event. `version_unreview`
+references the exact original decision, works offline and preserves history.
+The Hub and editor show active interpretation, explanation and independent
+`current`/`historical` provenance status, never a truth verdict; a separate
+Decisions action lists active reviews and permits offline withdrawal. Pairs
+are indexed by a symmetric key so a decision follows reverse navigation,
+but neither AI interpretation, paraphrase equivalence nor transitive evidence
+merging is inferred. Markdown, parsed facts and accepted decisions are
+unchanged. This slice also repairs the Java/Python protocol allowlist for
+existing editor/entity/source-review APIs and adds a cross-language regression
+that enumerates **all** emitted Python protocols. See
+`docs/STAGE18_COMPLETION_GATE.md` for the precise sign-off boundary.
+
+**Stage 18 on-device synthetic version QA (twenty-seventh slice, awaiting
+physical execution):** The existing quick/stress Device QA runner now invokes
+`VERSION-18-SUITE`, an isolated Python test with six checks for dated pair
+indexing, two-SHA preview, stale-token rejection, journal commit, symmetric
+review lookup, stale-source annotation and exact offline withdrawal. The only
+input is an existing **app-private cache directory**; all source Markdown and
+journal files are generated within an automatically removed temporary folder.
+No selected user notebook, real journal or network service is opened. Results
+are count-only, bounded and validated by the Java transport before inclusion
+in the redacted QA report. This adds no automatic acceptance and does not
+replace real touch/accessibility/process-lifecycle observation.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

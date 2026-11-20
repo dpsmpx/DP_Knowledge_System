@@ -27,6 +27,18 @@ from ksys.store.workspace import Workspace
 
 
 class RelationTests(unittest.TestCase):
+    def test_stage18_synthetic_device_suite_isolated_and_count_only(self):
+        before = sorted(p.name for p in self.base.iterdir())
+        report = json.loads(bridge.stage18_version_selftest(str(self.base)))
+        self.assertEqual("dpksys.stage18_version_selftest.v1", report["protocol"])
+        self.assertEqual((6, 0), (report["passed"], report["failed"]))
+        self.assertTrue(report["read_only_user_data"])
+        self.assertFalse(report["used_selected_vault"])
+        self.assertTrue(all(row["passed"] for row in report["checks"]))
+        self.assertEqual(before, sorted(p.name for p in self.base.iterdir()))
+        self.assertEqual(self.notes["a.md"],
+                         (self.vault / "a.md").read_text(encoding="utf-8"))
+
     def test_cross_file_evidence_counts_distinct_notes_not_parser_rows(self):
         self._import()
         evidence = self._relations("a.md")
@@ -372,6 +384,90 @@ class RelationTests(unittest.TestCase):
         with sqlite3.connect(self.workspace / "var" / "ks.sqlite") as con:
             return con.execute(
                 "SELECT doc, atom_key, negated FROM candidate_atoms ORDER BY doc").fetchall()
+
+    def test_manual_dated_relation_review_is_reversible_and_never_authoritative(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end, negative in (
+                    ("a.md", "2024-01-01", "2024-12-31", False),
+                    ("b.md", "2025-01-01", "2025-12-31", True)):
+                claim = {"mod": "asserted", "neg": negative, "atom": atom,
+                         "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "test", "nodes": [
+                    {"type": "claim", "assertion": claim}]},
+                    path, "F:test", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], row[6], path))
+        original = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                    for p in self.notes}
+        found = next(m for m in self._relations("a.md", verified=True)["matches"]
+                     if m["path"] == "b.md" and m["kind"] == "temporal_separation")
+        params = (str(self.workspace), str(self.vault), "a.md",
+                  json.dumps(found), "possibly_changed", "Вероятная смена по данным источников")
+        preview = json.loads(bridge.preview_version_review(*params))
+        self.assertEqual(2, len(preview["sources"]))
+        self.assertFalse(preview["changes_claim_authority"])
+        self.assertFalse(preview["changes_original_markdown"])
+        self.assertTrue(preview["sources"][0]["excerpt"])
+        self.assertTrue(preview["sources"][1]["excerpt"])
+        with self.assertRaises(ValueError):
+            bridge.record_version_review(*params, "invalid-token", preview["journal_head"])
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            bridge.record_version_review(*params, preview["preview_token"],
+                                         preview["journal_head"])
+        after_revoke = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual([], after_revoke["active"])
+        self.assertEqual([], after_revoke["recent"])
+        (self.vault / "b.md").write_text(self.notes["b.md"], encoding="utf-8")
+        with tempfile.TemporaryDirectory() as wrong_folder:
+            with self.assertRaises(ValueError):
+                bridge.preview_version_review(str(self.workspace), wrong_folder,
+                                              "a.md", json.dumps(found),
+                                              "possibly_changed", "reason")
+        approved = json.loads(bridge.record_version_review(
+            *params, preview["preview_token"], preview["journal_head"]))
+        decision_id = approved["journal_ids"][0]
+        active = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual(1, len(active["active"]))
+        self.assertEqual("possibly_changed", active["active"][0]["choice"])
+        with self.assertRaises(ValueError):
+            bridge.preview_version_review(*params)
+        annotated = next(m for m in self._relations("a.md", verified=True)["matches"]
+                         if m["path"] == "b.md" and m["kind"] == "temporal_separation")
+        self.assertEqual("current", annotated["version_review_state"])
+        self.assertEqual(decision_id, annotated["version_review_id"])
+        accepted = json.loads(editor_note_context(str(self.workspace), "a.md",
+                              self.notes["a.md"], str(self.vault)))
+        self.assertEqual([], accepted["accepted_records"])
+        reverse = next(m for m in self._relations("b.md", verified=True)["matches"]
+                       if m["path"] == "a.md" and m["kind"] == "temporal_separation")
+        self.assertEqual(decision_id, reverse["version_review_id"])
+        self.assertEqual("current", reverse["version_review_state"])
+        # A changed source makes the prior owner's note historical only.
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        historical = next(m for m in self._relations("a.md", verified=True)["matches"]
+                          if m["path"] == "b.md" and m["kind"] == "temporal_separation")
+        self.assertEqual("historical", historical["version_review_state"])
+        revoke = json.loads(bridge.preview_version_unreview(str(self.workspace), decision_id))
+        with self.assertRaises(ValueError):
+            bridge.record_version_unreview(str(self.workspace), decision_id, "wrong",
+                                           revoke["journal_head"])
+        bridge.record_version_unreview(str(self.workspace), decision_id,
+                                       revoke["preview_token"], revoke["journal_head"])
+        after_revoke = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual([], after_revoke["active"])
+        self.assertEqual(["version_unreview", "version_review"],
+                         [event["op"] for event in after_revoke["recent"]])
+        self.assertEqual(["a.md", "b.md"], after_revoke["recent"][1]["paths"])
+        no_annotation = next(m for m in self._relations("a.md")["matches"]
+                             if m["path"] == "b.md" and m["kind"] == "temporal_separation")
+        self.assertNotIn("version_review_id", no_annotation)
+        self.assertEqual(original["a.md"], hashlib.sha256(
+            (self.vault / "a.md").read_bytes()).hexdigest())
 
     def test_invalid_index_rows_cannot_hide_bounded_relation_query_exhaustion(self):
         self._import()

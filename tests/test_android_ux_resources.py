@@ -5,6 +5,7 @@ This does not stand in for a device accessibility, layout or lifecycle test.
 from __future__ import annotations
 
 import unittest
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -14,6 +15,53 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_all_python_bridge_protocols_are_accepted_by_java_transport(self):
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        emitted = set(re.findall(r"dpksys\.[a-z0-9_]+\.v[0-9]+", python))
+        allowed = set(re.findall(r'"(dpksys\.[a-z0-9_]+\.v[0-9]+)".equals\(protocol\)', java))
+        self.assertEqual(emitted, allowed)
+
+    def test_manual_version_review_has_source_and_journal_gates(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        dialog = (folder / "KnowledgeVersionReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_version_reviews")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for name in ("versionReviewDecisions", "previewVersionReview", "confirmVersionReview",
+                     "previewVersionUnreview", "confirmVersionUnreview"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", hub)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", editor)
+        self.assertIn("version_review_id", (folder / "KnowledgeRelationPresentation.java").read_text())
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_version_title", "knowledge_version_warning",
+                         "knowledge_version_action", "knowledge_version_revoke_warning",
+                         "knowledge_version_historical", "knowledge_version_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_stage18_version_device_suite_has_isolated_transport(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        transport = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("VERSION-18-SUITE", "checkSyntheticStage18Versions",
+                       "getCacheDir().getCanonicalPath()", "selectedVaultUntouched=true"):
+            self.assertIn(marker, runner)
+        self.assertIn('"dpksys.stage18_version_selftest.v1".equals(protocol)', transport)
+        self.assertIn('invoke(context, "stage18_version_selftest", cacheDir)', transport)
+        for marker in ("def stage18_version_selftest(",
+                       '"used_selected_vault": False',
+                       '"requires_manual_ui_qa": True'):
+            self.assertIn(marker, python)
+
     def test_relation_pair_detail_previews_both_sources_before_navigation(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

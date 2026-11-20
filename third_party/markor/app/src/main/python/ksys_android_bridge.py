@@ -20,7 +20,7 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
-from ksys.importer.relations import related_claims, indexed_related_claims
+from ksys.importer.relations import related_claims, indexed_related_claims, projected_atoms
 from ksys.importer.aliases import (verified_owner_aliases, MAX_ALIAS_OPERATIONS,
                                    MAX_ALIASES_PER_CANONICAL)
 from ksys.core.ids import canonical_json
@@ -182,6 +182,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
     relation_checks_limited = False
     source_lineage_limited = False
     source_assessment_limited = False
+    version_review_limited = False
     if matches["evidence_groups"] or matches["matches"]:
         con = _decision_index(workspace)
         if con is not None:
@@ -195,6 +196,8 @@ def note_relationships(workspace_dir: str, relative_path: str,
                     con, journal, relative_path, matches["evidence_groups"])
                 source_assessment_limited = _annotate_source_assessments(
                     con, journal, relative_path, matches["evidence_groups"])
+                version_review_limited = _annotate_version_reviews(
+                    con, journal, relative_path, matches["matches"])
             finally:
                 con.close()
     return json.dumps({
@@ -212,6 +215,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
         "evidence_checks_limited": evidence_checks_limited,
         "source_lineage_limited": source_lineage_limited,
         "source_assessment_limited": source_assessment_limited,
+        "version_review_limited": version_review_limited,
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -1053,6 +1057,346 @@ def record_source_unassessment(workspace_dir: str, decision_id: str,
                       sort_keys=True, separators=(",", ":"))
 
 
+# Human *interpretation* of a dated pair, never an approval of the assertions.
+# Deliberately no probability or truth score: distinct sources may share an
+# upstream origin and source-provided validity dates may be unreliable.
+VERSION_REVIEW_CHOICES = ("unresolved", "possibly_changed", "different_contexts",
+                          "consistent_readings")
+VERSION_REVIEW_KINDS = ("temporal_overlap", "temporal_separation",
+                        "temporal_uncertainty")
+MAX_VERSION_REVIEW_OPS = 512
+
+
+def _version_review_key(path: str, relation: dict) -> str:
+    """Symmetric pair identity anchored to precise parsed source fragments.
+
+    No relative ordering or live SHA belongs in the identity: a withdrawn or
+    historical decision can still be found after changing/reindexing a note.
+    A newly parsed version is recognized as *historical*, never auto-applied.
+    """
+    sides = [
+        {"path": path, "fragment": relation["source_fragment"],
+         "locator": relation["source_locator"], "interval": relation.get("interval")},
+        {"path": relation["path"], "fragment": relation["other_fragment"],
+         "locator": relation["other_locator"], "interval": relation.get("other_interval")},
+    ]
+    sides.sort(key=canonical_json)
+    payload = {"sides": sides, "kind": relation["kind"],
+               "predicate": relation["predicate"], "context": relation.get("context"),
+               "opposing_polarity": relation.get("opposing_polarity", False)}
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _version_review_state(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
+               entry.op in ("version_review", "version_unreview")]
+    if len(entries) > MAX_VERSION_REVIEW_OPS:
+        raise ValueError("Version review journal limit reached")
+    active = {}
+    history = []
+    for entry in entries:
+        data = entry.data
+        if not isinstance(data, dict):
+            continue
+        key = data.get("key")
+        if not isinstance(key, str) or len(key) != 64:
+            continue
+        if entry.op == "version_review":
+            if (key in active or data.get("choice") not in VERSION_REVIEW_CHOICES or
+                    not isinstance(data.get("sources"), list) or len(data["sources"]) != 2):
+                continue
+            active[key] = {"key": key, "choice": data["choice"],
+                           "reason": str(data.get("reason", ""))[:500],
+                           "sources": data["sources"], "relation": data.get("relation"),
+                           "journal_id": entry.id, "time": entry.ts}
+        elif key in active and active[key]["journal_id"] == data.get("decision_id"):
+            del active[key]
+        history.append({"op": entry.op, "key": key, "journal_id": entry.id,
+                        "decision_id": data.get("decision_id"), "time": entry.ts,
+                        "choice": data.get("choice"),
+                        "reason": str(data.get("reason", ""))[:500],
+                        "paths": [s.get("path") for s in (data.get("sources")
+                                  if isinstance(data.get("sources"), list) else [])
+                                  if isinstance(s, dict)]
+                        if entry.op == "version_review" else []})
+    return [active[k] for k in sorted(active)], list(reversed(history[-40:]))
+
+
+def version_review_decisions(workspace_dir: str) -> str:
+    kb = _kb(workspace_dir)
+    active, recent = _version_review_state(kb.journal)
+    return json.dumps({"protocol": "dpksys.version_review.v1", "active": active,
+                       "recent": recent, "journal_head": kb.journal.head,
+                       "read_only": True, "changes_claim_authority": False},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _annotate_version_reviews(con, journal: Journal, path: str,
+                              matches: list[dict]) -> bool:
+    try:
+        active, _ = _version_review_state(journal)
+    except ValueError:
+        return True
+    by_key = {record["key"]: record for record in active}
+    hashes = {}
+    for match in matches:
+        if match.get("kind") not in VERSION_REVIEW_KINDS:
+            continue
+        decision = by_key.get(_version_review_key(path, match))
+        if decision is None:
+            continue
+        current = bool(match.get("live_source_pair"))
+        if current:
+            for source in decision["sources"]:
+                source_path = source.get("path")
+                if source_path not in hashes:
+                    row = con.execute("SELECT sha256 FROM documents "
+                                      "WHERE path=? AND status='PARSED'",
+                                      (source_path,)).fetchone()
+                    hashes[source_path] = row[0] if row else None
+                if hashes[source_path] != source.get("source_sha256"):
+                    current = False
+        match["version_review_choice"] = decision["choice"]
+        match["version_review_reason"] = decision["reason"][:180]
+        match["version_review_id"] = decision["journal_id"]
+        match["version_review_state"] = "current" if current else "historical"
+    return False
+
+
+def _version_review_preview(workspace_dir: str, vault_dir: str, path: str,
+                            relation_json: str, choice: str, reason: str) -> dict:
+    if choice not in VERSION_REVIEW_CHOICES:
+        raise ValueError("Choose a supported descriptive version review")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain the review in 1..500 characters")
+    try:
+        requested = json.loads(relation_json)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid relation selection") from exc
+    if (not isinstance(requested, dict) or requested.get("kind") not in VERSION_REVIEW_KINDS
+            or not isinstance(path, str) or not path or len(path) > 500):
+        raise ValueError("Choose an exact dated relation from the local index")
+    kb = _kb(workspace_dir)
+    active, _ = _version_review_state(kb.journal)
+    if sum(e.actor == kb.journal.actor and e.op in
+           ("version_review", "version_unreview") for e in kb.journal.entries()) \
+            >= MAX_VERSION_REVIEW_OPS:
+        raise ValueError("Version review journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        page = indexed_related_claims(con, path, 100)
+        identifying = ("kind", "path", "source_fragment", "other_fragment",
+                       "source_locator", "other_locator", "predicate", "context",
+                       "interval", "other_interval", "opposing_polarity")
+        selected = [match for match in page["matches"]
+                    if match.get("kind") in VERSION_REVIEW_KINDS and
+                    all(match.get(k) == requested.get(k) for k in identifying)]
+        if len(selected) != 1:
+            raise ValueError("Dated relation changed or is no longer unambiguous")
+        match = selected[0]
+        key = _version_review_key(path, match)
+        if any(record["key"] == key for record in active):
+            raise ValueError("This version pair already has an active review; revoke it first")
+        _annotate_relation_previews(con, path, [match])
+        if not match.get("source_excerpt_available") or not match.get("other_excerpt_available"):
+            raise ValueError("Indexed original fragment provenance is unavailable")
+        sources = [_lineage_source(con, root, source_path)
+                   for source_path in (path, match["path"])]
+        for source, side in zip(sources, ("source", "other")):
+            source["fragment_id"] = match[side + "_fragment"]
+            source["locator"] = match[side + "_locator"]
+            source["excerpt"] = match[side + "_excerpt"]
+        relation = {k: match.get(k) for k in identifying}
+    finally:
+        con.close()
+    payload = {"key": key, "choice": choice, "reason": reason.strip(),
+               "sources": sources, "relation": relation, "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.version_review.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "changes_claim_authority": False,
+            "changes_original_markdown": False}
+
+
+def preview_version_review(workspace_dir: str, vault_dir: str, path: str,
+                           relation_json: str, choice: str, reason: str) -> str:
+    return json.dumps(_version_review_preview(workspace_dir, vault_dir, path,
+                      relation_json, choice, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_version_review(workspace_dir: str, vault_dir: str, path: str,
+                          relation_json: str, choice: str, reason: str,
+                          expected_token: str, expected_head: str | None) -> str:
+    preview = _version_review_preview(workspace_dir, vault_dir, path,
+                                      relation_json, choice, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Version sources or journal changed after preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("version_review", {key: preview[key] for key in
+                              ("key", "choice", "reason", "sources", "relation")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.version_review.v1",
+                       "decision": "version_review", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def preview_version_unreview(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _version_review_state(kb.journal)
+    record = next((item for item in active if item["journal_id"] == decision_id), None)
+    if record is None:
+        raise ValueError("No active owner version review with this decision ID")
+    payload = {"key": record["key"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.version_review.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_version_unreview(workspace_dir: str, decision_id: str,
+                            expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_version_unreview(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Version review or journal changed before withdrawal")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before withdrawal")
+    kb.ws.init()
+    event = kb.journal.append("version_unreview", {"key": preview["key"],
+                              "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.version_review.v1",
+                       "decision": "version_unreview", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def stage18_version_selftest(cache_dir: str) -> str:
+    """Isolated, count-only device check using synthetic notes and journal.
+
+    The *only* caller input is a private cache root. Never opens the selected
+    notebook, real workspace, journal, credentials or network endpoints.
+    UI touch/accessibility/process lifecycle still require observed QA.
+    """
+    cache = Path(cache_dir).resolve()
+    if not Path(cache_dir).is_absolute() or not cache.is_dir():
+        raise ValueError("Version QA requires an existing private cache folder")
+    checks = []
+
+    def verify(code, fn):
+        try:
+            fn()
+            checks.append({"code": code, "passed": True,
+                           "detail": "synthetic assertions passed"})
+        except Exception as error:
+            checks.append({"code": code, "passed": False,
+                           "detail": "synthetic mismatch (" + type(error).__name__ + ")"})
+
+    with tempfile.TemporaryDirectory(prefix="dpks-stage18-", dir=cache) as temp:
+        root = Path(temp)
+        vault = root / "synthetic_notes"
+        vault.mkdir()
+        workspace = str(root / "private_workspace")
+        notes = {"a.md": "# A\nАлекс является разработчиком.\n",
+                 "b.md": "# B\nАлекс не является разработчиком.\n"}
+        for path, content in notes.items():
+            (vault / path).write_text(content, encoding="utf-8")
+        state = {}
+
+        def setup():
+            json.loads(analyze_vault(workspace, str(vault)))
+            db = Path(workspace) / "var/ks.sqlite"
+            atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+            with sqlite3.connect(db) as con:
+                for path, start, end, negative in (
+                        ("a.md", "2024-01-01", "2024-12-31", False),
+                        ("b.md", "2025-01-01", "2025-12-31", True)):
+                    assertion = {"mod": "asserted", "neg": negative, "atom": atom,
+                                 "iv": {"from": start, "to": end}}
+                    row = projected_atoms({"id": "version-qa", "nodes": [
+                        {"type": "claim", "assertion": assertion}]},
+                        path, "F:version-qa", "version-qa:1")[0]
+                    con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                                "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                                (row[4], row[7], row[8], row[9], row[6], path))
+            page = json.loads(note_relationships(workspace, "a.md", str(vault)))
+            found = [r for r in page["matches"]
+                     if r["kind"] == "temporal_separation" and r["path"] == "b.md"]
+            assert len(found) == 1 and found[0]["live_source_pair"]
+            state["relation"] = json.dumps(found[0])
+        verify("VERSION-INDEX-18", setup)
+
+        def preview():
+            args = (workspace, str(vault), "a.md", state["relation"],
+                    "possibly_changed", "synthetic manual explanation")
+            result = json.loads(preview_version_review(*args))
+            assert result["read_only"] and not result["changes_claim_authority"]
+            assert len(result["sources"]) == 2
+            assert all(src["excerpt"] and src["source_sha256"] for src in result["sources"])
+            state["args"], state["preview"] = args, result
+        verify("VERSION-PREVIEW-18", preview)
+
+        def confirm():
+            pre = state["preview"]
+            with_stale_token = pre["preview_token"] + "x"
+            try:
+                record_version_review(*state["args"], with_stale_token,
+                                      pre["journal_head"])
+                raise AssertionError("Invalid preview token accepted")
+            except ValueError:
+                pass
+            record = json.loads(record_version_review(*state["args"],
+                               pre["preview_token"], pre["journal_head"]))
+            state["id"] = record["journal_ids"][0]
+            assert len(json.loads(version_review_decisions(workspace))["active"]) == 1
+        verify("VERSION-COMMIT-18", confirm)
+
+        def symmetric():
+            matches = json.loads(note_relationships(workspace, "b.md", str(vault)))["matches"]
+            marked = [m for m in matches if m["path"] == "a.md"
+                      and m["kind"] == "temporal_separation"]
+            assert len(marked) == 1 and marked[0]["version_review_id"] == state["id"]
+            assert marked[0]["version_review_state"] == "current"
+        verify("VERSION-SYMMETRY-18", symmetric)
+
+        def stale():
+            (vault / "b.md").write_text(notes["b.md"] + "\n", encoding="utf-8")
+            matches = json.loads(note_relationships(workspace, "a.md", str(vault)))["matches"]
+            marked = [m for m in matches if m.get("version_review_id") == state["id"]]
+            assert len(marked) == 1 and marked[0]["version_review_state"] == "historical"
+        verify("VERSION-STALE-18", stale)
+
+        def withdraw():
+            preview = json.loads(preview_version_unreview(workspace, state["id"]))
+            result = json.loads(record_version_unreview(workspace, state["id"],
+                                preview["preview_token"], preview["journal_head"]))
+            after = json.loads(version_review_decisions(workspace))
+            assert result["decision"] == "version_unreview" and not after["active"]
+            assert [e["op"] for e in after["recent"]] == [
+                "version_unreview", "version_review"]
+            assert (vault / "a.md").read_text(encoding="utf-8") == notes["a.md"]
+        verify("VERSION-WITHDRAW-18", withdraw)
+
+    passed = sum(x["passed"] for x in checks)
+    return json.dumps({"protocol": "dpksys.stage18_version_selftest.v1", "checks": checks,
+                       "passed": passed, "failed": len(checks) - passed,
+                       "synthetic_only": True, "read_only_user_data": True,
+                       "used_selected_vault": False, "requires_manual_ui_qa": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _validate_note_input(relative_path: str, markdown: str) -> None:
     if not isinstance(relative_path, str) or not isinstance(markdown, str):
         raise ValueError("Expected relative path and Markdown content")
@@ -1581,6 +1925,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
     relation_checks_limited = False
     source_lineage_limited = False
     source_assessment_limited = False
+    version_review_limited = False
     alias_limited = False
     modal_limited = False
     con = _decision_index(Path(workspace_dir))
@@ -1610,6 +1955,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                     con, kb.journal, relative_path, evidence_groups)
                 source_assessment_limited = _annotate_source_assessments(
                     con, kb.journal, relative_path, evidence_groups)
+                version_review_limited = _annotate_version_reviews(
+                    con, kb.journal, relative_path, relations)
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -1632,6 +1979,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
         "relation_checks_limited": relation_checks_limited,
         "source_lineage_limited": source_lineage_limited,
         "source_assessment_limited": source_assessment_limited,
+        "version_review_limited": version_review_limited,
         "alias_search_limited": alias_limited,
         "modal_search_limited": modal_limited,
         "relation_index_state": index_state,

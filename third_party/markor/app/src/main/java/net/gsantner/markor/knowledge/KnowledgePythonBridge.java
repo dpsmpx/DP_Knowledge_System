@@ -157,6 +157,47 @@ public final class KnowledgePythonBridge {
                 token, expectedHead);
     }
 
+    /** Descriptive, revocable human interpretation of an exact dated source pair. */
+    public static JSONObject versionReviewDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "version_review_decisions", workspace);
+    }
+
+    public static JSONObject previewVersionReview(final Context context, final String workspace,
+                                                  final String notebook, final String sourcePath,
+                                                  final String relationJson, final String choice,
+                                                  final String reason) throws JSONException {
+        return invoke(context, "preview_version_review", workspace, notebook, sourcePath,
+                relationJson, choice, reason);
+    }
+
+    public static JSONObject confirmVersionReview(final Context context, final String workspace,
+                                                  final String notebook, final String sourcePath,
+                                                  final String relationJson, final String choice,
+                                                  final String reason, final String token,
+                                                  final String expectedHead) throws JSONException {
+        return invoke(context, "record_version_review", workspace, notebook, sourcePath,
+                relationJson, choice, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewVersionUnreview(final Context context, final String workspace,
+                                                    final String decisionId) throws JSONException {
+        return invoke(context, "preview_version_unreview", workspace, decisionId);
+    }
+
+    public static JSONObject confirmVersionUnreview(final Context context, final String workspace,
+                                                    final String decisionId, final String token,
+                                                    final String expectedHead) throws JSONException {
+        return invoke(context, "record_version_unreview", workspace, decisionId,
+                token, expectedHead);
+    }
+
+    /** Synthetic-only Stage 18 journal/index regression in app-private cache. */
+    public static JSONObject stage18VersionSelfTest(final Context context, final String cacheDir)
+            throws JSONException {
+        return invoke(context, "stage18_version_selftest", cacheDir);
+    }
+
     public static JSONObject fullAudit(final Context context, final String workspace,
                                        final String notebook, final BulkProgress progress)
             throws JSONException {
@@ -395,6 +436,15 @@ public final class KnowledgePythonBridge {
                 || "dpksys.backup.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
+                || "dpksys.entities.v1".equals(protocol)
+                || "dpksys.source_lineage.v1".equals(protocol)
+                || "dpksys.source_assessment.v1".equals(protocol)
+                || "dpksys.version_review.v1".equals(protocol)
+                || "dpksys.stage18_version_selftest.v1".equals(protocol)
+                || "dpksys.editor_context.v1".equals(protocol)
+                || "dpksys.editor_highlights.v1".equals(protocol)
+                || "dpksys.editor_record_evidence.v1".equals(protocol)
+                || "dpksys.editor_source_records.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)
                 || "dpksys.stage22_editor_selftest.v1".equals(protocol);
     }
