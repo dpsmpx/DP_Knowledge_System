@@ -1499,7 +1499,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 + "\n\n" + getString(R.string.knowledge_editor_context_source)
                 + ": " + relation.optString("source_locator")
                 + "\n" + relation.optString("path") + " · "
-                + relation.optString("other_locator");
+                + relation.optString("other_locator")
+                + KnowledgeRelationPresentation.qualifiers(this, relation);
         final LinearLayout body = newDockContent();
         body.addView(contextDetailText(description));
         addContextRow(body, getString(R.string.knowledge_editor_context_open),

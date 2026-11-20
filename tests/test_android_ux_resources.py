@@ -336,6 +336,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                     if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_body")
         self.assertEqual("gone", body.get(ANDROID + "visibility"))
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        formatter = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeRelationPresentation.java").read_text()
+        self.assertIn("KnowledgeRelationPresentation.qualifiers(this, relation)", editor)
+        self.assertIn("KnowledgeRelationPresentation.qualifiers(this, match)", hub)
+        self.assertIn("knowledge_editor_structural_context", formatter)
+        self.assertIn("knowledge_editor_structural_interval", formatter)
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
                      "KnowledgePythonBridge.editorContext(", "relation_index_state",
                      "accepted_records", "candidate_relations", "source_span_state",

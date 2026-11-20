@@ -7,6 +7,7 @@ knowledge layer. No negative conclusion follows from absent evidence.
 from __future__ import annotations
 
 from ..core.clock import SystemClock
+from ..importer.relations import atom_qualifiers
 from ..query import smt
 from ..query.answers import Answerer
 from ..store.db import connect
@@ -187,7 +188,7 @@ def _source_conflict_page(con, offset: int) -> list[dict]:
                            "fragment_id": row[2]} for row in evidence])
         out.append({"type": "possible_source_conflict", "predicate": predicate,
                     "atom": atom_key[:320], "positive_sources": sides[0],
-                    "negative_sources": sides[1]})
+                    "negative_sources": sides[1], **atom_qualifiers(atom_key)})
     return out
 
 

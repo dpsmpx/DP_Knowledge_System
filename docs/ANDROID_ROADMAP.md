@@ -312,6 +312,21 @@ may leave old candidate relations until the next successful semantic refresh;
 users must inspect current notes and explicitly approve any authoritative
 knowledge through the preexisting journal flow. No network service is used.
 
+**Stage 18 precision hardening (first slice):** Cross-note agreement and
+possible-conflict groups now also require the **same exact asserted context
+and the same exact validity interval**. An absent context/interval is a
+specified default, not a wildcard; malformed annotations are excluded. The
+same constraint applies to the whole-library source-conflict audit because
+both use the disposable `candidate_atoms.atom_key`. The projection version
+changes to `exact-claim-context-interval-v2`, so a successful full semantic
+refresh safely regenerates old derived keys without editing notes or the
+human-approved journal. Read-only relation responses, editor context details
+and audit findings expose those exact qualifiers for human inspection;
+unapproved claims remain suggestions. Different or partly overlapping time
+spans are not automatically treated as equivalent. This trades recall for reliable
+precision; alias/entity resolution, interval-overlap reasoning, confidence
+and cross-source epistemic reconciliation remain **open Stage 18 work**.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

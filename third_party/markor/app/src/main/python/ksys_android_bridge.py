@@ -20,7 +20,7 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
-from ksys.importer.relations import related_claims
+from ksys.importer.relations import atom_qualifiers, related_claims
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.ir.nodes import node_from_dict
@@ -704,7 +704,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 index_state = "current"
                 rows = con.execute(
                     "SELECT DISTINCT b.doc, a.locator, b.locator, a.fragment_id, "
-                    "b.fragment_id, a.negated, b.negated, a.predicate "
+                    "b.fragment_id, a.negated, b.negated, a.predicate, a.atom_key "
                     "FROM candidate_atoms a JOIN candidate_atoms b ON a.atom_key=b.atom_key "
                     "JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
                     "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' "
@@ -719,7 +719,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                     "other_fragment": r[4],
                     "kind": "possible_conflict" if r[5] != r[6]
                             else "possible_agreement",
-                    "predicate": r[7],
+                    "predicate": r[7], **atom_qualifiers(r[8]),
                 } for r in rows[:20]]
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False

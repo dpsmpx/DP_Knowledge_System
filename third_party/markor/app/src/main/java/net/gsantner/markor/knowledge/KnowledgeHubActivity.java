@@ -1779,7 +1779,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             + " · " + match.optString("path")
                             + "\n" + match.optString("predicate") + " · "
                             + match.optString("source_locator") + " ↔ "
-                            + match.optString("other_locator");
+                            + match.optString("other_locator")
+                            + KnowledgeRelationPresentation.qualifiers(this, match);
                 }
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {

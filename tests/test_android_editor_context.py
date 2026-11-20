@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from ksys_android_bridge import (analyze_vault, editor_note_context, inspect_not
                                  _structural_editor_comparison)
 from ksys.semantics.formalize import Formalizer
 from ksys.core.clock import FixedClock
+from ksys.importer.relations import projected_atoms
 from ksys.store.journal import Journal
 from ksys.store.workspace import Workspace
 
@@ -101,6 +103,8 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual({"b.md", "c.md"}, set(related))
         self.assertEqual("possible_agreement", related["b.md"]["kind"])
         self.assertEqual("possible_conflict", related["c.md"]["kind"])
+        self.assertIsNone(related["c.md"]["context"])
+        self.assertEqual({"from": None, "to": None}, related["c.md"]["interval"])
         self.assertTrue(all(item["source_locator"] and item["other_locator"]
                             for item in related.values()))
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
@@ -111,6 +115,24 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual("stale", changed["relation_index_state"])
         self.assertEqual([], changed["candidate_relations"])
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+    def test_editor_relation_shows_matching_context_and_period(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        assertion = {"mod": "asserted", "neg": False,
+                     "atom": {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]},
+                     "ctx": "проект-а",
+                     "iv": {"from": "2024-05-01", "to": "2024-05-31"}}
+        key = projected_atoms({"id": "synthetic", "nodes": [
+            {"type": "claim", "assertion": assertion}
+        ]}, "a.md", "F:syn", "a:2")[0][4]
+        with sqlite3.connect(Workspace(self.workspace).db_path) as con:
+            for path in ("a.md", "b.md"):
+                con.execute("UPDATE candidate_atoms SET atom_key=? WHERE doc=?", (key, path))
+        related = {r["path"]: r for r in self.context()["candidate_relations"]}
+        self.assertEqual({"b.md"}, set(related))
+        self.assertEqual("проект-а", related["b.md"]["context"])
+        self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
+                         related["b.md"]["interval"])
 
     def test_accepted_opposites_show_possible_journal_conflict(self):
         for path in ("a.md", "c.md"):
