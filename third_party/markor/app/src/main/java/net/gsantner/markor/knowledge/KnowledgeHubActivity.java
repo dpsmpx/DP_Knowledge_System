@@ -4172,18 +4172,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private byte[] portableSettingsSnapshot() throws Exception {
-        final JSONObject safe = new JSONObject();
-        // Only explicit, non-secret metadata. Neither API keys nor opaque
-        // inherited Markor preferences can enter a portable backup silently.
-        for (final String key : new String[]{"knowledge_embedding_endpoint",
-                "knowledge_embedding_model", "knowledge_llm_endpoint", "knowledge_llm_model"}) {
-            final String value = getPreferences(MODE_PRIVATE).getString(key, "");
-            if (!value.isEmpty() && value.length() <= 500) safe.put(key, value);
-        }
-        safe.put("schema", "dpks-safe-settings-v1");
-        safe.put("secrets_exported", false);
-        safe.put("derived_indexes_exported", false);
-        return safe.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        // URLs may contain query-string credentials. Only validated model IDs
+        // are eligible for portable migration; never serialize raw preferences.
+        return KnowledgePortableSettings.snapshot(getPreferences(MODE_PRIVATE));
     }
 
     /** Only an explicit SAF save, never background upload or automatic rewriting. */
@@ -4287,6 +4278,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final JSONObject journalPreview = journalText == null ? null
                         : KnowledgePythonBridge.journalRestorePreview(this,
                                 workspacePath(), journalText);
+                final Map<String, String> safeModels = KnowledgePortableSettings.read(staged);
                 final File confirmedStaging = staged;
                 handedToDialog = true;
                 runOnUiThread(() -> {
@@ -4295,10 +4287,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         return;
                     }
                     pendingPortableStaging = confirmedStaging;
-                    new AlertDialog.Builder(this)
+                    final CheckBox migrateModels = new CheckBox(this);
+                    migrateModels.setText(R.string.knowledge_portable_migrate_models);
+                    migrateModels.setChecked(false);
+                    final AlertDialog.Builder builder = new AlertDialog.Builder(this)
                             .setTitle(R.string.knowledge_portable_restore)
                             .setMessage(getString(R.string.knowledge_portable_restore_preview,
-                                    summary.sources, summary.bytes, summary.journal))
+                                    summary.sources, summary.bytes, summary.journal)
+                                    + (safeModels.isEmpty() ? "" : "\n\n"
+                                            + getString(R.string.knowledge_portable_models_preview,
+                                                    safeModels.values().toString())))
                             .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
                                 confirmedStaging.delete();
                                 pendingPortableStaging = null;
@@ -4309,8 +4307,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             })
                             .setPositiveButton(R.string.knowledge_backup_confirm_import,
                                     (dialog, which) -> applyPortableRestore(confirmedStaging,
-                                            summary, journalPreview, generation))
-                            .show();
+                                            summary, journalPreview, generation,
+                                            migrateModels.isChecked() ? safeModels
+                                                    : Collections.emptyMap()));
+                    if (!safeModels.isEmpty()) builder.setView(migrateModels);
+                    builder.show();
                 });
             } catch (Exception failed) {
                 runOnUiThread(() -> {
@@ -4326,7 +4327,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void applyPortableRestore(final File verifiedZip,
                                       final KnowledgePortableArchive.Summary summary,
-                                      final JSONObject journalPreview, final int generation) {
+                                      final JSONObject journalPreview, final int generation,
+                                      final Map<String, String> safeModels) {
         status.setText(R.string.knowledge_backup_working);
         worker.submit(() -> {
             try {
@@ -4342,6 +4344,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 // switch to the restored notes. Never overwrite old notebooks.
                 _appSettings.setNotebookDirectory(restored);
                 notebook = restored;
+                final boolean modelsRestored = KnowledgePortableSettings.apply(
+                        getPreferences(MODE_PRIVATE), safeModels);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                         ((TextView) findViewById(R.id.knowledge_root)).setText(
@@ -4349,6 +4353,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         Toast.makeText(this,
                                 getString(R.string.knowledge_portable_restored,
                                         summary.sources), Toast.LENGTH_LONG).show();
+                        if (!modelsRestored) Toast.makeText(this,
+                                R.string.knowledge_portable_settings_failed,
+                                Toast.LENGTH_LONG).show();
                         recreate();
                     }
                 });

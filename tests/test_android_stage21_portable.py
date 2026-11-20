@@ -87,6 +87,23 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertNotIn("FileOutputStream(currentLibrary)", inbox)
 
 
+    def test_optional_model_settings_migrate_without_endpoints_or_secrets(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        settings = (JAVAS / "KnowledgePortableSettings.java").read_text()
+        worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
+        self.assertIn("migrateModels.setChecked(false)", hub)
+        self.assertIn("KnowledgePortableSettings.read(staged)", hub)
+        self.assertIn("KnowledgePortableSettings.apply(", hub)
+        self.assertIn("KnowledgePortableSettings.snapshot(null)", worker)
+        for required in ("knowledge_embedding_model", "knowledge_llm_model",
+                         '"secrets_exported", false',
+                         '"derived_indexes_exported", false',
+                         "Unsupported or unsafe portable settings"):
+            self.assertIn(required, settings)
+        for secret in ("knowledge_embedding_endpoint", "knowledge_llm_endpoint",
+                       "API_KEY", "SharedPreferences.getAll"):
+            self.assertNotIn(secret, settings)
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()

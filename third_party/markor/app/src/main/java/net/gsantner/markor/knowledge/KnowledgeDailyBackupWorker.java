@@ -19,7 +19,6 @@ import androidx.documentfile.provider.DocumentFile;
 import net.gsantner.markor.R;
 import net.gsantner.markor.model.AppSettings;
 
-import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -85,13 +84,9 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                         || !KnowledgeDailyBackup.enabled(context);
                 final KnowledgePortableArchive.Summary created;
                 try (FileOutputStream out = new FileOutputStream(tmp)) {
-                    final JSONObject settings = new JSONObject();
-                    settings.put("schema", "dpks-safe-settings-v1");
-                    settings.put("secrets_exported", false);
-                    settings.put("derived_indexes_exported", false);
                     created = KnowledgePortableArchive.write(notebook,
                             journal.isFile() ? journal : null,
-                            settings.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                            KnowledgePortableSettings.snapshot(null),
                             peerProof,
                             KnowledgePortableCipher.encrypt(out, passphrase), cancelled);
                 }

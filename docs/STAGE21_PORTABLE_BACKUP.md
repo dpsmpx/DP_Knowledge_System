@@ -117,6 +117,21 @@ committed by this path. Existing unsigned archives can be compared read-only.
 This is **not** finished synchronization. Multi-device causal storage,
 reviewed conflict-resolution events and non-overwriting replay remain open.
 
+## Seventh slice: explicit non-secret model-settings migration (pending CI)
+
+Only tightly validated model *identifiers* may be included in newly exported
+manual backups. Legacy archives which contain model endpoints remain readable,
+but those fields are intentionally ignored on restore: URL query strings and
+embedded credentials must not silently cross devices. Importing the model
+identifiers is a separate opt-in checkbox during new-library restoration,
+off by default. No model is downloaded as a side effect. Device-private
+tokens, endpoint addresses, signers, preferences and indexes are excluded.
+
+Daily backup captures only the safe settings schema, without guessing
+activity-specific model settings from a background process. Full non-secret
+app preferences migration and user-approved portable secret recovery remain
+open and must be specified before being implemented.
+
 ## Sixth slice: encrypted offline branch holding area (pending CI)
 
 After comparing a verified encrypted snapshot with a **paired** peer, the
