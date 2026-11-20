@@ -14,6 +14,13 @@ was published with the installable APK and SHA-256 file after a successful
 from tested source commit `b8aebd0f1d8d901b51c0facaadcbae776a44484a`.
 This does not authorize marking Stage 21 PASS or a stable production release.
 
+**Owner decision, 20 Nov 2026:** Defer all outstanding real-device SAF,
+Keystore/two-device, lifecycle/accessibility and SQLite full-integrity QA.
+Record them as `DEBT-21-*` in root `TODO.md`; do not re-request each time a
+new engineering slice lands. Synthetic quick and 20k device tests passed,
+but neither this deferral nor their PASS closes Stage 21's physical gate.
+Proceed with independently verifiable roadmap work while this PR remains draft.
+
 | Area | Current evidence | Gate |
 | --- | --- | --- |
 | Encrypted full snapshot + manifest | Versioned authenticated ciphertext, write/readback verification, clean-library restore; Android unit CI passed | Independent device restore |
