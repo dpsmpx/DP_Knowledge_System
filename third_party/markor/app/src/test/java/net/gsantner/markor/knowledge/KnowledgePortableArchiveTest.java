@@ -173,9 +173,14 @@ public class KnowledgePortableArchiveTest {
         assertTrue(source.mkdir());
         Files.write(new File(source, "new.md").toPath(),
                 "Only in encrypted snapshot".getBytes(StandardCharsets.UTF_8));
+        final File nested = new File(source, "nested");
+        assertTrue(nested.mkdir());
+        final byte[] second = "Second note: только синтетика".getBytes(StandardCharsets.UTF_8);
+        Files.write(new File(nested, "second.md").toPath(), second);
         final File output = new File(temp, "payload.zip");
         try (java.io.FileOutputStream file = new java.io.FileOutputStream(output)) {
-            KnowledgePortableArchive.write(source, null, null, file, () -> false);
+            assertEquals(2, KnowledgePortableArchive.write(
+                    source, null, null, file, () -> false).sources);
         }
         final File imported = KnowledgePortableRestore.restoreNewLibrary(
                 output, vault, text -> fail("Missing journal must not be imported"), () -> false);
@@ -184,5 +189,9 @@ public class KnowledgePortableArchiveTest {
                 new File(vault, "existing.md").toPath()), StandardCharsets.UTF_8));
         assertEquals("Only in encrypted snapshot", new String(Files.readAllBytes(
                 new File(imported, "new.md").toPath()), StandardCharsets.UTF_8));
+        assertArrayEquals(second, Files.readAllBytes(
+                new File(imported, "nested/second.md").toPath()));
+        assertArrayEquals(second, Files.readAllBytes(
+                new File(source, "nested/second.md").toPath()));
     }
 }

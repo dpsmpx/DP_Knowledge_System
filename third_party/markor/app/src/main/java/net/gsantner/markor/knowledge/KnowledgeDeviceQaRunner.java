@@ -296,14 +296,19 @@ public final class KnowledgeDeviceQaRunner {
             if (!vault.mkdir()) throw new IOException("Synthetic vault unavailable");
             final File note = new File(vault, "sample.md");
             writeFixture(note, "# Stage21\nSynthetic source only.\n");
+            final File nested = new File(vault, "nested");
+            if (!nested.mkdir()) throw new IOException("Synthetic nested vault unavailable");
+            final File secondNote = new File(nested, "second.md");
+            writeFixture(secondNote, "# Second synthetic note\nТолько тест.\n");
             final byte[] originalHash = sha256(note);
+            final byte[] secondHash = sha256(secondNote);
             final ByteArrayOutputStream destination = new ByteArrayOutputStream();
             final byte[] highwater = "synthetic-highwater-fixture".getBytes(StandardCharsets.UTF_8);
             try (OutputStream encrypted = KnowledgePortableCipher.encrypt(destination, password)) {
                 final KnowledgePortableArchive.Summary written = KnowledgePortableArchive.write(
                         vault, null, "{}".getBytes(StandardCharsets.UTF_8),
                         null, null, highwater, encrypted, this::isCancelled);
-                if (written.sources != 1 || written.secrets || !written.highWater) {
+                if (written.sources != 2 || written.secrets || !written.highWater) {
                     throw new SyntheticMismatch("verdict=PORTABLE_CONSENT_FLAGS_INVALID");
                 }
             }
@@ -313,9 +318,24 @@ public final class KnowledgeDeviceQaRunner {
                     new ByteArrayInputStream(encrypted), sandbox, password, this::isCancelled);
             final KnowledgePortableArchive.Summary verified =
                     KnowledgePortableArchive.verify(staging, this::isCancelled);
-            if (verified.sources != 1 || !verified.settings || verified.secrets
-                    || !verified.highWater || !Arrays.equals(originalHash, sha256(note))) {
+            if (verified.sources != 2 || !verified.settings || verified.secrets
+                    || !verified.highWater || !Arrays.equals(originalHash, sha256(note))
+                    || !Arrays.equals(secondHash, sha256(secondNote))) {
                 throw new SyntheticMismatch("verdict=PORTABLE_MANIFEST_INVALID");
+            }
+            // Exercise the actual clean-library restore path, but ONLY with
+            // disposable cache fixtures and no authoritative journal commit.
+            // The destination is a new sibling; neither original can be replaced.
+            final File restored = KnowledgePortableRestore.restoreNewLibrary(
+                    staging, vault, null, this::isCancelled);
+            if (!restored.isDirectory() || restored.getCanonicalFile().equals(vault.getCanonicalFile())
+                    || !restored.getCanonicalFile().getParentFile().equals(sandbox.getCanonicalFile())
+                    || !restored.getName().startsWith("DPKS_Restored_")
+                    || !Arrays.equals(originalHash, sha256(new File(restored, "sample.md")))
+                    || !Arrays.equals(secondHash, sha256(new File(restored, "nested/second.md")))
+                    || !Arrays.equals(originalHash, sha256(note))
+                    || !Arrays.equals(secondHash, sha256(secondNote))) {
+                throw new SyntheticMismatch("verdict=PORTABLE_CLEAN_RESTORE_MISMATCH");
             }
             encrypted[encrypted.length - 1] ^= 0x01;
             boolean rejected = false;
@@ -326,8 +346,9 @@ public final class KnowledgeDeviceQaRunner {
                 rejected = true;
             }
             if (!rejected) throw new SyntheticMismatch("verdict=PORTABLE_TAMPER_ACCEPTED");
-            return "synthetic encrypted archive verified, highwater included, "
-                    + "secrets excluded, tampering rejected, source unchanged";
+            return "synthetic encrypted archive verified, cleanLibraryRestored=2, "
+                    + "highwater included, secrets excluded, tampering rejected, "
+                    + "original source hashes unchanged";
         } finally {
             Arrays.fill(password, '\0');
             removeSandbox(sandbox);
