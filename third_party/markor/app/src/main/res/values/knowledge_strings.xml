@@ -414,6 +414,12 @@
     <string name="knowledge_sync_previous_page">Previous events</string>
     <string name="knowledge_sync_event_detail">Foreign event details (read-only)</string>
     <string name="knowledge_sync_event_detail_warning">This view may contain personal note provenance. It stays on this device and is never committed to local knowledge. Only inspect on a trusted screen.</string>
+    <string name="knowledge_sync_review_title">Record foreign event review</string>
+    <string name="knowledge_sync_review_hold">Defer</string>
+    <string name="knowledge_sync_review_reject">Reject</string>
+    <string name="knowledge_sync_review_warning">Only your decision, the foreign event ID and signed branch commitment will be saved in the local journal, without note text. The foreign decision will NOT be applied and source Markdown will remain unchanged. Reopen the branch after recording: the local journal head will change.</string>
+    <string name="knowledge_sync_review_confirm">Save review</string>
+    <string name="knowledge_sync_review_saved">Review recorded in the local journal without activating foreign knowledge.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

@@ -28,7 +28,7 @@ from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
 from ksys.store.journal_sync import (preview_journals, review_foreign_events,
-                                     inspect_foreign_event)
+                                     inspect_foreign_event, prepare_peer_review)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1679,6 +1679,36 @@ def journal_sync_event_detail(foreign_text: str, event_id: str,
     """The user explicitly selects a record; private payload stays on-device."""
     return json.dumps(inspect_foreign_event(foreign_text, event_id,
                                              expected_sha256), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_review_commit(workspace_dir: str, foreign_text: str,
+                               peer_fingerprint: str, event_id: str,
+                               expected_local_head: str, expected_remote_sha256: str,
+                               verdict: str) -> str:
+    """Commit a local human review receipt, NOT remote knowledge.
+
+    The Java caller must first reopen the authenticated, Keystore-encrypted
+    foreign inbox entry and confirm that its pinned signing peer is still
+    paired. This function itself cannot authenticate an Android ECDSA key.
+    """
+    kb = _kb(workspace_dir)
+    local_path = kb.ws.journal_path
+    local = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
+    expected = expected_local_head or None
+    data = prepare_peer_review(local, foreign_text, peer_fingerprint,
+                               event_id, expected, expected_remote_sha256, verdict)
+    for entry in reversed(kb.journal.entries()):
+        if entry.op == "peer_review" and all(entry.data.get(field) == data[field]
+                for field in ("peer_fingerprint", "remote_sha256", "remote_event_id", "verdict")):
+            return json.dumps({"protocol": "dpksys.sync-review-commit.v1",
+                               "receipt_id": entry.id, "journal_head": kb.journal.head,
+                               "duplicate": True, "activates_knowledge": False},
+                              sort_keys=True, separators=(",", ":"))
+    saved, _, _ = kb._commit("peer_review", data)
+    return json.dumps({"protocol": "dpksys.sync-review-commit.v1",
+                       "receipt_id": saved.id, "journal_head": kb.journal.head,
+                       "duplicate": False, "activates_knowledge": False},
                       sort_keys=True, separators=(",", ":"))
 
 

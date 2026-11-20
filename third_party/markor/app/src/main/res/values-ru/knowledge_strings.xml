@@ -414,6 +414,12 @@
     <string name="knowledge_sync_previous_page">Предыдущие события</string>
     <string name="knowledge_sync_event_detail">Детали внешнего события (только чтение)</string>
     <string name="knowledge_sync_event_detail_warning">Здесь могут быть личные данные из заметок. Содержимое остаётся на устройстве и не записывается в местный журнал. Просматривайте на доверенном экране.</string>
+    <string name="knowledge_sync_review_title">Зафиксировать проверку внешнего события</string>
+    <string name="knowledge_sync_review_hold">Отложить</string>
+    <string name="knowledge_sync_review_reject">Отклонить</string>
+    <string name="knowledge_sync_review_warning">В локальный журнал будет добавлена только запись о вашем решении с идентификатором внешнего события и подписанной ветви, без текста заметки. Внешнее решение НЕ будет применено, исходные Markdown не изменятся. После записи требуется повторно открыть ветвь: журнал получит новую голову.</string>
+    <string name="knowledge_sync_review_confirm">Сохранить решение</string>
+    <string name="knowledge_sync_review_saved">Решение о проверке записано в локальный журнал без активации внешнего знания.</string>
     <string name="knowledge_daily_backup_title">Ежедневные локальные шифрованные копии</string>
     <string name="knowledge_daily_backup_running">Создание и проверка зашифрованного локального архива…</string>
     <string name="knowledge_daily_backup_enable">Включить ежедневно</string>

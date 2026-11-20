@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +10,11 @@ from pathlib import Path
 from ksys.core.clock import FixedClock
 from ksys.store.journal import Journal
 from ksys.store.journal_sync import (preview_journals, validated_entries,
-                                     review_foreign_events, inspect_foreign_event)
+                                     review_foreign_events, inspect_foreign_event,
+                                     prepare_peer_review)
+from ksys.store.kb import KnowledgeBase
+from ksys.store.workspace import Workspace
+from third_party.markor.app.src.main.python.ksys_android_bridge import journal_sync_review_commit
 
 
 def journal_string(path: Path, operations: tuple[tuple[str, dict], ...]) -> str:
@@ -114,6 +119,71 @@ class JournalSyncPreviewTests(unittest.TestCase):
         self.assertTrue(detail["read_only"])
         with self.assertRaises(ValueError):
             inspect_foreign_event(content, entry.id, "0" * 64)
+
+    def test_review_receipt_is_human_written_and_cannot_activate_remote_knowledge(self):
+        workspace = Workspace(self.root / "workspace")
+        workspace.journal_path.parent.mkdir(parents=True)
+        workspace.journal_path.write_text(self.base, encoding="utf-8")
+        remote_path = self.root / "foreign.jsonl"
+        remote_path.write_text(self.base, encoding="utf-8")
+        Journal(remote_path, FixedClock()).append("reject", {
+            "candidates": ["synthetic-secret-candidate"]})
+        remote = remote_path.read_text(encoding="utf-8")
+        remote_event = validated_entries(remote)[-1]
+        fingerprint = "a" * 64
+        checksum = hashlib.sha256(remote.encode()).hexdigest()
+        local_head = validated_entries(self.base)[-1].id
+        original = workspace.journal_path.read_bytes()
+
+        planned = prepare_peer_review(self.base, remote, fingerprint, remote_event.id,
+                                      local_head, checksum, "hold")
+        self.assertFalse(planned["activates_knowledge"])
+        self.assertNotIn("synthetic-secret-candidate", json.dumps(planned))
+        self.assertEqual(original, workspace.journal_path.read_bytes())
+
+        recorded = json.loads(journal_sync_review_commit(
+            str(workspace.root), remote, fingerprint, remote_event.id,
+            local_head, checksum, "hold"))
+        self.assertEqual("dpksys.sync-review-commit.v1", recorded["protocol"])
+        self.assertFalse(recorded["activates_knowledge"])
+        kb = KnowledgeBase(workspace, FixedClock(), use_cache=False)
+        self.assertEqual([], kb.journal.verify())
+        self.assertEqual(("hold", recorded["receipt_id"]),
+                         kb.state.peer_reviews[(fingerprint, checksum, remote_event.id)])
+        self.assertEqual(0, len(kb.state.records))
+        self.assertNotIn("synthetic-secret-candidate",
+                         workspace.journal_path.read_text(encoding="utf-8"))
+        receipt = validated_entries(workspace.journal_path.read_text())[-1]
+        self.assertEqual("peer_review", receipt.op)
+        self.assertTrue(receipt.data["activates_knowledge"] is False)
+
+        duplicate = json.loads(journal_sync_review_commit(
+            str(workspace.root), remote, fingerprint, remote_event.id,
+            recorded["journal_head"], checksum, "hold"))
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(recorded["receipt_id"], duplicate["receipt_id"])
+        self.assertEqual(2, len(Journal(workspace.journal_path, FixedClock()).entries()))
+
+    def test_review_rejects_stale_unknown_tampered_and_approval_actions(self):
+        remote_path = self.root / "remote2.jsonl"
+        remote_path.write_text(self.base, encoding="utf-8")
+        Journal(remote_path, FixedClock()).append("defer", {"candidates": ["foreign"]})
+        remote = remote_path.read_text()
+        event_id = validated_entries(remote)[-1].id
+        common = validated_entries(self.base)[-1].id
+        digest = hashlib.sha256(remote.encode()).hexdigest()
+        for args in [
+                ("b" * 64, event_id, "wrong-local-head", digest, "hold"),
+                ("b" * 64, event_id, common, "0" * 64, "hold"),
+                ("b" * 64, "J:unknown", common, digest, "hold"),
+                ("b" * 64, event_id, common, digest, "approve"),
+                ("bad-fingerprint", event_id, common, digest, "hold"),
+        ]:
+            with self.assertRaises(ValueError):
+                prepare_peer_review(self.base, remote, *args)
+        with self.assertRaises(ValueError):
+            prepare_peer_review(self.base, remote.replace("foreign", "tampers"),
+                                "b" * 64, event_id, common, digest, "hold")
 
 
 if __name__ == "__main__":

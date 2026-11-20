@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -97,6 +98,9 @@ def validated_entries(content: str) -> list[Entry]:
 
 def _targets(event: Entry) -> set[str] | None:
     data = event.data
+    if event.op == "peer_review":
+        # A review receipt is an audit event, not a claim activation.
+        return set()
     if event.op in {"retract", "revise", "split"}:
         return {data["target"]} if isinstance(data.get("target"), str) else None
     if event.op == "merge":
@@ -220,3 +224,45 @@ def inspect_foreign_event(remote_content: str, event_id: str,
                 "read_only": True,
             }
     raise ValueError("Foreign event not found")
+
+
+def prepare_peer_review(local_content: str, remote_content: str,
+                        peer_fingerprint: str, remote_event_id: str,
+                        expected_local_head: str | None, expected_remote_sha256: str,
+                        verdict: str) -> dict[str, Any]:
+    """Validate a human review of one signed, paired foreign event.
+
+    Caller MUST authenticate the peer's ECDSA signature against a locally
+    paired identity before calling this function. No branch data, notes or
+    remote statements are copied into the local receipt. This is *not* a merge.
+    """
+    if not isinstance(peer_fingerprint, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", peer_fingerprint):
+        raise ValueError("Invalid trusted peer fingerprint")
+    if verdict not in ("hold", "reject"):
+        raise ValueError("A review receipt cannot authorize remote knowledge")
+    if not isinstance(remote_event_id, str) or len(remote_event_id) > 160:
+        raise ValueError("Invalid remote event ID")
+    if not isinstance(expected_remote_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", expected_remote_sha256):
+        raise ValueError("Invalid remote branch commitment")
+    comparison = preview_journals(local_content, remote_content)
+    if comparison.remote_sha256 != expected_remote_sha256:
+        raise ValueError("Foreign branch changed since review")
+    if comparison.local_head != expected_local_head:
+        raise ValueError("Local journal changed since review")
+    remote = validated_entries(remote_content)
+    foreign = {event.id for event in remote[comparison.common_events:]}
+    if remote_event_id not in foreign:
+        raise ValueError("Review event is not a foreign-only event")
+    return {
+        "peer_fingerprint": peer_fingerprint,
+        "remote_sha256": expected_remote_sha256,
+        "remote_head": comparison.remote_head,
+        "remote_event_id": remote_event_id,
+        "common_head": comparison.common_head,
+        "local_head_at_review": expected_local_head,
+        "verdict": verdict,
+        "activates_knowledge": False,
+        "protocol_version": 1,
+    }

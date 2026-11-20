@@ -68,6 +68,9 @@ class KnowledgeState:
         self.auto_labels: dict[str, str] = {}       # поверхностные формы из принятых текстов
         self.aliases: dict[str, str] = {}
         self.schema_ext: list = []
+        # Audit decisions about authenticated foreign events are NOT active
+        # knowledge and never directly alter records or inference.
+        self.peer_reviews: dict[tuple[str, str, str], tuple[str, str]] = {}
         self.head: str | None = None
         self.entries: list[Entry] = []
         self.diagnostics: list[Diagnostic] = []
@@ -190,6 +193,18 @@ class KnowledgeState:
             self.aliases[d["alias"]] = d["canonical"]
         elif e.op == "schema":
             self.schema_ext.append(d["schema"])
+        elif e.op == "peer_review":
+            fingerprint, branch, event_id, verdict = (
+                d.get("peer_fingerprint"), d.get("remote_sha256"),
+                d.get("remote_event_id"), d.get("verdict"))
+            if (all(isinstance(value, str) for value in (fingerprint, branch, event_id))
+                    and len(fingerprint) == len(branch) == 64
+                    and event_id.startswith("J:") and verdict in ("hold", "reject")
+                    and d.get("activates_knowledge") is False):
+                self.peer_reviews[(fingerprint, branch, event_id)] = (verdict, e.id)
+            else:
+                self.diagnostics.append(Diagnostic(ErrorKind.JOURNAL_ERROR,
+                                                   "invalid foreign event review receipt", location=e.id))
         self.head = e.id
         self.entries.append(e)
         return ch

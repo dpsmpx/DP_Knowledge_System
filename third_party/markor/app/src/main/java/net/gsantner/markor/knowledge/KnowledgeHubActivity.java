@@ -4141,6 +4141,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 if (!snapshot.peer.paired) throw new SecurityException("Peer trust revoked");
                 final JSONObject detail = KnowledgePythonBridge.journalSyncEventDetail(
                         this, snapshot.journal, eventId, expectedHash);
+                final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
+                        this, workspacePath(), snapshot.journal);
+                if (!expectedHash.equals(comparison.getString("remote_sha256")))
+                    throw new SecurityException("Peer branch changed since review");
+                final String localHead = comparison.isNull("local_head") ? ""
+                        : comparison.getString("local_head");
                 String payload = detail.toString(2);
                 if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
                 final String shown = payload;
@@ -4155,13 +4161,55 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setTitle(R.string.knowledge_sync_event_detail)
                             .setMessage(R.string.knowledge_sync_event_detail_warning)
                             .setView(text)
-                            .setPositiveButton(android.R.string.ok, null).show();
+                            .setPositiveButton(android.R.string.ok, null)
+                            .setNeutralButton(R.string.knowledge_sync_review_hold,
+                                    (dialog, which) -> confirmPeerReview(name, eventId,
+                                            expectedHash, localHead, "hold"))
+                            .setNegativeButton(R.string.knowledge_sync_review_reject,
+                                    (dialog, which) -> confirmPeerReview(name, eventId,
+                                            expectedHash, localHead, "reject"))
+                            .show();
                 });
             } catch (Exception invalid) {
                 runOnUiThread(() -> Toast.makeText(this,
                         R.string.knowledge_sync_branch_failed, Toast.LENGTH_LONG).show());
             }
         });
+    }
+
+    private void confirmPeerReview(final String name, final String eventId,
+                                   final String remoteSha, final String localHead,
+                                   final String verdict) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_review_title)
+                .setMessage(R.string.knowledge_sync_review_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_review_confirm, (dialog, which) ->
+                        worker.submit(() -> {
+                            try {
+                                // Recheck ECDSA, paired public key and journal bytes
+                                // on EVERY decision, even after the detail was viewed.
+                                final KnowledgePeerInbox.Snapshot incoming =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!incoming.peer.paired)
+                                    throw new SecurityException("Peer trust was revoked");
+                                final JSONObject receipt = KnowledgePythonBridge.journalSyncReviewCommit(
+                                        this, workspacePath(), incoming.journal,
+                                        incoming.peer.fingerprint, eventId, localHead,
+                                        remoteSha, verdict);
+                                if (receipt.optBoolean("activates_knowledge", true))
+                                    throw new SecurityException("Unexpected remote activation");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed())
+                                        Toast.makeText(this, R.string.knowledge_sync_review_saved,
+                                                Toast.LENGTH_LONG).show();
+                                });
+                            } catch (Exception failure) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_branch_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
     }
 
     private void promptPortablePeerPassword(final Uri source) {

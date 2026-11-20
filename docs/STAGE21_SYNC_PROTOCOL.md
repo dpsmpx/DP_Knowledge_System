@@ -94,3 +94,27 @@ pairing trust. Event listings validate both hash chains; detail views
 revalidate the foreign chain and expected remote journal SHA before showing
 a specific payload. No action in this review
 commits any foreign event; actual manual resolution remains unimplemented.
+
+## Ninth slice: immutable human review receipts (pending CI)
+
+The paired-device inbox's individual event detail now offers **Defer** and
+**Reject**. An additional confirmation is required. Before committing, Android
+reopens and revalidates the encrypted foreign branch, ECDSA commitment and
+current pairing; Python rechecks both journal hash chains, the selected
+foreign-only event, both expected heads and the remote SHA-256. The current
+user's own linear journal gains a `peer_review` event containing only the
+trusted fingerprint, foreign branch/event IDs, causal heads and verdict. No
+remote payload or note text is copied to this audit receipt.
+
+`peer_review` has **no active-knowledge effect** in deterministic replay.
+Duplicate review of the same signed branch/event/verdict is idempotent, and
+stale UI confirmations fail closed. Review receipts are included in the
+existing signed journal backup on the next explicit export. This is a causal
+acknowledgment/audit trail, **not** application of a foreign decision or
+resolution of a conflict. `approve` is intentionally not an allowed verdict.
+
+The next missing slice is a source-verified, explicitly human-approved
+cross-device adoption/resolution operation that preserves both causal heads
+and represents disagreement as contested knowledge. It must not silently
+interpret a review receipt as approval or replay a foreign hash chain into
+the local linear journal. Clean-device and concurrency QA remain OPEN.
