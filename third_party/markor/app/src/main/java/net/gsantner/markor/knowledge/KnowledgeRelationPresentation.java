@@ -274,10 +274,34 @@ final class KnowledgeRelationPresentation {
             if (relation.optBoolean("opposing_polarity")) {
                 text.append("\n").append(context.getString(
                         R.string.knowledge_modal_opposing_info));
+                if ("opposing_dated_readings".equals(relation.optString("version_review"))) {
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_version_review));
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_earlier_polarity,
+                            context.getString(relation.optBoolean("earlier_negated")
+                                    ? R.string.knowledge_relation_negative
+                                    : R.string.knowledge_relation_positive)));
+                    text.append("\n").append(context.getString(
+                            R.string.knowledge_relation_later_polarity,
+                            context.getString(relation.optBoolean("later_negated")
+                                    ? R.string.knowledge_relation_negative
+                                    : R.string.knowledge_relation_positive)));
+                }
+            }
+        }
+        if ("temporal_uncertainty".equals(relation.optString("kind"))) {
+            appendInterval(text, context, R.string.knowledge_relation_other_interval,
+                    relation.optJSONObject("other_interval"));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_relation_temporal_uncertainty_warning));
+            if (relation.optBoolean("opposing_polarity")) {
+                text.append("\n").append(context.getString(R.string.knowledge_modal_opposing_info));
             }
         }
         if ("temporal_overlap".equals(relation.optString("kind"))
-                || "temporal_separation".equals(relation.optString("kind"))) {
+                || "temporal_separation".equals(relation.optString("kind"))
+                || "temporal_uncertainty".equals(relation.optString("kind"))) {
             text.append("\n").append(context.getString(
                     R.string.knowledge_temporal_source_sha,
                     evidenceVerification(context,

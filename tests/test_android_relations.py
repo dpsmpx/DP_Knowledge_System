@@ -1087,6 +1087,12 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(("source_before_other", 0),
                          (by_path["c.md"]["relative_order"], by_path["c.md"]["gap_days"]))
         self.assertTrue(by_path["c.md"]["opposing_polarity"])
+        self.assertEqual("opposing_dated_readings", by_path["c.md"]["version_review"])
+        self.assertEqual((False, True), (by_path["c.md"]["earlier_negated"],
+                                         by_path["c.md"]["later_negated"]))
+        self.assertEqual("consistent_dated_readings", by_path["b.md"]["version_review"])
+        self.assertEqual((False, False), (by_path["b.md"]["earlier_negated"],
+                                          by_path["b.md"]["later_negated"]))
         self.assertTrue(all(m["authority"] == "unapproved_parser_hint"
                             for m in page["matches"]))
         reverse = next(m for m in self._relations("b.md")["matches"] if m["path"] == "a.md")
@@ -1102,12 +1108,26 @@ class RelationTests(unittest.TestCase):
             assign(con, "c.md", "2025-03-01", None, negated=True)
         self.assertFalse(any(m["kind"] == "temporal_separation"
                              for m in self._relations("a.md")["matches"]))
+        uncertain = [m for m in self._relations("a.md")["matches"]
+                     if m["path"] == "c.md"]
+        self.assertEqual(["temporal_uncertainty"], [m["kind"] for m in uncertain])
+        self.assertEqual({"from": "2025-03-01", "to": None},
+                         uncertain[0]["other_interval"])
+        self.assertTrue(uncertain[0]["opposing_polarity"])
+        self.assertEqual("unapproved_parser_hint", uncertain[0]["authority"])
 
         # The inclusive shared endpoint belongs to overlap, not separation.
         with sqlite3.connect(db) as con:
             assign(con, "c.md", "2025-02-28", "2025-03-31", negated=True)
         touching = [m for m in self._relations("a.md")["matches"] if m["path"] == "c.md"]
         self.assertEqual(["temporal_overlap"], [m["kind"] for m in touching])
+        # An open future endpoint can still have a proven shared date. Do
+        # not duplicate that overlap as an uncertainty warning.
+        with sqlite3.connect(db) as con:
+            assign(con, "c.md", "2025-02-20", None, negated=True)
+        overlapping_open = [m for m in self._relations("a.md")["matches"]
+                            if m["path"] == "c.md"]
+        self.assertEqual(["temporal_overlap"], [m["kind"] for m in overlapping_open])
         self.assertEqual({"from": "2025-02-28", "to": "2025-02-28"},
                          touching[0]["overlap_interval"])
 

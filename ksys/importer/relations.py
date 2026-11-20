@@ -236,6 +236,25 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
         (source_path, source_path, limit + 1)
     ).fetchall()
 
+    # Two partially bounded intervals cannot establish either overlap or
+    # separation. Report only that chronology is unresolved, provided each
+    # source actually supplies at least one date. Completely unspecified
+    # intervals are excluded rather than interpreted as all-time validity.
+    uncertain_filter = (
+        "AND a.atom_key<>b.atom_key "
+        "AND (a.valid_from IS NOT NULL OR a.valid_to IS NOT NULL) "
+        "AND (b.valid_from IS NOT NULL OR b.valid_to IS NOT NULL) "
+        "AND (a.valid_from IS NULL OR a.valid_to IS NULL "
+        "OR b.valid_from IS NULL OR b.valid_to IS NULL) "
+    )
+    uncertain = con.execute(
+        select + "FROM candidate_atoms a JOIN candidate_atoms b ON a.scope_key=b.scope_key "
+        + documents + "WHERE a.doc=? AND b.doc<>? " + uncertain_filter
+        + "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator, "
+          "a.fragment_id, b.fragment_id LIMIT ?",
+        (source_path, source_path, limit + 1)
+    ).fetchall()
+
     matches = []
     for r in exact:
         matches.append({
@@ -300,6 +319,36 @@ def indexed_related_claims(con, source_path: str, limit: int = 60,
             "relative_order": ("source_before_other" if source_first
                                else "other_before_source"),
             "gap_days": gap_days,
+            # A polarity shift is a question for the owner, not evidence that
+            # the world changed between the two source-supplied intervals.
+            "version_review": ("opposing_dated_readings" if r[5] != r[6]
+                               else "consistent_dated_readings"),
+            "earlier_negated": bool(r[5] if source_first else r[6]),
+            "later_negated": bool(r[6] if source_first else r[5]),
+            "authority": "unapproved_parser_hint",
+        })
+    for r in uncertain:
+        try:
+            source_interval = Interval(r[10], r[11])
+            other_interval = Interval(r[12], r[13])
+        except (KSError, TypeError, ValueError):
+            continue
+        source_qual = atom_qualifiers(r[8])
+        other_qual = atom_qualifiers(r[9])
+        if (source_interval.unbounded or other_interval.unbounded
+                or source_interval.intersect(other_interval) is not None
+                or source_qual["context"] != other_qual["context"]
+                or source_qual["interval"] != source_interval.to_dict()
+                or other_qual["interval"] != other_interval.to_dict()):
+            continue
+        matches.append({
+            "path": r[0], "source_locator": r[1], "other_locator": r[2],
+            "source_fragment": r[3], "other_fragment": r[4],
+            "kind": "temporal_uncertainty", "predicate": r[7],
+            "opposing_polarity": r[5] != r[6],
+            "context": source_qual["context"],
+            "interval": source_interval.to_dict(),
+            "other_interval": other_interval.to_dict(),
             "authority": "unapproved_parser_hint",
         })
     alias_matches, alias_limited = indexed_alias_candidates(

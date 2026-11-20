@@ -263,6 +263,13 @@
     <string name="knowledge_relation_source_earlier">The inspected source period is earlier.</string>
     <string name="knowledge_relation_other_earlier">The other source period is earlier.</string>
     <string name="knowledge_relation_gap_days">Calendar days between these periods: %1$d</string>
+    <string name="knowledge_relation_version_review">Review possible version disagreement: these are opposing dated readings, not proof of a factual change. Check both sources before deciding.</string>
+    <string name="knowledge_relation_earlier_polarity">Earlier reading: %1$s</string>
+    <string name="knowledge_relation_later_polarity">Later reading: %1$s</string>
+    <string name="knowledge_relation_negative">negative</string>
+    <string name="knowledge_relation_positive">positive</string>
+    <string name="knowledge_possible_temporal_uncertainty">Incomplete date ranges</string>
+    <string name="knowledge_relation_temporal_uncertainty_warning">At least one period has an open date boundary. No exact chronological order, version change or contradiction can be inferred from this hint. Check both sources.</string>
     <string name="knowledge_relation_temporal_separation_warning">Date order and opposite polarity do not prove a change, agreement or contradiction. These are unapproved indexed readings; inspect the original notes.</string>
     <string name="knowledge_temporal_source_sha">Inspected file SHA: %1$s</string>
     <string name="knowledge_temporal_other_sha">Other file SHA: %1$s</string>
