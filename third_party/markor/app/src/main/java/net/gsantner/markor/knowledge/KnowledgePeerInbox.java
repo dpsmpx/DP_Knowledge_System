@@ -40,6 +40,12 @@ final class KnowledgePeerInbox {
     private static final int MAX_RECORDS = 100;
     private static final String NAME_PATTERN = "[0-9a-f]{64}_[0-9a-f]{64}\\.dpkspeer";
 
+    static final class ObservedRollbackException extends SecurityException {
+        ObservedRollbackException() {
+            super("Signed peer branch is older than a retained, already verified branch");
+        }
+    }
+
     static final class Snapshot {
         final String journal;
         final KnowledgePeerIdentity.Verification peer;
@@ -107,6 +113,17 @@ final class KnowledgePeerInbox {
                 throw new SecurityException("Inbox record hash collision");
             return false; // Retry of identical signed branch is idempotent.
         }
+        // A previously verified longer chain from the SAME paired identity
+        // is positive evidence of a rollback. Keep the newer copy, do not
+        // silently replace or accept the older prefix as a fresh branch.
+        // Different signed forks are not automatically considered malicious.
+        for (final String name : list(context)) {
+            if (!name.startsWith(verified.fingerprint + "_")) continue;
+            final Snapshot known = open(context, name);
+            if (!known.peer.paired) throw new SecurityException("Peer trust was revoked");
+            if (isStrictLinePrefix(journal, known.journal))
+                throw new ObservedRollbackException();
+        }
         if (list(context).length >= MAX_RECORDS)
             throw new IOException("Peer inbox is full; review or delete old branches");
 
@@ -139,6 +156,13 @@ final class KnowledgePeerInbox {
                 throw new IOException("Cannot commit peer branch");
             return true;
         } finally { if (temp.exists()) temp.delete(); }
+    }
+
+    /** A JSONL prefix ends only at an event boundary; a fork is not rollback. */
+    static boolean isStrictLinePrefix(final String candidate, final String observed) {
+        return candidate != null && observed != null
+                && !candidate.isEmpty() && candidate.endsWith("\n")
+                && candidate.length() < observed.length() && observed.startsWith(candidate);
     }
 
     static String[] list(final Context context) throws IOException {

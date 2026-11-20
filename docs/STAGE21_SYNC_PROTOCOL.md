@@ -196,3 +196,20 @@ or foreign-event replay is triggered by acknowledgment.
 The offline exchange remains deliberately manual. Transitive peer receipt
 validation, upstream replay of all operation types, background transport,
 anti-rollback high-water enforcement and real-device QA still require work.
+
+## Fourteenth slice: retained-chain rollback guard (pending CI)
+
+When a signed branch from a currently paired device is about to enter the
+encrypted inbox, Android checks retained, still-authenticated journals from
+that **same fingerprint**. If the incoming JSONL is a strict event-boundary
+prefix of a longer retained journal, the older copy is rejected with a
+distinct warning. This protects against an accidentally re-sent old snapshot
+or a basic signed replay while the newer observation remains available.
+Different signed forks are **not** assumed to be rollbacks and remain
+individually reviewable; identical delivery stays idempotent.
+
+This is a *retained-observation guard*, not a global monotonic promise.
+Intentionally deleting the newest encrypted inbox entry removes the evidence
+needed for that comparison. A stronger signed high-water policy, verified
+across device migration/recovery, remains an acceptance gate. No automatic
+deletion of old observations is performed.

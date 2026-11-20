@@ -4465,6 +4465,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                                     created ? R.string.knowledge_sync_branch_saved
                                                             : R.string.knowledge_sync_branch_duplicate,
                                                     Toast.LENGTH_LONG).show());
+                                        } catch (KnowledgePeerInbox.ObservedRollbackException old) {
+                                            runOnUiThread(() -> new MaterialAlertDialogBuilder(this)
+                                                    .setTitle(R.string.knowledge_sync_rollback_title)
+                                                    .setMessage(R.string.knowledge_sync_rollback_warning)
+                                                    .setPositiveButton(android.R.string.ok, null)
+                                                    .show());
                                         } catch (Exception invalid) {
                                             runOnUiThread(() -> Toast.makeText(this,
                                                     R.string.knowledge_sync_branch_failed,

@@ -438,6 +438,8 @@
     <string name="knowledge_sync_ack_branch">Acknowledge branch</string>
     <string name="knowledge_sync_ack_warning">Record that you have received and verified this signed branch from the paired device? Its exact remote head and both causal references will be stored in your local journal and travel in the next encrypted snapshot you manually export. This is NOT approval of any foreign assertion, automatic synchronization or an invitation to overwrite notes.</string>
     <string name="knowledge_sync_ack_saved">Authenticated foreign branch acknowledged in your local journal.</string>
+    <string name="knowledge_sync_rollback_title">Older signed peer branch blocked</string>
+    <string name="knowledge_sync_rollback_warning">This signed journal is a strict older prefix of another retained verified branch from the same paired device. It was NOT added to the inbox. Keep the newer branch and check the other device for an outdated export or rollback. Different legitimate forks remain separately reviewable. Deleting the retained newer branch also removes this local comparison evidence.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>
