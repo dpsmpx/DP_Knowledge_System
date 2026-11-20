@@ -662,6 +662,20 @@ audit, source evidence counts or accepted knowledge. Library and editor expose
 the same bounded results with EN/RU warnings against inferred version truth.
 No index migration, original Markdown change or human journal write occurs.
 
+**Stage 18 live provenance for dated hints (twentieth slice, awaiting Android QA):**
+Both temporal hint types (`temporal_overlap` and `temporal_separation`) now
+expose **current/stale/unavailable/not_checked** verification for *each*
+original Markdown file against the exact SHA stored in the disposable index.
+Only two currently matching file hashes justify the display label
+`live_source_pair`; this verifies the saved source bytes, not date truth,
+assertion correctness, author independence or a historical change. Wrong
+notebook roots and exhausted budgets always leave hints marked historical.
+Temporal checks reuse the **same 16-distinct-file, maximum-32-MiB** per-query
+SHA budget as exact evidence and modal hints (existing checks are cached),
+with explicit incompleteness warnings in Hub and editor. Changes affect
+read-only API annotations, EN/RU UI, tests and documentation only. Original
+Markdown, derived knowledge authority and human decision journal are untouched.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

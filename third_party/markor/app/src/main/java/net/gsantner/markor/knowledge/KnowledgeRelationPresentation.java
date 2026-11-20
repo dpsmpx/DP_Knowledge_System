@@ -253,6 +253,20 @@ final class KnowledgeRelationPresentation {
                         R.string.knowledge_modal_opposing_info));
             }
         }
+        if ("temporal_overlap".equals(relation.optString("kind"))
+                || "temporal_separation".equals(relation.optString("kind"))) {
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_temporal_source_sha,
+                    evidenceVerification(context,
+                            relation.optString("source_verification", "not_checked"))));
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_temporal_other_sha,
+                    evidenceVerification(context,
+                            relation.optString("other_verification", "not_checked"))));
+            text.append("\n").append(context.getString(relation.optBoolean("live_source_pair")
+                    ? R.string.knowledge_temporal_current_pair
+                    : R.string.knowledge_temporal_historical_pair));
+        }
         if ("alias_candidate".equals(relation.optString("kind"))) {
             final JSONObject evidence = relation.optJSONObject("alias_evidence");
             if (evidence != null) {

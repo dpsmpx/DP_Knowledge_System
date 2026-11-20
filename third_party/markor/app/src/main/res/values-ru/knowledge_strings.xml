@@ -264,6 +264,11 @@
     <string name="knowledge_relation_other_earlier">Период другого источника раньше.</string>
     <string name="knowledge_relation_gap_days">Календарных дней между периодами: %1$d</string>
     <string name="knowledge_relation_temporal_separation_warning">Порядок дат и противоположная полярность не доказывают изменение факта, согласие или противоречие. Это неподтверждённые прочтения из индекса; проверьте исходные заметки.</string>
+    <string name="knowledge_temporal_source_sha">SHA исследуемого файла: %1$s</string>
+    <string name="knowledge_temporal_other_sha">SHA другого файла: %1$s</string>
+    <string name="knowledge_temporal_current_pair">SHA обоих исходных файлов совпадают с индексом. Периоды всё ещё взяты из неподтверждённых прочтений.</string>
+    <string name="knowledge_temporal_historical_pair">Как минимум один файл изменён, недоступен или не проверен: датированное сопоставление — лишь исторический снимок индекса.</string>
+    <string name="knowledge_temporal_checks_limited">Не все файлы датированных сопоставлений проверены по SHA; подсказки неполны или исторические.</string>
     <string name="knowledge_no_semantic_relations">Точных совпадений и осторожных подсказок по периодам/подтверждённым алиасам нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
     <string name="knowledge_semantic_failed">Не удалось проверить смысловые связи. Заметки и журнал решений не изменены.</string>
     <string name="knowledge_semantic_limited">только первые 60</string>

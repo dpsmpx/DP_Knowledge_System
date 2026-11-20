@@ -316,6 +316,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_relation_temporal_separation_warning"):
                 self.assertTrue(strings[name], f"{locale}: {name}")
 
+    def test_temporal_hints_show_per_file_sha_and_shared_limit_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("temporal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("temporal_checks_limited")', editor)
+        self.assertIn('"temporal_checks_limited": temporal_checks_limited', bridge)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_temporal_source_sha", "knowledge_temporal_other_sha",
+                         "knowledge_temporal_current_pair", "knowledge_temporal_historical_pair",
+                         "knowledge_temporal_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

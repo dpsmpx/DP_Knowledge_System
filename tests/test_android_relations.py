@@ -979,6 +979,96 @@ class RelationTests(unittest.TestCase):
                                          for p in self.notes})
         self.assertFalse((self.workspace / "data").exists())
 
+    def test_both_temporal_hint_kinds_verify_original_shas_without_authority(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end in (("a.md", "2024-01-01", "2024-12-31"),
+                                     ("b.md", "2024-06-01", "2025-02-01"),
+                                     ("c.md", "2025-02-02", "2025-12-31")):
+                assertion = {"mod": "asserted", "neg": path == "c.md", "atom": atom,
+                             "ctx": "проект-а", "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "test", "nodes": [
+                    {"type": "claim", "assertion": assertion}
+                ]}, path, "F:test", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], row[6], path))
+            self.assertEqual(0, _source_conflict_count(con))
+        before = hashlib.sha256(db.read_bytes()).hexdigest()
+
+        unchecked = self._relations("a.md")
+        self.assertTrue(unchecked["temporal_checks_limited"])
+        self.assertEqual({"temporal_overlap", "temporal_separation"},
+                         {m["kind"] for m in unchecked["matches"]})
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            and not m["live_source_pair"] for m in unchecked["matches"]))
+
+        current = self._relations("a.md", verified=True)
+        self.assertFalse(current["temporal_checks_limited"])
+        self.assertEqual(0, current["evidence_groups"][0]["indexed_other_files"])
+        self.assertTrue(all(m["source_verification"] == "current"
+                            and m["other_verification"] == "current"
+                            and m["live_source_pair"] for m in current["matches"]))
+        self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+        editor = json.loads(editor_note_context(str(self.workspace), "a.md",
+                            self.notes["a.md"], str(self.vault)))
+        self.assertFalse(editor["temporal_checks_limited"])
+        self.assertTrue(all(m["live_source_pair"] for m in editor["candidate_relations"]
+                            if m["kind"] in ("temporal_overlap", "temporal_separation")))
+
+        (self.vault / "b.md").write_text(self.notes["b.md"] + "\n", encoding="utf-8")
+        (self.vault / "c.md").unlink()
+        changed = self._relations("a.md", verified=True)
+        statuses = {m["path"]: m["other_verification"] for m in changed["matches"]}
+        self.assertEqual({"b.md": "stale", "c.md": "unavailable"}, statuses)
+        self.assertFalse(changed["temporal_checks_limited"])  # checked but not current
+        self.assertTrue(all(not m["live_source_pair"] for m in changed["matches"]))
+
+        (self.vault / "a.md").write_text(self.notes["a.md"] + "\n", encoding="utf-8")
+        stale_source = self._relations("a.md", verified=True)
+        self.assertTrue(all(m["source_verification"] == "stale"
+                            and not m["live_source_pair"] for m in stale_source["matches"]))
+        with tempfile.TemporaryDirectory() as wrong_root:
+            wrong = json.loads(note_relationships(str(self.workspace), "a.md", wrong_root))
+        self.assertTrue(wrong["temporal_checks_limited"])
+        self.assertTrue(all(m["source_verification"] == "not_checked"
+                            and m["other_verification"] == "not_checked"
+                            for m in wrong["matches"]))
+
+    def test_time_and_modal_hints_share_existing_evidence_sha_budget(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            original = self._relations("a.md")["evidence_groups"]
+            self.assertEqual(1, len(original))
+            matches = [{"kind": "modal_contrast", "path": "b.md"}]
+            matches.extend({"kind": "temporal_separation", "path": f"missing-{i:02}.md"}
+                           for i in range(16))
+            checked_paths = []
+            hash_file = bridge._entity_live_hash
+
+            def counted_hash(root, path):
+                checked_paths.append(path)
+                return hash_file(root, path)
+
+            with patch.object(bridge, "_entity_live_hash", side_effect=counted_hash):
+                evidence_limited, modal_limited, temporal_limited = (
+                    bridge._verify_evidence_freshness(
+                        con, str(self.vault), "a.md", original, matches))
+            self.assertFalse(evidence_limited)
+            self.assertFalse(modal_limited)
+            self.assertTrue(temporal_limited)
+            self.assertEqual(bridge.MAX_EVIDENCE_LIVE_CHECKS, len(checked_paths))
+            self.assertEqual(len(checked_paths), len(set(checked_paths)))
+            self.assertEqual("current", matches[0]["other_verification"])
+            self.assertTrue(matches[0]["live_source_pair"])
+            self.assertTrue(any(m["other_verification"] == "not_checked"
+                                and not m["live_source_pair"] for m in matches[1:]))
+
     def test_open_ended_intervals_require_actual_bounds_on_both_sides(self):
         self._import()
         db = self.workspace / "var" / "ks.sqlite"
