@@ -119,9 +119,13 @@
     <string name="knowledge_possible_agreement">Potential agreement</string>
     <string name="knowledge_possible_conflict">Potential conflict</string>
     <string name="knowledge_possible_temporal_overlap">Time periods overlap (review; not a conflict verdict)</string>
+    <string name="knowledge_possible_alias">Possible link via human-approved alias (review; not proof)</string>
+    <string name="knowledge_relation_alias_source">Compared names (approved canonical)</string>
+    <string name="knowledge_relation_alias_decisions">Alias decision IDs</string>
+    <string name="knowledge_alias_search_limited">Alias comparison limited; some hints omitted</string>
     <string name="knowledge_relation_other_interval">Other note period</string>
     <string name="knowledge_relation_overlap_interval">Shared period</string>
-    <string name="knowledge_no_semantic_relations">No exact matches or safe temporal-overlap hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>
+    <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>
     <string name="knowledge_semantic_failed">Could not inspect semantic relationships. Original notes and decisions are unchanged.</string>
     <string name="knowledge_semantic_limited">first 60 only</string>
     <string name="knowledge_index_failed">Local knowledge index is unavailable.</string>

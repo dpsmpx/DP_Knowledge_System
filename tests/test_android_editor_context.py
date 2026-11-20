@@ -116,6 +116,22 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual([], changed["candidate_relations"])
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
 
+    def test_editor_alias_hints_cite_owner_journal_without_approving_claim(self):
+        (self.vault / "d.md").write_text("# D\nБорис является разработчиком.\n",
+                                          encoding="utf-8")
+        analyze_vault(str(self.workspace), str(self.vault))
+        journal = Journal(Workspace(self.workspace).journal_path, FixedClock())
+        event = journal.append("alias", {"alias": "борис", "canonical": "алекс"})
+        before = hashlib.sha256(Workspace(self.workspace).db_path.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        hints = [r for r in context["candidate_relations"] if r["kind"] == "alias_candidate"]
+        self.assertEqual(["d.md"], [r["path"] for r in hints])
+        self.assertEqual([event.id], list(hints[0]["alias_evidence"]["journal_ids"]))
+        self.assertTrue(context["relations_are_unapproved"])
+        self.assertEqual(0, context["accepted_total"])
+        self.assertEqual(before, hashlib.sha256(Workspace(self.workspace).db_path.read_bytes()).hexdigest())
+
     def test_editor_relation_shows_matching_context_and_period(self):
         analyze_vault(str(self.workspace), str(self.vault))
         assertion = {"mod": "asserted", "neg": False,

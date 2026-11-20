@@ -9,6 +9,7 @@ import android.content.Context;
 import net.gsantner.markor.R;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 /** Display-only qualifiers of *unapproved* cross-note assertion matches. */
 final class KnowledgeRelationPresentation {
@@ -31,6 +32,24 @@ final class KnowledgeRelationPresentation {
                     relation.optJSONObject("other_interval"));
             appendInterval(text, context, R.string.knowledge_relation_overlap_interval,
                     relation.optJSONObject("overlap_interval"));
+        }
+        if ("alias_candidate".equals(relation.optString("kind"))) {
+            final JSONObject evidence = relation.optJSONObject("alias_evidence");
+            if (evidence != null) {
+                text.append("\n").append(context.getString(R.string.knowledge_relation_alias_source))
+                        .append(": ").append(evidence.optString("source_symbol"))
+                        .append(" ↔ ").append(evidence.optString("other_symbol"))
+                        .append(" → ").append(evidence.optString("canonical_symbol"));
+                final JSONArray decisions = evidence.optJSONArray("journal_ids");
+                if (decisions != null && decisions.length() > 0) {
+                    text.append("\n").append(context.getString(R.string.knowledge_relation_alias_decisions))
+                            .append(": ");
+                    for (int i = 0; i < decisions.length(); i++) {
+                        if (i > 0) text.append(", ");
+                        text.append(decisions.optString(i));
+                    }
+                }
+            }
         }
         return text.toString();
     }

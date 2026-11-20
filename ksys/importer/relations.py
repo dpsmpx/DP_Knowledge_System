@@ -17,6 +17,8 @@ from ..core.ids import canonical_json
 from ..ir.terms import Interval
 from ..store.db import connect
 from ..store.workspace import Workspace
+from .aliases import (AliasSnapshot, MAX_SOURCE_ATOMS, MAX_VARIANTS,
+                      one_symbol_variants)
 
 RELATIONS_VERSION = "exact-claim-context-temporal-overlap-v3"
 
@@ -102,7 +104,8 @@ def atom_qualifiers(atom_key: str) -> dict:
             "interval": interval if isinstance(interval, dict) else None}
 
 
-def related_claims(workspace: Workspace, source_path: str, limit: int = 60) -> dict:
+def related_claims(workspace: Workspace, source_path: str, limit: int = 60,
+                   aliases: AliasSnapshot | None = None) -> dict:
     """Return possible agreements/conflicts with paired provenance locators.
 
     The result contains no assertions of truth. Returned source paths and
@@ -118,12 +121,13 @@ def related_claims(workspace: Workspace, source_path: str, limit: int = 60) -> d
         return {"matches": [], "truncated": False}
     con = connect(workspace.db_path)
     try:
-        return indexed_related_claims(con, source_path, limit)
+        return indexed_related_claims(con, source_path, limit, aliases)
     finally:
         con.close()
 
 
-def indexed_related_claims(con, source_path: str, limit: int = 60) -> dict:
+def indexed_related_claims(con, source_path: str, limit: int = 60,
+                           aliases: AliasSnapshot | None = None) -> dict:
     """Bounded read-only relation query for both the library and editor.
 
     Exact matches retain their existing interpretation. Temporal overlaps are
@@ -196,7 +200,63 @@ def indexed_related_claims(con, source_path: str, limit: int = 60) -> dict:
             "other_interval": other_interval.to_dict(),
             "overlap_interval": overlap.to_dict(),
         })
+    alias_matches, alias_limited = indexed_alias_candidates(
+        con, source_path, limit, aliases)
+    matches.extend(alias_matches)
     matches.sort(key=lambda m: (m["path"].casefold(), m["other_locator"],
                                 m["source_locator"], m["kind"],
                                 m["source_fragment"], m["other_fragment"]))
-    return {"matches": matches[:limit], "truncated": len(matches) > limit}
+    return {"matches": matches[:limit], "truncated": len(matches) > limit,
+            "alias_search_limited": alias_limited}
+
+
+def indexed_alias_candidates(con, source_path: str, limit: int,
+                             aliases: AliasSnapshot | None) -> tuple[list[dict], bool]:
+    """Match exactly one explicitly approved symbol substitution via index.
+
+    No key is rewritten in SQLite, no aliases are inferred from note text,
+    and neither agreement nor conflict status is assigned to these hints.
+    """
+    if aliases is None or not aliases.by_symbol:
+        return [], aliases.limited if aliases is not None else False
+    source = con.execute(
+        "SELECT DISTINCT a.atom_key, a.locator, a.fragment_id, a.negated, a.predicate "
+        "FROM candidate_atoms a JOIN documents d ON d.path=a.doc AND d.status='PARSED' "
+        "WHERE a.doc=? ORDER BY a.locator, a.fragment_id LIMIT ?",
+        (source_path, MAX_SOURCE_ATOMS + 1),
+    ).fetchall()
+    limited = aliases.limited or len(source) > MAX_SOURCE_ATOMS
+    variants: dict[str, list] = {}
+    for atom_key, locator, fragment, negated, predicate in source[:MAX_SOURCE_ATOMS]:
+        for alternate, evidence in one_symbol_variants(atom_key, aliases):
+            if alternate not in variants and len(variants) >= MAX_VARIANTS:
+                # No arbitrary lexicographic subset masquerading as a complete
+                # entity comparison. Preserve exact/temporal results unchanged.
+                return [], True
+            variants.setdefault(alternate, []).append(
+                (atom_key, locator, fragment, negated, predicate, evidence))
+    if not variants:
+        return [], limited
+    placeholders = ",".join("?" for _ in variants)
+    other = con.execute(
+        "SELECT DISTINCT b.doc, b.locator, b.fragment_id, b.atom_key, b.negated "
+        "FROM candidate_atoms b JOIN documents d ON d.path=b.doc AND d.status='PARSED' "
+        "WHERE b.atom_key IN (" + placeholders + ") AND b.doc<>? "
+        "ORDER BY b.doc COLLATE NOCASE, b.locator, b.fragment_id, b.atom_key LIMIT ?",
+        (*variants, source_path, limit + 1),
+    ).fetchall()
+    if len(other) > limit:
+        limited = True
+    matches = []
+    for doc, locator, fragment, other_key, other_negated in other[:limit]:
+        for source_key, source_locator, source_fragment, source_negated, predicate, evidence in variants[other_key]:
+            matches.append({
+                "path": doc, "source_locator": source_locator,
+                "other_locator": locator, "source_fragment": source_fragment,
+                "other_fragment": fragment, "kind": "alias_candidate",
+                "predicate": predicate, "opposing_polarity": source_negated != other_negated,
+                "alias_evidence": evidence, **atom_qualifiers(source_key),
+            })
+            if len(matches) > limit:
+                return matches, True  # bounded even for many source fragments
+    return matches, limited

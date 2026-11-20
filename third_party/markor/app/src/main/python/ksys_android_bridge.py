@@ -10,7 +10,7 @@ import json
 import hashlib
 import sqlite3
 import tempfile
-from ksys.store.journal import Entry, entry_id
+from ksys.store.journal import Entry, entry_id, Journal
 from pathlib import Path
 
 from ksys import KS_VERSION
@@ -21,6 +21,7 @@ from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
 from ksys.importer.relations import related_claims, indexed_related_claims
+from ksys.importer.aliases import verified_owner_aliases
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.ir.nodes import node_from_dict
@@ -162,12 +163,19 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
     workspace = Path(workspace_dir)
     if not workspace.is_absolute():
         raise ValueError("Knowledge workspace must be absolute")
-    matches = related_claims(Workspace(workspace), relative_path)
+    ws = Workspace(workspace)
+    journal = Journal(ws.journal_path, SystemClock(),
+                      actor=ws.config().get("actor", "human:me"))
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    aliases = verified_owner_aliases(journal.entries(), journal.actor)
+    matches = related_claims(ws, relative_path, aliases=aliases)
     return json.dumps({
         "protocol": "dpksys.relations.v1",
         "path": relative_path,
         "matches": matches["matches"],
         "truncated": matches["truncated"],
+        "alias_search_limited": matches["alias_search_limited"],
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -694,6 +702,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         })
 
     relations, truncated, index_state = [], False, "absent"
+    alias_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
         try:
@@ -705,9 +714,11 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 index_state = "current"
                 # Shared with the library UI: exact conflicts stay separate
                 # from temporal-overlap hints, even in the editor dock.
-                result = indexed_related_claims(con, relative_path, 20)
+                result = indexed_related_claims(con, relative_path, 20,
+                    verified_owner_aliases(kb.journal.entries(), kb.journal.actor))
                 relations = result["matches"]
                 truncated = result["truncated"]
+                alias_limited = result["alias_search_limited"]
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -723,6 +734,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         "stale_provenance_count": stale_count,
         "historical_count": historical,
         "candidate_relations": relations, "relations_truncated": truncated,
+        "alias_search_limited": alias_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,
         "requires_human_review": True,

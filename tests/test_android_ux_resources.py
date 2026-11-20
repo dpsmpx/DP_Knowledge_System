@@ -31,6 +31,24 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_relation_overlap_interval"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
+    def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"alias_candidate".equals(kind)', hub)
+        self.assertIn('"alias_candidate".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("alias_evidence")', presentation)
+        self.assertIn('evidence.optJSONArray("journal_ids")', presentation)
+        self.assertIn('result.optBoolean("alias_search_limited")', hub)
+        self.assertIn('context.optBoolean("alias_search_limited")', editor)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_alias", "knowledge_relation_alias_source",
+                         "knowledge_relation_alias_decisions", "knowledge_alias_search_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_journal_export_prepares_before_saf_and_verifies_destination(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

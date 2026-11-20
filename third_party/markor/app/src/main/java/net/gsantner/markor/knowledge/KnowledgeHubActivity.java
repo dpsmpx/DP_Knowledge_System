@@ -1776,7 +1776,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 for (int i = 0; i < labels.length; i++) {
                     final JSONObject match = matches.getJSONObject(i);
                     final String kind = match.optString("kind");
-                    final int label = "temporal_overlap".equals(kind)
+                    final int label = "alias_candidate".equals(kind)
+                            ? R.string.knowledge_possible_alias
+                            : "temporal_overlap".equals(kind)
                             ? R.string.knowledge_possible_temporal_overlap
                             : "possible_conflict".equals(kind)
                                     ? R.string.knowledge_possible_conflict
@@ -1795,7 +1797,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                             .setTitle(getString(R.string.knowledge_semantic_relations)
                                     + (result.optBoolean("truncated")
-                                    ? " · " + getString(R.string.knowledge_semantic_limited) : ""))
+                                    ? " · " + getString(R.string.knowledge_semantic_limited) : "")
+                                    + (result.optBoolean("alias_search_limited")
+                                    ? " · " + getString(R.string.knowledge_alias_search_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
                     if (labels.length == 0) {
                         dialog.setMessage(R.string.knowledge_no_semantic_relations);

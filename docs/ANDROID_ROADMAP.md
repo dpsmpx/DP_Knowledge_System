@@ -364,6 +364,27 @@ not temporal truth inference, entity merging or historical version resolution.
 Android UI/SAF hardware QA remains separate; alias resolution and cross-source
 confidence reconciliation are still open Stage 18 work.
 
+**Stage 18 precision hardening (third slice, awaiting Android acceptance):**
+Read-only cross-note comparison can now return a distinct `alias_candidate`
+hint when **exactly one symbolic argument** differs under an alias already
+explicitly recorded by the configured owner in the integrity-verified local
+decision journal. The predicate, all other arguments, context, and exact
+validity interval must still match. Both source locators and the specific
+`J:` alias decision IDs appear in the result and editor/library UI; matching
+opposite polarities is **not** upgraded into a conflict or agreement verdict.
+This uses an indexed, bounded set of full-key alternatives at query time; no
+Markdown, indexed atom key, or journal record is modified. Competing rebindings,
+self-maps, chained/cyclic aliases, non-owner operations, invalid symbols and
+excessive numbers of mappings are ignored or explicitly marked limited.
+Unapproved textual similarity, wikilinks, and model-generated aliases do not
+create equivalence. This does **not** implement arbitrary entity disambiguation,
+an Android authoring/approval UI for new aliases, or evidence-based identity
+proof. The existing CLI `alias` journal operation is the only source of this
+slice's hints; full alias lifecycle, independent historical version resolution,
+confidence calibration and cross-source reconciliation remain on the roadmap.
+Synthetic Python and Android CI cover the code; real Android UI acceptance
+is still open. The separately deferred Stage 21 hardware debt is unchanged.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

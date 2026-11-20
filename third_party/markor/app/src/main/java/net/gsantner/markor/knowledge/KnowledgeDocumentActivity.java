@@ -930,7 +930,9 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             final JSONObject item = relations.optJSONObject(i);
             if (item == null) continue;
             final String kind = item.optString("kind");
-            final int label = "temporal_overlap".equals(kind)
+            final int label = "alias_candidate".equals(kind)
+                    ? R.string.knowledge_possible_alias
+                    : "temporal_overlap".equals(kind)
                     ? R.string.knowledge_possible_temporal_overlap
                     : "possible_conflict".equals(kind)
                             ? R.string.knowledge_editor_context_conflict
@@ -947,6 +949,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 getString(R.string.knowledge_editor_context_disclaimer));
         if (unsavedBuffer) appendContextWarning(warnings,
                 R.string.knowledge_editor_context_unsaved);
+        if (context.optBoolean("alias_search_limited")) appendContextWarning(warnings,
+                R.string.knowledge_alias_search_limited);
         final String indexState = context.optString("relation_index_state");
         if ("absent".equals(indexState)) {
             appendContextWarning(warnings, R.string.knowledge_editor_context_index_absent);
