@@ -251,7 +251,9 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
     The supplied selected notebook must match the import's recorded root;
     otherwise *every* status stays unchecked (never silently current). Cached
     fragment hashes allow only exact-text-repeat notices, never claims of
-    independent authorship, truth, or factual corroboration.
+    independent authorship, truth, or factual corroboration. Each copy family
+    marks *every* verified member, including the inspected source and the
+    first occurrence. Neither new file hashes nor inferred links are stored.
     """
     root = None
     if isinstance(vault_dir, str) and Path(vault_dir).is_absolute():
@@ -283,32 +285,70 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
         group["source_verification"] = source_state
         verified = {"same_polarity": 0, "opposite_polarity": 0, "mixed": 0}
         statuses = {"current": 0, "stale": 0, "unavailable": 0, "not_checked": 0}
-        excerpt_hashes = ({group["source_excerpt_hash"]}
-                          if source_state == "current" else set())
-        repeats = duplicates = 0
+        current = []
+        if source_state == "current":
+            current.append({"path": source_path, "source": True,
+                            "excerpt_hash": group.get("source_excerpt_hash"),
+                            "sha": source_sha})
         for evidence in group["other_sources"]:
             state, sha = check(evidence["path"])
             evidence["verification"] = state
             statuses[state] += 1
             if state != "current":
                 continue
+            current.append({"path": evidence["path"], "source": False,
+                            "item": evidence, "excerpt_hash": evidence.get("excerpt_hash"),
+                            "sha": sha})
             if source_state == "current":
                 kind = evidence["relation"]
                 if kind in verified:
                     verified[kind] += 1
-            # A matching excerpt is merely a possible copied text; it does
-            # not prove that different wording is independent testimony.
-            excerpt = evidence.get("excerpt_hash")
-            if isinstance(excerpt, str) and excerpt:
-                if excerpt in excerpt_hashes:
-                    evidence["repeated_excerpt"] = True
-                    repeats += 1
+
+        # Deterministic labels group all current files that match, rather than
+        # assigning a copy warning only to the second member of a pair. The
+        # representative fragment may be one of several parser readings; no
+        # independence estimate is justified from a single such hash.
+        def mark_families(hash_key: str, flag: str, label_key: str,
+                          source_flag: str, source_label: str, prefix: str):
+            buckets: dict[str, list[dict]] = {}
+            for record in current:
+                value = record[hash_key]
+                if isinstance(value, str) and value:
+                    buckets.setdefault(value, []).append(record)
+            repeating = [members for members in buckets.values() if len(members) > 1]
+            repeating.sort(key=lambda members: tuple(sorted(
+                (member["path"].casefold(), member["path"]) for member in members)))
+            families = []
+            for number, members in enumerate(repeating, 1):
+                label = f"{prefix}{number}"
+                paths = sorted((member["path"] for member in members),
+                               key=lambda name: (name.casefold(), name))
+                families.append({"label": label, "paths": paths})
+                for member in members:
+                    if member["source"]:
+                        group[source_flag] = True
+                        group[source_label] = label
+                    else:
+                        member["item"][flag] = True
+                        member["item"][label_key] = label
+            # All current nonmatching members explicitly remain unclustered.
+            for record in current:
+                if record["source"]:
+                    group.setdefault(source_flag, False)
                 else:
-                    evidence["repeated_excerpt"] = False
-                    excerpt_hashes.add(excerpt)
-            if source_state == "current" and sha == source_sha:
-                evidence["identical_document"] = True
-                duplicates += 1
+                    record["item"].setdefault(flag, False)
+            return families, sum(1 for record in current if not record["source"]
+                                 and record["item"][flag])
+
+        excerpt_families, repeats = mark_families(
+            "excerpt_hash", "repeated_excerpt", "excerpt_family",
+            "source_repeated_excerpt", "source_excerpt_family", "R")
+        document_families, duplicates = mark_families(
+            "sha", "identical_document", "document_family",
+            "source_identical_document", "source_document_family", "D")
+        checked_excerpts = {record["excerpt_hash"] for record in current
+                            if isinstance(record["excerpt_hash"], str)
+                            and record["excerpt_hash"]}
         group.update({
             "verified_same_polarity_files": verified["same_polarity"],
             "verified_opposite_polarity_files": verified["opposite_polarity"],
@@ -319,6 +359,13 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
             "unchecked_files": statuses["not_checked"],
             "repeated_excerpt_files": repeats,
             "identical_document_files": duplicates,
+            "current_excerpt_files": sum(1 for record in current
+                                         if isinstance(record["excerpt_hash"], str)
+                                         and record["excerpt_hash"]),
+            "distinct_representative_excerpts": len(checked_excerpts),
+            "excerpt_families": excerpt_families,
+            "document_families": document_families,
+            "independence_assessed": False,
         })
     return limited
 

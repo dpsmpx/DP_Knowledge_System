@@ -462,6 +462,30 @@ identity, versioned temporal reasoning, and calibrated source reliability.
 Device UI, lifecycle, 20k-note performance, TalkBack and SAF checks remain
 unverified; Stage 21 physical QA is still separately deferred.
 
+**Stage 18 source-copy families (seventh slice, awaiting device acceptance):**
+The same bounded live-provenance query now groups **all** current checked
+files by equal representative normalized fragment hash (`R1`, `R2`, …) and,
+separately, by identical full-document SHA-256 (`D1`, `D2`, …). Every member,
+including the originally inspected note and the first alphabetically ordered
+copy, receives its group label. Two other source files with identical content
+are identified even when the inspected file itself differs. Group membership
+and sorted member paths appear in the Hub and editor source disclosures;
+related files remain individually navigable. Repeat labels are deterministic
+per displayed claim and never reused as global source identities.
+
+The UI also distinguishes the **number of hash-current files with a selected
+fragment** from **the number of distinct representative normalized excerpts**.
+Neither measure is an estimate of independent witnesses, reliability or
+truth: it samples one indexed parser fragment per exact claim signature and
+cannot recognize paraphrased copying, common upstream citations, fabricated
+claims or independent people who happened to write the same words. Stale,
+missing, unchecked and over-budget notes cannot join a copy family. No
+new database schema, automatic source authority, human decision, journal
+operation, external service or Markdown write is involved. Calibrated and
+explicitly human-reviewed source lineage remains a separate open Stage 18
+task. Device UX, accessibility and the deferred Stage 21 physical QA remain
+unverified.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

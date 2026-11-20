@@ -166,6 +166,14 @@
     <string name="knowledge_evidence_identical_count">Identical full-document hashes among checked files: %1$d</string>
     <string name="knowledge_evidence_repeated_excerpt">Possible repeated excerpt</string>
     <string name="knowledge_evidence_identical_document">Identical file content</string>
+    <string name="knowledge_evidence_excerpt_diversity">Verified files with representative excerpt: %1$d · distinct normalized excerpts: %2$d. NOT an independent-source count.</string>
+    <string name="knowledge_evidence_family_counts">Possible shared-excerpt groups: %1$d · identical-full-file groups: %2$d</string>
+    <string name="knowledge_evidence_source_family">Inspected source is in possible repeat group %1$s</string>
+    <string name="knowledge_evidence_source_document_family">Inspected source has identical content in group %1$s</string>
+    <string name="knowledge_evidence_repeated_family">Possible repeated excerpt · %1$s</string>
+    <string name="knowledge_evidence_duplicate_family">Identical file content · %1$s</string>
+    <string name="knowledge_evidence_family_members">Possible excerpt repeat %1$s: %2$s</string>
+    <string name="knowledge_evidence_document_family_members">Identical file content %1$s: %2$s</string>
     <string name="knowledge_evidence_source_mixed">Parser candidates for this note contain both polarities; no clear stance can be assigned.</string>
     <string name="knowledge_evidence_limited">Bounded results, more files or claims may exist.</string>
     <string name="knowledge_evidence_disclaimer">Not a confidence or truth score. These are unapproved parser interpretations from a disposable index. Current hash only means the Markdown file matches the indexed snapshot, not that the claim is true. Unchecked or changed files are not live verified. A matching normalized excerpt is a possible copy, not proof of shared authorship; different excerpts are not necessarily independent. Context and exact validity period must match. Alias and temporal hints are excluded.</string>

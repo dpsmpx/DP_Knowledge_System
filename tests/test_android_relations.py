@@ -72,6 +72,15 @@ class RelationTests(unittest.TestCase):
         self.assertTrue(same["b.md"]["repeated_excerpt"])
         self.assertTrue(same["sub/e.markdown"]["repeated_excerpt"])
         self.assertFalse(same["c.md"]["repeated_excerpt"])
+        self.assertTrue(group["source_repeated_excerpt"])
+        self.assertEqual("R1", group["source_excerpt_family"])
+        self.assertEqual("R1", same["b.md"]["excerpt_family"])
+        self.assertEqual("R1", same["sub/e.markdown"]["excerpt_family"])
+        self.assertEqual([{"label": "R1", "paths": ["a.md", "b.md", "sub/e.markdown"]}],
+                         group["excerpt_families"])
+        self.assertEqual((4, 2), (group["current_excerpt_files"],
+                                  group["distinct_representative_excerpts"]))
+        self.assertFalse(group["independence_assessed"])
         self.assertEqual(2, group["repeated_excerpt_files"])
         self.assertEqual(0, group["identical_document_files"])
         self.assertEqual("not_assessed", group["confidence"])
@@ -99,6 +108,8 @@ class RelationTests(unittest.TestCase):
         self.assertEqual("current", statuses["sub/e.markdown"])
         self.assertFalse(any("repeated_excerpt" in item for item in group["other_sources"]
                              if item["verification"] != "current"))
+        self.assertEqual([{"label": "R1", "paths": ["a.md", "sub/e.markdown"]}],
+                         group["excerpt_families"])
 
         (self.vault / "a.md").write_text("# A changed\n", encoding="utf-8")
         stale = self._relations(verified=True)["evidence_groups"][0]
@@ -147,6 +158,43 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(1, group["identical_document_files"])
         self.assertTrue(next(s for s in group["other_sources"]
                              if s["path"] == "b.md")["identical_document"])
+        self.assertTrue(group["source_identical_document"])
+        self.assertEqual("D1", group["source_document_family"])
+        self.assertEqual([{"label": "D1", "paths": ["a.md", "b.md"]}],
+                         group["document_families"])
+
+    def test_full_file_copies_between_other_sources_are_symmetric(self):
+        self.notes["sub/e.markdown"] = self.notes["b.md"]
+        (self.vault / "sub/e.markdown").write_text(self.notes["b.md"], encoding="utf-8")
+        self._import()
+        group = self._relations(verified=True)["evidence_groups"][0]
+        self.assertFalse(group["source_identical_document"])
+        self.assertEqual(2, group["identical_document_files"])
+        self.assertEqual([{"label": "D1", "paths": ["b.md", "sub/e.markdown"]}],
+                         group["document_families"])
+        other = {source["path"]: source for source in group["other_sources"]}
+        self.assertTrue(other["b.md"]["identical_document"])
+        self.assertTrue(other["sub/e.markdown"]["identical_document"])
+        self.assertEqual("D1", other["b.md"]["document_family"])
+        self.assertEqual("D1", other["sub/e.markdown"]["document_family"])
+        self.assertFalse(other["c.md"]["identical_document"])
+
+    def test_separate_excerpts_form_separate_families_even_across_opposition(self):
+        self.notes["f.md"] = self.notes["c.md"]
+        (self.vault / "f.md").write_text(self.notes["f.md"], encoding="utf-8")
+        self._import()
+        group = self._relations(verified=True)["evidence_groups"][0]
+        self.assertEqual(2, len(group["excerpt_families"]))
+        self.assertEqual(4, group["repeated_excerpt_files"])
+        self.assertEqual(2, group["distinct_representative_excerpts"])
+        self.assertEqual([{"label": "R1", "paths": ["a.md", "b.md", "sub/e.markdown"]},
+                          {"label": "R2", "paths": ["c.md", "f.md"]}],
+                         group["excerpt_families"])
+        self.assertEqual((2, 2, 0), (
+            group["verified_same_polarity_files"],
+            group["verified_opposite_polarity_files"],
+            group["verified_mixed_polarity_files"]))
+        self.assertFalse(group["independence_assessed"])
 
     def test_mixed_polarity_in_one_file_never_double_votes(self):
         self._import()

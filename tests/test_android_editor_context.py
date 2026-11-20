@@ -137,12 +137,17 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual((1, 1, 0), (
             group["verified_same_polarity_files"],
             group["verified_opposite_polarity_files"], group["verified_mixed_polarity_files"]))
+        self.assertEqual(1, len(group["excerpt_families"]))
+        self.assertTrue(group["source_repeated_excerpt"])
+        self.assertEqual("R1", group["source_excerpt_family"])
+        self.assertFalse(group["independence_assessed"])
         (self.vault / "b.md").write_text("# B\nAnother claim.\n", encoding="utf-8")
         changed = self.context(verify_files=True)["evidence_groups"][0]
         self.assertEqual(1, changed["stale_files"])
         self.assertEqual((0, 1), (changed["verified_same_polarity_files"],
                                   changed["verified_opposite_polarity_files"]))
         self.assertEqual("current", changed["source_verification"])
+        self.assertEqual([], changed["excerpt_families"])
         unsaved = self.context(self.notes["a.md"] + "\nUnsaved", verify_files=True)
         self.assertEqual("stale", unsaved["relation_index_state"])
         self.assertEqual([], unsaved["evidence_groups"])

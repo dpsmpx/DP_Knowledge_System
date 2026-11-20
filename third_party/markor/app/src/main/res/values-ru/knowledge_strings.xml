@@ -166,6 +166,14 @@
     <string name="knowledge_evidence_identical_count">Полностью совпадающий хеш файла среди проверенных: %1$d</string>
     <string name="knowledge_evidence_repeated_excerpt">Возможный повтор фрагмента</string>
     <string name="knowledge_evidence_identical_document">Идентичное содержимое файла</string>
+    <string name="knowledge_evidence_excerpt_diversity">Проверенных файлов с выбранным фрагментом: %1$d · различных нормализованных фрагментов: %2$d. Это НЕ число независимых источников.</string>
+    <string name="knowledge_evidence_family_counts">Групп возможных повторов фрагмента: %1$d · групп идентичных файлов: %2$d</string>
+    <string name="knowledge_evidence_source_family">Просматриваемая заметка входит в группу возможных повторов %1$s</string>
+    <string name="knowledge_evidence_source_document_family">Просматриваемая заметка имеет идентичное содержимое в группе %1$s</string>
+    <string name="knowledge_evidence_repeated_family">Возможный повтор фрагмента · %1$s</string>
+    <string name="knowledge_evidence_duplicate_family">Идентичное содержимое файла · %1$s</string>
+    <string name="knowledge_evidence_family_members">Возможный повтор фрагмента %1$s: %2$s</string>
+    <string name="knowledge_evidence_document_family_members">Идентичное содержимое файла %1$s: %2$s</string>
     <string name="knowledge_evidence_source_mixed">Кандидаты анализа этой заметки содержат обе полярности; однозначной позиции нет.</string>
     <string name="knowledge_evidence_limited">Результаты ограничены: могут существовать другие файлы и утверждения.</string>
     <string name="knowledge_evidence_disclaimer">Это не вероятность истинности и не оценка достоверности. Показаны неподтверждённые интерпретации из производного индекса. Совпадение хеша означает лишь неизменность Markdown относительно индекса, но не истинность утверждения. Изменённые и непроверенные файлы не подтверждены текущей сверкой. Совпадение нормализованного фрагмента может означать копию, но не доказывает общее авторство; различающиеся фрагменты также не обязательно независимы. Контекст и период действия должны совпадать точно. Подсказки по псевдонимам и пересечению дат исключены.</string>

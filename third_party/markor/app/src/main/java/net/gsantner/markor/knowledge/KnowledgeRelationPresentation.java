@@ -33,6 +33,27 @@ final class KnowledgeRelationPresentation {
         text.append("\n").append(context.getString(R.string.knowledge_evidence_other_statuses,
                 group.optInt("current_files"), group.optInt("stale_files"),
                 group.optInt("unavailable_files"), group.optInt("unchecked_files")));
+        if (group.optInt("current_excerpt_files") > 0) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_excerpt_diversity,
+                    group.optInt("current_excerpt_files"),
+                    group.optInt("distinct_representative_excerpts")));
+        }
+        final JSONArray excerptFamilies = group.optJSONArray("excerpt_families");
+        final JSONArray documentFamilies = group.optJSONArray("document_families");
+        if ((excerptFamilies != null && excerptFamilies.length() > 0)
+                || (documentFamilies != null && documentFamilies.length() > 0)) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_family_counts,
+                    excerptFamilies == null ? 0 : excerptFamilies.length(),
+                    documentFamilies == null ? 0 : documentFamilies.length()));
+        }
+        if (group.optBoolean("source_repeated_excerpt")) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_source_family,
+                    group.optString("source_excerpt_family")));
+        }
+        if (group.optBoolean("source_identical_document")) {
+            text.append("\n").append(context.getString(R.string.knowledge_evidence_source_document_family,
+                    group.optString("source_document_family")));
+        }
         if (group.optInt("repeated_excerpt_files") > 0) {
             text.append("\n").append(context.getString(R.string.knowledge_evidence_repeated_count,
                     group.optInt("repeated_excerpt_files")));
@@ -55,7 +76,11 @@ final class KnowledgeRelationPresentation {
                 + (group.optBoolean("limited") ? "\n"
                 + context.getString(R.string.knowledge_evidence_limited) : "")
                 + "\n\n" + evidenceSummary(context, group)
-                + qualifiers(context, group);
+                + qualifiers(context, group)
+                + evidenceFamilyDetails(context, group.optJSONArray("excerpt_families"),
+                        R.string.knowledge_evidence_family_members)
+                + evidenceFamilyDetails(context, group.optJSONArray("document_families"),
+                        R.string.knowledge_evidence_document_family_members);
     }
 
     static String evidenceRelation(Context context, String relation) {
@@ -74,10 +99,31 @@ final class KnowledgeRelationPresentation {
                 .append("\n").append(evidenceVerification(context,
                         source.optString("verification", "not_checked")));
         if (source.optBoolean("repeated_excerpt")) {
-            text.append(" · ").append(context.getString(R.string.knowledge_evidence_repeated_excerpt));
+            text.append(" · ").append(context.getString(R.string.knowledge_evidence_repeated_family,
+                    source.optString("excerpt_family")));
         }
         if (source.optBoolean("identical_document")) {
-            text.append(" · ").append(context.getString(R.string.knowledge_evidence_identical_document));
+            text.append(" · ").append(context.getString(R.string.knowledge_evidence_duplicate_family,
+                    source.optString("document_family")));
+        }
+        return text.toString();
+    }
+
+    private static String evidenceFamilyDetails(Context context, JSONArray families, int label) {
+        if (families == null || families.length() == 0) return "";
+        final StringBuilder text = new StringBuilder();
+        for (int i = 0; i < families.length(); i++) {
+            final JSONObject family = families.optJSONObject(i);
+            if (family == null) continue;
+            final JSONArray paths = family.optJSONArray("paths");
+            if (paths == null || paths.length() < 2) continue;
+            final StringBuilder names = new StringBuilder();
+            for (int j = 0; j < paths.length(); j++) {
+                if (j > 0) names.append(", ");
+                names.append(paths.optString(j));
+            }
+            text.append("\n").append(context.getString(label,
+                    family.optString("label"), names.toString()));
         }
         return text.toString();
     }

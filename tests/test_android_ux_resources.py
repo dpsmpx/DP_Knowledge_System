@@ -33,6 +33,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('result.optBoolean("evidence_checks_limited")', hub)
         self.assertIn('source.optBoolean("repeated_excerpt")', presentation)
         self.assertIn('source.optBoolean("identical_document")', presentation)
+        self.assertIn('group.optJSONArray("excerpt_families")', presentation)
+        self.assertIn('group.optJSONArray("document_families")', presentation)
+        self.assertIn('source.optString("excerpt_family")', presentation)
+        self.assertIn('source.optString("document_family")', presentation)
+        self.assertIn("evidenceFamilyDetails(Context context, JSONArray families, int label)",
+                      presentation)
         self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
         self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
         self.assertIn("_verify_evidence_freshness(", bridge)
@@ -46,6 +52,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_evidence_not_checked", "knowledge_evidence_checked_counts",
                         "knowledge_evidence_other_statuses", "knowledge_evidence_checks_limited",
                         "knowledge_evidence_repeated_excerpt", "knowledge_evidence_identical_document"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_evidence_excerpt_diversity",
+                        "knowledge_evidence_family_counts", "knowledge_evidence_source_family",
+                        "knowledge_evidence_source_document_family",
+                        "knowledge_evidence_repeated_family", "knowledge_evidence_duplicate_family",
+                        "knowledge_evidence_family_members",
+                        "knowledge_evidence_document_family_members"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
