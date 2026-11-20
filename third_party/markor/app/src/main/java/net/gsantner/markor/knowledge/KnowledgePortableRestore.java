@@ -1,6 +1,7 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
+import android.content.Context;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -19,6 +20,31 @@ final class KnowledgePortableRestore {
     interface JournalCommit { void commit(String text) throws Exception; }
 
     private KnowledgePortableRestore() { }
+
+    static KnowledgePeerIdentity.Verification verifyPeer(final Context context,
+                                                         final File verifiedZip)
+            throws Exception {
+        try (ZipFile zip = new ZipFile(verifiedZip)) {
+            final ZipEntry proof = zip.getEntry(KnowledgePortableArchive.PEER);
+            if (proof == null) return null; // Older unsigned backups cannot sync.
+            final ZipEntry journal = zip.getEntry(KnowledgePortableArchive.JOURNAL);
+            if (journal == null) throw new IOException("Signed archive missing journal");
+            if (proof.getSize() < 1 || proof.getSize() > 4096)
+                throw new IOException("Invalid peer proof length");
+            final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (InputStream input = zip.getInputStream(proof)) {
+                final byte[] buf = new byte[4096];
+                int n;
+                while ((n = input.read(buf)) != -1) {
+                    if (bytes.size() + n > 4096)
+                        throw new IOException("Oversized peer proof");
+                    bytes.write(buf, 0, n);
+                }
+            }
+            return KnowledgePeerIdentity.verifyJournal(context, bytes.toByteArray(),
+                    zip.getInputStream(journal));
+        }
+    }
 
     static String journalText(final File verifiedZip) throws Exception {
         try (ZipFile zip = new ZipFile(verifiedZip)) {

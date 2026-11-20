@@ -31,6 +31,7 @@ final class KnowledgePortableArchive {
     static final String MANIFEST = "meta/manifest.dpks";
     static final String JOURNAL = "meta/journal.jsonl";
     static final String SETTINGS = "meta/settings.json";
+    static final String PEER = "meta/peer.json";
     static final int MAX_FILES = 300_000;
     static final long MAX_FILE_BYTES = 512L * 1024 * 1024;
     static final long MAX_ARCHIVE_BYTES = 12L * 1024 * 1024 * 1024;
@@ -69,6 +70,13 @@ final class KnowledgePortableArchive {
     static Summary write(final File selectedVault, final File journal,
                          final byte[] settingsJson, final OutputStream encryptedOutput,
                          final Cancellation cancelled) throws Exception {
+        return write(selectedVault, journal, settingsJson, null, encryptedOutput, cancelled);
+    }
+
+    static Summary write(final File selectedVault, final File journal,
+                         final byte[] settingsJson, final byte[] peerProof,
+                         final OutputStream encryptedOutput,
+                         final Cancellation cancelled) throws Exception {
         if (selectedVault == null || !selectedVault.isDirectory() || encryptedOutput == null) {
             throw new IOException("Selected source library unavailable");
         }
@@ -96,6 +104,13 @@ final class KnowledgePortableArchive {
             if (settingsJson != null) {
                 if (settingsJson.length > 256_000) throw new IOException("Settings exceed bound");
                 final Entry e = appendBytes(zip, SETTINGS, settingsJson);
+                inventory.add(e);
+                sum = plusBounded(sum, e.bytes);
+            }
+            if (peerProof != null) {
+                if (peerProof.length > 4096 || journal == null || !journal.isFile())
+                    throw new IOException("Invalid peer proof");
+                final Entry e = appendBytes(zip, PEER, peerProof);
                 inventory.add(e);
                 sum = plusBounded(sum, e.bytes);
             }
@@ -142,7 +157,7 @@ final class KnowledgePortableArchive {
                     actual.put(name, new Entry(name, manifest.length, hash(manifest)));
                     continue;
                 }
-                if (actual.size() >= MAX_FILES + 2) throw new IOException("Too many entries");
+                if (actual.size() >= MAX_FILES + 3) throw new IOException("Too many entries");
                 final MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 long size = 0;
                 try (InputStream in = zip.getInputStream(z)) {
@@ -261,7 +276,8 @@ final class KnowledgePortableArchive {
         if (name == null || name.length() > 1000 || name.isEmpty() || name.startsWith("/")
                 || name.contains("\\") || name.indexOf('\0') >= 0 || name.contains("//")) return false;
         if (!name.startsWith("notes/") && !JOURNAL.equals(name)
-                && !SETTINGS.equals(name) && !MANIFEST.equals(name)) return false;
+                && !SETTINGS.equals(name) && !PEER.equals(name)
+                && !MANIFEST.equals(name)) return false;
         for (final String component : name.split("/", -1)) {
             if (component.isEmpty() || ".".equals(component) || "..".equals(component)) return false;
         }

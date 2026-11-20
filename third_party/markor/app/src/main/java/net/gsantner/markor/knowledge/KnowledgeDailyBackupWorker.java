@@ -74,6 +74,8 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                 if (journal.isFile()) KnowledgePythonBridge.journalExportInfo(
                         context, new File(context.getNoBackupFilesDir(),
                                 "knowledge_workspace_v1").getAbsolutePath());
+                final byte[] peerProof = journal.isFile()
+                        ? KnowledgePeerIdentity.signJournal(journal) : null;
                 final String filename = "DPKS_daily_" + System.currentTimeMillis() + "_"
                         + Long.toHexString(new SecureRandom().nextLong()) + ".dpksb";
                 tmp = new File(directory, filename + ".partial");
@@ -90,6 +92,7 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                     created = KnowledgePortableArchive.write(notebook,
                             journal.isFile() ? journal : null,
                             settings.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                            peerProof,
                             KnowledgePortableCipher.encrypt(out, passphrase), cancelled);
                 }
                 try (FileInputStream ciphertext = new FileInputStream(tmp)) {
@@ -98,6 +101,7 @@ public final class KnowledgeDailyBackupWorker extends Worker {
                 }
                 final KnowledgePortableArchive.Summary checked =
                         KnowledgePortableArchive.verify(stage, cancelled);
+                if (peerProof != null) KnowledgePortableRestore.verifyPeer(context, stage);
                 if (created.sources != checked.sources || created.bytes != checked.bytes
                         || created.journal != checked.journal || !checked.settings)
                     throw new IllegalStateException("Backup verification mismatch");
@@ -171,6 +175,7 @@ public final class KnowledgeDailyBackupWorker extends Worker {
             }
             final KnowledgePortableArchive.Summary checked =
                     KnowledgePortableArchive.verify(stage, cancelled);
+            KnowledgePortableRestore.verifyPeer(context, stage);
             if (checked.sources != expected.sources || checked.bytes != expected.bytes
                     || checked.journal != expected.journal || !checked.settings)
                 throw new IllegalStateException("SAF backup verification mismatch");

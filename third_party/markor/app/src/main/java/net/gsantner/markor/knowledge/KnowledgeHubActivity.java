@@ -407,6 +407,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_portable_restore).setOnClickListener(view -> requestPortableRestore());
         findViewById(R.id.knowledge_portable_compare_peer).setOnClickListener(
                 view -> requestPortablePeerCompare());
+        findViewById(R.id.knowledge_sync_my_device).setOnClickListener(
+                view -> showOwnPeerIdentity());
+        findViewById(R.id.knowledge_sync_pair).setOnClickListener(
+                view -> promptPeerPair());
+        findViewById(R.id.knowledge_sync_trusted).setOnClickListener(
+                view -> showPairedPeers());
         findViewById(R.id.knowledge_daily_backup_toggle).setOnClickListener(
                 view -> toggleDailyBackup());
         findViewById(R.id.knowledge_daily_backup_now).setOnClickListener(view -> {
@@ -3918,6 +3924,100 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }).show();
     }
 
+    /** A fresh invitation is public information; the P-256 private key stays in Keystore. */
+    private void showOwnPeerIdentity() {
+        worker.submit(() -> {
+            try {
+                final String invitation = KnowledgePeerIdentity.currentInvitation(this);
+                final String fingerprint = KnowledgePeerIdentity.ownFingerprint();
+                final String code = KnowledgePeerIdentity.verificationCode(invitation);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final TextView details = new TextView(this);
+                    details.setText(getString(R.string.knowledge_sync_invite_details,
+                            fingerprint, code, invitation));
+                    details.setTextIsSelectable(true);
+                    final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                    details.setPadding(pad, pad, pad, pad);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_my_device)
+                            .setView(details)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_copy_invitation,
+                                    (dialog, which) -> {
+                                        final ClipboardManager clipboard = (ClipboardManager)
+                                                getSystemService(Context.CLIPBOARD_SERVICE);
+                                        if (clipboard != null) clipboard.setPrimaryClip(
+                                                ClipData.newPlainText("DPKS peer invitation", invitation));
+                                    }).show();
+                });
+            } catch (Exception failure) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_pair_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void promptPeerPair() {
+        final EditText invitation = new EditText(this);
+        invitation.setHint(R.string.knowledge_sync_enter_invitation);
+        invitation.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        invitation.setMinLines(2);
+        final EditText code = new EditText(this);
+        code.setHint(R.string.knowledge_sync_enter_code);
+        code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        code.setFilters(new InputFilter[]{new InputFilter.LengthFilter(12)});
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        fields.setPadding(pad, pad, pad, pad);
+        fields.addView(invitation);
+        fields.addView(code);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_pair)
+                .setMessage(R.string.knowledge_sync_pair_warning)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_pair, (dialog, which) -> {
+                    final String inviteValue = invitation.getText().toString().trim();
+                    final String codeValue = code.getText().toString().trim();
+                    worker.submit(() -> {
+                        final boolean paired;
+                        try {
+                            KnowledgePeerIdentity.pair(this, inviteValue, codeValue);
+                            paired = true;
+                        } catch (Exception invalid) {
+                            // Invalid pairing data never changes trust state.
+                            paired = false;
+                        }
+                        runOnUiThread(() -> Toast.makeText(this,
+                                paired ? R.string.knowledge_sync_paired
+                                        : R.string.knowledge_sync_pair_failed,
+                                Toast.LENGTH_LONG).show());
+                    });
+                }).show();
+    }
+
+    private void showPairedPeers() {
+        final String[] peers = KnowledgePeerIdentity.pairedFingerprints(this);
+        if (peers.length == 0) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_sync_trusted)
+                    .setMessage(R.string.knowledge_sync_no_peers)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_trusted)
+                .setItems(peers, (dialog, which) -> new MaterialAlertDialogBuilder(this)
+                        .setTitle(peers[which])
+                        .setMessage(R.string.knowledge_sync_revoke_warning)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.knowledge_sync_revoke,
+                                (confirm, selected) -> KnowledgePeerIdentity.revoke(this, peers[which]))
+                        .show()).show();
+    }
+
     private void promptPortablePeerPassword(final Uri source) {
         final EditText password = passwordInput(this);
         password.setHint(R.string.knowledge_backup_password);
@@ -3947,6 +4047,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 }
                 KnowledgePortableArchive.verify(staged,
                         () -> Thread.currentThread().isInterrupted());
+                final KnowledgePeerIdentity.Verification peer =
+                        KnowledgePortableRestore.verifyPeer(this, staged);
                 final String foreign = KnowledgePortableRestore.journalText(staged);
                 if (foreign == null) throw new IOException("Peer backup lacks a journal");
                 final JSONObject comparison = KnowledgePythonBridge.journalSyncPreview(
@@ -3960,7 +4062,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         comparison.optInt("common_events"),
                                         comparison.optInt("local_only"),
                                         comparison.optInt("remote_only"),
-                                        comparison.optInt("possible_target_conflicts")))
+                                        comparison.optInt("possible_target_conflicts"))
+                                        + "\n\n" + (peer == null
+                                        ? getString(R.string.knowledge_sync_peer_unsigned)
+                                        : getString(R.string.knowledge_sync_peer_signer,
+                                                peer.fingerprint.substring(0, 12),
+                                                peer.paired)))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
                     }
@@ -4002,11 +4109,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final File vault = notebook;
                 final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
                 if (journal.isFile()) KnowledgePythonBridge.journalExportInfo(this, workspacePath());
+                final byte[] peerProof = journal.isFile()
+                        ? KnowledgePeerIdentity.signJournal(journal) : null;
                 final KnowledgePortableArchive.Summary exported;
                 try (OutputStream saf = getContentResolver().openOutputStream(destination, "w")) {
                     if (saf == null) throw new IOException("Backup destination unavailable");
                     exported = KnowledgePortableArchive.write(vault,
                             journal.isFile() ? journal : null, portableSettingsSnapshot(),
+                            peerProof,
                             KnowledgePortableCipher.encrypt(saf, password),
                             () -> Thread.currentThread().isInterrupted());
                 }
@@ -4020,6 +4130,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final KnowledgePortableArchive.Summary verified =
                         KnowledgePortableArchive.verify(staging,
                                 () -> Thread.currentThread().isInterrupted());
+                if (peerProof != null) KnowledgePortableRestore.verifyPeer(this, staging);
                 if (exported.sources != verified.sources || exported.bytes != verified.bytes
                         || exported.journal != verified.journal || !verified.settings) {
                     throw new IOException("Written backup is incomplete");

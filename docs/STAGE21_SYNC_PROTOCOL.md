@@ -24,23 +24,36 @@ diverged/unrelated histories, count possible overlaps and show both heads.
 Unknown operation impacts prevent any declaration of safe commutativity.
 There is no automatic union or foreign event activation.
 
-## Proposed next protocol contract
+## Implemented signing and pairing slice (pending Android CI and device QA)
 
-1. Each device generates a random P-256 signing identity using Android
-   Keystore (no device hardware ID). Pairing carries the public key and
-   requires a human-verifiable fingerprint or QR transfer. A revoked peer
-   can no longer contribute events.
-2. The encrypted portable snapshot carries a signed commitment to the
-   exact journal bytes, a schema version and sender fingerprint. The
-   receiver checks the SHA chain, authenticated ciphertext, manifest,
-   signature and locally pinned peer key before accepting any branch.
-3. Foreign branches are stored append-only in app-private no-backup data
+- Each installation creates a Keystore-held P-256 ECDSA signing identity.
+  The private key is neither exported nor copied into snapshots.
+- **Manage → Device identity and pairing** displays a public invitation,
+  pinned fingerprint and a 12-hex-digit verification code. The receiver pastes
+  the invitation and independently reads the code from the sender's screen
+  (or an independently authenticated channel). Rotation and activity recreation
+  preserve a previously displayed invitation; code matches the invitation,
+  not an automatic proof of physical presence.
+- Trust is explicit in app-private preferences and can be revoked. Pairing is
+  independent of the archive password. Copying an invitation alone is not
+  sufficient to establish trust; confirmation on a trusted channel matters.
+- New portable and daily backups containing a journal also carry a signed
+  `meta/peer.json` commitment to the exact journal bytes, authenticated by
+  the ZIP manifest and by the Keystore signature. Archive comparison displays
+  whether that peer is currently paired. Unsigned legacy archives remain
+  read-only inspectable; they are not eligible for trusted synchronization.
+- Neither pairing nor comparing a signed snapshot imports, applies or merges
+  any remote decision. The signed snapshot is not yet an event-by-event DAG.
+
+## Proposed remaining protocol contract
+
+1. Foreign branches are stored append-only in app-private no-backup data
    with their signature and exchange commitment. A duplicate import is
    idempotent. Unknown schema revisions are quarantined, not applied.
-4. A signed, monotonic local branch plus causal links to acknowledged
+2. A signed, monotonic local branch plus causal links to acknowledged
    foreign heads forms a DAG. Compatible operation replay is deterministic.
    Incompatible decisions become **CONTESTED**, not facts.
-5. Conflict resolution is a **new local event referencing both heads**,
+3. Conflict resolution is a **new local event referencing both heads**,
    after explicit side-by-side review of source/provenance; old events stay
    immutable. Transport outages, replay, rollback, revoked peers and
    concurrent writes must be covered by synthetic acceptance tests.
@@ -49,8 +62,9 @@ Security note: a portable backup passphrase protects confidentiality, but
 does not by itself prove which device authored a branch. Signed identity and
 explicit local trust are separate requirements.
 
-## Not implemented in the first read-only slice
+## Not implemented yet
 
-Pairing QR/UI, identity signatures, durable inbox, causal replay, conflict
-resolution events, remote polling, event acknowledgements and device QA.
+QR scanning (manual invitation + separately verified code is available),
+durable inbox, causal replay, conflict resolution events, remote polling,
+event acknowledgements and real-device QA.
 Do not label Stage 21 sync as PASS until all these are integrated and tested.

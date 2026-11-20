@@ -103,3 +103,16 @@ foreign decisions without authenticated device pairing.
 
 The separate [sync protocol](STAGE21_SYNC_PROTOCOL.md) defines the remaining
 identity, causal inbox, conflict-resolution and transport contracts.
+
+## Fifth slice: signed device identity and explicit manual trust (pending CI)
+
+The user can exchange a public P-256 device invitation and confirm a separate
+verification code on the sender's display, inspect trusted fingerprints and
+revoke trust. The private identity stays in Android Keystore. Backups with a
+journal are signed with an ECDSA commitment to the journal's exact bytes;
+archive comparison verifies signature, journal and pairing status. The
+receiver must still validate the Python hash chain, and no foreign event is
+committed by this path. Existing unsigned archives can be compared read-only.
+
+This is **not** finished synchronization. Multi-device causal storage,
+reviewed conflict-resolution events and non-overwriting replay remain open.

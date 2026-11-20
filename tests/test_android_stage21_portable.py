@@ -47,6 +47,27 @@ class Stage21PortableWiring(unittest.TestCase):
         self.assertIn("_appSettings.setNotebookDirectory(restored)", hub)
         self.assertNotIn("new FileOutputStream(currentLibrary)", restore)
 
+    def test_pairing_is_manual_and_signed_snapshot_never_auto_merges(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        peer = (JAVAS / "KnowledgePeerIdentity.java").read_text()
+        archive = (JAVAS / "KnowledgePortableArchive.java").read_text()
+        backup = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
+        root = ET.parse(SOURCE / "res/layout/knowledge__activity.xml").getroot()
+        ids = [e.get(ANDROID + "id") for e in root.iter()]
+        for item in ("knowledge_sync_my_device", "knowledge_sync_pair",
+                     "knowledge_sync_trusted"):
+            self.assertEqual(ids.count("@+id/" + item), 1)
+            self.assertIn("R.id." + item, hub)
+        for required in ("AndroidKeyStore", "secp256r1", "SHA256withECDSA",
+                         "verificationCode(invitation)", "pairedFingerprints",
+                         "static void revoke", "static Verification verifyJournal"):
+            self.assertIn(required, peer)
+        self.assertIn("KnowledgePeerIdentity.signJournal(journal)", hub)
+        self.assertIn("KnowledgePeerIdentity.signJournal(journal)", backup)
+        self.assertIn("KnowledgePortableRestore.verifyPeer(this, staged)", hub)
+        self.assertIn('static final String PEER = "meta/peer.json"', archive)
+        self.assertNotIn("journalRestoreCommit(this, workspacePath(), foreign)", hub)
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()

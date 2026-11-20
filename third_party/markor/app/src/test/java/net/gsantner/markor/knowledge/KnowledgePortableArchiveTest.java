@@ -43,6 +43,38 @@ public class KnowledgePortableArchiveTest {
         }
     }
 
+    @Test public void optionalSignedPeerProofIsManifestBoundAndSurvivesRoundTrip()
+            throws Exception {
+        final File temp = Files.createTempDirectory("stage21-peer-").toFile();
+        final File vault = new File(temp, "vault");
+        assertTrue(vault.mkdir());
+        Files.write(new File(vault, "n.md").toPath(), "fixture".getBytes(StandardCharsets.UTF_8));
+        final File journal = new File(temp, "journal.jsonl");
+        Files.write(journal.toPath(), "synthetic chain fixture".getBytes(StandardCharsets.UTF_8));
+        final byte[] proof = "{\"schema\":\"synthetic-test-only\"}"
+                .getBytes(StandardCharsets.UTF_8);
+        final ByteArrayOutputStream zipped = new ByteArrayOutputStream();
+        KnowledgePortableArchive.write(vault, journal, null, proof, zipped, () -> false);
+        final File zip = new File(temp, "archive.zip");
+        Files.write(zip.toPath(), zipped.toByteArray());
+        assertTrue(KnowledgePortableArchive.verify(zip, () -> false).journal);
+        try (java.util.zip.ZipFile contents = new java.util.zip.ZipFile(zip)) {
+            assertNotNull(contents.getEntry(KnowledgePortableArchive.PEER));
+            try (java.io.InputStream input = contents.getInputStream(
+                    contents.getEntry(KnowledgePortableArchive.PEER))) {
+                final byte[] actual = new byte[proof.length];
+                assertEquals(proof.length, input.read(actual));
+                assertArrayEquals(proof, actual);
+                assertEquals(-1, input.read());
+            }
+        }
+        try {
+            KnowledgePortableArchive.write(vault, null, null, proof,
+                    new ByteArrayOutputStream(), () -> false);
+            fail("Detached peer proof accepted without journal");
+        } catch (java.io.IOException expected) { /* No detached signing metadata. */ }
+    }
+
     @Test public void wrongPasswordAndSingleByteTamperNeverYieldStaging() throws Exception {
         final File temp = Files.createTempDirectory("stage21-tamper-").toFile();
         final File vault = new File(temp, "vault");
