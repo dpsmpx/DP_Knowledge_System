@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 from ksys.core.clock import FixedClock
+from ksys.importer.vault import import_vault
+from ksys.source.markdown import parse_document
 from ksys.store.journal import Journal
 from ksys.store.journal_sync import validated_entries
 from ksys.store.journal_sync_manual import plan_foreign_metadata
@@ -15,7 +17,8 @@ from ksys.store.kb import KnowledgeBase
 from ksys.store.workspace import Workspace
 from third_party.markor.app.src.main.python.ksys_android_bridge import (
     journal_sync_metadata_preview, journal_sync_metadata_commit,
-    journal_sync_review_commit,
+    journal_sync_review_commit, journal_sync_context_source,
+    journal_sync_context_preview, journal_sync_context_commit,
 )
 
 
@@ -135,3 +138,77 @@ class ManualForeignMetadataTests(unittest.TestCase):
                 foreign, eid, sha = self.remote(op, data)
                 with self.assertRaises(ValueError):
                     self.preview(foreign, eid, sha)
+
+    def _context_note(self, markdown: str):
+        vault = self.root / "vault"
+        vault.mkdir(exist_ok=True)
+        path = vault / "source.md"
+        path.write_text(markdown, encoding="utf-8")
+        import_vault(self.workspace, vault, FixedClock(), only_extensions={".md"})
+        return "source.md", markdown, parse_document("source.md", markdown).fragments[0].id
+
+    def test_foreign_binding_requires_indexed_identical_local_fragment_and_two_approvals(self):
+        path, markdown, origin = self._context_note("Он использует Python.")
+        foreign, eid, sha = self.remote("bind", {
+            "origin": origin, "slot": "c0.0", "entity": "алекс"})
+        found = json.loads(journal_sync_context_source(
+            str(self.workspace.root), foreign, self.peer, eid, self.head, sha))
+        self.assertEqual(path, found["source_document"])
+        self.assertTrue(found["read_only"])
+        before = self.workspace.journal_path.read_bytes()
+        plan = json.loads(journal_sync_context_preview(
+            str(self.workspace.root), foreign, self.peer, eid, self.head, sha,
+            path, markdown))
+        self.assertEqual("bind", plan["operation"])
+        self.assertEqual(before, self.workspace.journal_path.read_bytes())
+        with self.assertRaises(ValueError):
+            journal_sync_context_commit(str(self.workspace.root), foreign, self.peer,
+                                        eid, self.head, sha, path, markdown + "X",
+                                        plan["plan_sha256"])
+        result = json.loads(journal_sync_context_commit(
+            str(self.workspace.root), foreign, self.peer, eid, self.head, sha,
+            path, markdown, plan["plan_sha256"]))
+        self.assertFalse(result["automatic_replay"])
+        kb = KnowledgeBase(self.workspace, FixedClock(), use_cache=False)
+        self.assertEqual("алекс", kb.state.binding(origin, "c0.0"))
+        self.assertEqual(eid, kb.journal.entries()[-1].data["foreign_causal"]["remote_event_id"])
+        self.assertNotEqual(eid, kb.journal.entries()[-1].id)
+        self.assertEqual([], kb.journal.verify())
+
+    def test_foreign_reading_must_exist_in_local_ambiguous_source(self):
+        path, markdown, origin = self._context_note("Алекс держит магазин.")
+        kb = KnowledgeBase(self.workspace, FixedClock(), use_cache=False)
+        readings = kb.preview(markdown, origin=origin, mode="import").options
+        self.assertGreater(len(readings), 1)
+        choice = readings[0]["reading_id"]
+        foreign, eid, sha = self.remote("resolve", {
+            "origin": origin, "reading_id": choice})
+        plan = json.loads(journal_sync_context_preview(
+            str(self.workspace.root), foreign, self.peer, eid, self.head, sha,
+            path, markdown))
+        self.assertEqual(choice, plan["data"]["reading_id"])
+        result = json.loads(journal_sync_context_commit(
+            str(self.workspace.root), foreign, self.peer, eid, self.head, sha,
+            path, markdown, plan["plan_sha256"]))
+        self.assertTrue(result["applied"])
+        self.assertEqual(choice, KnowledgeBase(self.workspace, FixedClock(),
+                          use_cache=False).state.reading_choice(origin))
+
+    def test_foreign_context_rejects_bad_origin_reading_and_local_override(self):
+        path, markdown, origin = self._context_note("Он использует Python.")
+        for data in ({"origin": "fake", "slot": "c0.0", "entity": "алекс"},
+                     {"origin": origin, "slot": "c0.9", "entity": "алекс"}):
+            foreign, eid, sha = self.remote("bind", data)
+            with self.assertRaises(ValueError):
+                journal_sync_context_preview(str(self.workspace.root), foreign,
+                                             self.peer, eid, self.head, sha, path, markdown)
+        Journal(self.workspace.journal_path, FixedClock()).append("bind", {
+            "origin": origin, "slot": "c0.0", "entity": "other"})
+        updated = self.workspace.journal_path.read_text(encoding="utf-8")
+        self.head = validated_entries(updated)[-1].id
+        self.local_text = updated
+        foreign, eid, sha = self.remote("bind", {
+            "origin": origin, "slot": "c0.0", "entity": "алекс"})
+        with self.assertRaises(ValueError):
+            journal_sync_context_preview(str(self.workspace.root), foreign,
+                                         self.peer, eid, self.head, sha, path, markdown)

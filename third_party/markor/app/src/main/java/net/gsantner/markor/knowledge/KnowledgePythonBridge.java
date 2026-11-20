@@ -292,6 +292,44 @@ public final class KnowledgePythonBridge {
                 fingerprint, eventId, localHead, remoteSha, planSha);
     }
 
+    public static JSONObject journalSyncContextSource(final Context context,
+                                                      final String workspace,
+                                                      final String foreignText,
+                                                      final String fingerprint,
+                                                      final String eventId,
+                                                      final String localHead,
+                                                      final String remoteSha) throws JSONException {
+        return invoke(context, "journal_sync_context_source", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha);
+    }
+
+    public static JSONObject journalSyncContextPreview(final Context context,
+                                                       final String workspace,
+                                                       final String foreignText,
+                                                       final String fingerprint,
+                                                       final String eventId,
+                                                       final String localHead,
+                                                       final String remoteSha,
+                                                       final String sourcePath,
+                                                       final String markdown) throws JSONException {
+        return invoke(context, "journal_sync_context_preview", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown);
+    }
+
+    public static JSONObject journalSyncContextCommit(final Context context,
+                                                      final String workspace,
+                                                      final String foreignText,
+                                                      final String fingerprint,
+                                                      final String eventId,
+                                                      final String localHead,
+                                                      final String remoteSha,
+                                                      final String sourcePath,
+                                                      final String markdown,
+                                                      final String planSha) throws JSONException {
+        return invoke(context, "journal_sync_context_commit", workspace, foreignText,
+                fingerprint, eventId, localHead, remoteSha, sourcePath, markdown, planSha);
+    }
+
     public static JSONObject journalSyncReviewCommit(final Context context, final String workspace,
                                                      final String foreignText,
                                                      final String fingerprint,
@@ -385,6 +423,9 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-event-detail.v1".equals(protocol)
                 || "dpksys.sync-metadata-preview.v1".equals(protocol)
                 || "dpksys.sync-metadata-commit.v1".equals(protocol)
+                || "dpksys.sync-context-source.v1".equals(protocol)
+                || "dpksys.sync-context-preview.v1".equals(protocol)
+                || "dpksys.sync-context-commit.v1".equals(protocol)
                 || "dpksys.sync-review-commit.v1".equals(protocol)
                 || "dpksys.sync-ack-commit.v1".equals(protocol)
                 || "dpksys.sync-adopt.v1".equals(protocol)

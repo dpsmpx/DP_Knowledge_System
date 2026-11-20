@@ -30,9 +30,11 @@ from ksys.store.workspace import Workspace
 from ksys.store.journal_sync import (preview_journals, review_foreign_events,
                                      inspect_foreign_event, prepare_peer_review,
                                      prepare_peer_adoption, prepare_peer_ack,
-                                     prepare_peer_retraction)
+                                     prepare_peer_retraction, verified_foreign_event)
 from ksys.store.journal_sync_manual import (plan_foreign_metadata,
-                                            commit_foreign_metadata)
+                                            commit_foreign_metadata,
+                                            MANUAL_CONTEXT_OPS, plan_foreign_context,
+                                            commit_foreign_context)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1748,6 +1750,84 @@ def journal_sync_metadata_commit(workspace_dir: str, foreign_text: str,
                                      event_id, expected_local_head or None,
                                      expected_remote_sha256, expected_plan_sha256)
     return json.dumps({"protocol": "dpksys.sync-metadata-commit.v1", **result},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _manual_context_event(kb: KnowledgeBase, local: str, foreign_text: str,
+                          fingerprint: str, event_id: str, local_head: str,
+                          remote_sha: str):
+    event, _ = verified_foreign_event(local, foreign_text, fingerprint,
+                                      event_id, local_head or None, remote_sha)
+    if event.op not in MANUAL_CONTEXT_OPS:
+        raise ValueError("Foreign operation has no local source binding workflow")
+    if kb.state.peer_reviews.get((fingerprint, remote_sha, event_id), (None,))[0] == "reject":
+        raise ValueError("Foreign context operation was explicitly rejected")
+    return event
+
+
+def journal_sync_context_source(workspace_dir: str, foreign_text: str,
+                                fingerprint: str, event_id: str, local_head: str,
+                                remote_sha: str) -> str:
+    """Identify an indexed LOCAL note, not a remote-supplied filesystem path."""
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    event = _manual_context_event(kb, local, foreign_text, fingerprint,
+                                   event_id, local_head, remote_sha)
+    origin = event.data.get("origin")
+    if not isinstance(origin, str) or not origin or len(origin) > 160:
+        raise ValueError("Foreign origin is invalid")
+    if not kb.ws.db_path.is_file():
+        raise ValueError("Index the selected local Markdown library first")
+    uri = kb.ws.db_path.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as con:
+        matches = con.execute("SELECT doc FROM fragments WHERE id=? LIMIT 2", (origin,)).fetchall()
+    if len(matches) != 1 or not isinstance(matches[0][0], str):
+        raise ValueError("Foreign origin is absent or ambiguous in the local index")
+    return json.dumps({"protocol": "dpksys.sync-context-source.v1",
+                       "operation": event.op, "source_document": matches[0][0],
+                       "requires_local_note": True, "read_only": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _context_plan(kb: KnowledgeBase, foreign_text: str, fingerprint: str,
+                  event_id: str, local_head: str, remote_sha: str,
+                  source_path: str, markdown: str, local: str) -> dict:
+    event = _manual_context_event(kb, local, foreign_text, fingerprint,
+                                   event_id, local_head, remote_sha)
+    fragment = _fragment(source_path, markdown, event.data["origin"])
+    return plan_foreign_context(kb, local, foreign_text, fingerprint,
+                                event_id, local_head or None, remote_sha,
+                                source_path, fragment, _source_hash(markdown))
+
+
+def journal_sync_context_preview(workspace_dir: str, foreign_text: str,
+                                 fingerprint: str, event_id: str, local_head: str,
+                                 remote_sha: str, source_path: str,
+                                 markdown: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    plan = _context_plan(kb, foreign_text, fingerprint, event_id, local_head,
+                          remote_sha, source_path, markdown, local)
+    return json.dumps({"protocol": "dpksys.sync-context-preview.v1", **plan},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_context_commit(workspace_dir: str, foreign_text: str,
+                                fingerprint: str, event_id: str, local_head: str,
+                                remote_sha: str, source_path: str,
+                                markdown: str, plan_sha: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    event = _manual_context_event(kb, local, foreign_text, fingerprint,
+                                   event_id, local_head, remote_sha)
+    fragment = _fragment(source_path, markdown, event.data["origin"])
+    result = commit_foreign_context(kb, local, foreign_text, fingerprint,
+                                     event_id, local_head or None, remote_sha,
+                                     source_path, fragment, _source_hash(markdown), plan_sha)
+    return json.dumps({"protocol": "dpksys.sync-context-commit.v1", **result},
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 

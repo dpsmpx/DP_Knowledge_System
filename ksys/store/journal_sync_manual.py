@@ -17,6 +17,7 @@ from ..validation.schema import Schema, TYPE_OK
 from .journal_sync import verified_foreign_event
 
 MANUAL_METADATA_OPS = frozenset({"alias", "label", "schema"})
+MANUAL_CONTEXT_OPS = frozenset({"bind", "resolve"})
 MAX_METADATA_BYTES = 4096
 
 
@@ -183,6 +184,98 @@ def commit_foreign_metadata(kb: Any, local_text: str, foreign_text: str,
     saved, _, _ = kb._commit(plan["operation"], data)
     if kb.journal.verify():
         raise ValueError("Local metadata translation did not verify")
+    return {"operation": plan["operation"], "journal_id": saved.id,
+            "journal_head": kb.journal.head, "foreign_causal": data["foreign_causal"],
+            "applied": True, "automatic_replay": False}
+
+
+def plan_foreign_context(kb: Any, local_text: str, foreign_text: str,
+                         fingerprint: str, event_id: str, local_head: str | None,
+                         remote_sha: str, source_path: str, fragment: Any,
+                         source_sha: str) -> dict:
+    """Translate a foreign reading/binding only for a matching LOCAL note span."""
+    event, comparison = verified_foreign_event(
+        local_text, foreign_text, fingerprint, event_id, local_head, remote_sha)
+    if event.op not in MANUAL_CONTEXT_OPS:
+        raise ValueError("Foreign operation requires a different review workflow")
+    if not isinstance(source_path, str) or not source_path or len(source_path) > 512:
+        raise ValueError("Missing indexed local note path")
+    if not isinstance(source_sha, str) or len(source_sha) != 64:
+        raise ValueError("Missing local note commitment")
+    data = event.data
+    if event.op == "bind":
+        if set(data) != {"origin", "slot", "entity"}:
+            raise ValueError("Unsupported foreign binding payload")
+        origin = _bounded_text(data["origin"], "origin", maximum=160)
+        slot = _bounded_text(data["slot"], "slot", maximum=64)
+        entity = _bounded_text(data["entity"], "entity", maximum=128)
+    else:
+        if set(data) != {"origin", "reading_id"}:
+            raise ValueError("Unsupported foreign reading payload")
+        origin = _bounded_text(data["origin"], "origin", maximum=160)
+        reading = _bounded_text(data["reading_id"], "reading", maximum=160)
+    if origin != fragment.id:
+        raise ValueError("Foreign origin is absent from the selected local note")
+    preview = kb.preview(fragment.plain, origin=fragment.id, mode="import")
+    if event.op == "bind":
+        if kb.state.binding(origin, slot) is not None:
+            raise ValueError("Local slot is already bound; cannot replace it")
+        if not any(any(item.get("slot") == slot for item in option["unresolved"])
+                   for option in preview.options):
+            raise ValueError("Foreign slot is not unresolved in the local source")
+        approved = {"origin": origin, "slot": slot, "entity": entity}
+        meaning = "Bind the exact unresolved local source slot to the named entity"
+    else:
+        if kb.state.reading_choice(origin) is not None:
+            raise ValueError("Local source already has a selected reading")
+        if len(preview.options) < 2:
+            raise ValueError("Local source has no ambiguous readings")
+        chosen = next((o for o in preview.options if o["reading_id"] == reading), None)
+        if chosen is None:
+            raise ValueError("Foreign reading is not available for the local source")
+        approved = {"origin": origin, "reading_id": reading}
+        meaning = str(chosen["paraphrase"])[:400]
+    canonical = canonical_json({"operation": event.op, "data": approved,
+                                "source_path": source_path, "source_sha": source_sha,
+                                "meaning": meaning, "event_id": event.id,
+                                "local_head": local_head, "remote_sha": remote_sha})
+    if len(canonical.encode("utf-8")) > MAX_METADATA_BYTES:
+        raise ValueError("Foreign context review exceeds size bound")
+    return {
+        "operation": event.op, "data": approved,
+        "source_document": source_path, "source_sha256": source_sha,
+        "source_excerpt": fragment.plain[:400], "local_meaning": meaning,
+        "plan_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "remote_event_id": event.id, "remote_sha256": comparison.remote_sha256,
+        "remote_head": comparison.remote_head, "local_head": local_head,
+        "common_head": comparison.common_head, "risk": "local_interpretation_change",
+        "requires_human_confirmation": True, "read_only": True,
+    }
+
+
+def commit_foreign_context(kb: Any, local_text: str, foreign_text: str,
+                           fingerprint: str, event_id: str, local_head: str | None,
+                           remote_sha: str, source_path: str, fragment: Any,
+                           source_sha: str, expected_plan_sha: str) -> dict:
+    if not isinstance(expected_plan_sha, str) or len(expected_plan_sha) != 64:
+        raise ValueError("Missing exact source preview commitment")
+    plan = plan_foreign_context(kb, local_text, foreign_text, fingerprint,
+                                event_id, local_head, remote_sha, source_path,
+                                fragment, source_sha)
+    if plan["plan_sha256"] != expected_plan_sha or kb.journal.head != local_head:
+        raise ValueError("Local context review went stale; preview again")
+    data = copy.deepcopy(plan["data"])
+    data["foreign_causal"] = {
+        "peer_fingerprint": fingerprint, "remote_sha256": remote_sha,
+        "remote_head": plan["remote_head"], "remote_event_id": event_id,
+        "common_head": plan["common_head"], "local_head_at_review": local_head,
+        "source_document": source_path, "source_sha256": source_sha,
+        "review_kind": "individual_manual_context_approval_v1",
+    }
+    kb.ws.init()
+    saved, _, _ = kb._commit(plan["operation"], data)
+    if kb.journal.verify():
+        raise ValueError("Local context translation did not verify")
     return {"operation": plan["operation"], "journal_id": saved.id,
             "journal_head": kb.journal.head, "foreign_causal": data["foreign_causal"],
             "applied": True, "automatic_replay": False}

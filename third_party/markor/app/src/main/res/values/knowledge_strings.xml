@@ -392,6 +392,12 @@
     <string name="knowledge_sync_metadata_confirm">You have reviewed the exact foreign operation and accept its semantic consequences. Create one new local journal event with causal references? This does not replay the remote journal, modify Markdown or approve any other event.</string>
     <string name="knowledge_sync_metadata_saved">Reviewed metadata change committed to the local journal.</string>
     <string name="knowledge_sync_metadata_failed">Metadata operation cannot be applied safely. Review its preconditions or keep/reject the foreign event; nothing was automatically merged.</string>
+    <string name="knowledge_sync_context_preview">Review foreign reading or reference</string>
+    <string name="knowledge_sync_context_warning">The foreign bind/resolve decision can change how your own Markdown is understood. It is only available when the matching local note was indexed and remains unchanged. Review the exact target, the local source text and its interpretation below. No other event is approved; the source Markdown stays untouched.</string>
+    <string name="knowledge_sync_context_apply">Approve local interpretation</string>
+    <string name="knowledge_sync_context_confirm">Confirm applying this exact foreign reading or pronoun binding to your verified local note? A NEW local journal event will retain the remote and source commitments. A changed note, journal head or peer branch will be rejected.</string>
+    <string name="knowledge_sync_context_saved">Verified interpretation recorded in your local journal.</string>
+    <string name="knowledge_sync_context_failed">Cannot safely apply this interpretation. Index your selected Markdown library first, verify the same note exists, or hold/reject the foreign event. No automatic replay occurred.</string>
     <string name="knowledge_portable_compare_sources">Compare original Markdown from encrypted snapshot</string>
     <string name="knowledge_portable_sources_warning">Manually choose a DPKS encrypted snapshot via Android files, Syncthing or SAF. Only original Markdown is listed. No existing note will be replaced, merged or automatically imported. Select a file to compare; saving a copy always requires its own confirmation.</string>
     <string name="knowledge_portable_sources_page">Markdown source files (%1$d of %2$d)</string>

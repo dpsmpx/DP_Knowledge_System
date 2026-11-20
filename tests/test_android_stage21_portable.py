@@ -219,6 +219,26 @@ class Stage21PortableWiring(unittest.TestCase):
             else:
                 self.assertIn(required, manual)
 
+    def test_foreign_context_requires_local_indexed_note_and_manual_approval(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        manual = (ROOT / "ksys/store/journal_sync_manual.py").read_text()
+        for name in ("previewPeerContext(", "confirmPeerContext(",
+                     "KnowledgePythonBridge.journalSyncContextSource(",
+                     "KnowledgePythonBridge.journalSyncContextPreview(",
+                     "KnowledgePythonBridge.journalSyncContextCommit(",
+                     "readSelectedNote(path)"):
+            self.assertIn(name, hub)
+        for op in ("source", "preview", "commit"):
+            self.assertIn("dpksys.sync-context-" + op + ".v1", bridge)
+            self.assertIn("def journal_sync_context_" + op + "(", python)
+        for name in ("verified_foreign_event(", "plan_foreign_context(",
+                     "commit_foreign_context(", "fragment.plain",
+                     '"foreign_causal"', '"automatic_replay": False'):
+            self.assertIn(name, manual)
+        self.assertIn("SELECT doc FROM fragments WHERE id=? LIMIT 2", python)
+
     def test_daily_schedule_seals_passphrase_and_never_uploads_vault(self):
         scheduler = (JAVAS / "KnowledgeDailyBackup.java").read_text()
         worker = (JAVAS / "KnowledgeDailyBackupWorker.java").read_text()
