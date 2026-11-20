@@ -552,6 +552,174 @@ def record_entity_unalias(workspace_dir: str, alias: str,
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# Source-lineage decisions are deliberately distinct from semantic aliases and
+# accepted claims. They assert only a person's *assessment of provenance*, not
+# independent corroboration, truth, or a shared factual identity.
+MAX_SOURCE_LINEAGE_OPERATIONS = 512
+
+
+def _source_lineage_state(kb) -> tuple[list[dict], list[dict]]:
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in kb.journal.entries()
+               if entry.actor == kb.journal.actor and
+               entry.op in ("source_link", "source_unlink")]
+    if len(entries) > MAX_SOURCE_LINEAGE_OPERATIONS:
+        raise ValueError("Source lineage journal limit reached")
+    active: dict[tuple[str, str], dict] = {}
+    recent = []
+    for entry in entries:
+        data = entry.data
+        paths = data.get("paths") if isinstance(data, dict) else None
+        if (not isinstance(paths, list) or len(paths) != 2 or
+                any(not isinstance(p, str) for p in paths) or
+                paths != sorted(paths, key=lambda p: (p.casefold(), p)) or
+                paths[0] == paths[1]):
+            continue
+        key = tuple(paths)
+        if entry.op == "source_link":
+            sources = data.get("sources")
+            if (key in active or not isinstance(sources, list) or len(sources) != 2 or
+                    [s.get("path") for s in sources if isinstance(s, dict)] != paths):
+                continue
+            active[key] = {"paths": paths, "sources": sources,
+                           "reason": data.get("reason", ""),
+                           "journal_id": entry.id, "time": entry.ts}
+        elif entry.op == "source_unlink":
+            previous = active.get(key)
+            if previous and previous["journal_id"] == data.get("decision_id"):
+                del active[key]
+        recent.append({"op": entry.op, "paths": paths, "journal_id": entry.id,
+                       "decision_id": data.get("decision_id"), "time": entry.ts})
+    return [active[key] for key in sorted(active)], list(reversed(recent[-40:]))
+
+
+def source_lineage_decisions(workspace_dir: str) -> str:
+    """Read human provenance annotations even with the notebook disconnected."""
+    kb = _kb(workspace_dir)
+    active, recent = _source_lineage_state(kb)
+    return json.dumps({"protocol": "dpksys.source_lineage.v1",
+                       "active": active, "recent": recent,
+                       "journal_head": kb.journal.head, "read_only": True,
+                       "does_not_establish_independence": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _lineage_paths(first_path: str, second_path: str) -> list[str]:
+    for path in (first_path, second_path):
+        if (not isinstance(path, str) or not path or path.startswith("/") or
+                "\\" in path or ".." in path.split("/") or
+                not path.lower().endswith((".md", ".markdown")) or len(path) > 500):
+            raise ValueError("Select two different relative Markdown files")
+    if first_path == second_path:
+        raise ValueError("Select two different relative Markdown files")
+    return sorted((first_path, second_path), key=lambda p: (p.casefold(), p))
+
+
+def _lineage_source(con, root: Path, path: str) -> dict:
+    row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                      (path,)).fetchone()
+    actual = _entity_live_hash(root, path)
+    if not row or not actual or actual != row[0]:
+        raise ValueError("Source missing or modified since indexing; analyze again")
+    excerpt = con.execute(
+        "SELECT locator,text FROM fragments WHERE doc=? "
+        "ORDER BY CASE WHEN unit_role='sentence' THEN 0 ELSE 1 END, ordinal LIMIT 1",
+        (path,)).fetchone()
+    if not excerpt:
+        raise ValueError("No indexed source excerpt to review")
+    return {"path": path, "source_sha256": actual,
+            "locator": excerpt[0], "excerpt": excerpt[1][:320]}
+
+
+def _source_lineage_preview(workspace_dir: str, vault_dir: str,
+                            first_path: str, second_path: str, reason: str) -> dict:
+    paths = _lineage_paths(first_path, second_path)
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain the common upstream source in 1..500 characters")
+    kb = _kb(workspace_dir)
+    active, _ = _source_lineage_state(kb)
+    if any(item["paths"] == paths for item in active):
+        raise ValueError("This source-pair decision is already active; revoke it first")
+    owner_ops = sum(entry.actor == kb.journal.actor and
+                    entry.op in ("source_link", "source_unlink")
+                    for entry in kb.journal.entries())
+    if owner_ops >= MAX_SOURCE_LINEAGE_OPERATIONS:
+        raise ValueError("Source lineage journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        sources = [_lineage_source(con, root, path) for path in paths]
+    finally:
+        con.close()
+    payload = {"paths": paths, "sources": sources, "reason": reason.strip(),
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.source_lineage.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "does_not_establish_independence": True,
+            "changes_original_markdown": False}
+
+
+def preview_source_link(workspace_dir: str, vault_dir: str,
+                        first_path: str, second_path: str, reason: str) -> str:
+    return json.dumps(_source_lineage_preview(workspace_dir, vault_dir,
+                      first_path, second_path, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_source_link(workspace_dir: str, vault_dir: str, first_path: str,
+                       second_path: str, reason: str, expected_token: str,
+                       expected_head: str | None) -> str:
+    preview = _source_lineage_preview(workspace_dir, vault_dir,
+                                     first_path, second_path, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source or journal changed after review")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("source_link", {key: preview[key]
+                    for key in ("paths", "sources", "reason")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", "decision": "source_link",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preview_source_unlink(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _source_lineage_state(kb)
+    selected = next((item for item in active if item["journal_id"] == decision_id), None)
+    if selected is None:
+        raise ValueError("No active owner source link for this decision")
+    payload = {"paths": selected["paths"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_unlink(workspace_dir: str, decision_id: str,
+                         expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_source_unlink(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source link or journal changed before revocation")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.journal.append("source_unlink",
+                              {"paths": preview["paths"], "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", "decision": "source_unlink",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _validate_note_input(relative_path: str, markdown: str) -> None:
     if not isinstance(relative_path, str) or not isinstance(markdown, str):
         raise ValueError("Expected relative path and Markdown content")

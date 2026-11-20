@@ -486,6 +486,21 @@ explicitly human-reviewed source lineage remains a separate open Stage 18
 task. Device UX, accessibility and the deferred Stage 21 physical QA remain
 unverified.
 
+**Stage 18 human-reviewed common-upstream lineage (eighth slice, in progress):**
+Two original Markdown files may be explicitly marked by the owner as sharing
+an upstream source, with a human-provided reason. Preview shows the exact
+current SHA-256 and a bounded original indexed excerpt with locator for each
+file, and is read-only; confirmation rechecks both SHA-256 values, notebook
+root, and hash-chained journal head before appending `source_link`. The
+independent `source_unlink` event references the exact original decision ID
+and can be confirmed after notebook disconnection. Both operations are
+**source lineage annotations only**: they never affect fact/claim authority,
+entity aliases, inferences, Markdown, or confidence/independence ratings.
+Only direct owner decisions are active; no transitive link inference, automatic
+matching, network metadata lookup or merging is performed. The owner journal
+operation list is bounded, and prior decisions remain in history on revocation.
+Android controls and physical acceptance are still being integrated.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

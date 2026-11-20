@@ -198,6 +198,10 @@ class KnowledgeState:
                     d.get("canonical"), d.get("decision_id"), e.actor):
                 self.aliases.pop(d["alias"], None)
                 self.alias_decisions.pop(d["alias"], None)
+        elif e.op in ("source_link", "source_unlink"):
+            # A separate human provenance annotation. Never change claims,
+            # alias identity, authoritative facts or inference engines.
+            pass
         elif e.op == "schema":
             self.schema_ext.append(d["schema"])
         self.head = e.id
