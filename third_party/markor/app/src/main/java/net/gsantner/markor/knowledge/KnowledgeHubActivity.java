@@ -322,6 +322,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         findViewById(R.id.knowledge_source_lineage).setOnClickListener(view ->
                 new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
                         decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_source_assessment).setOnClickListener(view ->
+                new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -1815,6 +1818,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         result.optBoolean("evidence_limited"),
                                         result.optBoolean("evidence_checks_limited"),
                                         result.optBoolean("source_lineage_limited"),
+                                        result.optBoolean("source_assessment_limited"),
                                         relativePath));
                     }
                     if (labels.length == 0) {
@@ -1845,6 +1849,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void showEvidenceGroups(final JSONArray groups, final boolean limited,
                                     final boolean checksLimited, final boolean lineageLimited,
+                                    final boolean assessmentLimited,
                                     final String sourcePath) {
         final String[] rows = new String[groups.length()];
         for (int i = 0; i < rows.length; i++) {
@@ -1855,7 +1860,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setTitle(getString(R.string.knowledge_evidence_title)
                         + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : "")
                         + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : "")
-                        + (lineageLimited ? " · " + getString(R.string.knowledge_source_lineage_evidence_limited) : ""))
+                        + (lineageLimited ? " · " + getString(R.string.knowledge_source_lineage_evidence_limited) : "")
+                        + (assessmentLimited ? " · " + getString(R.string.knowledge_source_assessment_evidence_limited) : ""))
                 .setItems(rows, (d, which) -> {
                     final JSONObject group = groups.optJSONObject(which);
                     if (group != null) showEvidenceDetail(group, sourcePath);

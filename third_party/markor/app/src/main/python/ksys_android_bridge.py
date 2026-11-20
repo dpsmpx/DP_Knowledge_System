@@ -176,6 +176,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
     matches = related_claims(ws, relative_path, aliases=aliases)
     evidence_checks_limited = True
     source_lineage_limited = False
+    source_assessment_limited = False
     if matches["evidence_groups"]:
         con = _decision_index(workspace)
         if con is not None:
@@ -183,6 +184,8 @@ def note_relationships(workspace_dir: str, relative_path: str,
                 evidence_checks_limited = _verify_evidence_freshness(
                     con, vault_dir, relative_path, matches["evidence_groups"])
                 source_lineage_limited = _annotate_reviewed_source_links(
+                    con, journal, relative_path, matches["evidence_groups"])
+                source_assessment_limited = _annotate_source_assessments(
                     con, journal, relative_path, matches["evidence_groups"])
             finally:
                 con.close()
@@ -196,6 +199,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
         "evidence_limited": matches["evidence_limited"],
         "evidence_checks_limited": evidence_checks_limited,
         "source_lineage_limited": source_lineage_limited,
+        "source_assessment_limited": source_assessment_limited,
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
@@ -818,6 +822,54 @@ def _source_assessments(journal: Journal) -> tuple[list[dict], list[dict]]:
         recent.append({"op": entry.op, "path": path, "journal_id": entry.id,
                        "decision_id": data.get("decision_id"), "time": entry.ts})
     return [active[path] for path in sorted(active)], list(reversed(recent[-40:]))
+
+
+def _annotate_source_assessments(con, journal: Journal,
+                                 source_path: str, groups: list[dict]) -> bool:
+    """Show owner labels beside evidence; never turn those labels into scoring.
+
+    'Current' requires a live file hash check and the exact indexed SHA saved
+    at approval. A changed, missing or unchecked note only has a historical
+    annotation. Revoked decisions are absent even though the journal retains
+    their history. This neither reads additional note bytes nor changes SQL.
+    """
+    try:
+        active, _ = _source_assessments(journal)
+    except ValueError:
+        return True
+    by_path = {decision["path"]: decision for decision in active}
+    indexed_shas: dict[str, str | None] = {}
+
+    def annotate(target: dict, path: str, verification: str) -> bool | None:
+        decision = by_path.get(path)
+        if decision is None:
+            return None
+        if path not in indexed_shas:
+            row = con.execute(
+                "SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                (path,)).fetchone()
+            indexed_shas[path] = row[0] if row else None
+        current = (verification == "current" and indexed_shas[path] is not None
+                   and indexed_shas[path] == decision["source"].get("source_sha256"))
+        target["source_assessment_kind"] = decision["kind"]
+        target["source_assessment_state"] = "current" if current else "historical"
+        target["source_assessment_id"] = decision["journal_id"]
+        target["source_assessment_reason"] = decision["reason"][:180]
+        return current
+
+    for group in groups:
+        annotate(group, source_path, group.get("source_verification", "not_checked"))
+        current_count = historical_count = 0
+        for evidence in group["other_sources"]:
+            current = annotate(evidence, evidence["path"],
+                               evidence.get("verification", "not_checked"))
+            if current is True:
+                current_count += 1
+            elif current is False:
+                historical_count += 1
+        group["source_assessment_current_files"] = current_count
+        group["source_assessment_historical_files"] = historical_count
+    return False
 
 
 def source_assessment_decisions(workspace_dir: str) -> str:
@@ -1448,6 +1500,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
     evidence_groups, evidence_limited = [], False
     evidence_checks_limited = True
     source_lineage_limited = False
+    source_assessment_limited = False
     alias_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
@@ -1471,6 +1524,8 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                     con, vault_dir, relative_path, evidence_groups)
                 source_lineage_limited = _annotate_reviewed_source_links(
                     con, kb.journal, relative_path, evidence_groups)
+                source_assessment_limited = _annotate_source_assessments(
+                    con, kb.journal, relative_path, evidence_groups)
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -1489,6 +1544,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
         "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
         "evidence_checks_limited": evidence_checks_limited,
         "source_lineage_limited": source_lineage_limited,
+        "source_assessment_limited": source_assessment_limited,
         "alias_search_limited": alias_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,

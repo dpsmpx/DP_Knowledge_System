@@ -552,6 +552,19 @@ withdrawal confirmation. These are UI/journal metadata only. No automatic
 epistemic authority, source ranking or hidden classification is introduced;
 physical Android, accessibility and SAF acceptance remain unverified.
 
+**Stage 18 descriptive source-type evidence (twelfth slice, awaiting Android QA):**
+The Hub's and saved-editor's unapproved cross-note evidence displays an
+owner-recorded source-type category, exact decision ID and shortened explanation
+beside the original and each other source. It distinguishes **current** (the
+live file hash matches the indexed document and the SHA saved at manual approval)
+from **historical/unverified** (changed, absent, unchecked or wrong notebook).
+Counts of classified *other files* are shown separately; they never add to
+independence, reliability or truth scores. A withdrawal removes the active
+annotation from future read-only evidence queries while the append-only journal
+still holds history. Journal bounds and unavailable verification have explicit
+UI warnings; no extra files are hashed, no source is auto-classified, and no
+Markdown/index/knowledge claims are modified by evidence browsing.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

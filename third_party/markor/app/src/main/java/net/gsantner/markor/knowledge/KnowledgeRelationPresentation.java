@@ -68,6 +68,18 @@ final class KnowledgeRelationPresentation {
                     group.optInt("reviewed_source_links_current"),
                     group.optInt("reviewed_source_links_historical")));
         }
+        if (group.has("source_assessment_kind")) {
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_source_assessment_evidence_inspected))
+                    .append(sourceAssessmentLabel(context, group));
+        }
+        if (group.optInt("source_assessment_current_files") > 0
+                || group.optInt("source_assessment_historical_files") > 0) {
+            text.append("\n").append(context.getString(
+                    R.string.knowledge_source_assessment_evidence_counts,
+                    group.optInt("source_assessment_current_files"),
+                    group.optInt("source_assessment_historical_files")));
+        }
         if ("mixed".equals(group.optString("source_polarity"))) {
             text.append("\n").append(context.getString(R.string.knowledge_evidence_source_mixed));
         }
@@ -120,7 +132,27 @@ final class KnowledgeRelationPresentation {
                     .append(" · J:").append(source.optString("reviewed_source_link_id"))
                     .append("\n").append(source.optString("reviewed_source_link_reason"));
         }
+        text.append(sourceAssessmentLabel(context, source));
         return text.toString();
+    }
+
+    /** Manual provenance label, not a reliability or independence estimate. */
+    private static String sourceAssessmentLabel(Context context, JSONObject source) {
+        final String state = source.optString("source_assessment_state");
+        if (!"current".equals(state) && !"historical".equals(state)) return "";
+        final int kind;
+        switch (source.optString("source_assessment_kind")) {
+            case "primary_record": kind = R.string.knowledge_source_assessment_primary; break;
+            case "secondary_summary": kind = R.string.knowledge_source_assessment_secondary; break;
+            case "republication": kind = R.string.knowledge_source_assessment_republication; break;
+            default: kind = R.string.knowledge_source_assessment_unclassified; break;
+        }
+        return "\n" + context.getString("current".equals(state)
+                        ? R.string.knowledge_source_assessment_evidence_current
+                        : R.string.knowledge_source_assessment_evidence_historical)
+                + " · " + context.getString(kind)
+                + " · J:" + source.optString("source_assessment_id")
+                + "\n" + source.optString("source_assessment_reason");
     }
 
     private static String evidenceFamilyDetails(Context context, JSONArray families, int label) {

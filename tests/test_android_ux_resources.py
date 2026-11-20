@@ -142,6 +142,29 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_source_assessment_error_detail"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
 
+    def test_manual_source_type_is_disclosed_beside_evidence(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("sourceAssessmentLabel(context, group)", presentation)
+        self.assertIn("sourceAssessmentLabel(context, source)", presentation)
+        self.assertIn("source_assessment_current_files", presentation)
+        self.assertIn("source_assessment_historical_files", presentation)
+        self.assertIn('"source_assessment_limited"', hub)
+        self.assertIn('"source_assessment_limited"', editor)
+        self.assertIn("_annotate_source_assessments(", bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_evidence_inspected",
+                        "knowledge_source_assessment_evidence_counts",
+                        "knowledge_source_assessment_evidence_current",
+                        "knowledge_source_assessment_evidence_historical",
+                        "knowledge_source_assessment_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         button = next(e for e in layout.iter() if e.get(ANDROID + "id")

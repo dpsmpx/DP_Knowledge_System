@@ -103,6 +103,11 @@
     <string name="knowledge_source_lineage_evidence_current">Human-reviewed upstream link; both file hashes still match the decision</string>
     <string name="knowledge_source_lineage_evidence_historical">Historical human upstream link; source changed or was not verified</string>
     <string name="knowledge_source_lineage_evidence_limited">Source-link journal coverage is unavailable or over its safety cap.</string>
+    <string name="knowledge_source_assessment_evidence_inspected">Owner's source-type note for the inspected file (not a reliability score):</string>
+    <string name="knowledge_source_assessment_evidence_counts">Other evidence files with manual source-type notes: %1$d current · %2$d historical/unverified. No truth or independence score.</string>
+    <string name="knowledge_source_assessment_evidence_current">Current manual source-type note; original hash matches approval</string>
+    <string name="knowledge_source_assessment_evidence_historical">Historical manual source-type note; original changed or not checked</string>
+    <string name="knowledge_source_assessment_evidence_limited">Manual source-type journal coverage is unavailable or over its safety cap.</string>
     <string name="knowledge_decisions_search">Search decisions and sources</string>
     <string name="knowledge_decisions_loading">Loading local decisions…</string>
     <string name="knowledge_decisions_empty">No entries in this category. Analyze the library to extract suggestions, or choose another category.</string>

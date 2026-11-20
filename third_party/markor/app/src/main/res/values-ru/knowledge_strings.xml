@@ -103,6 +103,11 @@
     <string name="knowledge_source_lineage_evidence_current">Связь источников подтверждена человеком; оба хеша совпадают с моментом решения</string>
     <string name="knowledge_source_lineage_evidence_historical">Историческое решение человека; источник изменился или не проверен</string>
     <string name="knowledge_source_lineage_evidence_limited">Проверка журнала связей источников недоступна или достигнут предел безопасности.</string>
+    <string name="knowledge_source_assessment_evidence_inspected">Ручная пометка типа просматриваемого источника (не оценка надёжности):</string>
+    <string name="knowledge_source_assessment_evidence_counts">Другие свидетельства с ручным типом источника: актуальны %1$d · исторические/не проверены %2$d. Не оценка истины или независимости.</string>
+    <string name="knowledge_source_assessment_evidence_current">Актуальная ручная пометка типа; хеш файла совпадает с решением</string>
+    <string name="knowledge_source_assessment_evidence_historical">Историческая пометка типа; файл изменился или не проверен</string>
+    <string name="knowledge_source_assessment_evidence_limited">Проверка ручных типов источников недоступна или достигнут предел безопасности.</string>
     <string name="knowledge_decisions_search">Поиск решений и источников</string>
     <string name="knowledge_decisions_loading">Загрузка локальных решений…</string>
     <string name="knowledge_decisions_empty">В этой категории нет записей. Запустите анализ библиотеки или выберите другую категорию.</string>

@@ -966,6 +966,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
             appendContextWarning(warnings, R.string.knowledge_evidence_checks_limited);
         if (evidenceCount > 0 && context.optBoolean("source_lineage_limited"))
             appendContextWarning(warnings, R.string.knowledge_source_lineage_evidence_limited);
+        if (evidenceCount > 0 && context.optBoolean("source_assessment_limited"))
+            appendContextWarning(warnings, R.string.knowledge_source_assessment_evidence_limited);
         final String indexState = context.optString("relation_index_state");
         if ("absent".equals(indexState)) {
             appendContextWarning(warnings, R.string.knowledge_editor_context_index_absent);
