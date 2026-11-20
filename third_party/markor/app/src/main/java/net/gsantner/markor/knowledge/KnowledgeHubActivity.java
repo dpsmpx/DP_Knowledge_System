@@ -1879,21 +1879,59 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         chooseLineagePartner(group, sourcePath))
                 .setPositiveButton(R.string.knowledge_evidence_show_sources, (d, w) -> {
                     final JSONArray sources = group.optJSONArray("other_sources");
-                    if (sources == null || sources.length() == 0) return;
-                    final String[] rows = new String[sources.length()];
-                    for (int i = 0; i < rows.length; i++) {
+                    final int count = sources == null ? 0 : sources.length();
+                    final String[] rows = new String[count + 1];
+                    rows[0] = getString(R.string.knowledge_source_assessment_evidence_inspected)
+                            + "\n" + sourcePath;
+                    for (int i = 0; i < count; i++) {
                         final JSONObject source = sources.optJSONObject(i);
-                        if (source != null) rows[i] =
+                        rows[i + 1] = source == null ? "" :
                                 KnowledgeRelationPresentation.evidenceSourceLabel(this, source);
                     }
                     new AlertDialog.Builder(this)
                             .setTitle(R.string.knowledge_evidence_title)
                             .setItems(rows, (d2, selected) -> {
-                                final JSONObject source = sources.optJSONObject(selected);
-                                if (source != null) openIndexedNote(source.optString("path"));
+                                if (selected == 0) {
+                                    evidenceSourceActions(sourcePath,
+                                            group.optString("source_verification"),
+                                            group.has("source_assessment_kind"));
+                                } else {
+                                    final JSONObject source = sources.optJSONObject(selected - 1);
+                                    if (source != null) evidenceSourceActions(
+                                            source.optString("path"),
+                                            source.optString("verification"),
+                                            source.has("source_assessment_kind"));
+                                }
                             })
                             .setNegativeButton(android.R.string.cancel, null).show();
                 }).show();
+    }
+
+    private void evidenceSourceActions(final String path, final String verification,
+                                       final boolean alreadyReviewed) {
+        if (!"current".equals(verification)) {
+            // The owner may inspect a stale file, but cannot prefill it as
+            // hash-verified evidence until a fresh notebook analysis.
+            openIndexedNote(path);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_evidence_title)
+                .setItems(new String[]{getString(R.string.knowledge_entity_view_source),
+                        getString(alreadyReviewed
+                                ? R.string.knowledge_source_assessment_history
+                                : R.string.knowledge_source_assessment_new)}, (d, index) -> {
+                    if (index == 0) openIndexedNote(path);
+                    else {
+                        final KnowledgeSourceAssessmentDialog dialog =
+                                new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
+                                        decisionWorker, this::openIndexedNote,
+                                        () -> loadDecisionPage(0));
+                        if (alreadyReviewed) dialog.show();
+                        else dialog.showNew(path);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void chooseLineagePartner(final JSONObject group, final String sourcePath) {

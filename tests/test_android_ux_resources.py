@@ -22,7 +22,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
         self.assertIn('result.optJSONArray("evidence_groups")', hub)
         self.assertIn("showEvidenceDetail(group, sourcePath)", hub)
-        self.assertIn("openIndexedNote(source.optString(\"path\"))", hub)
+        self.assertIn('source.optString("path"),', hub)
+        self.assertIn("if (index == 0) openIndexedNote(path)", hub)
         self.assertIn('context.optJSONArray("evidence_groups")', editor)
         self.assertIn('context.optBoolean("evidence_limited")', editor)
         self.assertIn("showContextEvidence(group, selectedVault)", editor)
@@ -164,6 +165,22 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_source_assessment_evidence_historical",
                         "knowledge_source_assessment_evidence_limited"):
                 self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_source_type_review_prefills_only_current_evidence_path(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("evidenceSourceActions(sourcePath", hub)
+        self.assertIn("sources.optJSONObject(selected - 1)", hub)
+        self.assertIn('if (!"current".equals(verification))', hub)
+        self.assertIn("if (alreadyReviewed) dialog.show()", hub)
+        self.assertIn("else dialog.showNew(path)", hub)
+        self.assertIn("void showNew(final String initialPath)", dialog)
+        self.assertIn("chooseKind(initialPath)", dialog)
+        self.assertIn("path.setText(initialPath)", dialog)
+        # UI prefill is not an approval bypass: its preview invokes the
+        # existing live source/hash and journal verification bridge.
+        self.assertIn("KnowledgePythonBridge.previewSourceAssessment", dialog)
 
     def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()

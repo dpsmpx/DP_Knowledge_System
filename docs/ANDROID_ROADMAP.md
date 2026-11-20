@@ -565,6 +565,16 @@ still holds history. Journal bounds and unavailable verification have explicit
 UI warnings; no extra files are hashed, no source is auto-classified, and no
 Markdown/index/knowledge claims are modified by evidence browsing.
 
+**Stage 18 source-type review navigation (thirteenth slice, awaiting Android QA):**
+The evidence file picker lists the inspected note as well as other evidence
+sources. Selecting a hash-current note offers **open original** or **manual
+source-type review**, with the exact relative path prefilled after choosing a
+descriptive type. An existing manual type instead offers its decision/history
+screen; stale, missing and unchecked evidence is only offered for original
+inspection. Prefill never counts as confirmation: the existing backend still
+checks the selected root, live SHA, fragment, preview token and journal head.
+This adds no automatic classification or source authority.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

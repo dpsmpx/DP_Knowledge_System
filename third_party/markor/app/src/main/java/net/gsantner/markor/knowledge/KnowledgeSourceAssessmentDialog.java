@@ -99,7 +99,16 @@ final class KnowledgeSourceAssessmentDialog {
                 .setNegativeButton(android.R.string.cancel, null).show();
     }
 
+    /** The path is only a convenience; preview still verifies the original. */
+    void showNew(final String initialPath) {
+        chooseKind(initialPath);
+    }
+
     private void chooseKind() {
+        chooseKind("");
+    }
+
+    private void chooseKind(final String initialPath) {
         if (notebook == null) {
             Toast.makeText(activity, R.string.knowledge_no_folder, Toast.LENGTH_LONG).show();
             return;
@@ -108,11 +117,11 @@ final class KnowledgeSourceAssessmentDialog {
         for (int i = 0; i < KINDS.length; i++) labels[i] = s(KIND_LABELS[i]);
         new MaterialAlertDialogBuilder(activity)
                 .setTitle(R.string.knowledge_source_assessment_choose_kind)
-                .setItems(labels, (d, which) -> showFields(KINDS[which]))
+                .setItems(labels, (d, which) -> showFields(KINDS[which], initialPath))
                 .setNegativeButton(android.R.string.cancel, null).show();
     }
 
-    private void showFields(final String kind) {
+    private void showFields(final String kind, final String initialPath) {
         final LinearLayout fields = new LinearLayout(activity);
         fields.setOrientation(LinearLayout.VERTICAL);
         final int pad = (int) (20 * activity.getResources().getDisplayMetrics().density);
@@ -120,6 +129,7 @@ final class KnowledgeSourceAssessmentDialog {
         final EditText path = new EditText(activity);
         path.setSingleLine(true);
         path.setHint(R.string.knowledge_source_assessment_path);
+        path.setText(initialPath);
         fields.addView(path);
         final EditText reason = new EditText(activity);
         reason.setSingleLine(false);
