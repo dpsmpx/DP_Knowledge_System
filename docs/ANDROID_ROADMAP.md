@@ -745,6 +745,28 @@ with 62 mismatched indexed intervals checks that invalid hints stay hidden
 while both surfaces explicitly signal incomplete coverage. No extra SQLite
 scan beyond the existing cap, source edit or human-journal mutation occurs.
 
+**Stage 18 manual version interpretation (twenty-sixth slice, code complete;
+Android acceptance pending):** An owner can now review a particular dated
+cross-note relation (`temporal_overlap`, `temporal_separation`, or
+`temporal_uncertainty`) by reading both original source paths, exact indexed
+fragments and live SHA-256 values. One of four *descriptive* interpretations
+can be recorded with a mandatory explanation: unresolved, possibly changed,
+not comparable, or compatible readings. A read-only preview token binds the
+pair's exact fragment/locator/date/context/polarity selection to both current
+Markdown hashes and the journal head. Confirmation fully rechecks these
+inputs and appends an owner-only `version_review` event. `version_unreview`
+references the exact original decision, works offline and preserves history.
+The Hub and editor show active interpretation, explanation and independent
+`current`/`historical` provenance status, never a truth verdict; a separate
+Decisions action lists active reviews and permits offline withdrawal. Pairs
+are indexed by a symmetric key so a decision follows reverse navigation,
+but neither AI interpretation, paraphrase equivalence nor transitive evidence
+merging is inferred. Markdown, parsed facts and accepted decisions are
+unchanged. This slice also repairs the Java/Python protocol allowlist for
+existing editor/entity/source-review APIs and adds a cross-language regression
+that enumerates **all** emitted Python protocols. See
+`docs/STAGE18_COMPLETION_GATE.md` for the precise sign-off boundary.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

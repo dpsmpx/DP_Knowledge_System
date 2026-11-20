@@ -262,6 +262,17 @@
                 android:minHeight="48dp"
                 android:text="@string/knowledge_source_assessment_title" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/knowledge_version_reviews"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="8dp"
+                android:minHeight="48dp"
+                android:text="@string/knowledge_version_history" />
+
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

@@ -367,6 +367,22 @@ final class KnowledgeRelationPresentation {
                 text.append("\n").append(context.getString(R.string.knowledge_modal_opposing_info));
             }
         }
+        if (relation.has("version_review_id")) {
+            final String choice = relation.optString("version_review_choice");
+            final int description;
+            switch (choice) {
+                case "possibly_changed": description = R.string.knowledge_version_possible_change; break;
+                case "different_contexts": description = R.string.knowledge_version_different_contexts; break;
+                case "consistent_readings": description = R.string.knowledge_version_consistent; break;
+                default: description = R.string.knowledge_version_unresolved;
+            }
+            text.append("\n").append(context.getString(R.string.knowledge_version_annotation,
+                    context.getString(description), context.getString(
+                            "current".equals(relation.optString("version_review_state"))
+                                    ? R.string.knowledge_version_current
+                                    : R.string.knowledge_version_historical)));
+            text.append("\n").append(relation.optString("version_review_reason"));
+        }
         return text.toString();
     }
 

@@ -975,6 +975,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 R.string.knowledge_temporal_checks_limited);
         if (context.optBoolean("relation_checks_limited")) appendContextWarning(warnings,
                 R.string.knowledge_relation_checks_limited);
+        if (context.optBoolean("version_review_limited")) appendContextWarning(warnings,
+                R.string.knowledge_version_limited);
         if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
                 R.string.knowledge_evidence_limited);
         if (evidenceCount > 0 && context.optBoolean("evidence_checks_limited"))
@@ -1541,6 +1543,15 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 view -> setDockExpanded(false));
         addContextRow(body, getString(R.string.knowledge_relation_open_other),
                 view -> openRelatedNote(relation.optString("path"), selectedVault));
+        final String kind = relation.optString("kind");
+        if ("temporal_overlap".equals(kind) || "temporal_separation".equals(kind)
+                || "temporal_uncertainty".equals(kind)) {
+            addContextRow(body, getString(R.string.knowledge_version_action), view ->
+                    new KnowledgeVersionReviewDialog(this,
+                            new File(getNoBackupFilesDir(), "knowledge_workspace_v1")
+                                    .getAbsolutePath(), selectedVault, knowledgeWorker,
+                            sourcePath, relation, this::refreshKnowledgeContext).show());
+        }
         showDockPage(getString(title), body);
     }
 
