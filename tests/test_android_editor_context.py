@@ -215,6 +215,8 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual(["b.md"], [r["path"] for r in context["candidate_relations"]])
         item = context["candidate_relations"][0]
         self.assertEqual("temporal_overlap", item["kind"])
+        self.assertTrue(item["source_excerpt_available"])
+        self.assertTrue(item["other_excerpt_available"])
         self.assertEqual({"from": "2024-01-01", "to": "2024-01-01"},
                          item["overlap_interval"])
         self.assertTrue(context["relations_are_unapproved"])
@@ -243,6 +245,8 @@ class EditorContextTests(unittest.TestCase):
         result = [r for r in context["candidate_relations"] if r["path"] == "b.md"]
         self.assertEqual(1, len(result))
         self.assertEqual("temporal_separation", result[0]["kind"])
+        self.assertTrue(result[0]["source_excerpt_available"])
+        self.assertTrue(result[0]["other_excerpt_available"])
         self.assertEqual("source_before_other", result[0]["relative_order"])
         self.assertEqual(0, result[0]["gap_days"])
         self.assertTrue(result[0]["opposing_polarity"])

@@ -691,6 +691,22 @@ kinds, alongside exact evidence, now share the same bounded 16-file SHA cache
 Markdown, disposable projection, accepted knowledge or human journal is
 modified by this read-only verification.
 
+**Stage 18 two-source relation detail (twenty-second slice, awaiting Android QA):**
+The Hub relationship list now opens a detail dialog instead of jumping to the
+other note. The editor context dock displays the same side-by-side relation
+description. Both show the inspected and related Markdown path, exact locator,
+bounded **240-character** historical fragment excerpt and the SHA-current/
+stale/unavailable/unchecked status of each original file. The user can then
+choose to open either note (or reveal the current editor note), using existing
+canonical-path-safe navigation. These excerpts are **only from the disposable
+index**, never re-read live content; a matching SHA is not an endorsement of
+parser correctness or a factual decision. The bridge uses one SQLite batch
+query for at most 200 unique referenced fragment IDs (the 100-relation page
+bound), validates that each fragment really belongs to the expected document
+and locator, and hides corrupt/missing provenance rather than attaching
+unrelated text. No index mutation, journal write, model call or original note
+edit is caused by this display. Device UX/accessibility QA remains deferred.
+
 ## Stage 09 — whole-library contradiction and uncertainty audit
 
 The native **Audit the whole knowledge library** action first reruns the

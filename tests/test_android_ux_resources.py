@@ -14,6 +14,35 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_relation_pair_detail_previews_both_sources_before_navigation(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("showSemanticRelationDetail(relativePath, match, titles[position])", hub)
+        self.assertIn("openIndexedNote(sourcePath)", hub)
+        self.assertIn('openIndexedNote(relation.optString("path"))', hub)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("view -> setDockExpanded(false)", editor)
+        self.assertIn('openRelatedNote(relation.optString("path"), selectedVault)', editor)
+        self.assertIn("relationComparison(Context context, JSONObject relation, String sourcePath)",
+                      presentation)
+        self.assertIn('relation.optBoolean("source_excerpt_available")', presentation)
+        self.assertIn('relation.optBoolean("other_excerpt_available")', presentation)
+        self.assertIn('MAX_RELATION_PREVIEW_CHARS = 240', bridge)
+        self.assertIn('MAX_RELATION_PREVIEW_FRAGMENTS = 200', bridge)
+        self.assertIn('_annotate_relation_previews(con, relative_path', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_preview_warning",
+                         "knowledge_relation_preview_inspected",
+                         "knowledge_relation_preview_other",
+                         "knowledge_relation_open_inspected",
+                         "knowledge_relation_open_other"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_indexed_cross_source_evidence_is_explicitly_unrated_and_navigable(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
@@ -725,8 +754,9 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
         hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
         formatter = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeRelationPresentation.java").read_text()
-        self.assertIn("KnowledgeRelationPresentation.qualifiers(this, relation)", editor)
-        self.assertIn("KnowledgeRelationPresentation.qualifiers(this, match)", hub)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", hub)
+        self.assertIn("qualifiers(context, relation)", formatter)
         self.assertIn("knowledge_editor_structural_context", formatter)
         self.assertIn("knowledge_editor_structural_interval", formatter)
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",

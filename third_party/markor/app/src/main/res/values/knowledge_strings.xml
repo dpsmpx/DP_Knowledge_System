@@ -274,6 +274,11 @@
     <string name="knowledge_relation_current_pair">Both original file hashes match the index. An exact candidate or owner-approved alias still does not establish that the claim is true.</string>
     <string name="knowledge_relation_historical_pair">At least one original file changed, is unavailable or unchecked: this exact/alias relation is an unverified index snapshot, not current evidence.</string>
     <string name="knowledge_relation_checks_limited">Some exact or alias relation sources could not be SHA-checked; those hints remain historical or incomplete.</string>
+    <string name="knowledge_relation_preview_warning">These are bounded excerpts from the disposable analysis index, NOT new reads of the original notes. Check each file SHA status below; even matching hashes do not approve the interpretation. Review the original files before deciding.</string>
+    <string name="knowledge_relation_preview_inspected">Inspected indexed fragment</string>
+    <string name="knowledge_relation_preview_other">Related indexed fragment</string>
+    <string name="knowledge_relation_open_inspected">Open inspected note</string>
+    <string name="knowledge_relation_open_other">Open related note</string>
     <string name="knowledge_no_semantic_relations">No exact matches or conservative temporal/approved-alias hints found. This does not prove that notes are unrelated. Refresh semantic analysis after editing notes.</string>
     <string name="knowledge_semantic_failed">Could not inspect semantic relationships. Original notes and decisions are unchanged.</string>
     <string name="knowledge_semantic_limited">first 60 only</string>

@@ -1784,6 +1784,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final JSONArray matches = result.getJSONArray("matches");
                 final JSONArray evidence = result.optJSONArray("evidence_groups");
                 final String[] labels = new String[matches.length()];
+                final int[] titles = new int[matches.length()];
                 for (int i = 0; i < labels.length; i++) {
                     final JSONObject match = matches.getJSONObject(i);
                     final String kind = match.optString("kind");
@@ -1798,12 +1799,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             : "possible_conflict".equals(kind)
                                     ? R.string.knowledge_possible_conflict
                                     : R.string.knowledge_possible_agreement;
+                    titles[i] = label;
                     labels[i] = getString(label)
                             + " · " + match.optString("path")
                             + "\n" + match.optString("predicate") + " · "
                             + match.optString("source_locator") + " ↔ "
-                            + match.optString("other_locator")
-                            + KnowledgeRelationPresentation.qualifiers(this, match);
+                            + match.optString("other_locator");
                 }
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
@@ -1839,7 +1840,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         dialog.setItems(labels, (d, position) -> {
                             final JSONObject match = matches.optJSONObject(position);
                             if (match != null) {
-                                openIndexedNote(match.optString("path"));
+                                showSemanticRelationDetail(relativePath, match, titles[position]);
                             }
                         });
                     }
@@ -1857,6 +1858,20 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void showSemanticRelationDetail(final String sourcePath, final JSONObject relation,
+                                            final int title) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(KnowledgeRelationPresentation.relationComparison(
+                        this, relation, sourcePath))
+                .setNeutralButton(R.string.knowledge_relation_open_inspected,
+                        (dialog, which) -> openIndexedNote(sourcePath))
+                .setPositiveButton(R.string.knowledge_relation_open_other,
+                        (dialog, which) -> openIndexedNote(relation.optString("path")))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private void showEvidenceGroups(final JSONArray groups, final boolean limited,

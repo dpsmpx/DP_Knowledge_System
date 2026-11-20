@@ -944,7 +944,8 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                             : R.string.knowledge_editor_context_agreement;
             addContextRow(related, getString(label) + " · "
                     + item.optString("path") + " · " + item.optString("other_locator"),
-                    view -> showContextRelation(item, label, selectedVault));
+                    view -> showContextRelation(item, label, selectedVault,
+                            context.optString("path")));
         }
         final int evidenceCount = evidenceGroups == null ? 0 : evidenceGroups.length();
         for (int i = 0; i < evidenceCount; i++) {
@@ -1530,16 +1531,13 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     }
 
     private void showContextRelation(final JSONObject relation, final int title,
-                                     final File selectedVault) {
-        final String description = getString(R.string.knowledge_editor_context_disclaimer)
-                + "\n\n" + getString(R.string.knowledge_editor_context_source)
-                + ": " + relation.optString("source_locator")
-                + "\n" + relation.optString("path") + " · "
-                + relation.optString("other_locator")
-                + KnowledgeRelationPresentation.qualifiers(this, relation);
+                                     final File selectedVault, final String sourcePath) {
         final LinearLayout body = newDockContent();
-        body.addView(contextDetailText(description));
-        addContextRow(body, getString(R.string.knowledge_editor_context_open),
+        body.addView(contextDetailText(KnowledgeRelationPresentation.relationComparison(
+                this, relation, sourcePath)));
+        addContextRow(body, getString(R.string.knowledge_relation_open_inspected),
+                view -> setDockExpanded(false));
+        addContextRow(body, getString(R.string.knowledge_relation_open_other),
                 view -> openRelatedNote(relation.optString("path"), selectedVault));
         showDockPage(getString(title), body);
     }

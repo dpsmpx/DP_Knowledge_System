@@ -391,6 +391,12 @@ class RelationTests(unittest.TestCase):
         self.assertTrue(all(link["source_locator"] and link["other_locator"]
                             and link["source_fragment"] and link["other_fragment"]
                             for link in links.values()))
+        self.assertTrue(all(link["source_excerpt_available"]
+                            and link["other_excerpt_available"] for link in links.values()))
+        self.assertTrue(all("Алекс является разработчиком" in link["source_excerpt"]
+                            for link in links.values()))
+        self.assertTrue(all(link["other_excerpt_hash"]
+                            and not link["other_excerpt_truncated"] for link in links.values()))
         self.assertFalse(result["truncated"])
         self.assertFalse((self.workspace / "data").exists())
         self.assertEqual(before, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
@@ -450,6 +456,40 @@ class RelationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._relations("../a.md")
 
+    def test_relation_pair_previews_are_batched_bounded_and_owner_matched(self):
+        self._import()
+        db = self.workspace / "var/ks.sqlite"
+        with sqlite3.connect(db) as con:
+            matches = indexed_related_claims(con, "a.md")["matches"]
+            query_log = []
+            con.set_trace_callback(query_log.append)
+            bridge._annotate_relation_previews(con, "a.md", matches)
+            con.set_trace_callback(None)
+            self.assertEqual(1, len(query_log))
+            self.assertIn("FROM fragments WHERE id IN", query_log[0])
+            self.assertTrue(all(m["source_excerpt_available"]
+                                and m["other_excerpt_available"] for m in matches))
+            source = matches[0].copy()
+            source["source_fragment"] = next(m["other_fragment"] for m in matches
+                                             if m["path"] == "c.md")
+            wrong_locator = matches[0].copy()
+            wrong_locator["other_locator"] = "a different locator"
+            bridge._annotate_relation_previews(con, "a.md", [source, wrong_locator])
+            self.assertFalse(source["source_excerpt_available"])
+            self.assertIsNone(source["source_excerpt"])
+            self.assertFalse(wrong_locator["other_excerpt_available"])
+            self.assertIsNone(wrong_locator["other_excerpt"])
+            with self.assertRaises(ValueError):
+                bridge._annotate_relation_previews(con, "a.md", [
+                    {"path": "b.md", "source_fragment": f"s{i}",
+                     "other_fragment": f"o{i}"} for i in range(101)])
+
+            b_fragment = next(m["other_fragment"] for m in matches if m["path"] == "b.md")
+            con.execute("UPDATE fragments SET plain=? WHERE id=?", ("X" * 500, b_fragment))
+        clipped = next(m for m in self._relations("a.md")["matches"] if m["path"] == "b.md")
+        self.assertEqual("X" * bridge.MAX_RELATION_PREVIEW_CHARS, clipped["other_excerpt"])
+        self.assertTrue(clipped["other_excerpt_truncated"])
+
     def test_only_verified_direct_human_alias_yields_separate_candidate(self):
         original = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
                     for p in self.notes}
@@ -464,6 +504,8 @@ class RelationTests(unittest.TestCase):
         self.assertEqual({"a.md", "b.md", "c.md", "sub/e.markdown"},
                          {r["path"] for r in hinted["matches"]})
         self.assertTrue(all(r["kind"] == "alias_candidate" for r in hinted["matches"]))
+        self.assertTrue(all(r["source_excerpt_available"]
+                            and r["other_excerpt_available"] for r in hinted["matches"]))
         for relation in hinted["matches"]:
             self.assertEqual("борис", relation["alias_evidence"]["source_symbol"])
             self.assertEqual("алекс", relation["alias_evidence"]["other_symbol"])
@@ -707,6 +749,8 @@ class RelationTests(unittest.TestCase):
         self.assertFalse(result["modal_search_limited"])
         contrasts = [row for row in result["matches"] if row["kind"] == "modal_contrast"]
         self.assertTrue({"b.md", "c.md"}.issubset({r["path"] for r in contrasts}), contrasts)
+        self.assertTrue(all(r["source_excerpt_available"]
+                            and r["other_excerpt_available"] for r in contrasts))
         self.assertTrue(all(r["source_modality"] == "asserted"
                             and r["other_modality"] in ("possible", "usually")
                             and r["authority"] == "unapproved_parser_hint"
@@ -976,6 +1020,8 @@ class RelationTests(unittest.TestCase):
         self.assertEqual({"b.md", "c.md"}, {x["path"] for x in relations})
         overlap = next(x for x in relations if x["path"] == "b.md")
         self.assertEqual("temporal_overlap", overlap["kind"])
+        self.assertTrue(overlap["source_excerpt_available"]
+                        and overlap["other_excerpt_available"])
         self.assertEqual("temporal_separation", next(x for x in relations
                          if x["path"] == "c.md")["kind"])
         self.assertFalse(overlap["opposing_polarity"])
@@ -1033,6 +1079,8 @@ class RelationTests(unittest.TestCase):
         page = self._relations("a.md")
         self.assertEqual({"b.md", "c.md"}, {m["path"] for m in page["matches"]})
         self.assertTrue(all(m["kind"] == "temporal_separation" for m in page["matches"]))
+        self.assertTrue(all(m["source_excerpt_available"]
+                            and m["other_excerpt_available"] for m in page["matches"]))
         by_path = {m["path"]: m for m in page["matches"]}
         self.assertEqual(("other_before_source", 31),
                          (by_path["b.md"]["relative_order"], by_path["b.md"]["gap_days"]))

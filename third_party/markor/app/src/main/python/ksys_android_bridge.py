@@ -45,6 +45,8 @@ MAX_EDITOR_EVIDENCE_LINKS = 16
 MAX_EDITOR_EVIDENCE_EVENTS = 16
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_FILES = 200_000
+MAX_RELATION_PREVIEW_CHARS = 240
+MAX_RELATION_PREVIEW_FRAGMENTS = 200  # 2 refs × at most 100 relations
 
 
 def analyze_vault(workspace_dir: str, vault_dir: str, callback=None) -> str:
@@ -188,6 +190,7 @@ def note_relationships(workspace_dir: str, relative_path: str,
                  temporal_checks_limited, relation_checks_limited) = _verify_evidence_freshness(
                     con, vault_dir, relative_path, matches["evidence_groups"],
                     matches["matches"])
+                _annotate_relation_previews(con, relative_path, matches["matches"])
                 source_lineage_limited = _annotate_reviewed_source_links(
                     con, journal, relative_path, matches["evidence_groups"])
                 source_assessment_limited = _annotate_source_assessments(
@@ -415,6 +418,39 @@ def _verify_evidence_freshness(con, vault_dir: str | None,
             else:
                 relation_limited = relation_limited or unchecked
     return evidence_limited, modal_limited, temporal_limited, relation_limited
+
+
+def _annotate_relation_previews(con, source_path: str, matches: list[dict]) -> None:
+    """Attach bounded *indexed snapshots*, never text obtained from live notes.
+
+    One batch looks up each referenced fragment at most once. A fragment is
+    shown only when its actual document and locator agree with the relation's
+    provenance fields. A stale/unchecked SHA never converts a historical
+    index excerpt into verified present-day prose. No SQLite or Markdown write.
+    """
+    ids = sorted({fragment for match in matches for fragment in
+                  (match.get("source_fragment"), match.get("other_fragment"))
+                  if isinstance(fragment, str) and fragment})
+    if len(ids) > MAX_RELATION_PREVIEW_FRAGMENTS:
+        raise ValueError("Relation fragment preview bound exceeded")
+    previews = {}
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        rows = con.execute(
+            "SELECT id, doc, locator, substr(plain,1,?), length(plain), text_hash "
+            "FROM fragments WHERE id IN (" + placeholders + ")",
+            (MAX_RELATION_PREVIEW_CHARS, *ids)).fetchall()
+        previews = {row[0]: row[1:] for row in rows}
+    for match in matches:
+        for side, path in (("source", source_path), ("other", match["path"])):
+            row = previews.get(match.get(side + "_fragment"))
+            valid = (row is not None and row[0] == path
+                     and row[1] == match.get(side + "_locator"))
+            match[side + "_excerpt_available"] = valid
+            match[side + "_excerpt"] = row[2] if valid else None
+            match[side + "_excerpt_truncated"] = (
+                row[3] > MAX_RELATION_PREVIEW_CHARS if valid else False)
+            match[side + "_excerpt_hash"] = row[4] if valid else None
 
 
 def _annotate_reviewed_source_links(con, journal: Journal,
@@ -1567,6 +1603,7 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
                 (evidence_checks_limited, modal_checks_limited,
                  temporal_checks_limited, relation_checks_limited) = _verify_evidence_freshness(
                     con, vault_dir, relative_path, evidence_groups, relations)
+                _annotate_relation_previews(con, relative_path, relations)
                 source_lineage_limited = _annotate_reviewed_source_links(
                     con, kb.journal, relative_path, evidence_groups)
                 source_assessment_limited = _annotate_source_assessments(

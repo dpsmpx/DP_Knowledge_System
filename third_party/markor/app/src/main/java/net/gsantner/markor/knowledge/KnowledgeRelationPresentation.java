@@ -165,6 +165,29 @@ final class KnowledgeRelationPresentation {
         return text.toString();
     }
 
+    /** Two bounded *index* previews, with source SHA states shown separately. */
+    static String relationComparison(Context context, JSONObject relation, String sourcePath) {
+        if (relation == null) return "";
+        final StringBuilder text = new StringBuilder(context.getString(
+                R.string.knowledge_relation_preview_warning));
+        text.append("\n\n").append(context.getString(R.string.knowledge_relation_preview_inspected))
+                .append(" · ").append(sourcePath)
+                .append(" · ").append(relation.optString("source_locator"))
+                .append("\n").append(excerptDisplay(context,
+                        relation.optString("source_excerpt", ""),
+                        relation.optBoolean("source_excerpt_truncated"),
+                        relation.optBoolean("source_excerpt_available")));
+        text.append("\n\n").append(context.getString(R.string.knowledge_relation_preview_other))
+                .append(" · ").append(relation.optString("path"))
+                .append(" · ").append(relation.optString("other_locator"))
+                .append("\n").append(excerptDisplay(context,
+                        relation.optString("other_excerpt", ""),
+                        relation.optBoolean("other_excerpt_truncated"),
+                        relation.optBoolean("other_excerpt_available")));
+        text.append("\n").append(qualifiers(context, relation));
+        return text.toString();
+    }
+
     private static String excerptDisplay(Context context, String excerpt,
                                          boolean truncated, boolean available) {
         if (!available) return context.getString(R.string.knowledge_evidence_comparison_missing);

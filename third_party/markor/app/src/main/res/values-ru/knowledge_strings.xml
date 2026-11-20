@@ -274,6 +274,11 @@
     <string name="knowledge_relation_current_pair">SHA обоих исходных файлов совпадают с индексом. Точное прочтение или подтверждённый владельцем псевдоним всё ещё не доказывают истинность утверждения.</string>
     <string name="knowledge_relation_historical_pair">Как минимум один исходный файл изменён, недоступен или не проверен: точное сопоставление или подсказка псевдонима — только исторический снимок индекса.</string>
     <string name="knowledge_relation_checks_limited">Не все файлы точных сопоставлений и псевдонимов проверены по SHA; соответствующие подсказки исторические или неполные.</string>
+    <string name="knowledge_relation_preview_warning">Это ограниченные фрагменты из пересоздаваемого индекса, а не новое чтение исходных заметок. Проверьте SHA-статус каждого файла ниже; даже совпадающие хеши не подтверждают интерпретацию. Перед решением откройте оригиналы.</string>
+    <string name="knowledge_relation_preview_inspected">Исследуемый фрагмент из индекса</string>
+    <string name="knowledge_relation_preview_other">Сопоставляемый фрагмент из индекса</string>
+    <string name="knowledge_relation_open_inspected">Открыть исследуемую заметку</string>
+    <string name="knowledge_relation_open_other">Открыть связанную заметку</string>
     <string name="knowledge_no_semantic_relations">Точных совпадений и осторожных подсказок по периодам/подтверждённым алиасам нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
     <string name="knowledge_semantic_failed">Не удалось проверить смысловые связи. Заметки и журнал решений не изменены.</string>
     <string name="knowledge_semantic_limited">только первые 60</string>
