@@ -404,6 +404,12 @@
     <string name="knowledge_sync_structural_confirm">You have compared every affected local record against the proposed replacement. Create this NEW local revise/split/merge journal event with cryptographic causal references? Recheck both branches and reject any changed record or invalid successor.</string>
     <string name="knowledge_sync_structural_saved">Reviewed local knowledge revision recorded.</string>
     <string name="knowledge_sync_structural_failed">Revision cannot be safely applied. Check whether every target still exists and is active; you can hold/reject this foreign event. Nothing was automatically merged.</string>
+    <string name="knowledge_sync_batch_preview">Compare foreign claim batch</string>
+    <string name="knowledge_sync_batch_warning">This single foreign event proposes 2–8 claims. The complete bounded list is below, including each exact local Markdown source, selected reading and formal statement. EVERY original must match the signed source hash and local parser output, no claim may be known/rejected/conflicting, and the whole group is accepted or refused together. No source Markdown will be changed or overwritten.</string>
+    <string name="knowledge_sync_batch_apply">Approve all listed claims</string>
+    <string name="knowledge_sync_batch_confirm">Confirm that you reviewed EVERY local source and claim? Commit the entire batch as ONE NEW local journal event with cryptographic references, after re-reading every note and revalidating both journal branches? No automatic replay occurs.</string>
+    <string name="knowledge_sync_batch_saved">All verified claims were recorded atomically as one local journal event.</string>
+    <string name="knowledge_sync_batch_failed">Cannot safely accept this batch. All original notes must exist unchanged in the selected library and all readings must match. No partial or automatic acceptance occurred; you may hold/reject the foreign event.</string>
     <string name="knowledge_portable_compare_sources">Compare original Markdown from encrypted snapshot</string>
     <string name="knowledge_portable_sources_warning">Manually choose a DPKS encrypted snapshot via Android files, Syncthing or SAF. Only original Markdown is listed. No existing note will be replaced, merged or automatically imported. Select a file to compare; saving a copy always requires its own confirmation.</string>
     <string name="knowledge_portable_sources_page">Markdown source files (%1$d of %2$d)</string>

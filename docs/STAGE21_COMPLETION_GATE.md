@@ -15,11 +15,11 @@ artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 | Original Markdown exchange | Both encrypted-snapshot and direct plaintext `.md` SAF/manual routes: hash/excerpt compare, explicit per-file keep-both, exclusive create; no automatic overwrite | Real SAF provider, device lifecycle/storage, full large-document compare |
 | Peer trust | Nonexportable signing identity, out-of-band code, revocation | Two physical devices and rotation QA |
 | Divergent branches | Signed encrypted inbox; separate AES/Keystore-protected high-water history survives inbox deletion; opt-in encrypted checkpoint export and monotonic restore | Real device migration, trust pairing and rollback/replay acceptance |
-| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema`, source-anchored `bind`/`resolve`, and active-local-record-checked `revise`/`split`/`merge` | Device UI + concurrent-write review; unsupported event families audited only |
+| Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema`, source-anchored `bind`/`resolve`, active-local-record-checked `revise`/`split`/`merge`, and 2–8-source atomic `batch_accept` | Device UI + concurrent-write review; unsupported audit-only event families cannot activate knowledge |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
 | Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668), and Stage21 slice29 [#206](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44725289838) passed both flavors; APK assembly skipped | New Stage21 in-app synthetic QA still requires an Android unit CI run and physical integration tests |
-| Existing device QA buttons | Quick/stress now include isolated `PORTABLE-21` encrypted archive/manifest/tamper and six `SYNC21-*` journal/consent tests; no new button, no real user data touched | Run on physical device; SAF/Keystore pairing, 20k-file vault and OS lifecycle not simulated |
+| Existing device QA buttons | Quick/stress now include isolated `PORTABLE-21` encrypted archive/manifest/tamper and seven `SYNC21-*` journal/consent/atomic-batch tests; no new button, no real user data touched | Run on physical device; SAF/Keystore pairing, 20k-file vault and OS lifecycle not simulated |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
 because the Android stub API provides no working `JSONObject` parser outside
@@ -43,6 +43,9 @@ it explicitly skipped package-ID and APK content inspections as requested.
   provenance claims are not adopted as source evidence; only the owner's
   deliberate LOCAL decision and signed foreign causal links are recorded.
   An event outside supported individual handlers remains hold/reject-only.
+- A foreign `batch_accept` (2–8 claims) requires every original local Markdown
+  and an exact rederived local claim. The whole bundle is human-reviewed and
+  committed as one new local causal event, or none of it is applied.
 - LLM API keys currently live only in the foreground session, not in app
   preferences, and cannot be transferred. The v3 secret allowlist handles
   only persisted embedding/LLM endpoints, including credentials embedded in

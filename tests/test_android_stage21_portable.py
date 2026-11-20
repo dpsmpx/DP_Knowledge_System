@@ -256,6 +256,23 @@ class Stage21PortableWiring(unittest.TestCase):
                       "kb._commit(", '"foreign_causal"', '"automatic_replay": False'):
             self.assertIn(token, structural)
 
+    def test_foreign_batch_accept_requires_all_originals_and_atomic_review(self):
+        hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
+        bridge = (JAVAS / "KnowledgePythonBridge.java").read_text()
+        python = (SOURCE / "python/ksys_android_bridge.py").read_text()
+        for method in ("previewPeerBatch(", "confirmPeerBatch(",
+                       "peerBatchLocalOriginals(", "readSelectedNote(path)",
+                       "KnowledgePythonBridge.journalSyncBatchSources(",
+                       "KnowledgePythonBridge.journalSyncBatchPreview(",
+                       "KnowledgePythonBridge.journalSyncBatchCommit("):
+            self.assertIn(method, hub)
+        for operation in ("sources", "preview", "commit"):
+            self.assertIn("dpksys.sync-batch-" + operation + ".v1", bridge)
+            self.assertIn("def journal_sync_batch_" + operation + "(", python)
+        self.assertIn("_prepare_claim_batch(", python)
+        self.assertIn("Foreign batch knowledge differs from the local originals", python)
+        self.assertIn('kb._commit("batch_accept", {', python)
+
     def test_existing_device_qa_buttons_include_isolated_stage21_scenarios(self):
         hub = (JAVAS / "KnowledgeHubActivity.java").read_text()
         runner = (JAVAS / "KnowledgeDeviceQaRunner.java").read_text()
@@ -283,7 +300,7 @@ class Stage21PortableWiring(unittest.TestCase):
             self.assertTrue(result["read_only_user_data"])
             self.assertFalse(result["used_selected_vault"])
             self.assertTrue(result["requires_manual_device_qa"])
-            self.assertEqual(6, result["passed"])
+            self.assertEqual(7, result["passed"])
             self.assertEqual(0, result["failed"])
             self.assertEqual([], list(Path(root).iterdir()))
 

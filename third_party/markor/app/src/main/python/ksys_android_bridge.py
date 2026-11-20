@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ksys import KS_VERSION
 from ksys.core.clock import SystemClock
+from ksys.core.ids import canonical_json
 from ksys.source.markdown import parse_document
 from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
@@ -789,6 +790,39 @@ def stage21_sync_selftest(cache_dir: str) -> str:
                 return
             raise AssertionError("Rejected foreign event became active")
         verify("SYNC21-REJECT-FENCE", rejection)
+
+        def batch():
+            local_ws, local, head, _ = fixture("batch-local")
+            remote_ws, _, _, _ = fixture("batch-peer")
+            sources = [("first.md", "# One\nСтресс приводит к бессоннице.\n"),
+                       ("second.md", "# Two\nКофе вызывает усталость.\n")]
+            selections = []
+            for path, markdown in sources:
+                fragment = parse_document(path, markdown).fragments[1]
+                plan = json.loads(preview_fragment(str(remote_ws.root), path, markdown,
+                                                   fragment.id))
+                selections.append({"path": path, "markdown": markdown,
+                                   "fragment_id": fragment.id,
+                                   "reading_id": plan["preview"]["options"][0]["reading_id"]})
+            selected = json.dumps(selections, ensure_ascii=False)
+            approval = json.loads(preview_claim_batch(str(remote_ws.root), selected))
+            accept_claim_batch(str(remote_ws.root), selected, approval["batch_hash"],
+                               approval["journal_head"])
+            foreign = remote_ws.journal_path.read_text(encoding="utf-8")
+            eid = Journal(remote_ws.journal_path, FixedClock()).entries()[-1].id
+            sha = hashlib.sha256(foreign.encode()).hexdigest()
+            originals = json.dumps([{"path": p, "markdown": m} for p, m in sources],
+                                   ensure_ascii=False)
+            plan = json.loads(journal_sync_batch_preview(str(local_ws.root), foreign,
+                                                         signer, eid, head or "", sha, originals))
+            assert plan["count"] == 2 and plan["read_only"]
+            result = json.loads(journal_sync_batch_commit(str(local_ws.root), foreign,
+                                                           signer, eid, head or "", sha,
+                                                           originals, plan["plan_sha256"]))
+            kb = KnowledgeBase(local_ws, FixedClock(), use_cache=False)
+            assert result["applied"] and not result["automatic_replay"]
+            assert len(kb.journal.entries()) == 1 and len(kb.state.records) == 2
+        verify("SYNC21-BATCH-ATOMIC", batch)
 
     return json.dumps({
         "protocol": "dpksys.stage21_sync_selftest.v1", "checks": checks,
@@ -2011,6 +2045,141 @@ def journal_sync_structural_commit(workspace_dir: str, foreign_text: str,
                                       event_id, local_head or None, remote_sha, plan_sha)
     return json.dumps({"protocol": "dpksys.sync-structural-commit.v1", **result},
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _batch_foreign_event(kb: KnowledgeBase, local: str, foreign: str,
+                         fingerprint: str, event_id: str, local_head: str,
+                         remote_sha: str):
+    event, comparison = verified_foreign_event(
+        local, foreign, fingerprint, event_id, local_head or None, remote_sha)
+    if event.op != "batch_accept" or set(event.data) != {"items"}:
+        raise ValueError("Only a separately sourced foreign claim batch may be reviewed")
+    items = event.data["items"]
+    if not isinstance(items, list) or not 2 <= len(items) <= 8:
+        raise ValueError("Foreign claim batch must contain 2..8 items")
+    if kb.state.peer_reviews.get((fingerprint, remote_sha, event_id), (None,))[0] == "reject":
+        raise ValueError("Foreign claim batch was explicitly rejected")
+    sources = []
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {
+                "node", "role", "provenance", "confidence", "candidates"} \
+                or item["role"] != "claim" or item["confidence"] is not None \
+                or item["candidates"] != []:
+            raise ValueError("Unsupported foreign claim batch item")
+        prov = item["provenance"]
+        if not isinstance(prov, dict) or prov.get("source_type") != "vault_note" \
+                or not isinstance(prov.get("document"), str) \
+                or not isinstance(prov.get("document_sha"), str) \
+                or not isinstance(prov.get("fragment_id"), str) \
+                or not isinstance(prov.get("extraction"), dict) \
+                or prov["extraction"].get("method") != "cnl" \
+                or not isinstance(prov["extraction"].get("reading_id"), str) \
+                or not 1 <= len(prov["document"]) <= 512:
+            raise ValueError("Foreign claim batch lacks matching original-note provenance")
+        sources.append({"path": prov["document"], "source_sha256": prov["document_sha"]})
+    return event, comparison, sources
+
+
+def journal_sync_batch_sources(workspace_dir: str, foreign_text: str,
+                               fingerprint: str, event_id: str,
+                               local_head: str, remote_sha: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    _, _, sources = _batch_foreign_event(kb, local, foreign_text, fingerprint,
+                                         event_id, local_head, remote_sha)
+    return json.dumps({"protocol": "dpksys.sync-batch-sources.v1", "sources": sources,
+                       "read_only": True, "requires_local_originals": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _manual_batch_plan(kb: KnowledgeBase, local: str, foreign: str,
+                       fingerprint: str, event_id: str, local_head: str,
+                       remote_sha: str, originals_json: str):
+    event, comparison, sources = _batch_foreign_event(
+        kb, local, foreign, fingerprint, event_id, local_head, remote_sha)
+    if not isinstance(originals_json, str) or len(originals_json) > 16_000_000:
+        raise ValueError("Foreign batch local originals exceed review bound")
+    originals = json.loads(originals_json)
+    if not isinstance(originals, list) or len(originals) != len(sources):
+        raise ValueError("Every foreign batch source needs one local original")
+    selections = []
+    for item, claim, src in zip(event.data["items"], originals, sources):
+        if not isinstance(claim, dict) or set(claim) != {"path", "markdown"} \
+                or claim["path"] != src["path"] \
+                or not isinstance(claim["markdown"], str) \
+                or _source_hash(claim["markdown"]) != src["source_sha256"]:
+            raise ValueError("Local original differs from foreign claim source")
+        prov = item["provenance"]
+        selections.append({"path": claim["path"], "markdown": claim["markdown"],
+                           "fragment_id": prov["fragment_id"],
+                           "reading_id": prov["extraction"]["reading_id"]})
+    items, summary, token = _prepare_claim_batch(
+        kb, json.dumps(selections, ensure_ascii=False, separators=(",", ":")))
+    for foreign_item, item in zip(event.data["items"], items):
+        canonical_item = {"node": item["node"].to_dict(), "role": "claim",
+                          "provenance": item["provenance"], "confidence": None,
+                          "candidates": []}
+        if foreign_item != canonical_item:
+            raise ValueError("Foreign batch knowledge differs from the local originals")
+    plan_token = hashlib.sha256(canonical_json({
+        "summary": summary, "token": token, "event_id": event.id,
+        "local_head": local_head or None, "remote_sha": remote_sha,
+    }).encode("utf-8")).hexdigest()
+    return items, {
+        "operation": "batch_accept", "items": summary, "count": len(summary),
+        "plan_sha256": plan_token, "remote_event_id": event.id,
+        "remote_sha256": comparison.remote_sha256, "remote_head": comparison.remote_head,
+        "local_head": local_head or None, "common_head": comparison.common_head,
+        "risk": "activate_multiple_source_claims", "read_only": True,
+        "requires_human_confirmation": True, "automatic_replay": False,
+    }
+
+
+def journal_sync_batch_preview(workspace_dir: str, foreign_text: str,
+                               fingerprint: str, event_id: str,
+                               local_head: str, remote_sha: str,
+                               originals_json: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    _, plan = _manual_batch_plan(kb, local, foreign_text, fingerprint,
+                                 event_id, local_head, remote_sha, originals_json)
+    return json.dumps({"protocol": "dpksys.sync-batch-preview.v1", **plan},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_batch_commit(workspace_dir: str, foreign_text: str,
+                              fingerprint: str, event_id: str,
+                              local_head: str, remote_sha: str,
+                              originals_json: str, expected_plan_sha: str) -> str:
+    kb = _kb(workspace_dir)
+    path = kb.ws.journal_path
+    local = path.read_text(encoding="utf-8") if path.is_file() else ""
+    items, plan = _manual_batch_plan(kb, local, foreign_text, fingerprint,
+                                     event_id, local_head, remote_sha, originals_json)
+    if not isinstance(expected_plan_sha, str) or expected_plan_sha != plan["plan_sha256"] \
+            or kb.journal.head != (local_head or None):
+        raise ValueError("Source batch review went stale; preview again")
+    provenance = {
+        "peer_fingerprint": fingerprint, "remote_sha256": remote_sha,
+        "remote_head": plan["remote_head"], "remote_event_id": event_id,
+        "common_head": plan["common_head"], "local_head_at_review": local_head or None,
+        "review_kind": "individual_manual_sourced_batch_approval_v1",
+    }
+    payload = [{"node": item["node"].to_dict(), "role": "claim",
+                "provenance": item["provenance"], "confidence": None, "candidates": []}
+               for item in items]
+    kb.ws.init()
+    saved, _, _ = kb._commit("batch_accept", {
+        "items": payload, "foreign_causal": provenance})
+    if kb.journal.verify():
+        raise ValueError("Atomic local batch verification failed")
+    return json.dumps({
+        "protocol": "dpksys.sync-batch-commit.v1", "operation": "batch_accept",
+        "count": len(payload), "journal_id": saved.id, "journal_head": kb.journal.head,
+        "foreign_causal": provenance, "applied": True, "automatic_replay": False,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def journal_sync_review_commit(workspace_dir: str, foreign_text: str,

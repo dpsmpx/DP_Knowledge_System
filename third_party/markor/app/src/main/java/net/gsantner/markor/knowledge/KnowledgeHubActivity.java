@@ -4566,6 +4566,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         || "resolve".equals(operation);
                 final boolean structural = "revise".equals(operation)
                         || "split".equals(operation) || "merge".equals(operation);
+                final boolean batch = "batch_accept".equals(operation);
                 String payload = detail.toString(2);
                 if (payload.length() > 16_000) payload = payload.substring(0, 16_000) + "…";
                 final String shown = payload;
@@ -4590,6 +4591,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             ? R.string.knowledge_sync_context_preview
                                             : structural
                                             ? R.string.knowledge_sync_structural_preview
+                                            : batch
+                                            ? R.string.knowledge_sync_batch_preview
                                             : android.R.string.ok,
                                     "accept".equals(operation)
                                             ? (dialog, which) -> previewPeerAdoption(
@@ -4605,6 +4608,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                             name, eventId, expectedHash, localHead)
                                             : structural
                                             ? (dialog, which) -> previewPeerStructure(
+                                            name, eventId, expectedHash, localHead)
+                                            : batch
+                                            ? (dialog, which) -> previewPeerBatch(
                                             name, eventId, expectedHash, localHead)
                                             : null)
                             .setNeutralButton(R.string.knowledge_sync_review_hold,
@@ -4837,6 +4843,103 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             } catch (Exception invalid) {
                                 runOnUiThread(() -> Toast.makeText(this,
                                         R.string.knowledge_sync_structural_failed,
+                                        Toast.LENGTH_LONG).show());
+                            }
+                        })).show();
+    }
+
+    /** A foreign claim batch is indivisible: every local original must match. */
+    private String peerBatchLocalOriginals(final KnowledgePeerInbox.Snapshot branch,
+                                           final String eventId, final String remoteSha,
+                                           final String localHead) throws Exception {
+        final JSONObject sources = KnowledgePythonBridge.journalSyncBatchSources(
+                this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                eventId, localHead, remoteSha);
+        if (!sources.optBoolean("read_only") || !sources.optBoolean("requires_local_originals"))
+            throw new SecurityException("Unsafe foreign batch source list");
+        final JSONArray items = sources.getJSONArray("sources");
+        if (items.length() < 2 || items.length() > 8)
+            throw new SecurityException("Foreign batch source count invalid");
+        final JSONArray originals = new JSONArray();
+        for (int i = 0; i < items.length(); i++) {
+            final String path = items.getJSONObject(i).getString("path");
+            final JSONObject selected = new JSONObject();
+            selected.put("path", path);
+            selected.put("markdown", readSelectedNote(path));
+            originals.put(selected);
+        }
+        return originals.toString();
+    }
+
+    private void previewPeerBatch(final String name, final String eventId,
+                                  final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final String originals = peerBatchLocalOriginals(branch, eventId, remoteSha, localHead);
+                final JSONObject plan = KnowledgePythonBridge.journalSyncBatchPreview(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, originals);
+                if (!plan.optBoolean("read_only")
+                        || !plan.optBoolean("requires_human_confirmation")
+                        || plan.getInt("count") < 2 || plan.getInt("count") > 8)
+                    throw new SecurityException("Unsafe foreign batch preview");
+                final String planSha = plan.getString("plan_sha256");
+                final String shown = getString(R.string.knowledge_sync_batch_warning)
+                        + "\n\n" + plan.getJSONArray("items").toString(2);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_batch_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_batch_apply,
+                                    (dialog, which) -> confirmPeerBatch(
+                                            name, eventId, remoteSha, localHead, planSha))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_batch_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void confirmPeerBatch(final String name, final String eventId,
+                                  final String remoteSha, final String localHead,
+                                  final String planSha) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_sync_batch_apply)
+                .setMessage(R.string.knowledge_sync_batch_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_sync_batch_apply,
+                        (dialog, which) -> worker.submit(() -> {
+                            try {
+                                final KnowledgePeerInbox.Snapshot branch =
+                                        KnowledgePeerInbox.open(this, name);
+                                if (!branch.peer.paired)
+                                    throw new SecurityException("Peer trust revoked");
+                                final String originals = peerBatchLocalOriginals(
+                                        branch, eventId, remoteSha, localHead);
+                                final JSONObject result = KnowledgePythonBridge.journalSyncBatchCommit(
+                                        this, workspacePath(), branch.journal,
+                                        branch.peer.fingerprint, eventId, localHead,
+                                        remoteSha, originals, planSha);
+                                if (!result.optBoolean("applied", false)
+                                        || result.optBoolean("automatic_replay", true)
+                                        || result.optInt("count") < 2)
+                                    throw new SecurityException("Claim batch was not committed");
+                                runOnUiThread(() -> {
+                                    if (!isFinishing() && !isDestroyed()) {
+                                        Toast.makeText(this, R.string.knowledge_sync_batch_saved,
+                                                Toast.LENGTH_LONG).show();
+                                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                                    }
+                                });
+                            } catch (Exception invalid) {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        R.string.knowledge_sync_batch_failed,
                                         Toast.LENGTH_LONG).show());
                             }
                         })).show();

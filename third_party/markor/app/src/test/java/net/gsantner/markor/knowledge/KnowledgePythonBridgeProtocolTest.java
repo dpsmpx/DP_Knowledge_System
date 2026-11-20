@@ -29,7 +29,8 @@ public class KnowledgePythonBridgeProtocolTest {
                 "dpksys.sync-metadata-commit.v1", "dpksys.sync-context-source.v1",
                 "dpksys.sync-context-preview.v1", "dpksys.sync-context-commit.v1",
                 "dpksys.sync-structural-preview.v1", "dpksys.sync-structural-commit.v1",
-                "dpksys.stage21_sync_selftest.v1"
+                "dpksys.stage21_sync_selftest.v1", "dpksys.sync-batch-sources.v1",
+                "dpksys.sync-batch-preview.v1", "dpksys.sync-batch-commit.v1"
         }) {
             assertTrue(protocol, KnowledgePythonBridge.isSupportedProtocol(protocol));
         }
