@@ -192,13 +192,16 @@
   и публикацию в Releases получено 20.11.2026; старый запрет снят только
   для этой тестовой сборки.
 
-- [ ] **DEV-21-35 — подписанный GitHub QA prerelease.** Workflow
+- [x] **DEV-21-35 — подписанный GitHub QA prerelease.** Workflow
   `.github/workflows/knowledge-signed-prerelease.yml` собирает standalone
   `com.dpsmpx.dpks`, проверяет обе flavor unit-сборки, наличие встроенной
   `PORTABLE-21`/семи `SYNC21-*` проверок, подписывает APK существующим
   GitHub Secrets keystore, сверяет package ID, Chaquopy и SHA-256, затем
-  создаёт GitHub prerelease с APK и `.sha256`. Закрыть пункт **только после**
-  успешного workflow и проверки доступности файлов в Releases.
+  создаёт GitHub prerelease с APK и `.sha256`. Выполнено: Actions
+  [#44732028603](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44732028603)
+  прошёл; [QA prerelease `knowledge-stage21-qa-21-b8aebd0f1d`](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-21-b8aebd0f1d)
+  опубликован, оба файла видны в GitHub Releases. APK подписан для ручной
+  аппаратной QA; **QA-21-01..06 по-прежнему не выполнены**.
 
 Машинная проверка 20 000 **событий журнала** проходит с синтетическими
 данными; она **не заменяет** 20 000 файлов в заметочном хранилище на Android.

@@ -7,8 +7,12 @@ GitHub Actions runner** (run #195, 44691540899); that workflow uploaded no
 artifacts. From slice 19, Stage 21 CI skips all APK assembly tasks.
 On 20 November the owner separately authorized a **signed, installable QA
 prerelease via GitHub Actions and GitHub Releases**; the limited release
-workflow is independent of the existing PR unit-test-only job. This permission
-does not authorize marking Stage 21 PASS or a stable production release.
+workflow is independent of the existing PR unit-test-only job. On 20 November,
+[signed Stage21 QA prerelease `knowledge-stage21-qa-21-b8aebd0f1d`](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-21-b8aebd0f1d)
+was published with the installable APK and SHA-256 file after a successful
+[GitHub Actions run #44732028603](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44732028603),
+from tested source commit `b8aebd0f1d8d901b51c0facaadcbae776a44484a`.
+This does not authorize marking Stage 21 PASS or a stable production release.
 
 | Area | Current evidence | Gate |
 | --- | --- | --- |
@@ -22,7 +26,7 @@ does not authorize marking Stage 21 PASS or a stable production release.
 | Human resolutions | Audit Defer/Reject, signed-head acknowledgment, source-reverified acceptance, contested/keep-local, anchored retraction; individually approved `alias`/`label`/`schema`, source-anchored `bind`/`resolve`, active-local-record-checked `revise`/`split`/`merge`, and 2–8-source atomic `batch_accept` | Device UI + concurrent-write review; unsupported audit-only event families cannot activate knowledge |
 | Explicit contest warning | Per-record decision flags and general-query warning | TalkBack and user acceptance |
 | Synthetic scale | 20,000-event fork verification, no false merge or records, tamper and 8 MiB rejection | **PASS in Python only**; not a 20k-file vault or Android stress test |
-| Java unit suite | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668), and Stage21 QA [#208](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44727142983) and atomic batch [#209](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44728153467) passed both flavors; APK assembly skipped | Physical integration/device QA and permitted release build still outstanding |
+| Java unit suite and signed QA build | v3 secrets [#199](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44710699191), Markdown correction [#202](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44713363668), Stage21 QA [#208](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44727142983) and atomic batch [#209](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44728153467) passed both flavors without APK. Signed prerelease [#44732028603](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44732028603) passed both flavors, assembled, signed and published an APK with SHA-256 | Physical integration/device QA outstanding; release is QA-only |
 | Existing device QA buttons | Quick/stress now include isolated `PORTABLE-21` encrypted archive/manifest/tamper and seven `SYNC21-*` journal/consent/atomic-batch tests; no new button, no real user data touched | Run on physical device; SAF/Keystore pairing, 20k-file vault and OS lifecycle not simulated |
 
 Local-JVM settings fixtures require the real `org.json` test-only library
@@ -86,9 +90,11 @@ it explicitly skipped package-ID and APK content inspections as requested.
    remain disabled until reviewed and tested.
 2. Android Java unit CI **passed** on both flavors. The owner has now
    authorized one signed, standalone Stage21 QA prerelease, with APK package
-   verification and SHA-256, while the existing draft PR's general Android CI
-   remains unit-test-only. A successful signed release workflow is a build
-   gate, **not** evidence that hardware integration or UI acceptance passed.
+   verification and SHA-256. This [QA release](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage21-qa-21-b8aebd0f1d)
+   was published by a successful [signed workflow](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/44732028603),
+   while the existing draft PR's general Android CI remains unit-test-only.
+   This passed build gate is **not** evidence that hardware integration or UI
+   acceptance passed.
 3. Complete **QA-21-01..06** on real devices, including 20,000 **files**,
    constrained storage, interruption and SAF provider behavior. Follow
    `docs/STAGE21_DEVICE_ACCEPTANCE.md`, including new QA-21-09..10; record
