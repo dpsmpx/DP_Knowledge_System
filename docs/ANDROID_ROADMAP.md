@@ -247,8 +247,13 @@ provider may leave a partial file, and the user is warned to remove it
 manually. The in-app synthetic quick QA includes `BACKUP-WRITE-01`, which
 checks successful stream read-back and rejects a synthetic zero-byte provider;
 real SAF providers, rotation/process death, and physical export/restore remain
-unverified. **Journal export does not include original Markdown notes or the
+unverified as a complete acceptance matrix. **Journal export does not include original Markdown notes or the
 full Stage 21 portable backup.**
+
+**Owner confirmation, signed Stage 18 Preview #26 (2026-11-20):** The owner
+retested export and reported that it works. This closes the reported #24
+zero-byte symptom for that device/test, not a complete SAF-provider matrix,
+backup restore, interruption/rotation, or Stage 21 acceptance.
 
 **Limitations:** no scheduled automatic backup, password recovery, key
 rotation, multi-device merge, atomic guarantees across an external cloud
@@ -338,8 +343,26 @@ human-approved journal. Read-only relation responses, editor context details
 and audit findings expose those exact qualifiers for human inspection;
 unapproved claims remain suggestions. Different or partly overlapping time
 spans are not automatically treated as equivalent. This trades recall for reliable
-precision; alias/entity resolution, interval-overlap reasoning, confidence
+precision; alias/entity resolution, interval-overlap truth inference, confidence
 and cross-source epistemic reconciliation remain **open Stage 18 work**.
+
+**Stage 18 precision hardening (second slice, awaiting Android acceptance):**
+The local *derived* candidate index v5 also keeps an exact predicate/argument/
+context scope key and validated ISO date bounds. It can now display a separate
+`temporal_overlap` hint when two distinct explicitly bounded intervals intersect
+(inclusive of a shared endpoint). It displays both intervals and their
+intersection; different context, unrelated predicates/arguments, disjoint dates
+and unspecified periods are excluded. An opposite polarity is shown only as
+metadata, **not** automatically classified as a conflict. Exact agreement and
+possible-conflict matching, plus the whole-library contradiction audit, retain
+their original exact full-key requirement. The projection marker
+`exact-claim-context-temporal-overlap-v3` forces a fresh derived refresh after
+upgrade; neither Markdown files nor the human journal is migrated or modified.
+Both the library relation list and editor context use one bounded query with an
+index on the shared scope key. This is a comparison of source interpretations,
+not temporal truth inference, entity merging or historical version resolution.
+Android UI/SAF hardware QA remains separate; alias resolution and cross-source
+confidence reconciliation are still open Stage 18 work.
 
 ## Stage 09 — whole-library contradiction and uncertainty audit
 

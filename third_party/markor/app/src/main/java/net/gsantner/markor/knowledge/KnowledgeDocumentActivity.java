@@ -929,9 +929,12 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         for (int i = 0; i < relationCount; i++) {
             final JSONObject item = relations.optJSONObject(i);
             if (item == null) continue;
-            final int label = "possible_conflict".equals(item.optString("kind"))
-                    ? R.string.knowledge_editor_context_conflict
-                    : R.string.knowledge_editor_context_agreement;
+            final String kind = item.optString("kind");
+            final int label = "temporal_overlap".equals(kind)
+                    ? R.string.knowledge_possible_temporal_overlap
+                    : "possible_conflict".equals(kind)
+                            ? R.string.knowledge_editor_context_conflict
+                            : R.string.knowledge_editor_context_agreement;
             addContextRow(related, getString(label) + " · "
                     + item.optString("path") + " · " + item.optString("other_locator"),
                     view -> showContextRelation(item, label, selectedVault));

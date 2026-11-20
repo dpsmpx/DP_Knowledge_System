@@ -134,6 +134,36 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
                          related["b.md"]["interval"])
 
+    def test_editor_shows_temporal_overlap_without_conflict_verdict(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        db = Workspace(self.workspace).db_path
+        before = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                  for p in self.notes}
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end in (("a.md", "2023-01-01", "2024-01-01"),
+                                     ("b.md", "2024-01-01", "2025-01-01")):
+                assertion = {"mod": "asserted", "neg": False, "atom": atom,
+                             "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "synthetic", "nodes": [
+                    {"type": "claim", "assertion": assertion}
+                ]}, path, "F:synthetic", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], path))
+        index_before = hashlib.sha256(db.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        self.assertEqual(["b.md"], [r["path"] for r in context["candidate_relations"]])
+        item = context["candidate_relations"][0]
+        self.assertEqual("temporal_overlap", item["kind"])
+        self.assertEqual({"from": "2024-01-01", "to": "2024-01-01"},
+                         item["overlap_interval"])
+        self.assertTrue(context["relations_are_unapproved"])
+        self.assertEqual(index_before, hashlib.sha256(db.read_bytes()).hexdigest())
+        self.assertEqual(before, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                                  for p in self.notes})
+
     def test_accepted_opposites_show_possible_journal_conflict(self):
         for path in ("a.md", "c.md"):
             note = self.notes[path]

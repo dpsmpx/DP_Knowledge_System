@@ -294,7 +294,7 @@ def import_vault(ws: Workspace, vault: Path, clock: Clock, analyzer: Analyzer | 
                              cand["paraphrase"], canonical_json(cand["diagnostics"]),
                              canonical_json(cand.get("ambiguity") or {}), cand["input_hash"], frag.span[0]))
                 for row in projected_atoms(cand, rel, frag.id, frag.locator):
-                    con.execute("INSERT OR IGNORE INTO candidate_atoms VALUES(?,?,?,?,?,?,?)", row)
+                    con.execute("INSERT OR IGNORE INTO candidate_atoms VALUES(?,?,?,?,?,?,?,?,?,?)", row)
         con.execute("INSERT OR REPLACE INTO documents(path, sha256, size, status, kind, flags, fragment_count, versions, error)"
                     " VALUES(?,?,?,?,?,?,?,?,?)", (rel, sha, size, "PARSED", kind, json.dumps(flags),
                                                    len(parsed.fragments), versions_key,

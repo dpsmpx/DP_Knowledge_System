@@ -118,7 +118,10 @@
     <string name="knowledge_semantic_working">Сопоставление локальных неподтверждённых интерпретаций…</string>
     <string name="knowledge_possible_agreement">Возможное согласие</string>
     <string name="knowledge_possible_conflict">Возможное противоречие</string>
-    <string name="knowledge_no_semantic_relations">Точных совпадений формализованных утверждений не найдено. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
+    <string name="knowledge_possible_temporal_overlap">Периоды пересекаются (нужна проверка; не вывод о противоречии)</string>
+    <string name="knowledge_relation_other_interval">Период другой заметки</string>
+    <string name="knowledge_relation_overlap_interval">Общий период</string>
+    <string name="knowledge_no_semantic_relations">Точных совпадений и безопасных подсказок о пересечении периодов нет. Это не доказывает отсутствия связей. После изменения заметок обновите смысловой анализ.</string>
     <string name="knowledge_semantic_failed">Не удалось проверить смысловые связи. Заметки и журнал решений не изменены.</string>
     <string name="knowledge_semantic_limited">только первые 60</string>
     <string name="knowledge_index_failed">Локальный индекс знаний недоступен.</string>

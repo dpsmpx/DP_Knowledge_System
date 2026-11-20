@@ -14,6 +14,23 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_temporal_overlap_hints_have_distinct_labels_and_both_intervals(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_overlap".equals(kind)', hub)
+        self.assertIn('"temporal_overlap".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("other_interval")', presentation)
+        self.assertIn('relation.optJSONObject("overlap_interval")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_possible_temporal_overlap",
+                        "knowledge_relation_other_interval",
+                        "knowledge_relation_overlap_interval"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
     def test_journal_export_prepares_before_saf_and_verifies_destination(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

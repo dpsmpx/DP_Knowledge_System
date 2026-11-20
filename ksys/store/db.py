@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-DB_SCHEMA_VERSION = "4"
+DB_SCHEMA_VERSION = "5"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -45,9 +45,13 @@ CREATE TABLE IF NOT EXISTS candidate_atoms (
     atom_key TEXT NOT NULL,
     predicate TEXT NOT NULL,
     negated INTEGER NOT NULL,
+    scope_key TEXT NOT NULL,
+    valid_from TEXT,
+    valid_to TEXT,
     PRIMARY KEY (candidate_id, atom_key, negated));
 CREATE INDEX IF NOT EXISTS candidate_atoms_doc ON candidate_atoms(doc);
 CREATE INDEX IF NOT EXISTS candidate_atoms_key ON candidate_atoms(atom_key, doc);
+CREATE INDEX IF NOT EXISTS candidate_atoms_scope ON candidate_atoms(scope_key, doc);
 
 CREATE TABLE IF NOT EXISTS journal (
     seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, op TEXT NOT NULL, ts TEXT NOT NULL,

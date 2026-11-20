@@ -20,7 +20,7 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
-from ksys.importer.relations import atom_qualifiers, related_claims
+from ksys.importer.relations import related_claims, indexed_related_claims
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
 from ksys.ir.nodes import node_from_dict
@@ -156,7 +156,8 @@ def note_relationships(workspace_dir: str, relative_path: str) -> str:
     """Compare unapproved structured assertions between different notes.
 
     A shared atom is evidence of a candidate relation, never evidence that
-    either original claim is true. No private note text leaves this process.
+    either original claim is true. A temporal overlap is a separate review
+    hint, never a conflict verdict. No private note text leaves this process.
     """
     workspace = Path(workspace_dir)
     if not workspace.is_absolute():
@@ -702,25 +703,11 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 index_state = "stale"
             else:
                 index_state = "current"
-                rows = con.execute(
-                    "SELECT DISTINCT b.doc, a.locator, b.locator, a.fragment_id, "
-                    "b.fragment_id, a.negated, b.negated, a.predicate, a.atom_key "
-                    "FROM candidate_atoms a JOIN candidate_atoms b ON a.atom_key=b.atom_key "
-                    "JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
-                    "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' "
-                    "WHERE a.doc=? AND b.doc<>? "
-                    "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator LIMIT ?",
-                    (relative_path, relative_path, 21),
-                ).fetchall()
-                truncated = len(rows) > 20
-                relations = [{
-                    "path": r[0], "source_locator": r[1],
-                    "other_locator": r[2], "source_fragment": r[3],
-                    "other_fragment": r[4],
-                    "kind": "possible_conflict" if r[5] != r[6]
-                            else "possible_agreement",
-                    "predicate": r[7], **atom_qualifiers(r[8]),
-                } for r in rows[:20]]
+                # Shared with the library UI: exact conflicts stay separate
+                # from temporal-overlap hints, even in the editor dock.
+                result = indexed_related_claims(con, relative_path, 20)
+                relations = result["matches"]
+                truncated = result["truncated"]
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:

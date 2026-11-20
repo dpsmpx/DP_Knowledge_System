@@ -24,16 +24,27 @@ final class KnowledgeRelationPresentation {
                         .append(": ").append(scope);
             }
         }
-        final JSONObject interval = relation.optJSONObject("interval");
+        appendInterval(text, context, R.string.knowledge_editor_structural_interval,
+                relation.optJSONObject("interval"));
+        if ("temporal_overlap".equals(relation.optString("kind"))) {
+            appendInterval(text, context, R.string.knowledge_relation_other_interval,
+                    relation.optJSONObject("other_interval"));
+            appendInterval(text, context, R.string.knowledge_relation_overlap_interval,
+                    relation.optJSONObject("overlap_interval"));
+        }
+        return text.toString();
+    }
+
+    private static void appendInterval(final StringBuilder text, final Context context,
+                                       final int label, final JSONObject interval) {
         if (interval != null) {
             final String from = interval.isNull("from") ? "" : interval.optString("from", "");
             final String to = interval.isNull("to") ? "" : interval.optString("to", "");
             if (!from.isEmpty() || !to.isEmpty()) {
-                text.append("\n").append(context.getString(R.string.knowledge_editor_structural_interval))
+                text.append("\n").append(context.getString(label))
                         .append(": ").append(from.isEmpty() ? "−∞" : from)
                         .append(" – ").append(to.isEmpty() ? "+∞" : to);
             }
         }
-        return text.toString();
     }
 }

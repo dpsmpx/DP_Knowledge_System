@@ -207,6 +207,88 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(2, len(rows))
         self.assertNotEqual(rows[0][4], rows[1][4])
 
+    def test_temporal_overlap_is_not_a_conflict_or_agreement(self):
+        original = {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
+                    for name in self.notes}
+        self._import()
+        db = self.workspace / "var" / "ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+
+        def assign(con, path, start, end, *, context="проект-а"):
+            assertion = {"mod": "asserted", "neg": path == "c.md", "atom": atom,
+                         "ctx": context, "iv": {"from": start, "to": end}}
+            row = projected_atoms({"id": "test", "nodes": [
+                {"type": "claim", "assertion": assertion}
+            ]}, path, "F:test", "test:1")[0]
+            con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                        "valid_from=?, valid_to=? WHERE doc=?",
+                        (row[4], row[7], row[8], row[9], path))
+
+        with sqlite3.connect(db) as con:
+            assign(con, "a.md", "2024-01-01", "2024-12-31")
+            assign(con, "b.md", "2024-05-01", "2025-02-01")
+            assign(con, "c.md", "2025-02-02", "2025-12-31")
+            self.assertEqual(0, _source_conflict_count(con))
+        relations = self._relations()["matches"]
+        self.assertEqual(["b.md"], [x["path"] for x in relations])
+        overlap = relations[0]
+        self.assertEqual("temporal_overlap", overlap["kind"])
+        self.assertFalse(overlap["opposing_polarity"])
+        self.assertEqual({"from": "2024-01-01", "to": "2024-12-31"},
+                         overlap["interval"])
+        self.assertEqual({"from": "2024-05-01", "to": "2025-02-01"},
+                         overlap["other_interval"])
+        self.assertEqual({"from": "2024-05-01", "to": "2024-12-31"},
+                         overlap["overlap_interval"])
+
+        with sqlite3.connect(db) as con:
+            # A different polarity still only merits a temporal hint. It must
+            # never enter the exact-key contradiction audit by date overlap.
+            con.execute("UPDATE candidate_atoms SET negated=1 WHERE doc='b.md'")
+            self.assertEqual(0, _source_conflict_count(con))
+            assign(con, "b.md", "2024-12-31", "2024-12-31")
+        boundary = self._relations()["matches"]
+        self.assertEqual(["b.md"], [x["path"] for x in boundary])
+        self.assertTrue(boundary[0]["opposing_polarity"])
+        self.assertEqual({"from": "2024-12-31", "to": "2024-12-31"},
+                         boundary[0]["overlap_interval"])
+        with sqlite3.connect(db) as con:
+            assign(con, "b.md", "2024-12-31", "2025-02-01", context="проект-б")
+        self.assertEqual([], self._relations()["matches"])
+        self.assertEqual(original, {
+            name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
+            for name in self.notes})
+        self.assertFalse((self.workspace / "data").exists())
+
+    def test_open_ended_intervals_require_actual_bounds_on_both_sides(self):
+        self._import()
+        db = self.workspace / "var" / "ks.sqlite"
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+
+        def rows(start, end):
+            return projected_atoms({"id": "synthetic", "nodes": [{
+                "type": "claim", "assertion": {
+                    "mod": "asserted", "neg": False, "atom": atom,
+                    "iv": {"from": start, "to": end},
+                },
+            }]}, "x.md", "F:x", "x:1")[0]
+
+        start_only = rows("2024-06-01", None)
+        end_only = rows(None, "2024-06-01")
+        with sqlite3.connect(db) as con:
+            for path, row in (("a.md", start_only), ("b.md", end_only)):
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], path))
+        result = self._relations()["matches"]
+        self.assertEqual(["b.md"], [r["path"] for r in result])
+        self.assertEqual({"from": "2024-06-01", "to": "2024-06-01"},
+                         result[0]["overlap_interval"])
+        # The unspecified period in c.md and sub/e.markdown must NOT behave
+        # like an all-time interval and create spurious overlap suggestions.
+        self.assertNotIn("c.md", {r["path"] for r in result})
+        self.assertNotIn("sub/e.markdown", {r["path"] for r in result})
+
     def test_projection_version_change_rebuilds_unchanged_derived_notes(self):
         self._import()
         db = self.workspace / "var" / "ks.sqlite"
@@ -245,7 +327,7 @@ class RelationTests(unittest.TestCase):
         self._import()
         self.assertEqual(fixture, journal.read_text(encoding="utf-8"))
         with sqlite3.connect(old_index) as con:
-            self.assertEqual("4", con.execute(
+            self.assertEqual("5", con.execute(
                 "SELECT value FROM meta WHERE key='db_schema'").fetchone()[0])
         self.assertTrue(self._atoms())
 

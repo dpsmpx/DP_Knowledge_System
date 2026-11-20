@@ -1775,9 +1775,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final String[] labels = new String[matches.length()];
                 for (int i = 0; i < labels.length; i++) {
                     final JSONObject match = matches.getJSONObject(i);
-                    final boolean conflict = "possible_conflict".equals(match.optString("kind"));
-                    labels[i] = getString(conflict ? R.string.knowledge_possible_conflict
-                                    : R.string.knowledge_possible_agreement)
+                    final String kind = match.optString("kind");
+                    final int label = "temporal_overlap".equals(kind)
+                            ? R.string.knowledge_possible_temporal_overlap
+                            : "possible_conflict".equals(kind)
+                                    ? R.string.knowledge_possible_conflict
+                                    : R.string.knowledge_possible_agreement;
+                    labels[i] = getString(label)
                             + " · " + match.optString("path")
                             + "\n" + match.optString("predicate") + " · "
                             + match.optString("source_locator") + " ↔ "
