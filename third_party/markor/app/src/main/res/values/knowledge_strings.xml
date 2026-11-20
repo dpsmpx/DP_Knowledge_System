@@ -420,6 +420,11 @@
     <string name="knowledge_sync_review_warning">Only your decision, the foreign event ID and signed branch commitment will be saved in the local journal, without note text. The foreign decision will NOT be applied and source Markdown will remain unchanged. Reopen the branch after recording: the local journal head will change.</string>
     <string name="knowledge_sync_review_confirm">Save review</string>
     <string name="knowledge_sync_review_saved">Review recorded in the local journal without activating foreign knowledge.</string>
+    <string name="knowledge_sync_adopt_preview">Review adoption</string>
+    <string name="knowledge_sync_adopt_confirm">Confirm adoption</string>
+    <string name="knowledge_sync_adopt_warning">Only one accepted assertion with an identical original Markdown note on this device can be adopted. Source text, selected reading, epistemic role and conflicts will be checked again. This is a NEW local human decision referencing a trusted foreign branch, not automatic journal merging. Ambiguity or conflict prevents the write.</string>
+    <string name="knowledge_sync_adopt_saved">Foreign assertion adopted as an explicit new local decision.</string>
+    <string name="knowledge_sync_adopt_failed">Cannot adopt: the source, interpretation, journal, trust or conflicts failed validation. Nothing was changed.</string>
     <string name="knowledge_daily_backup_title">Encrypted daily local backups</string>
     <string name="knowledge_daily_backup_running">Creating and verifying a local encrypted snapshot…</string>
     <string name="knowledge_daily_backup_enable">Enable daily copies</string>

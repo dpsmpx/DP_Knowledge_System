@@ -4161,7 +4161,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setTitle(R.string.knowledge_sync_event_detail)
                             .setMessage(R.string.knowledge_sync_event_detail_warning)
                             .setView(text)
-                            .setPositiveButton(android.R.string.ok, null)
+                            .setPositiveButton("accept".equals(detail.optString("operation"))
+                                            ? R.string.knowledge_sync_adopt_preview
+                                            : android.R.string.ok,
+                                    "accept".equals(detail.optString("operation"))
+                                            ? (dialog, which) -> previewPeerAdoption(
+                                            name, eventId, expectedHash, localHead)
+                                            : null)
                             .setNeutralButton(R.string.knowledge_sync_review_hold,
                                     (dialog, which) -> confirmPeerReview(name, eventId,
                                             expectedHash, localHead, "hold"))
@@ -4210,6 +4216,75 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         Toast.LENGTH_LONG).show());
                             }
                         })).show();
+    }
+
+    private void previewPeerAdoption(final String name, final String eventId,
+                                     final String remoteSha, final String localHead) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final JSONObject detail = KnowledgePythonBridge.journalSyncEventDetail(
+                        this, branch.journal, eventId, remoteSha);
+                if (!"accept".equals(detail.optString("operation")))
+                    throw new SecurityException("Unsupported foreign operation");
+                final JSONObject data = detail.getJSONObject("data");
+                final JSONObject source = data.getJSONObject("provenance");
+                if (!"vault_note".equals(source.optString("source_type")))
+                    throw new SecurityException("Foreign source is not portable");
+                final String path = source.getString("document");
+                final String markdown = readSelectedNote(path);
+                final String freshSha = sha256Hex(
+                        markdown.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                if (!freshSha.equals(source.getString("document_sha")))
+                    throw new SecurityException("Local Markdown differs from peer original");
+                final String excerpt = source.optString("text", "");
+                final String shown = getString(R.string.knowledge_sync_adopt_warning)
+                        + "\n\n" + path + "\n" + data.optString("role", "")
+                        + "\n\n" + excerpt.substring(0, Math.min(1500, excerpt.length()));
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_sync_adopt_preview)
+                            .setMessage(shown)
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton(R.string.knowledge_sync_adopt_confirm,
+                                    (dialog, which) -> commitPeerAdoption(
+                                            name, eventId, remoteSha, localHead, path))
+                            .show();
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_adopt_failed, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void commitPeerAdoption(final String name, final String eventId,
+                                    final String remoteSha, final String localHead,
+                                    final String sourcePath) {
+        worker.submit(() -> {
+            try {
+                final KnowledgePeerInbox.Snapshot branch = KnowledgePeerInbox.open(this, name);
+                if (!branch.peer.paired) throw new SecurityException("Peer trust revoked");
+                final String currentSource = readSelectedNote(sourcePath);
+                final JSONObject result = KnowledgePythonBridge.journalSyncAdopt(
+                        this, workspacePath(), branch.journal, branch.peer.fingerprint,
+                        eventId, localHead, remoteSha, sourcePath, currentSource);
+                if (!result.optBoolean("applied", false))
+                    throw new SecurityException("Foreign adoption not committed");
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, R.string.knowledge_sync_adopt_saved,
+                                Toast.LENGTH_LONG).show();
+                        if (decisionWorkspaceReady) loadDecisionPage(0);
+                    }
+                });
+            } catch (Exception invalid) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.knowledge_sync_adopt_failed, Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void promptPortablePeerPassword(final Uri source) {

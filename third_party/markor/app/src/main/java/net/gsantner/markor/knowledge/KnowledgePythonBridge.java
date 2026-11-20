@@ -280,6 +280,17 @@ public final class KnowledgePythonBridge {
                 fingerprint, eventId, expectedLocalHead, expectedRemoteSha, verdict);
     }
 
+    public static JSONObject journalSyncAdopt(final Context context, final String workspace,
+                                             final String foreignText, final String fingerprint,
+                                             final String eventId, final String expectedLocalHead,
+                                             final String expectedRemoteSha,
+                                             final String sourcePath, final String sourceMarkdown)
+            throws JSONException {
+        return invoke(context, "journal_sync_adopt", workspace, foreignText,
+                fingerprint, eventId, expectedLocalHead, expectedRemoteSha,
+                sourcePath, sourceMarkdown);
+    }
+
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
         synchronized (KnowledgePythonBridge.class) {
@@ -307,6 +318,7 @@ public final class KnowledgePythonBridge {
                 || "dpksys.sync-events.v1".equals(protocol)
                 || "dpksys.sync-event-detail.v1".equals(protocol)
                 || "dpksys.sync-review-commit.v1".equals(protocol)
+                || "dpksys.sync-adopt.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)

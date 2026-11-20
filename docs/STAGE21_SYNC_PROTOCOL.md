@@ -113,8 +113,26 @@ existing signed journal backup on the next explicit export. This is a causal
 acknowledgment/audit trail, **not** application of a foreign decision or
 resolution of a conflict. `approve` is intentionally not an allowed verdict.
 
-The next missing slice is a source-verified, explicitly human-approved
-cross-device adoption/resolution operation that preserves both causal heads
-and represents disagreement as contested knowledge. It must not silently
-interpret a review receipt as approval or replay a foreign hash chain into
-the local linear journal. Clean-device and concurrency QA remain OPEN.
+## Tenth slice: source-verified manual adoption (pending CI)
+
+An individual foreign `accept` event may be **explicitly adopted** only if
+the peer is still paired and its signed encrypted inbox passes validation,
+the current local source note has exactly the original SHA-256, the precise
+fragment and locator match, and the locally computed CNL reading, canonical
+node and epistemic role agree. Unsupported operation types, other source
+types, missing source files, ambiguous readings, already-rejected records,
+stale journal heads and possible conflicts fail closed. The confirmation
+dialog displays the source excerpt and warns that adoption is a new local
+decision, not replay of the foreign hash chain.
+
+The approved single assertion is written as **one new local `accept` event**
+with provenance referencing the signed foreign event and *both* causal
+heads. No original Markdown is modified. Repeating the same approval is
+idempotent. A prior explicit foreign-event rejection prevents adoption. A
+foreign acceptance does **not** cross the trust boundary merely because a
+signed file was received or a review receipt exists.
+
+This does not yet resolve conflicting claims, reconstruct remote source
+notes, or automatically replay all compatible operations. A manual conflict
+resolution receipt with explicit causal references, branch acknowledgements,
+and clean-device/concurrency QA remain OPEN.

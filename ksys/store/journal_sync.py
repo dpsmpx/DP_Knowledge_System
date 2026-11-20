@@ -226,21 +226,18 @@ def inspect_foreign_event(remote_content: str, event_id: str,
     raise ValueError("Foreign event not found")
 
 
-def prepare_peer_review(local_content: str, remote_content: str,
-                        peer_fingerprint: str, remote_event_id: str,
-                        expected_local_head: str | None, expected_remote_sha256: str,
-                        verdict: str) -> dict[str, Any]:
-    """Validate a human review of one signed, paired foreign event.
+def verified_foreign_event(local_content: str, remote_content: str,
+                           peer_fingerprint: str, remote_event_id: str,
+                           expected_local_head: str | None,
+                           expected_remote_sha256: str) -> tuple[Entry, JournalBranchPreview]:
+    """Confirm exact causal source/head with NO trust inference or mutation.
 
-    Caller MUST authenticate the peer's ECDSA signature against a locally
-    paired identity before calling this function. No branch data, notes or
-    remote statements are copied into the local receipt. This is *not* a merge.
+    IMPORTANT: caller MUST authenticate the ECDSA signature and confirm the
+    pinned peer is currently trusted. SHA-256 alone is not sender identity.
     """
     if not isinstance(peer_fingerprint, str) or not re.fullmatch(
             r"[0-9a-f]{64}", peer_fingerprint):
         raise ValueError("Invalid trusted peer fingerprint")
-    if verdict not in ("hold", "reject"):
-        raise ValueError("A review receipt cannot authorize remote knowledge")
     if not isinstance(remote_event_id, str) or len(remote_event_id) > 160:
         raise ValueError("Invalid remote event ID")
     if not isinstance(expected_remote_sha256, str) or not re.fullmatch(
@@ -252,9 +249,27 @@ def prepare_peer_review(local_content: str, remote_content: str,
     if comparison.local_head != expected_local_head:
         raise ValueError("Local journal changed since review")
     remote = validated_entries(remote_content)
-    foreign = {event.id for event in remote[comparison.common_events:]}
-    if remote_event_id not in foreign:
-        raise ValueError("Review event is not a foreign-only event")
+    selected = next((event for event in remote[comparison.common_events:]
+                     if event.id == remote_event_id), None)
+    if selected is None:
+        raise ValueError("Selected event is not a foreign-only event")
+    return selected, comparison
+
+
+def prepare_peer_review(local_content: str, remote_content: str,
+                        peer_fingerprint: str, remote_event_id: str,
+                        expected_local_head: str | None, expected_remote_sha256: str,
+                        verdict: str) -> dict[str, Any]:
+    """Validate a human review, NOT knowledge activation.
+
+    Caller MUST authenticate the peer's ECDSA signature against a locally
+    paired identity. No note text is copied into the local review receipt.
+    """
+    if verdict not in ("hold", "reject"):
+        raise ValueError("A review receipt cannot authorize remote knowledge")
+    _, comparison = verified_foreign_event(
+        local_content, remote_content, peer_fingerprint, remote_event_id,
+        expected_local_head, expected_remote_sha256)
     return {
         "peer_fingerprint": peer_fingerprint,
         "remote_sha256": expected_remote_sha256,
@@ -264,5 +279,46 @@ def prepare_peer_review(local_content: str, remote_content: str,
         "local_head_at_review": expected_local_head,
         "verdict": verdict,
         "activates_knowledge": False,
+        "protocol_version": 1,
+    }
+
+
+def prepare_peer_adoption(local_content: str, remote_content: str,
+                          peer_fingerprint: str, remote_event_id: str,
+                          expected_local_head: str | None,
+                          expected_remote_sha256: str) -> tuple[Entry, dict[str, Any]]:
+    """Only a single foreign acceptance can be proposed for local revalidation.
+
+    Other operations, arbitrary schema changes, stale branches and all
+    implicit linear-chain fast-forwards are intentionally unsupported here.
+    This returns a plan, NEVER appends a journal event.
+    """
+    event, comparison = verified_foreign_event(
+        local_content, remote_content, peer_fingerprint, remote_event_id,
+        expected_local_head, expected_remote_sha256)
+    if event.op != "accept" or not isinstance(event.data, dict):
+        raise ValueError("Only an individually accepted source claim may be adopted")
+    data = event.data
+    source = data.get("provenance")
+    if (not isinstance(source, dict) or source.get("source_type") != "vault_note"
+            or not isinstance(source.get("extraction"), dict)
+            or source["extraction"].get("method") != "cnl"
+            or not isinstance(source.get("document"), str)
+            or not isinstance(source.get("document_sha"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", source["document_sha"])
+            or not isinstance(source.get("fragment_id"), str)
+            or not isinstance(source.get("text"), str)
+            or not isinstance(source.get("span"), list)
+            or len(source["span"]) != 2
+            or not isinstance(data.get("node"), dict)
+            or data.get("role") not in ("claim", "hypothesis", "fact")):
+        raise ValueError("Foreign decision lacks verifiable original note provenance")
+    return event, {
+        "peer_fingerprint": peer_fingerprint,
+        "remote_sha256": expected_remote_sha256,
+        "remote_head": comparison.remote_head,
+        "remote_event_id": remote_event_id,
+        "common_head": comparison.common_head,
+        "local_head_at_review": expected_local_head,
         "protocol_version": 1,
     }

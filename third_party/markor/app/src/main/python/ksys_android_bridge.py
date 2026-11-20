@@ -28,7 +28,8 @@ from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
 from ksys.store.workspace import Workspace
 from ksys.store.journal_sync import (preview_journals, review_foreign_events,
-                                     inspect_foreign_event, prepare_peer_review)
+                                     inspect_foreign_event, prepare_peer_review,
+                                     prepare_peer_adoption)
 from ksys.dialogue.session import Dialogue
 from ksys.dialogue.intents import classify as classify_intent
 from ksys.query.answers import Answerer
@@ -1709,6 +1710,89 @@ def journal_sync_review_commit(workspace_dir: str, foreign_text: str,
     return json.dumps({"protocol": "dpksys.sync-review-commit.v1",
                        "receipt_id": saved.id, "journal_head": kb.journal.head,
                        "duplicate": False, "activates_knowledge": False},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def journal_sync_adopt(workspace_dir: str, foreign_text: str,
+                       peer_fingerprint: str, event_id: str,
+                       expected_local_head: str, expected_remote_sha256: str,
+                       relative_path: str, markdown: str) -> str:
+    """Explicit user adoption after authenticated peer and live-source review.
+
+    The Java caller must authenticate the signed inbox and read the source
+    using the selected Android vault's safe path resolver. This method proves
+    source/hash/span/reading agreement again. Only an individual `accept`
+    operation with canonical CNL provenance may be adopted. Conflict, absent
+    source and any schema/role ambiguity fail closed. No original file changes.
+    """
+    _validate_note_input(relative_path, markdown)
+    kb = _kb(workspace_dir)
+    local_path = kb.ws.journal_path
+    local = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
+    event, foreign = prepare_peer_adoption(
+        local, foreign_text, peer_fingerprint, event_id,
+        expected_local_head or None, expected_remote_sha256)
+    # A previously rejected event cannot be reactivated by merely pressing
+    # another button. A fresh explicit owner policy is needed instead.
+    reviewed = kb.state.peer_reviews.get(
+        (peer_fingerprint, expected_remote_sha256, event_id))
+    if reviewed and reviewed[0] == "reject":
+        raise ValueError("Foreign event was explicitly rejected")
+    source = event.data["provenance"]
+    if source["document"] != relative_path or source["document_sha"] != _source_hash(markdown):
+        raise ValueError("Original local Markdown differs from foreign source")
+    for entry in reversed(kb.journal.entries()):
+        prior = entry.data.get("provenance", {}).get("foreign_event", {}) \
+            if entry.op == "accept" else {}
+        if all(prior.get(key) == foreign[key] for key in
+               ("peer_fingerprint", "remote_sha256", "remote_event_id")):
+            return json.dumps({"protocol": "dpksys.sync-adopt.v1",
+                               "journal_id": entry.id, "journal_head": kb.journal.head,
+                               "duplicate": True, "applied": True},
+                              sort_keys=True, separators=(",", ":"))
+
+    fragment = _fragment(relative_path, markdown, source["fragment_id"])
+    if (list(fragment.span) != source["span"]
+            or fragment.text != source["text"]
+            or fragment.locator != source.get("locator")):
+        raise ValueError("Foreign origin does not match selected note span")
+    reading = source["extraction"].get("reading_id")
+    if not isinstance(reading, str):
+        raise ValueError("Foreign decision lacks selected reading")
+    preview = kb.preview(fragment.plain, origin=fragment.id, mode="import")
+    if preview.formalization.status in ("NO_PARSE", "UNRESOLVED", "AMBIGUOUS"):
+        raise ValueError("Local interpretation is not sufficiently certain")
+    option = next((o for o in preview.options if o["reading_id"] == reading), None)
+    if option is None or len(option["nodes"]) != 1:
+        raise ValueError("Foreign reading is unavailable on this device")
+    role = event.data["role"]
+    node = convert_role(option["nodes"][0], role)
+    if node.to_dict() != event.data["node"]:
+        raise ValueError("Canonical knowledge differs between devices")
+    if kb.state.active(node.id) or node.id in kb.state.rejected:
+        raise ValueError("Local knowledge already exists or was rejected")
+    if any(str(d.get("severity", "")).lower() == "error" for d in option["diagnostics"]):
+        raise ValueError("Foreign interpretation failed local validation")
+    if kb.conflicts_for([node]):
+        raise ValueError("Contested knowledge requires separate manual resolution")
+
+    provenance = {
+        "source_type": "vault_note", "document": relative_path,
+        "document_sha": _source_hash(markdown),
+        "fragment_id": fragment.id, "locator": fragment.locator,
+        "span": list(fragment.span), "text": fragment.text,
+        "text_hash": fragment.text_hash,
+        "extraction": {"method": "cnl", "reading_id": reading},
+        "foreign_event": foreign,
+    }
+    kb.ws.init()
+    saved = kb.accept([node], provenance=provenance, role=role,
+                      note="Explicitly adopted from authenticated peer on Android")
+    if kb.journal.verify() or len(saved.entries) != 1:
+        raise ValueError("Foreign adoption journal write did not verify")
+    return json.dumps({"protocol": "dpksys.sync-adopt.v1",
+                       "journal_id": saved.entries[0].id, "journal_head": kb.journal.head,
+                       "duplicate": False, "applied": True},
                       sort_keys=True, separators=(",", ":"))
 
 
