@@ -1076,8 +1076,41 @@ public final class KnowledgeDeviceQaRunner {
                     workspace, selections.toString());
             if (!preview.getBoolean("read_only")
                     || !preview.getBoolean("requires_human_confirmation")
-                    || preview.getJSONArray("items").length() != 2) {
+                    || preview.getJSONArray("items").length() != 2
+                    || !sources[0].contains(preview.getJSONArray("items").getJSONObject(0)
+                            .getString("source_excerpt"))
+                    || preview.getJSONArray("items").getJSONObject(0)
+                            .getBoolean("source_truncated")) {
                 throw new SyntheticMismatch("verdict=BATCH_PREVIEW_MISMATCH");
+            }
+            // Fresh opposing claims must not bypass individual review merely
+            // because neither assertion appears in the current journal.
+            final String opposingSource = "# Opposing\nСтресс не приводит к бессоннице.\n";
+            final String opposingPath = "synthetic-batch-opposing.md";
+            final String opposingFragment = KnowledgePythonBridge.inspect(context,
+                    opposingPath, opposingSource).getJSONArray("fragments")
+                    .getJSONObject(1).getString("id");
+            final String opposingReading = KnowledgePythonBridge.preview(context, workspace,
+                    opposingPath, opposingSource, opposingFragment)
+                    .getJSONObject("preview").getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            final JSONObject opposingEntry = new JSONObject();
+            opposingEntry.put("path", opposingPath);
+            opposingEntry.put("markdown", opposingSource);
+            opposingEntry.put("fragment_id", opposingFragment);
+            opposingEntry.put("reading_id", opposingReading);
+            final JSONArray opposingBatch = new JSONArray();
+            opposingBatch.put(selections.getJSONObject(0));
+            opposingBatch.put(opposingEntry);
+            boolean opposingRejected = false;
+            try {
+                KnowledgePythonBridge.previewClaimBatch(context, workspace,
+                        opposingBatch.toString());
+            } catch (Exception expected) {
+                opposingRejected = true;
+            }
+            if (!opposingRejected) {
+                throw new SyntheticMismatch("verdict=BATCH_OPPOSING_READINGS_ALLOWED");
             }
             boolean staleRejected = false;
             try {
@@ -1131,6 +1164,7 @@ public final class KnowledgeDeviceQaRunner {
             }
             if (!replayRejected) throw new SyntheticMismatch("verdict=BATCH_REPLAY_ALLOWED");
             return "syntheticClaims=2, activeAfterBatch=2, atomicJournalEntry=true, "
+                    + "sourceExcerptVerified=true, opposingBundleRejected=true, "
                     + "staleHeadRejected=true, changedSourceRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {

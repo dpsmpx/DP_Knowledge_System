@@ -1605,6 +1605,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         if (item != null) {
                             details.append(i + 1).append(". ").append(item.optString("path"))
                                     .append(" · ").append(item.optString("locator"))
+                                    .append("\n").append(getString(R.string.knowledge_batch_source))
+                                    .append("\n").append(item.optString("source_excerpt"));
+                            if (item.optBoolean("source_truncated")) {
+                                details.append(getString(R.string.knowledge_batch_source_truncated));
+                            }
+                            details.append("\n")
+                                    .append(getString(R.string.knowledge_batch_interpretation))
                                     .append("\n").append(item.optString("paraphrase"))
                                     .append("\n").append(item.optString("ksf"))
                                     .append("\n\n");
@@ -1622,6 +1629,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_decision_failed);
+                        new AlertDialog.Builder(this)
+                                .setMessage(R.string.knowledge_batch_rejected)
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
                     }
                 });
             }

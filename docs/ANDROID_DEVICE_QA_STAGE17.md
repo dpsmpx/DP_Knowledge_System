@@ -61,14 +61,23 @@ exist. Strict automated policies and broader multi-role batch approval are **not
 - Append one `batch_accept` event activating two separate claims, retaining
   source-specific provenance and the original read-only Markdown content.
 - Reject replay of a previously committed batch.
+- Refuse an unreviewed batch containing two directly opposite new claims,
+  even if neither conflicts with the existing journal; separate human review
+  remains available, and no claim is discarded or automatically judged false.
 
 In the actual UI, choose **Review candidates** and select one candidate to
 use the previous single-decision screen, or **2–8** candidates on the current
-page to preview a batch. Confirm only after inspecting all displayed readings
-and canonical statements. This intentionally narrow first batch **always uses
+page to preview a batch. The confirmation dialog now displays a bounded
+original-source excerpt (up to 500 characters) beside **each** chosen
+interpretation and canonical statement; shortened excerpts are marked, and
+the full original note can be opened separately. Confirm only after inspecting
+these readings and their original context. This intentionally narrow batch **always uses
 the `claim` role**: neither facts nor hypotheses are promoted by bulk action.
-Contradictory, already active, duplicate, unresolved and invalid interpretations
-are blocked. The commit rereads the sources and checks the preview fingerprint
+Conflicts against active knowledge, direct opposition **within the selected
+batch**, already active, duplicate, unresolved and invalid interpretations
+are blocked from this combined operation. A rejection dialog directs the user
+to inspect individual entries. Contradictory claims are not prohibited from
+separate explicit human decisions. The commit rereads the sources and checks the preview fingerprint
 and journal head. All changes belong to one journal event; the app never edits
 the original Markdown. Do not approve suggestions without reading their sources.
 

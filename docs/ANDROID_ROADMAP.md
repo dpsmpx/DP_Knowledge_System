@@ -42,7 +42,7 @@ snapshot until the integrated application is ready.
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 | 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
-| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event and hash-checked preview; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
+| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event, hash-checked preview, source excerpts and intra-batch direct-opposition guard; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
 | 18 | Source-backed, conservative cross-note precision and human-reviewed epistemic reconciliation | **Functional slices 1–27 implemented in Draft PR #76:** exact context/interval matching, owner aliases, copy families, source lineage/type, SHA freshness, modal and temporal hints, reversible date-pair reviews and isolated `VERSION-18-SUITE`. Python and Android CI are acceptance prerequisites; device UI, TalkBack, lifecycle and 20k-vault physical acceptance remain OPEN. See `docs/STAGE18_COMPLETION_GATE.md`. No automatic truth or numerical reliability claims. |
 | 22 | Full independent Android UI/UX with Dynamic Color, efficient note browsing, process dashboards, human decision/diff review and accessible navigation | **Slices 1–13 integrated, 14–20 in PR #72 pending final CI/merge:** 4-tab Material 3 DPKS workspace, direct launcher, guarded review, user-controlled editor Save/Preview, exact-source context and cautious CNL comparisons; responsive phone/tablet dock, 60-note paged library, offline epistemic guide, code-only event history and one-button Java/Python synthetic tests. Markor's editing/rendering engine is deliberately reused. General-language semantic equivalence, real touch/TalkBack/200% font acceptance, device 20k benchmarks and full independent editor engine are **not** asserted. QA-59–74 remain OPEN/DEFERRED. See `docs/STAGE22_COMPLETION_GATE.md` and `docs/ANDROID_DEVICE_QA_STAGE22.md`. |
 
@@ -102,7 +102,11 @@ page, inspect each current note-derived reading, and explicitly accept them
 **only as claims**. It rejects duplicates, conflicts, invalid readings, stale
 notes and journal changes before a single `batch_accept` event containing
 separate provenance per claim. Choosing one candidate still opens the older
-single-decision dialog. `BATCH-17` tests only disposable synthetic notes.
+single-decision dialog. Its preview now shows bounded original-source excerpts
+beside interpretations and rejects direct opposition between uncommitted
+batch items, even when the journal itself has no conflict. Separate manual
+acceptance of contrary source claims remains possible. `BATCH-17` tests only
+disposable synthetic notes.
 See `docs/ANDROID_DEVICE_QA_STAGE17.md`.
 
 **Still open:** revision/split/merge edge cases, richer batch roles, versioned strict
