@@ -385,6 +385,57 @@ class RelationTests(unittest.TestCase):
             return con.execute(
                 "SELECT doc, atom_key, negated FROM candidate_atoms ORDER BY doc").fetchall()
 
+    def test_real_markdown_dated_pair_can_be_manually_reviewed_without_sql_fixture(self):
+        """Owner-visible QA: ordinary CNL notes must reach the version dialog.
+
+        Earlier temporal unit fixtures injected date qualifiers into disposable
+        SQLite rows. This regression instead exercises the entire Markdown
+        parser, import, relation selection, review, reverse lookup and revoke.
+        """
+        self.notes["a.md"] = ("# Stage 18 · Earlier reading\n"
+                              "С 2024-01-01 по 2024-12-31 Алекс работает в Google.\n")
+        self.notes["b.md"] = ("# Stage 18 · Later reading\n"
+                              "С 2025-01-01 по 2025-12-31 Алекс не работает в Google.\n")
+        for name in ("a.md", "b.md"):
+            (self.vault / name).write_text(self.notes[name], encoding="utf-8")
+        original = {name: hashlib.sha256((self.vault / name).read_bytes()).hexdigest()
+                    for name in ("a.md", "b.md")}
+        self._import()
+        with sqlite3.connect(self.workspace / "var/ks.sqlite") as con:
+            qualifiers = con.execute(
+                "SELECT doc, valid_from, valid_to, negated FROM candidate_atoms "
+                "WHERE doc IN ('a.md', 'b.md') ORDER BY doc").fetchall()
+        self.assertEqual([
+            ("a.md", "2024-01-01", "2024-12-31", 0),
+            ("b.md", "2025-01-01", "2025-12-31", 1),
+        ], qualifiers)
+        matches = self._relations("a.md", verified=True)["matches"]
+        selected = [m for m in matches if m["path"] == "b.md"
+                    and m["kind"] == "temporal_separation"]
+        self.assertEqual(1, len(selected))
+        self.assertTrue(selected[0]["live_source_pair"])
+        params = (str(self.workspace), str(self.vault), "a.md",
+                  json.dumps(selected[0], ensure_ascii=False), "possibly_changed",
+                  "Тестовая интерпретация двух периодов")
+        preview = json.loads(bridge.preview_version_review(*params))
+        self.assertTrue(all(source["excerpt"] and source["source_sha256"]
+                            for source in preview["sources"]))
+        result = json.loads(bridge.record_version_review(
+            *params, preview["preview_token"], preview["journal_head"]))
+        decision_id = result["journal_ids"][0]
+        reverse = next(m for m in self._relations("b.md", verified=True)["matches"]
+                       if m["path"] == "a.md" and m["kind"] == "temporal_separation")
+        self.assertEqual(decision_id, reverse["version_review_id"])
+        revoke = json.loads(bridge.preview_version_unreview(str(self.workspace), decision_id))
+        bridge.record_version_unreview(str(self.workspace), decision_id,
+                                       revoke["preview_token"], revoke["journal_head"])
+        state = json.loads(bridge.version_review_decisions(str(self.workspace)))
+        self.assertEqual([], state["active"])
+        self.assertEqual(["version_unreview", "version_review"],
+                         [event["op"] for event in state["recent"]])
+        self.assertEqual(original, {name: hashlib.sha256(
+            (self.vault / name).read_bytes()).hexdigest() for name in original})
+
     def test_manual_dated_relation_review_is_reversible_and_never_authoritative(self):
         self._import()
         db = self.workspace / "var/ks.sqlite"

@@ -24,6 +24,9 @@ reviewable candidate accurately, not that the original assertion is true.
 This sign-off cannot be inferred from Python tests, a successful APK build or
 GitHub Actions. Run with a **synthetic notebook** only; no private vault data
 needs to be exported or uploaded.
+For the exact two-file controlled-language fixture and safe manual walk-through,
+see [`docs/ANDROID_DEVICE_QA_STAGE18.md`](ANDROID_DEVICE_QA_STAGE18.md). Any
+confirmed test interpretation leaves a reversible but permanent journal history.
 
 1. On Android 15 and an Android 11 device, open **Library → Related claims —
    choose a note** (or long-press a library row and choose its relation action);
