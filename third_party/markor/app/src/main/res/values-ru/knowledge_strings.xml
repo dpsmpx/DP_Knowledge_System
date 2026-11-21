@@ -347,6 +347,10 @@
     <string name="knowledge_batch_limit">Выберите одну запись для отдельной проверки или 2–8 для пакета.</string>
     <string name="knowledge_batch_confirm">Подтвердить все выбранные утверждения</string>
     <string name="knowledge_batch_warning">Все выбранные прочтения будут записаны как утверждения, НЕ как установленные факты. Проверьте каждое прочтение и источник перед общим подтверждением. В журнале будет одно событие для всего пакета; изменение источника или журнала отменит запись.</string>
+    <string name="knowledge_batch_source">Исходный фрагмент:</string>
+    <string name="knowledge_batch_source_truncated">… [фрагмент сокращён; откройте заметку для полного контекста]</string>
+    <string name="knowledge_batch_interpretation">Выбранное прочтение:</string>
+    <string name="knowledge_batch_rejected">Совместная проверка пакета невозможна: изменился источник или журнал, либо не прошла проверка прочтения или согласованности. Проверьте записи по отдельности. Противоположные утверждения можно рассмотреть отдельными ручными решениями.</string>
     <string name="knowledge_batch_saved">Утверждения приняты одним событием журнала.</string>
     <string name="knowledge_bulk_queue_warning">Это машинные интерпретации, а не подтверждённые факты. Каждая проверяется по актуальному источнику до утверждения.</string>
     <string name="knowledge_audit_start">Полный аудит базы знаний</string>

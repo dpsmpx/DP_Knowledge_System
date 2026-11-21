@@ -347,6 +347,10 @@
     <string name="knowledge_batch_limit">Select one item for individual review, or 2–8 for a batch.</string>
     <string name="knowledge_batch_confirm">Confirm all selected claims</string>
     <string name="knowledge_batch_warning">All selected interpretations will be recorded as claims, NOT established facts. Verify each paraphrase and source before one explicit confirmation. One journal event will cover the whole batch; any stale source or journal aborts it.</string>
+    <string name="knowledge_batch_source">Original source excerpt:</string>
+    <string name="knowledge_batch_source_truncated">… [excerpt shortened; open the note for full context]</string>
+    <string name="knowledge_batch_interpretation">Selected interpretation:</string>
+    <string name="knowledge_batch_rejected">The batch cannot be reviewed together: a source, interpretation, journal, or consistency check failed. Inspect the selected entries individually. Opposing claims can still be considered in separate human decisions.</string>
     <string name="knowledge_batch_saved">Claims accepted in one journal event.</string>
     <string name="knowledge_bulk_queue_warning">These are machine-extracted interpretations, not accepted facts. Each must be verified against its current source before approval.</string>
     <string name="knowledge_audit_start">Audit the whole knowledge library</string>

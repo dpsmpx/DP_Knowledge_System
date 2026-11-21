@@ -27,6 +27,7 @@ from ksys.core.ids import canonical_json
 from ksys.ir.terms import SYMBOL_RE
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
+from ksys.inference.engine import Engine, complement_support
 from ksys.ir.nodes import node_from_dict
 from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
@@ -2259,10 +2260,21 @@ def _prepare_claim_batch(kb: KnowledgeBase, selection_json: str):
                         "reading_id": option["reading_id"], "paraphrase": option["paraphrase"],
                         "source_hash": source_hash, "fragment_id": fragment.id,
                         "node_id": node.id, "ksf": node.ksf(),
+                        "source_excerpt": fragment.text[:500],
+                        "source_truncated": len(fragment.text) > 500,
                         "diagnostic_count": len(option["diagnostics"])})
     # Batch-wide consistency, in addition to individual checks above.
     if any(d.severity.value == "error" for d in kb.check_candidate_nodes([i["node"] for i in items])):
         raise ValueError("Combined batch fails semantic validation")
+    # Each candidate was checked against the current journal, not against the
+    # other uncommitted candidates. Do not silently bundle two opposing claims.
+    # Both may still be recorded separately after explicit human review.
+    assertions = {item["node"].assertion.id: item["node"].assertion for item in items}
+    batch_engine = Engine.from_items(assertions)
+    if any(other != item["node"].assertion.id
+           for item in items
+           for other in complement_support(batch_engine, item["node"].assertion)):
+        raise ValueError("Opposing batch readings require separate human review")
     token = hashlib.sha256(json.dumps({"head": kb.journal.head, "items": summary},
                                    sort_keys=True, ensure_ascii=False,
                                    separators=(",", ":")).encode("utf-8")).hexdigest()

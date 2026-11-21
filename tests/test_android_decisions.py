@@ -58,6 +58,11 @@ class MobileDecisionTests(unittest.TestCase):
         self.assertEqual("claim", packet["role"])
         self.assertEqual(2, len(packet["items"]))
         self.assertTrue(packet["requires_human_confirmation"])
+        self.assertEqual("Стресс приводит к бессоннице.",
+                         packet["items"][0]["source_excerpt"])
+        self.assertFalse(packet["items"][0]["source_truncated"])
+        self.assertEqual(hashlib.sha256(selections[0]["markdown"].encode()).hexdigest(),
+                         packet["items"][0]["source_hash"])
         result = json.loads(accept_claim_batch(workspace, json.dumps(selections),
                                                packet["batch_hash"], packet["journal_head"]))
         self.assertEqual("batch_accept", result["decision"])
@@ -94,6 +99,33 @@ class MobileDecisionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             accept_claim_batch(workspace, json.dumps(selections), packet["batch_hash"],
                                packet["journal_head"])
+        self.assertEqual(1, len(Journal(self.root / "workspace/data/formal/journal.jsonl",
+                                        FixedClock()).entries()))
+
+    def test_opposing_uncommitted_claims_cannot_be_accepted_as_one_batch(self):
+        selections = self._batch_selections()
+        negative = "# Negative\nСтресс не приводит к бессоннице.\n"
+        fragment = json.loads(inspect_note("negative.md", negative))["fragments"][1]["id"]
+        preview = json.loads(preview_fragment(str(self.root / "workspace"),
+                                              "negative.md", negative, fragment))
+        selections[1] = {"path": "negative.md", "markdown": negative,
+                         "fragment_id": fragment,
+                         "reading_id": preview["preview"]["options"][0]["reading_id"]}
+        with self.assertRaisesRegex(ValueError, "Opposing batch readings"):
+            preview_claim_batch(str(self.root / "workspace"), json.dumps(selections))
+        self.assertFalse((self.root / "workspace").exists())
+        # The block is solely on unreviewed *batching*, not on preserving
+        # contradictory source claims in distinct human decisions.
+        first = json.loads(preview_fragment(str(self.root / "workspace"),
+                                            selections[0]["path"], selections[0]["markdown"],
+                                            selections[0]["fragment_id"]))
+        record_decision(str(self.root / "workspace"), selections[0]["path"],
+                        selections[0]["markdown"], selections[0]["fragment_id"],
+                        selections[0]["reading_id"], "claim", first["source_hash"],
+                        first["journal_head"])
+        second = json.loads(preview_fragment(str(self.root / "workspace"),
+                                             "negative.md", negative, fragment))
+        self.assertTrue(second["preview"]["options"][0]["conflicts"])
         self.assertEqual(1, len(Journal(self.root / "workspace/data/formal/journal.jsonl",
                                         FixedClock()).entries()))
 
