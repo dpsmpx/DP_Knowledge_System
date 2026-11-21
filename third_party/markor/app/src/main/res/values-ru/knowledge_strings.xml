@@ -181,7 +181,8 @@
     <string name="knowledge_history_partial">Частично завершено</string>
     <string name="knowledge_history_cancelled">Отменено</string>
     <string name="knowledge_history_failed">Ошибка</string>
-    <string name="knowledge_process_qa">Диагностика устройства</string>
+    <string name="knowledge_process_qa">Проверки и диагностика устройства</string>
+    <string name="knowledge_process_jump_qa">Перейти к проверкам устройства ↓</string>
     <string name="knowledge_manage_decisions">Решения и аудит знаний</string>
     <string name="knowledge_manage_backup">Резервная копия журнала</string>
     <string name="knowledge_manage_backup_warning">Это зашифрованная копия только журнала решений, а не полный бэкап заметок и настроек приложения.</string>
@@ -206,6 +207,9 @@
     <string name="knowledge_possible_backlinks">Возможные входящие ссылки (не подтверждены)</string>
     <string name="knowledge_no_backlinks">Возможные входящие ссылки не найдены.</string>
     <string name="knowledge_semantic_relations">Связанные утверждения в заметках</string>
+    <string name="knowledge_library_relations">Связанные утверждения — выбрать заметку</string>
+    <string name="knowledge_relations_choose_note">Выберите заметку на этой странице библиотеки для просмотра связей с другими заметками</string>
+    <string name="knowledge_relations_empty_page">На текущей странице нет заметок. Дождитесь сканирования или измените поиск.</string>
     <string name="knowledge_semantic_working">Сопоставление локальных неподтверждённых интерпретаций…</string>
     <string name="knowledge_possible_agreement">Возможное согласие</string>
     <string name="knowledge_possible_conflict">Возможное противоречие</string>

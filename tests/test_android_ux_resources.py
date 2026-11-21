@@ -15,6 +15,32 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for panel_id, child_ids in (
+                ("knowledge_page_library", ("knowledge_library_relations",)),
+                ("knowledge_page_processes", ("knowledge_process_jump_qa",
+                                               "knowledge_process_qa_card", "knowledge_qa_quick"))):
+            panel = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                         == "@+id/" + panel_id)
+            for child_id in child_ids:
+                self.assertTrue(any(e.get(ANDROID + "id") == "@+id/" + child_id
+                                    for e in panel.iter()), child_id)
+        for name in ("knowledge_library_relations", "knowledge_process_jump_qa"):
+            button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                          == "@+id/" + name)
+            self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for signal in ("showLibraryRelationsPicker()", "showSemanticRelations(paths[which])",
+                       "knowledge_process_jump_qa", "qaCard.getTop()"):
+            self.assertIn(signal, java)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_library_relations", "knowledge_relations_choose_note",
+                         "knowledge_relations_empty_page", "knowledge_process_jump_qa"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
     def test_all_python_bridge_protocols_are_accepted_by_java_transport(self):
         python = (ROOT / "python/ksys_android_bridge.py").read_text()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()

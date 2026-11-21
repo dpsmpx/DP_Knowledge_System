@@ -313,7 +313,8 @@ import, without a second walk of the vault. The private derived SQLite schema
 is upgraded from v3 to v4 (the disposable index rebuilds; authoritative
 journals and Markdown sources are not migrated or modified).
 
-Long-press any indexed note and choose **Related claims across notes**. The
+Use the visible **Related claims — choose a note** button in Library or
+long-press any indexed note and choose **Related claims across notes**. The
 knowledge core finds other notes with *exactly the same structured predicate
 and arguments*, distinguishing a candidate **agreement** (same negation)
 from a candidate **conflict** (opposite negation). The results contain both

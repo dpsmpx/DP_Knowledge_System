@@ -30,6 +30,7 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.SimpleAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -368,6 +369,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             }
             return true;
         });
+        findViewById(R.id.knowledge_library_relations).setOnClickListener(
+                view -> showLibraryRelationsPicker());
 
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
@@ -402,6 +405,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaQuickButton.setOnClickListener(view -> runDeviceQa(false, false));
         qaStressButton.setOnClickListener(view -> runDeviceQa(true, false));
         qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
+        findViewById(R.id.knowledge_process_jump_qa).setOnClickListener(view -> {
+            final ScrollView processes = findViewById(R.id.knowledge_page_processes);
+            final View qaCard = findViewById(R.id.knowledge_process_qa_card);
+            processes.post(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    processes.smoothScrollTo(0, qaCard.getTop());
+                }
+            });
+        });
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
@@ -1774,6 +1786,33 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    /** Visible discovery path; long-press on a row remains an optional shortcut. */
+    private void showLibraryRelationsPicker() {
+        if (displayed.isEmpty()) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_semantic_relations)
+                    .setMessage(R.string.knowledge_relations_empty_page)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        // Keep labels and paths from the same search-page snapshot even if a
+        // background scan refreshes the library while the picker is open.
+        final String[] paths = new String[displayed.size()];
+        final String[] choices = new String[displayed.size()];
+        for (int i = 0; i < paths.length; i++) {
+            paths[i] = displayed.get(i).relativePath;
+            choices[i] = labels.get(i);
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_relations_choose_note)
+                .setItems(choices, (dialog, which) -> {
+                    if (which >= 0 && which < paths.length) {
+                        showSemanticRelations(paths[which]);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void showSemanticRelations(final String relativePath) {
