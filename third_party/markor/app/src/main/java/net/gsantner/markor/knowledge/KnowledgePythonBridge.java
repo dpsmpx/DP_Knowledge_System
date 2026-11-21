@@ -37,8 +37,165 @@ public final class KnowledgePythonBridge {
     }
 
     public static JSONObject relationships(final Context context, final String workspace,
-                                           final String relativePath) throws JSONException {
-        return invoke(context, "note_relationships", workspace, relativePath);
+                                           final String relativePath, final String notebook)
+            throws JSONException {
+        return invoke(context, "note_relationships", workspace, relativePath, notebook);
+    }
+
+    /** Strict manual entity lifecycle: no inferred merges or Markdown changes. */
+    public static JSONObject entityAliasWorkspace(final Context context, final String workspace,
+                                                 final String notebook, final String alias,
+                                                 final String canonical) throws JSONException {
+        return invoke(context, "entity_alias_workspace", workspace, notebook, alias, canonical);
+    }
+
+    public static JSONObject entityAliasDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "entity_alias_decisions", workspace);
+    }
+
+    public static JSONObject previewEntityAlias(final Context context, final String workspace,
+                                                final String notebook, final String alias,
+                                                final String canonical, final String aliasPath,
+                                                final String aliasFragment, final String canonicalPath,
+                                                final String canonicalFragment, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_entity_alias", workspace, notebook, alias, canonical,
+                aliasPath, aliasFragment, canonicalPath, canonicalFragment, reason);
+    }
+
+    public static JSONObject confirmEntityAlias(final Context context, final String workspace,
+                                                final String notebook, final String alias,
+                                                final String canonical, final String aliasPath,
+                                                final String aliasFragment, final String canonicalPath,
+                                                final String canonicalFragment, final String reason,
+                                                final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_entity_alias", workspace, notebook, alias, canonical,
+                aliasPath, aliasFragment, canonicalPath, canonicalFragment, reason,
+                token, expectedHead);
+    }
+
+    public static JSONObject previewEntityUnalias(final Context context, final String workspace,
+                                                  final String alias) throws JSONException {
+        return invoke(context, "preview_entity_unalias", workspace, alias);
+    }
+
+    public static JSONObject confirmEntityUnalias(final Context context, final String workspace,
+                                                  final String alias, final String token,
+                                                  final String expectedHead) throws JSONException {
+        return invoke(context, "record_entity_unalias", workspace, alias, token, expectedHead);
+    }
+
+    /** Explicit, reversible common-upstream source annotations (not truth votes). */
+    public static JSONObject sourceLineageDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "source_lineage_decisions", workspace);
+    }
+
+    public static JSONObject previewSourceLink(final Context context, final String workspace,
+                                               final String notebook, final String firstPath,
+                                               final String secondPath, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_source_link", workspace, notebook,
+                firstPath, secondPath, reason);
+    }
+
+    public static JSONObject confirmSourceLink(final Context context, final String workspace,
+                                               final String notebook, final String firstPath,
+                                               final String secondPath, final String reason,
+                                               final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_source_link", workspace, notebook,
+                firstPath, secondPath, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewSourceUnlink(final Context context, final String workspace,
+                                                 final String decisionId) throws JSONException {
+        return invoke(context, "preview_source_unlink", workspace, decisionId);
+    }
+
+    public static JSONObject confirmSourceUnlink(final Context context, final String workspace,
+                                                 final String decisionId, final String token,
+                                                 final String expectedHead) throws JSONException {
+        return invoke(context, "record_source_unlink", workspace, decisionId,
+                token, expectedHead);
+    }
+
+    /** User-authored source *type*, never a reliability score or fact approval. */
+    public static JSONObject sourceAssessmentDecisions(final Context context,
+                                                       final String workspace) throws JSONException {
+        return invoke(context, "source_assessment_decisions", workspace);
+    }
+
+    public static JSONObject previewSourceAssessment(final Context context, final String workspace,
+                                                     final String notebook, final String path,
+                                                     final String kind, final String reason)
+            throws JSONException {
+        return invoke(context, "preview_source_assessment", workspace, notebook,
+                path, kind, reason);
+    }
+
+    public static JSONObject confirmSourceAssessment(final Context context, final String workspace,
+                                                     final String notebook, final String path,
+                                                     final String kind, final String reason,
+                                                     final String token, final String expectedHead)
+            throws JSONException {
+        return invoke(context, "record_source_assessment", workspace, notebook,
+                path, kind, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewSourceUnassessment(final Context context, final String workspace,
+                                                       final String decisionId) throws JSONException {
+        return invoke(context, "preview_source_unassessment", workspace, decisionId);
+    }
+
+    public static JSONObject confirmSourceUnassessment(final Context context, final String workspace,
+                                                       final String decisionId, final String token,
+                                                       final String expectedHead) throws JSONException {
+        return invoke(context, "record_source_unassessment", workspace, decisionId,
+                token, expectedHead);
+    }
+
+    /** Descriptive, revocable human interpretation of an exact dated source pair. */
+    public static JSONObject versionReviewDecisions(final Context context, final String workspace)
+            throws JSONException {
+        return invoke(context, "version_review_decisions", workspace);
+    }
+
+    public static JSONObject previewVersionReview(final Context context, final String workspace,
+                                                  final String notebook, final String sourcePath,
+                                                  final String relationJson, final String choice,
+                                                  final String reason) throws JSONException {
+        return invoke(context, "preview_version_review", workspace, notebook, sourcePath,
+                relationJson, choice, reason);
+    }
+
+    public static JSONObject confirmVersionReview(final Context context, final String workspace,
+                                                  final String notebook, final String sourcePath,
+                                                  final String relationJson, final String choice,
+                                                  final String reason, final String token,
+                                                  final String expectedHead) throws JSONException {
+        return invoke(context, "record_version_review", workspace, notebook, sourcePath,
+                relationJson, choice, reason, token, expectedHead);
+    }
+
+    public static JSONObject previewVersionUnreview(final Context context, final String workspace,
+                                                    final String decisionId) throws JSONException {
+        return invoke(context, "preview_version_unreview", workspace, decisionId);
+    }
+
+    public static JSONObject confirmVersionUnreview(final Context context, final String workspace,
+                                                    final String decisionId, final String token,
+                                                    final String expectedHead) throws JSONException {
+        return invoke(context, "record_version_unreview", workspace, decisionId,
+                token, expectedHead);
+    }
+
+    /** Synthetic-only Stage 18 journal/index regression in app-private cache. */
+    public static JSONObject stage18VersionSelfTest(final Context context, final String cacheDir)
+            throws JSONException {
+        return invoke(context, "stage18_version_selftest", cacheDir);
     }
 
     public static JSONObject fullAudit(final Context context, final String workspace,
@@ -60,9 +217,11 @@ public final class KnowledgePythonBridge {
 
     /** Saved-note context: accepted journal records plus tentative, read-only links. */
     public static JSONObject editorContext(final Context context, final String workspace,
-                                           final String relativePath, final String savedMarkdown)
+                                           final String relativePath, final String savedMarkdown,
+                                           final String notebook)
             throws JSONException {
-        return invoke(context, "editor_note_context", workspace, relativePath, savedMarkdown);
+        return invoke(context, "editor_note_context", workspace, relativePath, savedMarkdown,
+                notebook);
     }
 
     /** Ephemeral, approved-only source spans: no index or journal write. */
@@ -277,6 +436,15 @@ public final class KnowledgePythonBridge {
                 || "dpksys.backup.v1".equals(protocol)
                 || "dpksys.bulk.v1".equals(protocol)
                 || "dpksys.relations.v1".equals(protocol)
+                || "dpksys.entities.v1".equals(protocol)
+                || "dpksys.source_lineage.v1".equals(protocol)
+                || "dpksys.source_assessment.v1".equals(protocol)
+                || "dpksys.version_review.v1".equals(protocol)
+                || "dpksys.stage18_version_selftest.v1".equals(protocol)
+                || "dpksys.editor_context.v1".equals(protocol)
+                || "dpksys.editor_highlights.v1".equals(protocol)
+                || "dpksys.editor_record_evidence.v1".equals(protocol)
+                || "dpksys.editor_source_records.v1".equals(protocol)
                 || "dpksys.audit.v1".equals(protocol)
                 || "dpksys.stage22_editor_selftest.v1".equals(protocol);
     }

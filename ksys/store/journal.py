@@ -15,7 +15,7 @@ from ..core.clock import Clock
 from ..core.errors import Diagnostic, ErrorKind, KSError
 from ..core.ids import canonical_json, digest
 
-OPS = {"accept", "batch_accept", "reject", "defer", "retract", "revise", "split", "merge", "resolve", "bind", "label", "alias", "schema"}
+OPS = {"accept", "batch_accept", "reject", "defer", "retract", "revise", "split", "merge", "resolve", "bind", "label", "alias", "unalias", "source_link", "source_unlink", "source_assess", "source_unassess", "version_review", "version_unreview", "schema"}
 
 
 @dataclass(frozen=True)

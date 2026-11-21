@@ -42,7 +42,8 @@ snapshot until the integrated application is ready.
 | 14 | Opt-in WorkManager local scan jobs, long-running foreground processing, opt-in count-only change notifications, on-device endurance fixture and signed prerelease automation | Durable scheduler and retries, safe note-only source traversal, notification permission handling, isolated signed test package; actual device endurance evidence remains an acceptance gate |
 | 15 | Real-device endurance signoff and adaptive scheduling at 20k–200k notes | Measured latency, energy, interruptions, restore behavior, Android 11/15 compatibility and performance fixes before promoting integration to main |
 | 16 | Conservative reconciliation of moved/deleted sources, partial-scan uncertainty and backlinks/evidence freshness | Only complete scans delete derived rows; incomplete scans preserve but explicitly label unverified rows and exclude them from AI evidence, semantic retrieval and confirmed-recent backlinks; synthetic device regression |
-| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event and hash-checked preview; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
+| 17 | Decision lifecycle: revision, split/merge, retraction, batch approvals and strict versioned policies | **Partial:** human retraction/revision, atomic one-to-two split and two-to-one merge; bounded 2–8 claim-only batch with one journal event, hash-checked preview, source excerpts and intra-batch direct-opposition guard; synthetic QA `DECISION-17`, `REVISE-17`, `SPLIT-17`, `MERGE-17`, `BATCH-17`; broader batch, automation and device acceptance outstanding |
+| 18 | Source-backed, conservative cross-note precision and human-reviewed epistemic reconciliation | **Functional slices 1–27 implemented in Draft PR #76:** exact context/interval matching, owner aliases, copy families, source lineage/type, SHA freshness, modal and temporal hints, reversible date-pair reviews and isolated `VERSION-18-SUITE`. Python and Android CI are acceptance prerequisites; device UI, TalkBack, lifecycle and 20k-vault physical acceptance remain OPEN. See `docs/STAGE18_COMPLETION_GATE.md`. No automatic truth or numerical reliability claims. |
 | 22 | Full independent Android UI/UX with Dynamic Color, efficient note browsing, process dashboards, human decision/diff review and accessible navigation | **Slices 1–13 integrated, 14–20 in PR #72 pending final CI/merge:** 4-tab Material 3 DPKS workspace, direct launcher, guarded review, user-controlled editor Save/Preview, exact-source context and cautious CNL comparisons; responsive phone/tablet dock, 60-note paged library, offline epistemic guide, code-only event history and one-button Java/Python synthetic tests. Markor's editing/rendering engine is deliberately reused. General-language semantic equivalence, real touch/TalkBack/200% font acceptance, device 20k benchmarks and full independent editor engine are **not** asserted. QA-59–74 remain OPEN/DEFERRED. See `docs/STAGE22_COMPLETION_GATE.md` and `docs/ANDROID_DEVICE_QA_STAGE22.md`. |
 
 **Stage 22 delivery correction:** PR #66 / Preview #17 included the one-button
@@ -101,7 +102,11 @@ page, inspect each current note-derived reading, and explicitly accept them
 **only as claims**. It rejects duplicates, conflicts, invalid readings, stale
 notes and journal changes before a single `batch_accept` event containing
 separate provenance per claim. Choosing one candidate still opens the older
-single-decision dialog. `BATCH-17` tests only disposable synthetic notes.
+single-decision dialog. Its preview now shows bounded original-source excerpts
+beside interpretations and rejects direct opposition between uncommitted
+batch items, even when the journal itself has no conflict. Separate manual
+acceptance of contrary source claims remains possible. `BATCH-17` tests only
+disposable synthetic notes.
 See `docs/ANDROID_DEVICE_QA_STAGE17.md`.
 
 **Still open:** revision/split/merge edge cases, richer batch roles, versioned strict
@@ -214,7 +219,7 @@ No LLM invocation or external connection is part of this milestone.
 Because a human-approved knowledge journal is authoritative and irreplaceable,
 the next integration PR prioritizes portable backup/recovery before optional
 LLM transport. The Knowledge Library exposes two Android Storage Access
-Framework actions: **Encrypted export** and **Restore backup**. Only the user
+Framework actions: **Export decisions journal** and **Restore backup**. Only the user
 chooses the destination/source document.
 
 The export verifies the existing Python journal's hash chain and compares its
@@ -235,6 +240,25 @@ temporary file. **An existing nonempty journal is never replaced or merged.**
 There is an 8 MB plaintext limit for this initial portable format. User
 passphrases must contain at least 12 characters, and users are responsible
 for keeping both the encrypted archive and the passphrase safe.
+
+**Export regression found in Stage 18 Preview #24 (2026-11-20):** A newly
+created SAF destination could remain **0 bytes** if the journal was empty or
+encryption failed *after* the document picker had already created it. The
+follow-up fix checks the journal, validates its SHA-256 and encrypts the
+payload **before** asking Android to create a file. No decisions now means an
+explicit message without launching the picker. Once saved, the entire closed
+encrypted payload is read back and compared before showing success; a failed
+provider may leave a partial file, and the user is warned to remove it
+manually. The in-app synthetic quick QA includes `BACKUP-WRITE-01`, which
+checks successful stream read-back and rejects a synthetic zero-byte provider;
+real SAF providers, rotation/process death, and physical export/restore remain
+unverified as a complete acceptance matrix. **Journal export does not include original Markdown notes or the
+full Stage 21 portable backup.**
+
+**Owner confirmation, signed Stage 18 Preview #26 (2026-11-20):** The owner
+retested export and reported that it works. This closes the reported #24
+zero-byte symptom for that device/test, not a complete SAF-provider matrix,
+backup restore, interruption/rotation, or Stage 21 acceptance.
 
 **Limitations:** no scheduled automatic backup, password recovery, key
 rotation, multi-device merge, atomic guarantees across an external cloud
@@ -293,7 +317,8 @@ import, without a second walk of the vault. The private derived SQLite schema
 is upgraded from v3 to v4 (the disposable index rebuilds; authoritative
 journals and Markdown sources are not migrated or modified).
 
-Long-press any indexed note and choose **Related claims across notes**. The
+Use the visible **Related claims — choose a note** button in Library or
+long-press any indexed note and choose **Related claims across notes**. The
 knowledge core finds other notes with *exactly the same structured predicate
 and arguments*, distinguishing a candidate **agreement** (same negation)
 from a candidate **conflict** (opposite negation). The results contain both
@@ -311,6 +336,454 @@ do not imply that either is false. Changed or temporarily missing sources
 may leave old candidate relations until the next successful semantic refresh;
 users must inspect current notes and explicitly approve any authoritative
 knowledge through the preexisting journal flow. No network service is used.
+
+**Stage 18 precision hardening (first slice):** Cross-note agreement and
+possible-conflict groups now also require the **same exact asserted context
+and the same exact validity interval**. An absent context/interval is a
+specified default, not a wildcard; malformed annotations are excluded. The
+same constraint applies to the whole-library source-conflict audit because
+both use the disposable `candidate_atoms.atom_key`. The projection version
+changes to `exact-claim-context-interval-v2`, so a successful full semantic
+refresh safely regenerates old derived keys without editing notes or the
+human-approved journal. Read-only relation responses, editor context details
+and audit findings expose those exact qualifiers for human inspection;
+unapproved claims remain suggestions. Different or partly overlapping time
+spans are not automatically treated as equivalent. This trades recall for reliable
+precision; alias/entity resolution, interval-overlap truth inference, confidence
+and cross-source epistemic reconciliation remain **open Stage 18 work**.
+
+**Stage 18 precision hardening (second slice, awaiting Android acceptance):**
+The local *derived* candidate index v5 also keeps an exact predicate/argument/
+context scope key and validated ISO date bounds. It can now display a separate
+`temporal_overlap` hint when two distinct explicitly bounded intervals intersect
+(inclusive of a shared endpoint). It displays both intervals and their
+intersection; different context, unrelated predicates/arguments, disjoint dates
+and unspecified periods are excluded. An opposite polarity is shown only as
+metadata, **not** automatically classified as a conflict. Exact agreement and
+possible-conflict matching, plus the whole-library contradiction audit, retain
+their original exact full-key requirement. The projection marker
+`exact-claim-context-temporal-overlap-v3` forces a fresh derived refresh after
+upgrade; neither Markdown files nor the human journal is migrated or modified.
+Both the library relation list and editor context use one bounded query with an
+index on the shared scope key. This is a comparison of source interpretations,
+not temporal truth inference, entity merging or historical version resolution.
+Android UI/SAF hardware QA remains separate; alias resolution and cross-source
+confidence reconciliation are still open Stage 18 work.
+
+**Stage 18 precision hardening (third slice, awaiting Android acceptance):**
+Read-only cross-note comparison can now return a distinct `alias_candidate`
+hint when **exactly one symbolic argument** differs under an alias already
+explicitly recorded by the configured owner in the integrity-verified local
+decision journal. The predicate, all other arguments, context, and exact
+validity interval must still match. Both source locators and the specific
+`J:` alias decision IDs appear in the result and editor/library UI; matching
+opposite polarities is **not** upgraded into a conflict or agreement verdict.
+This uses an indexed, bounded set of full-key alternatives at query time; no
+Markdown, indexed atom key, or journal record is modified. Competing rebindings,
+self-maps, chained/cyclic aliases, non-owner operations, invalid symbols and
+excessive numbers of mappings are ignored or explicitly marked limited.
+Unapproved textual similarity, wikilinks, and model-generated aliases do not
+create equivalence. This does **not** implement arbitrary entity disambiguation,
+an Android authoring/approval UI for new aliases, or evidence-based identity
+proof. The existing CLI `alias` journal operation is the only source of this
+slice's hints; full alias lifecycle, independent historical version resolution,
+confidence calibration and cross-source reconciliation remain on the roadmap.
+Synthetic Python and Android CI cover the code; real Android UI acceptance
+is still open. The separately deferred Stage 21 hardware debt is unchanged.
+
+**Stage 18 manual entity lifecycle (fourth slice, awaiting device acceptance):**
+The Android **Decisions → Manual entity matching and withdrawal** entry now
+provides an explicit workflow to enter two exact parsed entity symbols, browse
+up to 24 indexed source fragments per symbol, inspect the original excerpts,
+open either note, choose two distinct source fragments, enter a reason, inspect
+a combined preview and consciously confirm. A successful approval appends an
+owner-authored `alias` event to the private hash-chained human journal with the
+exact symbol pair, two source paths/locators, source SHA-256 values and excerpts;
+the original Markdown and disposable claim keys remain unchanged. Before both
+preview and commit, the bridge checks the saved index's notebook root, exact
+parsed symbols, source SHA-256 against the current files, unchanged journal
+head, source selection and preview token. Stale or missing sources, rebinding,
+chains, cycles and over-limit alias groups fail closed. These are decisions
+*based on unapproved parser interpretations*, not objective identity proofs.
+The same screen lists owner-approved mappings, recorded evidence and recent
+journal events. A separate revocation preview plus confirmation appends an
+`unalias` event that references the exact original alias decision; this stops
+new alias-backed relationship hints without destroying the old record, and
+revocation remains accessible even when the notebook is disconnected. Reapproval
+after revocation requires a new full source review and new journal event.
+Legacy CLI aliases without stored excerpts remain visible by symbol and journal
+ID, but cannot retroactively acquire invented evidence. This slice does not
+automatically reconcile old inferences, infer entity identities, prove source
+truth, or implement a confidence model. Android on-device UX/accessibility,
+process-death recovery and SAF hardware QA remain unverified; Stage 21 hardware
+debt is still deliberately deferred.
+
+**Stage 18 evidence-pattern review (fifth slice, awaiting device acceptance):**
+For every exact, indexed candidate claim signature in an inspected note, the
+shared library/editor read-only query now reports a bounded cross-file evidence
+overview (at most 16 distinct signatures and 32 *other files* per signature).
+It deduplicates repeated fragments/readings within the same Markdown file,
+separates same versus opposite polarity, and treats a file with both parser
+polarities as **mixed** rather than counting it on both sides. When the source
+note itself has mixed readings, comparison counts are suppressed instead of
+guessing its position. Exact predicates, all arguments, context and interval
+must match; temporal-overlap and alias hints remain separate and never add
+votes to the exact evidence. The bounded source paths and locators are
+inspectable from the relation list and from the editor context panel.
+
+These are **counts of indexed documents, not independent witnesses**: copied
+notes, uncertain parser readings and stale snapshots can mislead. Every group
+therefore explicitly says confidence is **not assessed**, authority remains
+`unapproved_candidates`, and freshness is an unverified index snapshot. Caps
+are labeled as incomplete, not silently presented as exhaustive counts. No
+factual reconciliation, authority promotion, numerical confidence or direct
+journal/source writes occur. Physical
+Android UI, latency, TalkBack and large-vault acceptance remain open.
+
+**Stage 18 live evidence provenance (sixth slice, awaiting device acceptance):**
+When the selected notebook matches the import's recorded root, both the Hub
+relation overview and editor context now rehash a bounded selection of original
+Markdown files, read-only, before presenting cross-note evidence. Each displayed
+source is explicitly marked **current hash**, **changed**, **unavailable** or
+**not checked**. At most 16 distinct file hashes are inspected per request
+(each eligible file at most 2 MiB; approximately 32 MiB upper I/O bound).
+The checked subset receives separate same/opposite/mixed counts only if **both**
+the inspected note and the other file match their indexed SHA-256. Original
+indexed counts remain visibly labeled as unverified snapshots. Files outside
+the check budget and root mismatches are **not checked**, not presumed valid;
+limits are surfaced in both UIs. Missing or oversized files and rejected paths
+are not silently counted as current.
+
+The disposable index also exposes the representative indexed fragment hash
+for each matched document, enabling a **possible repeated excerpt** warning
+only among currently verified files; when two complete file hashes match,
+the UI can say **identical file content**. Fragment hashing normalizes Unicode
+and trims surrounding whitespace, so this is a textual-repeat signal, not
+proof of shared authorship or independent provenance. Distinct hashes do **not**
+establish independence. A hash match proves the file was unchanged relative to
+indexing, not that the semantic interpretation or claim is true. No journal
+decision, Markdown edit, automatic merge, confidence number or authorization
+promotion is produced. Next Stage 18 work: more robust human-reviewed entity
+identity, versioned temporal reasoning, and calibrated source reliability.
+Device UI, lifecycle, 20k-note performance, TalkBack and SAF checks remain
+unverified; Stage 21 physical QA is still separately deferred.
+
+**Stage 18 source-copy families (seventh slice, awaiting device acceptance):**
+The same bounded live-provenance query now groups **all** current checked
+files by equal representative normalized fragment hash (`R1`, `R2`, …) and,
+separately, by identical full-document SHA-256 (`D1`, `D2`, …). Every member,
+including the originally inspected note and the first alphabetically ordered
+copy, receives its group label. Two other source files with identical content
+are identified even when the inspected file itself differs. Group membership
+and sorted member paths appear in the Hub and editor source disclosures;
+related files remain individually navigable. Repeat labels are deterministic
+per displayed claim and never reused as global source identities.
+
+The UI also distinguishes the **number of hash-current files with a selected
+fragment** from **the number of distinct representative normalized excerpts**.
+Neither measure is an estimate of independent witnesses, reliability or
+truth: it samples one indexed parser fragment per exact claim signature and
+cannot recognize paraphrased copying, common upstream citations, fabricated
+claims or independent people who happened to write the same words. Stale,
+missing, unchecked and over-budget notes cannot join a copy family. No
+new database schema, automatic source authority, human decision, journal
+operation, external service or Markdown write is involved. Calibrated and
+explicitly human-reviewed source lineage remains a separate open Stage 18
+task. Device UX, accessibility and the deferred Stage 21 physical QA remain
+unverified.
+
+**Stage 18 human-reviewed common-upstream lineage (eighth slice, in progress):**
+Two original Markdown files may be explicitly marked by the owner as sharing
+an upstream source, with a human-provided reason. Preview shows the exact
+current SHA-256 and a bounded original indexed excerpt with locator for each
+file, and is read-only; confirmation rechecks both SHA-256 values, notebook
+root, and hash-chained journal head before appending `source_link`. The
+independent `source_unlink` event references the exact original decision ID
+and can be confirmed after notebook disconnection. Both operations are
+**source lineage annotations only**: they never affect fact/claim authority,
+entity aliases, inferences, Markdown, or confidence/independence ratings.
+Only direct owner decisions are active; no transitive link inference, automatic
+matching, network metadata lookup or merging is performed. The owner journal
+operation list is bounded, and prior decisions remain in history on revocation.
+The Android Decisions screen now offers a dedicated manual common-origin
+workflow: two exact relative paths and reason, current excerpt/SHA review,
+source navigation, confirmation, active/history browser and a separate
+withdrawal confirmation. The relation evidence disclosure links directly to
+the same workflow with the inspected note path filled in. No action is
+automatic; changed notes fail closed, and withdrawal remains reachable
+without an active notebook. Physical UI, lifecycle, TalkBack, 20k-note
+performance and SAF acceptance remain unverified.
+
+**Stage 18 reviewed lineage in evidence (ninth slice, awaiting device QA):**
+The Hub and editor source-evidence lists now display *direct* owner-reviewed
+common-upstream decisions with their journal ID and recorded reason. A manual
+link is marked current only when **both** original Markdown files still match
+their indexed hashes **and** those hashes equal the values saved at the time
+of the owner's decision. Otherwise the link remains visible, but is labeled
+**historical/unverified**, including after reindexing a modified file. The
+checked and historical link counts are separate from indexed claim polarity
+counts and do not enter copy-family detection, truth inference, confidence or
+independence estimates. No chained/transitive human lineage is inferred.
+Revocation immediately removes the active link from new relation views while
+preserving its journal history. Excessive/corrupt source-link journal coverage
+fails closed with an explicit incompleteness warning. No additional source
+I/O or index writes are introduced. Android hardware acceptance remains open.
+
+**Stage 18 source-link navigation (tenth slice, awaiting device QA):**
+The Hub's evidence disclosure offers an explicit choice of the *other* source
+from already hash-current indexed candidates, then pre-fills both exact note
+paths in the human common-origin review dialog. Stale, missing and unchecked
+files are not offered as verified candidates; a manual-path fallback remains
+available and the backend still validates both sources again at preview and
+commit. Saved active-link excerpts are separately labeled **historical**
+because their original hashes may no longer match current Markdown. This is
+navigation and disclosure only, not automatic source matching or approval.
+
+**Stage 18 manual source-type annotations (eleventh slice, journal API):**
+An owner may explicitly classify a single original Markdown note as
+`primary_record`, `secondary_summary`, `republication`, or `unclassified`,
+with a human explanation. These are **descriptive provenance types, not
+reliability scores or correctness rankings**. The read-only preview displays
+the selected original excerpt, locator, and verified file SHA-256. The
+confirmation rechecks the notebook root, current file hash, preview token,
+active decision and journal head before appending the distinct `source_assess`
+event. `source_unassess` references that exact event and works offline;
+historical records are never deleted. Neither event modifies authority,
+claims, aliases, inferences, Markdown or the source index. The active/history
+API and operation cap are separate from the common-upstream link workflow.
+The Android Decisions screen now exposes a separate source-type review button.
+It offers a localized descriptive-type choice, original excerpt/SHA preview,
+explicit confirmation, source navigation, owner history and a separate offline
+withdrawal confirmation. These are UI/journal metadata only. No automatic
+epistemic authority, source ranking or hidden classification is introduced;
+physical Android, accessibility and SAF acceptance remain unverified.
+
+**Stage 18 descriptive source-type evidence (twelfth slice, awaiting Android QA):**
+The Hub's and saved-editor's unapproved cross-note evidence displays an
+owner-recorded source-type category, exact decision ID and shortened explanation
+beside the original and each other source. It distinguishes **current** (the
+live file hash matches the indexed document and the SHA saved at manual approval)
+from **historical/unverified** (changed, absent, unchecked or wrong notebook).
+Counts of classified *other files* are shown separately; they never add to
+independence, reliability or truth scores. A withdrawal removes the active
+annotation from future read-only evidence queries while the append-only journal
+still holds history. Journal bounds and unavailable verification have explicit
+UI warnings; no extra files are hashed, no source is auto-classified, and no
+Markdown/index/knowledge claims are modified by evidence browsing.
+
+**Stage 18 source-type review navigation (thirteenth slice, awaiting Android QA):**
+The evidence file picker lists the inspected note as well as other evidence
+sources. Selecting a hash-current note offers **open original** or **manual
+source-type review**, with the exact relative path prefilled after choosing a
+descriptive type. An existing manual type instead offers its decision/history
+screen; stale, missing and unchecked evidence is only offered for original
+inspection. Prefill never counts as confirmation: the existing backend still
+checks the selected root, live SHA, fragment, preview token and journal head.
+This adds no automatic classification or source authority.
+
+**Stage 18 direct review and withdrawal (fourteenth slice, awaiting Android QA):**
+Selecting a currently annotated source from the evidence file picker opens
+that **exact active owner decision** instead of requiring a search through
+all decisions. The panel displays stored reasons, source snapshot and journal
+ID, and offers the existing independent withdrawal preview and confirmation.
+If the decision changed between evidence display and selection, the panel
+falls back to the normal review/history menu; it does not act on a stale ID.
+Every mutation remains guarded by the original journal-head and decision-ID
+checks, with no changes to Markdown or automatic claim status.
+
+**Stage 18 paired evidence excerpts (fifteenth slice, awaiting Android QA):**
+Cross-note evidence now carries an explicitly bounded (up to 240 characters)
+snapshot excerpt and fragment ID per original file, selected deterministically
+from a single source-owned fragment row. The representative locator and
+excerpt hash come from **that same row**, instead of potentially unrelated
+`MIN` aggregates over multiple parser readings. Invalid cross-document
+fragment references cannot leak a different note's excerpt or enter copied
+excerpt warnings. The Hub compares the inspected and selected excerpts
+before offering source navigation or human source-type review, and the editor
+context dock shows the same comparison before opening the other note. Both
+views explicitly warn that indexed snapshots may be stale and that live SHA
+freshness validates bytes, **not** the interpretation or truth of a claim.
+No additional Markdown reads, network access, source edits, automatic
+confidence scores or journal writes are introduced by comparison.
+
+**Stage 18 bounded excerpt query optimization (sixteenth slice, awaiting Android QA):**
+The source-owned representative selection now uses a single parameterized
+SQLite window query for the inspected note and up to 32 other files per
+evidence group, replacing a separate lookup for each file. Thus at most
+33 SQL reads are needed for 16 groups (one overview + one file-count + one
+excerpt batch per group), rather than hundreds of individual reads. Text
+substrings are still loaded only for the ranked fragment per document, with
+the same 240-character cap, exact path ownership and stable ordering.
+Tests compare the displayed excerpts and verify the per-group query budget;
+this is a bounded implementation improvement, **not** a measured Android
+20k-vault latency claim or a change of evidence authority.
+
+**Stage 18 nonasserted modality contrasts (seventeenth slice, awaiting Android QA):**
+An independent disposable `candidate_modal_atoms` table now projects only
+explicit `possible`/`usually` claim readings and hypothesis readings, with
+the same strict ground-atom validation, exact context and interval as the
+existing asserted-claim index. Asserted `claim` rows remain only in
+`candidate_atoms`; neither modal nor hypothetical rows may enter its exact
+agreement/conflict, evidence-file counts, copied-excerpt families or
+whole-library conflict audit. Index schema v6 and relation projection v4
+trigger a **derived-only** rebuild on refresh; private Markdown and the
+append-only human knowledge journal remain untouched.
+
+The Hub and editor now show a distinct **modality contrast** hint when the
+same strict atom signature is reported with different degrees/kinds of
+certainty (asserted, usually, possible, explicitly hypothetical). Both
+modalities, node kinds, source locators, context, exact period and any opposite
+polarity are displayed; the latter is **not** a factual conflict verdict.
+Queries are bounded by the existing relation page limit and one additional
+SQL index. Missing/pre-migration modal tables or capped coverage report
+incompleteness. No natural-language semantic equivalence, numerical
+confidence, independence estimate, user approval or truth propagation is
+inferred from a source modality. Physical Android QA remains separate.
+
+**Stage 18 modal source freshness (eighteenth slice, awaiting Android QA):**
+Modal/hypothesis comparison rows now show the current saved-file SHA status
+of both original Markdown sources: current, stale, unavailable or not checked.
+An indexed modal contrast is described as a live-source pair only if **both**
+file hashes match the versions in the disposable index; even then parser
+readings remain unapproved. Without a matching selected notebook root, all
+checks stay explicitly unchecked. The Hub and editor show historical-only
+warnings, including when checks are capped. Modal comparisons reuse the same
+16-unique-file budget as exact-evidence checks (maximum 32 MiB of live
+Markdown reads per query), with no duplicate hashing of shared files.
+Original notes, approved decisions and the append-only human journal remain
+unchanged. No automatic conflict vote, source reliability or independence
+assessment is introduced; physical Android QA remains open.
+
+**Stage 18 time-separated source readings (nineteenth slice, awaiting Android QA):**
+The bounded cross-note relation query now adds a distinct, read-only
+`temporal_separation` hint for two asserted, fully closed, non-overlapping
+date intervals describing the **same exact predicate, arguments and context**.
+The UI shows both precise date ranges, which is earlier and the number of
+calendar days strictly between them (0 for adjacent periods). These are
+source-supplied validity intervals, **not** observations of when a fact changed.
+Unspecified/open bounds never yield a separation hint; a shared endpoint is
+still an overlap, not a gap. Opposite polarity remains metadata only. Neither
+this hint nor any date order participates in the exact-key agreement/conflict
+audit, source evidence counts or accepted knowledge. Library and editor expose
+the same bounded results with EN/RU warnings against inferred version truth.
+No index migration, original Markdown change or human journal write occurs.
+
+**Stage 18 live provenance for dated hints (twentieth slice, awaiting Android QA):**
+Both temporal hint types (`temporal_overlap` and `temporal_separation`) now
+expose **current/stale/unavailable/not_checked** verification for *each*
+original Markdown file against the exact SHA stored in the disposable index.
+Only two currently matching file hashes justify the display label
+`live_source_pair`; this verifies the saved source bytes, not date truth,
+assertion correctness, author independence or a historical change. Wrong
+notebook roots and exhausted budgets always leave hints marked historical.
+Temporal checks reuse the **same 16-distinct-file, maximum-32-MiB** per-query
+SHA budget as exact evidence and modal hints (existing checks are cached),
+with explicit incompleteness warnings in Hub and editor. Changes affect
+read-only API annotations, EN/RU UI, tests and documentation only. Original
+Markdown, derived knowledge authority and human decision journal are untouched.
+
+**Stage 18 live original-source checks for exact/alias relations (twenty-first
+slice, awaiting Android QA):** The remaining cross-note relation kinds
+(`possible_agreement`, `possible_conflict`, `alias_candidate`) now expose the
+same independent **current/stale/unavailable/not_checked** file-hash status
+for both original Markdown paths and a strict `live_source_pair` flag. Even
+when an owner-reviewed alias remains active in the integrity-verified journal,
+the *source text* is historical/unverified if its live SHA differs from the
+indexed version, is inaccessible or was not checked. Exact candidate matches
+and owner decisions are not automatically promoted to true claims. The Hub and
+editor display individual file statuses and EN/RU warnings. All five relation
+kinds, alongside exact evidence, now share the same bounded 16-file SHA cache
+(maximum 32 MiB per query); incomplete coverage is explicit. No original
+Markdown, disposable projection, accepted knowledge or human journal is
+modified by this read-only verification.
+
+**Stage 18 two-source relation detail (twenty-second slice, awaiting Android QA):**
+The Hub relationship list now opens a detail dialog instead of jumping to the
+other note. The editor context dock displays the same side-by-side relation
+description. Both show the inspected and related Markdown path, exact locator,
+bounded **240-character** historical fragment excerpt and the SHA-current/
+stale/unavailable/unchecked status of each original file. The user can then
+choose to open either note (or reveal the current editor note), using existing
+canonical-path-safe navigation. These excerpts are **only from the disposable
+index**, never re-read live content; a matching SHA is not an endorsement of
+parser correctness or a factual decision. The bridge uses one SQLite batch
+query for at most 200 unique referenced fragment IDs (the 100-relation page
+bound), validates that each fragment really belongs to the expected document
+and locator, and hides corrupt/missing provenance rather than attaching
+unrelated text. No index mutation, journal write, model call or original note
+edit is caused by this display. Device UX/accessibility QA remains deferred.
+
+**Stage 18 dated version disagreement review (twenty-third slice, awaiting Android QA):**
+For two explicitly closed, non-overlapping source-provided validity periods,
+the temporal separation hint now carries chronological *earlier/later* claim
+polarities and an explicit `opposing_dated_readings` review marker (or
+`consistent_dated_readings`). In the relation detail and editor context dock,
+opposing readings show both chronological polarities plus an EN/RU prompt to
+inspect both sources. This is a read-only **possible version disagreement**,
+not a detected real-world change, a contradiction in accepted knowledge, an
+automatic decision or a new reliability score. Same-polarity periods receive
+no disagreement prompt. Missing/open periods and overlapping endpoints retain
+their earlier conservative behavior. No changes to source Markdown, journal,
+schema or authority; physical Android QA remains deferred.
+
+**Stage 18 partial-bound temporal uncertainty (twenty-fourth slice, awaiting
+Android QA):** Two candidate assertions with the same exact predicate,
+arguments and context but different partially bounded validity intervals now
+receive a distinct `temporal_uncertainty` hint when each supplies at least one
+date and no overlap can be established. A wholly unspecified period is not
+treated as an all-time assertion. The reviewer sees both original intervals,
+any opposing polarity, source-hash freshness and an EN/RU warning that neither
+chronological order nor real-world change can be inferred. This read-only
+hint cannot contribute to conflict counts, agreement counts, approved
+decisions or source independence. The existing 100-result relation cap and
+shared 16-file SHA-verification budget remain in force. Physical device QA
+is deferred separately.
+
+**Stage 18 bounded relation completeness (twenty-fifth slice, awaiting Android
+QA):** The indexed relation query now marks `truncated` whenever *any* of its
+bounded exact/temporal SQL windows exhaust the per-kind `limit + 1` budget,
+even when the raw rows fail subsequent integrity checks and the final visible
+result is empty. Previously, filtering invalid disposable atom/interval rows
+could hide all displayed matches and incorrectly clear the existing truncation
+warning. Both the library and editor already present this warning via the
+same read-only response field, without a protocol change. Synthetic regression
+with 62 mismatched indexed intervals checks that invalid hints stay hidden
+while both surfaces explicitly signal incomplete coverage. No extra SQLite
+scan beyond the existing cap, source edit or human-journal mutation occurs.
+
+**Stage 18 manual version interpretation (twenty-sixth slice, code complete;
+Android acceptance pending):** An owner can now review a particular dated
+cross-note relation (`temporal_overlap`, `temporal_separation`, or
+`temporal_uncertainty`) by reading both original source paths, exact indexed
+fragments and live SHA-256 values. One of four *descriptive* interpretations
+can be recorded with a mandatory explanation: unresolved, possibly changed,
+not comparable, or compatible readings. A read-only preview token binds the
+pair's exact fragment/locator/date/context/polarity selection to both current
+Markdown hashes and the journal head. Confirmation fully rechecks these
+inputs and appends an owner-only `version_review` event. `version_unreview`
+references the exact original decision, works offline and preserves history.
+The Hub and editor show active interpretation, explanation and independent
+`current`/`historical` provenance status, never a truth verdict; a separate
+Decisions action lists active reviews and permits offline withdrawal. Pairs
+are indexed by a symmetric key so a decision follows reverse navigation,
+but neither AI interpretation, paraphrase equivalence nor transitive evidence
+merging is inferred. Markdown, parsed facts and accepted decisions are
+unchanged. This slice also repairs the Java/Python protocol allowlist for
+existing editor/entity/source-review APIs and adds a cross-language regression
+that enumerates **all** emitted Python protocols. See
+`docs/STAGE18_COMPLETION_GATE.md` for the precise sign-off boundary.
+
+**Stage 18 on-device synthetic version QA (twenty-seventh slice, awaiting
+physical execution):** The existing quick/stress Device QA runner now invokes
+`VERSION-18-SUITE`, an isolated Python test with six checks for dated pair
+indexing, two-SHA preview, stale-token rejection, journal commit, symmetric
+review lookup, stale-source annotation and exact offline withdrawal. The only
+input is an existing **app-private cache directory**; all source Markdown and
+journal files are generated within an automatically removed temporary folder.
+No selected user notebook, real journal or network service is opened. Results
+are count-only, bounded and validated by the Java transport before inclusion
+in the redacted QA report. This adds no automatic acceptance and does not
+replace real touch/accessibility/process-lifecycle observation.
 
 ## Stage 09 — whole-library contradiction and uncertainty audit
 

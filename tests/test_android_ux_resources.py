@@ -5,6 +5,7 @@ This does not stand in for a device accessibility, layout or lifecycle test.
 from __future__ import annotations
 
 import unittest
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -14,6 +15,517 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for panel_id, child_ids in (
+                ("knowledge_page_library", ("knowledge_library_relations",)),
+                ("knowledge_page_processes", ("knowledge_process_jump_qa",
+                                               "knowledge_process_qa_card", "knowledge_qa_quick"))):
+            panel = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                         == "@+id/" + panel_id)
+            for child_id in child_ids:
+                self.assertTrue(any(e.get(ANDROID + "id") == "@+id/" + child_id
+                                    for e in panel.iter()), child_id)
+        for name in ("knowledge_library_relations", "knowledge_process_jump_qa"):
+            button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                          == "@+id/" + name)
+            self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for signal in ("showLibraryRelationsPicker()", "showSemanticRelations(paths[which])",
+                       "knowledge_process_jump_qa", "qaCard.getTop()"):
+            self.assertIn(signal, java)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_library_relations", "knowledge_relations_choose_note",
+                         "knowledge_relations_empty_page", "knowledge_process_jump_qa"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_all_python_bridge_protocols_are_accepted_by_java_transport(self):
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        emitted = set(re.findall(r"dpksys\.[a-z0-9_]+\.v[0-9]+", python))
+        allowed = set(re.findall(r'"(dpksys\.[a-z0-9_]+\.v[0-9]+)".equals\(protocol\)', java))
+        self.assertEqual(emitted, allowed)
+
+    def test_manual_version_review_has_source_and_journal_gates(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        dialog = (folder / "KnowledgeVersionReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_version_reviews")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for name in ("versionReviewDecisions", "previewVersionReview", "confirmVersionReview",
+                     "previewVersionUnreview", "confirmVersionUnreview"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", hub)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", editor)
+        self.assertIn("version_review_id", (folder / "KnowledgeRelationPresentation.java").read_text())
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_version_title", "knowledge_version_warning",
+                         "knowledge_version_action", "knowledge_version_revoke_warning",
+                         "knowledge_version_historical", "knowledge_version_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_stage18_version_device_suite_has_isolated_transport(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        transport = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("VERSION-18-SUITE", "checkSyntheticStage18Versions",
+                       "getCacheDir().getCanonicalPath()", "selectedVaultUntouched=true"):
+            self.assertIn(marker, runner)
+        self.assertIn('"dpksys.stage18_version_selftest.v1".equals(protocol)', transport)
+        self.assertIn('invoke(context, "stage18_version_selftest", cacheDir)', transport)
+        for marker in ("def stage18_version_selftest(",
+                       '"used_selected_vault": False',
+                       '"requires_manual_ui_qa": True'):
+            self.assertIn(marker, python)
+
+    def test_relation_pair_detail_previews_both_sources_before_navigation(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("showSemanticRelationDetail(relativePath, match, titles[position])", hub)
+        self.assertIn("openIndexedNote(sourcePath)", hub)
+        self.assertIn('openIndexedNote(relation.optString("path"))', hub)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("view -> setDockExpanded(false)", editor)
+        self.assertIn('openRelatedNote(relation.optString("path"), selectedVault)', editor)
+        self.assertIn("relationComparison(Context context, JSONObject relation, String sourcePath)",
+                      presentation)
+        self.assertIn('relation.optBoolean("source_excerpt_available")', presentation)
+        self.assertIn('relation.optBoolean("other_excerpt_available")', presentation)
+        self.assertIn('MAX_RELATION_PREVIEW_CHARS = 240', bridge)
+        self.assertIn('MAX_RELATION_PREVIEW_FRAGMENTS = 200', bridge)
+        self.assertIn('_annotate_relation_previews(con, relative_path', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_preview_warning",
+                         "knowledge_relation_preview_inspected",
+                         "knowledge_relation_preview_other",
+                         "knowledge_relation_open_inspected",
+                         "knowledge_relation_open_other"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_indexed_cross_source_evidence_is_explicitly_unrated_and_navigable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optJSONArray("evidence_groups")', hub)
+        self.assertIn("showEvidenceDetail(group, sourcePath)", hub)
+        self.assertIn("evidenceSourceActions(group, source, sourcePath)", hub)
+        self.assertIn("(d, w) -> openIndexedNote(path)", hub)
+        self.assertIn('context.optJSONArray("evidence_groups")', editor)
+        self.assertIn('context.optBoolean("evidence_limited")', editor)
+        self.assertIn("showContextEvidence(group, selectedVault, context.optString", editor)
+        self.assertIn("openRelatedNote(selected.optString(\"path\"), selectedVault)", editor)
+        self.assertIn("evidenceDisclosure(Context context, JSONObject group)", presentation)
+        self.assertIn("evidenceSourceLabel(Context context, JSONObject source)", presentation)
+        self.assertIn('context.optBoolean("evidence_checks_limited")', editor)
+        self.assertIn('result.optBoolean("evidence_checks_limited")', hub)
+        self.assertIn('source.optBoolean("repeated_excerpt")', presentation)
+        self.assertIn('source.optBoolean("identical_document")', presentation)
+        self.assertIn('group.optJSONArray("excerpt_families")', presentation)
+        self.assertIn('group.optJSONArray("document_families")', presentation)
+        self.assertIn('source.optString("excerpt_family")', presentation)
+        self.assertIn('source.optString("document_family")', presentation)
+        self.assertIn("evidenceFamilyDetails(Context context, JSONArray families, int label)",
+                      presentation)
+        self.assertIn('source.optString("reviewed_source_link_state")', presentation)
+        self.assertIn('source.optString("reviewed_source_link_id")', presentation)
+        self.assertIn('group.optInt("reviewed_source_links_current")', presentation)
+        self.assertIn('result.optBoolean("source_lineage_limited")', hub)
+        self.assertIn('context.optBoolean("source_lineage_limited")', editor)
+        self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
+        self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
+        self.assertIn("_verify_evidence_freshness(", bridge)
+        self.assertIn('result.optBoolean("modal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("modal_checks_limited")', editor)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        self.assertIn('"modal_checks_limited": modal_checks_limited', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_evidence_title", "knowledge_evidence_file_counts",
+                        "knowledge_evidence_disclaimer", "knowledge_evidence_limited",
+                        "knowledge_evidence_source_mixed", "knowledge_evidence_current",
+                        "knowledge_evidence_stale", "knowledge_evidence_unavailable",
+                        "knowledge_evidence_not_checked", "knowledge_evidence_checked_counts",
+                        "knowledge_evidence_other_statuses", "knowledge_evidence_checks_limited",
+                        "knowledge_evidence_repeated_excerpt", "knowledge_evidence_identical_document"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_evidence_excerpt_diversity",
+                        "knowledge_evidence_family_counts", "knowledge_evidence_source_family",
+                        "knowledge_evidence_source_document_family",
+                        "knowledge_evidence_repeated_family", "knowledge_evidence_duplicate_family",
+                        "knowledge_evidence_family_members",
+                        "knowledge_evidence_document_family_members"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_source_lineage_evidence_counts",
+                        "knowledge_source_lineage_evidence_current",
+                        "knowledge_source_lineage_evidence_historical",
+                        "knowledge_source_lineage_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_modal_checks_limited", "knowledge_modal_current_pair",
+                        "knowledge_modal_historical_pair"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_manual_source_lineage_review_is_reversible_and_reachable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_lineage")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        dialog = (folder / "KnowledgeSourceReviewDialog.java").read_text()
+        self.assertIn("new KnowledgeSourceReviewDialog(this, workspacePath()", hub)
+        self.assertIn("chooseLineagePartner(group, sourcePath)", hub)
+        self.assertIn('"current".equals(source.optString("verification"))', hub)
+        self.assertIn("paths.get(index) : \"\"", hub)
+        for name in ("sourceLineageDecisions", "previewSourceLink", "confirmSourceLink",
+                     "previewSourceUnlink", "confirmSourceUnlink"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "requires_human_confirmation", "source_link", "source_unlink"):
+            if signal == "requires_human_confirmation":
+                self.assertIn(signal, (ROOT / "python/ksys_android_bridge.py").read_text())
+            else:
+                self.assertIn(signal, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_source_lineage_title", "knowledge_source_lineage_new",
+                         "knowledge_source_lineage_history", "knowledge_source_lineage_reason",
+                         "knowledge_source_lineage_preview", "knowledge_source_lineage_confirm",
+                         "knowledge_source_lineage_revoke", "knowledge_source_lineage_revoke_warning",
+                         "knowledge_source_lineage_error_detail",
+                         "knowledge_source_lineage_choose_candidate",
+                         "knowledge_source_lineage_manual_path",
+                         "knowledge_source_lineage_historical_warning"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_manual_source_type_review_does_not_rate_truth(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_assessment")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("new KnowledgeSourceAssessmentDialog(this, workspacePath()", hub)
+        for method in ("sourceAssessmentDecisions", "previewSourceAssessment",
+                       "confirmSourceAssessment", "previewSourceUnassessment",
+                       "confirmSourceUnassessment"):
+            self.assertIn(method + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + method + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "source_assess", "source_unassess", "setTextIsSelectable(true)"):
+            self.assertIn(signal, dialog)
+        self.assertIn('"changes_claim_authority": False', python)
+        self.assertIn('"reliability_score": None', python)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_title",
+                        "knowledge_source_assessment_primary",
+                        "knowledge_source_assessment_secondary",
+                        "knowledge_source_assessment_republication",
+                        "knowledge_source_assessment_unclassified",
+                        "knowledge_source_assessment_preview_warning",
+                        "knowledge_source_assessment_revoke_warning",
+                        "knowledge_source_assessment_history",
+                        "knowledge_source_assessment_error_detail"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_manual_source_type_is_disclosed_beside_evidence(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("sourceAssessmentLabel(context, group)", presentation)
+        self.assertIn("sourceAssessmentLabel(context, source)", presentation)
+        self.assertIn("source_assessment_current_files", presentation)
+        self.assertIn("source_assessment_historical_files", presentation)
+        self.assertIn('"source_assessment_limited"', hub)
+        self.assertIn('"source_assessment_limited"', editor)
+        self.assertIn("_annotate_source_assessments(", bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_evidence_inspected",
+                        "knowledge_source_assessment_evidence_counts",
+                        "knowledge_source_assessment_evidence_current",
+                        "knowledge_source_assessment_evidence_historical",
+                        "knowledge_source_assessment_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_source_type_review_prefills_only_current_evidence_path(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("evidenceSourceActions(group, null, sourcePath)", hub)
+        self.assertIn("sources.optJSONObject(selected - 1)", hub)
+        self.assertIn('if (!"current".equals(verification))', hub)
+        self.assertIn("if (alreadyReviewed) dialog.showReviewed(path)", hub)
+        self.assertIn("else dialog.showNew(path)", hub)
+        self.assertIn("void showNew(final String initialPath)", dialog)
+        self.assertIn("chooseKind(initialPath)", dialog)
+        self.assertIn("path.setText(initialPath)", dialog)
+        # UI prefill is not an approval bypass: its preview invokes the
+        # existing live source/hash and journal verification bridge.
+        self.assertIn("KnowledgePythonBridge.previewSourceAssessment", dialog)
+
+    def test_exact_bounded_excerpts_are_disclosed_before_source_actions(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        index = (Path(__file__).resolve().parents[1] / "ksys/importer/relations.py").read_text()
+        self.assertIn("evidenceExcerptComparison(Context context, JSONObject group", presentation)
+        self.assertIn('group.optString("source_excerpt"', presentation)
+        self.assertIn('selected.optString("excerpt"', presentation)
+        self.assertIn("R.string.knowledge_evidence_comparison_warning", presentation)
+        self.assertIn("evidenceExcerptComparison(\n                        this, group, selected, sourcePath)", hub)
+        self.assertIn("showContextEvidenceComparison(group, item, sourcePath, selectedVault)", editor)
+        self.assertIn("KnowledgeRelationPresentation.evidenceExcerptComparison(", editor)
+        self.assertIn("MAX_EVIDENCE_EXCERPT_CHARS = 240", index)
+        self.assertIn("f.doc=a.doc", index)
+        self.assertIn("substr(f.plain, 1, ?)", index)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_evidence_comparison_warning",
+                         "knowledge_evidence_comparison_inspected",
+                         "knowledge_evidence_comparison_selected",
+                         "knowledge_evidence_comparison_missing",
+                         "knowledge_evidence_comparison_truncated"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_modal_contrasts_are_separate_from_asserted_conflict_ui(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        schema = (Path(__file__).resolve().parents[1] / "ksys/store/db.py").read_text()
+        for view in (hub, editor):
+            self.assertIn('"modal_contrast".equals(kind)', view)
+            self.assertIn('"modal_search_limited"', view)
+            self.assertIn("R.string.knowledge_possible_modal_contrast", view)
+        self.assertIn('"modal_contrast".equals(relation.optString("kind"))', presentation)
+        self.assertIn("R.string.knowledge_modal_opposing_info", presentation)
+        self.assertIn('"modal_search_limited": modal_limited', bridge)
+        self.assertIn("CREATE TABLE IF NOT EXISTS candidate_modal_atoms", schema)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_modal_contrast", "knowledge_modal_source",
+                         "knowledge_modal_other", "knowledge_modal_asserted",
+                         "knowledge_modal_possible", "knowledge_modal_usually",
+                         "knowledge_modal_claim", "knowledge_modal_hypothesis",
+                         "knowledge_modal_opposing_info", "knowledge_modal_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_existing_source_review_opens_exact_active_decision_for_withdrawal(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("void showReviewed(final String exactPath)", dialog)
+        self.assertIn('exactPath.equals(record.optString("path"))', dialog)
+        self.assertIn("showActive(record)", dialog)
+        self.assertIn("KnowledgePythonBridge.sourceAssessmentDecisions", dialog)
+        self.assertIn("KnowledgePythonBridge.previewSourceUnassessment", dialog)
+        self.assertIn("KnowledgePythonBridge.confirmSourceUnassessment", dialog)
+        self.assertIn("show();", dialog)  # Stale evidence gracefully reopens menu.
+
+    def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_entity_matching")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeEntityReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        self.assertIn("new KnowledgeEntityReviewDialog(this, workspacePath()", hub)
+        for name in ("entityAliasWorkspace", "previewEntityAlias", "confirmEntityAlias",
+                     "entityAliasDecisions", "previewEntityUnalias", "confirmEntityUnalias"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for name in ("source_sha256", "fragment_id", "preview_token", "journal_head",
+                     "openNote.accept", "knowledge_entity_revoke_warning"):
+            self.assertIn(name, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_entity_matching", "knowledge_entity_source_a",
+                         "knowledge_entity_source_b", "knowledge_entity_confirm_warning",
+                         "knowledge_entity_revoke_warning", "knowledge_entity_saved"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_temporal_overlap_hints_have_distinct_labels_and_both_intervals(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_overlap".equals(kind)', hub)
+        self.assertIn('"temporal_overlap".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("other_interval")', presentation)
+        self.assertIn('relation.optJSONObject("overlap_interval")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_possible_temporal_overlap",
+                        "knowledge_relation_other_interval",
+                        "knowledge_relation_overlap_interval"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_time_separation_hints_show_order_gap_and_anti_conflict_warning(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_separation".equals(kind)', hub)
+        self.assertIn('"temporal_separation".equals(kind)', editor)
+        self.assertIn('"temporal_separation".equals(relation.optString("kind"))', presentation)
+        self.assertIn('relation.optInt("gap_days")', presentation)
+        self.assertIn('relation.optString("relative_order")', presentation)
+        self.assertIn('relation.optString("version_review")', presentation)
+        self.assertIn('relation.optBoolean("earlier_negated")', presentation)
+        self.assertIn('relation.optBoolean("later_negated")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_temporal_separation",
+                         "knowledge_relation_source_earlier",
+                         "knowledge_relation_other_earlier",
+                         "knowledge_relation_gap_days",
+                         "knowledge_relation_version_review",
+                         "knowledge_relation_earlier_polarity",
+                         "knowledge_relation_later_polarity",
+                         "knowledge_relation_negative",
+                         "knowledge_relation_positive",
+                         "knowledge_relation_temporal_separation_warning"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_incomplete_temporal_bounds_are_labeled_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        for activity in ("KnowledgeHubActivity.java", "KnowledgeDocumentActivity.java"):
+            self.assertIn('"temporal_uncertainty".equals(kind)',
+                          (folder / activity).read_text())
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_uncertainty".equals(relation.optString("kind"))',
+                      presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_possible_temporal_uncertainty"])
+            self.assertTrue(strings["knowledge_relation_temporal_uncertainty_warning"])
+
+    def test_temporal_hints_show_per_file_sha_and_shared_limit_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("temporal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("temporal_checks_limited")', editor)
+        self.assertIn('"temporal_checks_limited": temporal_checks_limited', bridge)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_temporal_source_sha", "knowledge_temporal_other_sha",
+                         "knowledge_temporal_current_pair", "knowledge_temporal_historical_pair",
+                         "knowledge_temporal_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_exact_and_alias_hints_show_live_sha_and_unapproved_disclaimer(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("relation_checks_limited")', hub)
+        self.assertIn('context.optBoolean("relation_checks_limited")', editor)
+        self.assertIn('"relation_checks_limited": relation_checks_limited', bridge)
+        self.assertIn('"possible_agreement".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"possible_conflict".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"alias_candidate".equals(relation.optString("kind"))', presentation)
+        self.assertIn('R.string.knowledge_relation_source_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_other_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_historical_pair', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_source_sha", "knowledge_relation_other_sha",
+                         "knowledge_relation_current_pair", "knowledge_relation_historical_pair",
+                         "knowledge_relation_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"alias_candidate".equals(kind)', hub)
+        self.assertIn('"alias_candidate".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("alias_evidence")', presentation)
+        self.assertIn('evidence.optJSONArray("journal_ids")', presentation)
+        self.assertIn('result.optBoolean("alias_search_limited")', hub)
+        self.assertIn('context.optBoolean("alias_search_limited")', editor)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_alias", "knowledge_relation_alias_source",
+                         "knowledge_relation_alias_decisions", "knowledge_alias_search_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_journal_export_prepares_before_saf_and_verifies_destination(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        prepare = hub[hub.index("private void prepareJournalExport("):
+                      hub.index("private void requestJournalImport(")]
+        self.assertLess(prepare.index("KnowledgePythonBridge.journalExportInfo("),
+                        prepare.index("KnowledgeJournalCrypto.encrypt("))
+        self.assertLess(prepare.index("KnowledgeJournalCrypto.encrypt("),
+                        prepare.index("startActivityForResult(intent, REQUEST_EXPORT_JOURNAL)"))
+        self.assertIn("journal.length() == 0L", prepare)
+        self.assertIn("KnowledgeJournalExportWriter.writeAndVerify(", hub)
+        self.assertIn('openOutputStream(destination, "wt")', hub)
+        self.assertIn("openInputStream(destination)", hub)
+        self.assertNotIn("pendingExportPassword", hub)
+        self.assertTrue((ROOT.parent / "test/java/net/gsantner/markor/knowledge/"
+                         "KnowledgeJournalExportWriterTest.java").exists())
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter)', runner)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_backup_export_empty"])
+            self.assertTrue(strings["knowledge_backup_export_incomplete"])
+
     def test_stage22_first_open_guide_is_private_and_accessible(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         buttons = [element for element in layout.iter()
@@ -336,6 +848,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                     if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_body")
         self.assertEqual("gone", body.get(ANDROID + "visibility"))
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        formatter = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeRelationPresentation.java").read_text()
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", hub)
+        self.assertIn("qualifiers(context, relation)", formatter)
+        self.assertIn("knowledge_editor_structural_context", formatter)
+        self.assertIn("knowledge_editor_structural_interval", formatter)
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
                      "KnowledgePythonBridge.editorContext(", "relation_index_state",
                      "accepted_records", "candidate_relations", "source_span_state",

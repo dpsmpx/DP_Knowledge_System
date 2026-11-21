@@ -10,7 +10,7 @@ import json
 import hashlib
 import sqlite3
 import tempfile
-from ksys.store.journal import Entry, entry_id
+from ksys.store.journal import Entry, entry_id, Journal
 from pathlib import Path
 
 from ksys import KS_VERSION
@@ -20,9 +20,14 @@ from ksys.source.coverage import check_coverage
 from ksys.importer.classify import classify
 from ksys.importer.language_analyzer import LanguageAnalyzer
 from ksys.importer.vault import import_vault, MARKDOWN_EXT
-from ksys.importer.relations import related_claims
+from ksys.importer.relations import related_claims, indexed_related_claims, projected_atoms
+from ksys.importer.aliases import (verified_owner_aliases, MAX_ALIAS_OPERATIONS,
+                                   MAX_ALIASES_PER_CANONICAL)
+from ksys.core.ids import canonical_json
+from ksys.ir.terms import SYMBOL_RE
 from ksys.audit.library import audit_summary, audit_page
 from ksys.store.kb import KnowledgeBase, convert_role
+from ksys.inference.engine import Engine, complement_support
 from ksys.ir.nodes import node_from_dict
 from ksys.core.errors import KSError
 from ksys.semantics.formalize import Formalizer
@@ -41,6 +46,8 @@ MAX_EDITOR_EVIDENCE_LINKS = 16
 MAX_EDITOR_EVIDENCE_EVENTS = 16
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_FILES = 200_000
+MAX_RELATION_PREVIEW_CHARS = 240
+MAX_RELATION_PREVIEW_FRAGMENTS = 200  # 2 refs × at most 100 relations
 
 
 def analyze_vault(workspace_dir: str, vault_dir: str, callback=None) -> str:
@@ -152,25 +159,1243 @@ def review_queue(workspace_dir: str, offset: int = 0) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def note_relationships(workspace_dir: str, relative_path: str) -> str:
+def note_relationships(workspace_dir: str, relative_path: str,
+                       vault_dir: str | None = None) -> str:
     """Compare unapproved structured assertions between different notes.
 
     A shared atom is evidence of a candidate relation, never evidence that
-    either original claim is true. No private note text leaves this process.
+    either original claim is true. A temporal overlap is a separate review
+    hint, never a conflict verdict. No private note text leaves this process.
     """
     workspace = Path(workspace_dir)
     if not workspace.is_absolute():
         raise ValueError("Knowledge workspace must be absolute")
-    matches = related_claims(Workspace(workspace), relative_path)
+    ws = Workspace(workspace)
+    journal = Journal(ws.journal_path, SystemClock(),
+                      actor=ws.config().get("actor", "human:me"))
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    aliases = verified_owner_aliases(journal.entries(), journal.actor)
+    matches = related_claims(ws, relative_path, aliases=aliases)
+    evidence_checks_limited = True
+    modal_checks_limited = False
+    temporal_checks_limited = False
+    relation_checks_limited = False
+    source_lineage_limited = False
+    source_assessment_limited = False
+    version_review_limited = False
+    if matches["evidence_groups"] or matches["matches"]:
+        con = _decision_index(workspace)
+        if con is not None:
+            try:
+                (evidence_checks_limited, modal_checks_limited,
+                 temporal_checks_limited, relation_checks_limited) = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, matches["evidence_groups"],
+                    matches["matches"])
+                _annotate_relation_previews(con, relative_path, matches["matches"])
+                source_lineage_limited = _annotate_reviewed_source_links(
+                    con, journal, relative_path, matches["evidence_groups"])
+                source_assessment_limited = _annotate_source_assessments(
+                    con, journal, relative_path, matches["evidence_groups"])
+                version_review_limited = _annotate_version_reviews(
+                    con, journal, relative_path, matches["matches"])
+            finally:
+                con.close()
     return json.dumps({
         "protocol": "dpksys.relations.v1",
         "path": relative_path,
         "matches": matches["matches"],
         "truncated": matches["truncated"],
+        "alias_search_limited": matches["alias_search_limited"],
+        "modal_search_limited": matches["modal_search_limited"],
+        "modal_checks_limited": modal_checks_limited,
+        "temporal_checks_limited": temporal_checks_limited,
+        "relation_checks_limited": relation_checks_limited,
+        "evidence_groups": matches["evidence_groups"],
+        "evidence_limited": matches["evidence_limited"],
+        "evidence_checks_limited": evidence_checks_limited,
+        "source_lineage_limited": source_lineage_limited,
+        "source_assessment_limited": source_assessment_limited,
+        "version_review_limited": version_review_limited,
         "source": "unapproved_candidate_assertions",
         "read_only": True,
         "requires_human_review": True,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+# Stage 18: deliberate owner-only entity decisions. Sources come from an
+# unapproved, disposable projection, so every source must be rechecked against
+# the original file's SHA before a preview or journal append.
+ENTITY_SOURCE_PAGE = 24
+MAX_EVIDENCE_LIVE_CHECKS = 16  # at most 32 MiB of live Markdown I/O per query
+
+
+def _entity_symbol(symbol: str) -> str:
+    if (not isinstance(symbol, str) or not 1 <= len(symbol) <= 128
+            or not SYMBOL_RE.fullmatch(symbol)):
+        raise ValueError("Use an exact formal symbol (1..128 characters)")
+    return symbol
+
+
+def _entity_index(workspace_dir: str, vault_dir: str):
+    workspace, vault = Path(workspace_dir), Path(vault_dir)
+    if not workspace.is_absolute() or not vault.is_absolute() or not vault.is_dir():
+        raise ValueError("Select an accessible notebook and private knowledge workspace")
+    con = _decision_index(workspace)
+    if con is None:
+        raise ValueError("Analyze the notebook before reviewing entity sources")
+    indexed_root = con.execute(
+        "SELECT value FROM meta WHERE key='vault_root'").fetchone()
+    if not indexed_root or indexed_root[0] != str(vault.resolve()):
+        con.close()
+        raise ValueError("Notebook changed since analysis; analyze again")
+    return con, vault.resolve()
+
+
+def _entity_live_hash(root: Path, relative_path: str) -> str | None:
+    if (not isinstance(relative_path, str) or not relative_path
+            or relative_path.startswith("/") or "\\" in relative_path
+            or ".." in relative_path.split("/")
+            or not relative_path.lower().endswith((".md", ".markdown"))):
+        return None
+    source = (root / relative_path).resolve()
+    if not source.is_relative_to(root) or not source.is_file():
+        return None
+    try:
+        if source.stat().st_size > MAX_IMPORT_BYTES:
+            return None
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except (OSError, PermissionError):
+        return None
+
+
+def _verify_evidence_freshness(con, vault_dir: str | None,
+                               source_path: str, groups: list[dict],
+                               matches: list[dict] | None = None) -> tuple[bool, bool, bool, bool]:
+    """Verify a bounded set of current file hashes without indexing or writes.
+
+    The supplied selected notebook must match the import's recorded root;
+    otherwise *every* status stays unchecked (never silently current). Cached
+    fragment hashes allow only exact-text-repeat notices, never claims of
+    independent authorship, truth, or factual corroboration. Each copy family
+    marks *every* verified member, including the inspected source and the
+    first occurrence. Modality, temporal, exact and reviewed-alias hints reuse
+    the *same* 16-file budget, including checks already done for exact evidence.
+    Neither new file hashes nor inferred links are stored. SHA freshness is
+    not semantic approval, even when a journal-backed alias is active.
+    """
+    root = None
+    if isinstance(vault_dir, str) and Path(vault_dir).is_absolute():
+        selected = Path(vault_dir).resolve()
+        stored = con.execute("SELECT value FROM meta WHERE key='vault_root'").fetchone()
+        if selected.is_dir() and stored and stored[0] == str(selected):
+            root = selected
+    cache: dict[str, tuple[str, str | None]] = {}
+    limited = root is None
+
+    def check(path: str) -> tuple[str, str | None]:
+        nonlocal limited
+        if path in cache:
+            return cache[path]
+        if root is None or len(cache) >= MAX_EVIDENCE_LIVE_CHECKS:
+            limited = True
+            return ("not_checked", None)
+        row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                          (path,)).fetchone()
+        expected = row[0] if row else None
+        live = _entity_live_hash(root, path)
+        state = ("unavailable" if live is None or expected is None else
+                 "current" if live == expected else "stale")
+        cache[path] = (state, expected)
+        return cache[path]
+
+    source_state, source_sha = check(source_path)
+    for group in groups:
+        group["source_verification"] = source_state
+        verified = {"same_polarity": 0, "opposite_polarity": 0, "mixed": 0}
+        statuses = {"current": 0, "stale": 0, "unavailable": 0, "not_checked": 0}
+        current = []
+        if source_state == "current":
+            current.append({"path": source_path, "source": True,
+                            "excerpt_hash": group.get("source_excerpt_hash"),
+                            "sha": source_sha})
+        for evidence in group["other_sources"]:
+            state, sha = check(evidence["path"])
+            evidence["verification"] = state
+            statuses[state] += 1
+            if state != "current":
+                continue
+            current.append({"path": evidence["path"], "source": False,
+                            "item": evidence, "excerpt_hash": evidence.get("excerpt_hash"),
+                            "sha": sha})
+            if source_state == "current":
+                kind = evidence["relation"]
+                if kind in verified:
+                    verified[kind] += 1
+
+        # Deterministic labels group all current files that match, rather than
+        # assigning a copy warning only to the second member of a pair. The
+        # representative fragment may be one of several parser readings; no
+        # independence estimate is justified from a single such hash.
+        def mark_families(hash_key: str, flag: str, label_key: str,
+                          source_flag: str, source_label: str, prefix: str):
+            buckets: dict[str, list[dict]] = {}
+            for record in current:
+                value = record[hash_key]
+                if isinstance(value, str) and value:
+                    buckets.setdefault(value, []).append(record)
+            repeating = [members for members in buckets.values() if len(members) > 1]
+            repeating.sort(key=lambda members: tuple(sorted(
+                (member["path"].casefold(), member["path"]) for member in members)))
+            families = []
+            for number, members in enumerate(repeating, 1):
+                label = f"{prefix}{number}"
+                paths = sorted((member["path"] for member in members),
+                               key=lambda name: (name.casefold(), name))
+                families.append({"label": label, "paths": paths})
+                for member in members:
+                    if member["source"]:
+                        group[source_flag] = True
+                        group[source_label] = label
+                    else:
+                        member["item"][flag] = True
+                        member["item"][label_key] = label
+            # All current nonmatching members explicitly remain unclustered.
+            for record in current:
+                if record["source"]:
+                    group.setdefault(source_flag, False)
+                else:
+                    record["item"].setdefault(flag, False)
+            return families, sum(1 for record in current if not record["source"]
+                                 and record["item"][flag])
+
+        excerpt_families, repeats = mark_families(
+            "excerpt_hash", "repeated_excerpt", "excerpt_family",
+            "source_repeated_excerpt", "source_excerpt_family", "R")
+        document_families, duplicates = mark_families(
+            "sha", "identical_document", "document_family",
+            "source_identical_document", "source_document_family", "D")
+        checked_excerpts = {record["excerpt_hash"] for record in current
+                            if isinstance(record["excerpt_hash"], str)
+                            and record["excerpt_hash"]}
+        group.update({
+            "verified_same_polarity_files": verified["same_polarity"],
+            "verified_opposite_polarity_files": verified["opposite_polarity"],
+            "verified_mixed_polarity_files": verified["mixed"],
+            "current_files": statuses["current"],
+            "stale_files": statuses["stale"],
+            "unavailable_files": statuses["unavailable"],
+            "unchecked_files": statuses["not_checked"],
+            "repeated_excerpt_files": repeats,
+            "identical_document_files": duplicates,
+            "current_excerpt_files": sum(1 for record in current
+                                         if isinstance(record["excerpt_hash"], str)
+                                         and record["excerpt_hash"]),
+            "distinct_representative_excerpts": len(checked_excerpts),
+            "excerpt_families": excerpt_families,
+            "document_families": document_families,
+            "independence_assessed": False,
+        })
+    evidence_limited = limited
+    modal_limited = False
+    temporal_limited = False
+    relation_limited = False
+    # Evidence, modality, dated, and remaining hints share one SHA budget.
+    # Cached exact sources are free to recheck; alias partner files cannot
+    # escape the cap or silently be called current after its exhaustion.
+    for kinds in (("modal_contrast",), ("temporal_overlap", "temporal_separation",
+                   "temporal_uncertainty"),
+                  ("possible_agreement", "possible_conflict", "alias_candidate")):
+        for match in matches or []:
+            if match.get("kind") not in kinds:
+                continue
+            source_state, _ = check(source_path)
+            other_state, _ = check(match["path"])
+            match["source_verification"] = source_state
+            match["other_verification"] = other_state
+            # A stale, missing or unchecked source leaves only the historical
+            # indexed reading. Dates, polarity and modality are never votes.
+            match["live_source_pair"] = source_state == other_state == "current"
+            unchecked = "not_checked" in (source_state, other_state)
+            if kinds == ("modal_contrast",):
+                modal_limited = modal_limited or unchecked
+            elif kinds == ("temporal_overlap", "temporal_separation",
+                           "temporal_uncertainty"):
+                temporal_limited = temporal_limited or unchecked
+            else:
+                relation_limited = relation_limited or unchecked
+    return evidence_limited, modal_limited, temporal_limited, relation_limited
+
+
+def _annotate_relation_previews(con, source_path: str, matches: list[dict]) -> None:
+    """Attach bounded *indexed snapshots*, never text obtained from live notes.
+
+    One batch looks up each referenced fragment at most once. A fragment is
+    shown only when its actual document and locator agree with the relation's
+    provenance fields. A stale/unchecked SHA never converts a historical
+    index excerpt into verified present-day prose. No SQLite or Markdown write.
+    """
+    ids = sorted({fragment for match in matches for fragment in
+                  (match.get("source_fragment"), match.get("other_fragment"))
+                  if isinstance(fragment, str) and fragment})
+    if len(ids) > MAX_RELATION_PREVIEW_FRAGMENTS:
+        raise ValueError("Relation fragment preview bound exceeded")
+    previews = {}
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        rows = con.execute(
+            "SELECT id, doc, locator, substr(plain,1,?), length(plain), text_hash "
+            "FROM fragments WHERE id IN (" + placeholders + ")",
+            (MAX_RELATION_PREVIEW_CHARS, *ids)).fetchall()
+        previews = {row[0]: row[1:] for row in rows}
+    for match in matches:
+        for side, path in (("source", source_path), ("other", match["path"])):
+            row = previews.get(match.get(side + "_fragment"))
+            valid = (row is not None and row[0] == path
+                     and row[1] == match.get(side + "_locator"))
+            match[side + "_excerpt_available"] = valid
+            match[side + "_excerpt"] = row[2] if valid else None
+            match[side + "_excerpt_truncated"] = (
+                row[3] > MAX_RELATION_PREVIEW_CHARS if valid else False)
+            match[side + "_excerpt_hash"] = row[4] if valid else None
+
+
+def _annotate_reviewed_source_links(con, journal: Journal,
+                                    source_path: str, groups: list[dict]) -> bool:
+    """Add only *direct* owner-reviewed provenance links to live evidence rows.
+
+    These annotations are separate from evidence counts and the claim graph.
+    An old human link remains visible as historical/unverified if either file
+    differs from the SHA saved at approval, is unavailable, or was not checked.
+    No transitive propagation or automatic independence verdict is permitted.
+    """
+    try:
+        active, _ = _source_lineage_state(journal)
+    except ValueError:
+        return True
+    direct = {}
+    for decision in active:
+        paths = decision["paths"]
+        if source_path not in paths:
+            continue
+        partner = paths[0] if paths[1] == source_path else paths[1]
+        stored = {source["path"]: source.get("source_sha256")
+                  for source in decision["sources"]}
+        direct[partner] = (decision, stored)
+    if not direct:
+        for group in groups:
+            group["reviewed_source_links_current"] = 0
+            group["reviewed_source_links_historical"] = 0
+        return False
+    source_row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                             (source_path,)).fetchone()
+    source_indexed_sha = source_row[0] if source_row else None
+    for group in groups:
+        current_count = historical_count = 0
+        for evidence in group["other_sources"]:
+            pair = direct.get(evidence["path"])
+            if pair is None:
+                continue
+            decision, stored = pair
+            other_row = con.execute("SELECT sha256 FROM documents "
+                                    "WHERE path=? AND status='PARSED'",
+                                    (evidence["path"],)).fetchone()
+            verified = (group.get("source_verification") == "current" and
+                        evidence.get("verification") == "current" and
+                        source_indexed_sha == stored.get(source_path) and
+                        other_row is not None and other_row[0] == stored.get(evidence["path"]))
+            state = "current" if verified else "historical"
+            evidence["reviewed_source_link_state"] = state
+            evidence["reviewed_source_link_id"] = decision["journal_id"]
+            evidence["reviewed_source_link_reason"] = str(decision["reason"])[:180]
+            if verified:
+                current_count += 1
+            else:
+                historical_count += 1
+        group["reviewed_source_links_current"] = current_count
+        group["reviewed_source_links_historical"] = historical_count
+    return False
+
+
+def _entity_sources(con, root: Path, symbol: str) -> tuple[list[dict], bool]:
+    # Exact canonical JSON argument, not substring/name similarity. A candidate
+    # atom is only a proposal: UI explicitly names this epistemic status.
+    needle = canonical_json({"k": "sym", "v": symbol})
+    rows = con.execute(
+        "SELECT DISTINCT a.doc, a.fragment_id, f.locator, f.text, d.sha256 "
+        "FROM candidate_atoms a JOIN fragments f ON f.id=a.fragment_id "
+        "JOIN documents d ON d.path=a.doc AND d.status='PARSED' "
+        "WHERE instr(a.atom_key, ?) > 0 "
+        "ORDER BY a.doc COLLATE NOCASE, f.locator, a.fragment_id LIMIT ?",
+        (needle, ENTITY_SOURCE_PAGE + 1)).fetchall()
+    sources = []
+    for path, fragment, locator, excerpt, sha in rows[:ENTITY_SOURCE_PAGE]:
+        sources.append({"path": path, "fragment_id": fragment,
+                        "locator": locator, "excerpt": excerpt[:360],
+                        "source_sha256": sha,
+                        "current": _entity_live_hash(root, path) == sha})
+    return sources, len(rows) > ENTITY_SOURCE_PAGE
+
+
+def _owner_aliases(kb: KnowledgeBase) -> tuple[dict, bool]:
+    snapshot = verified_owner_aliases(kb.journal.entries(), kb.journal.actor)
+    by_id = {e.id: e for e in kb.journal.entries()}
+    active = {}
+    for name, evidence in snapshot.by_symbol.items():
+        if evidence.journal_id is None:
+            continue
+        event = by_id[evidence.journal_id]
+        active[name] = {"alias": name, "canonical": evidence.canonical,
+                        "journal_id": event.id, "time": event.ts,
+                        "reason": event.note or "",
+                        "sources": event.data.get("evidence", [])[:2]
+                        if isinstance(event.data.get("evidence"), list) else []}
+    return active, snapshot.limited
+
+
+def entity_alias_workspace(workspace_dir: str, vault_dir: str,
+                           alias: str, canonical: str) -> str:
+    """Read-only source choices and approved history for the Android screen."""
+    a, c = _entity_symbol(alias), _entity_symbol(canonical)
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        left, left_limited = _entity_sources(con, root, a)
+        right, right_limited = _entity_sources(con, root, c)
+    finally:
+        con.close()
+    return json.dumps({
+        "protocol": "dpksys.entities.v1", "alias": a, "canonical": c,
+        "alias_sources": left, "canonical_sources": right,
+        "sources_limited": left_limited or right_limited,
+        "active": [active[k] for k in sorted(active)],
+        "journal_limited": limited, "journal_head": kb.journal.head,
+        "read_only": True, "requires_human_review": True,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def entity_alias_decisions(workspace_dir: str) -> str:
+    """List reversible owner decisions even when the notebook is unavailable."""
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    recent = [{"op": e.op, "alias": e.data.get("alias"),
+               "canonical": e.data.get("canonical"), "journal_id": e.id,
+               "time": e.ts} for e in reversed(kb.journal.entries())
+              if e.actor == kb.journal.actor and e.op in ("alias", "unalias")][:40]
+    return json.dumps({"protocol": "dpksys.entities.v1",
+                       "active": [active[k] for k in sorted(active)],
+                       "recent": recent, "journal_limited": limited,
+                       "read_only": True}, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
+def _entity_selected(con, root: Path, symbol: str, path: str, fragment_id: str) -> dict:
+    if not isinstance(fragment_id, str) or len(fragment_id) > 120:
+        raise ValueError("Invalid source fragment")
+    sources, limited = _entity_sources(con, root, symbol)
+    selected = next((s for s in sources if s["path"] == path
+                     and s["fragment_id"] == fragment_id), None)
+    if selected is None or not selected["current"]:
+        raise ValueError("Source missing, changed or not in the reviewed list; analyze again")
+    return selected
+
+
+def _entity_preview(workspace_dir: str, vault_dir: str,
+                    alias: str, canonical: str, alias_path: str,
+                    alias_fragment: str, canonical_path: str,
+                    canonical_fragment: str, reason: str) -> dict:
+    a, c = _entity_symbol(alias), _entity_symbol(canonical)
+    if a == c or not isinstance(reason, str) or len(reason.strip()) > 500:
+        raise ValueError("Specify two different symbols and a reason of at most 500 characters")
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    snapshot = verified_owner_aliases(kb.journal.entries(), kb.journal.actor)
+    count = sum(e.op in ("alias", "unalias") and e.actor == kb.journal.actor
+                for e in kb.journal.entries())
+    if (limited or count >= MAX_ALIAS_OPERATIONS or a in snapshot.by_symbol
+            or a in kb.state.aliases or c in kb.state.aliases
+            or c in active or len(snapshot.groups.get(c, ())) > MAX_ALIASES_PER_CANONICAL):
+        raise ValueError("Alias is already mapped, would form a chain, or journal limit reached")
+    if (alias_path, alias_fragment) == (canonical_path, canonical_fragment):
+        raise ValueError("Choose distinct source fragments for the two symbols")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        left = _entity_selected(con, root, a, alias_path, alias_fragment)
+        right = _entity_selected(con, root, c, canonical_path, canonical_fragment)
+    finally:
+        con.close()
+    evidence = [{"symbol": symbol, "path": src["path"],
+                 "fragment_id": src["fragment_id"], "locator": src["locator"],
+                 "source_sha256": src["source_sha256"], "excerpt": src["excerpt"]}
+                for symbol, src in ((a, left), (c, right))]
+    payload = {"alias": a, "canonical": c, "evidence": evidence,
+               "reason": reason.strip(), "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.entities.v1", **payload, "preview_token": token,
+            "read_only": True, "requires_human_confirmation": True,
+            "changes_original_markdown": False}
+
+
+def preview_entity_alias(workspace_dir: str, vault_dir: str, alias: str,
+                         canonical: str, alias_path: str, alias_fragment: str,
+                         canonical_path: str, canonical_fragment: str,
+                         reason: str) -> str:
+    return json.dumps(_entity_preview(workspace_dir, vault_dir, alias, canonical,
+                      alias_path, alias_fragment, canonical_path,
+                      canonical_fragment, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_entity_alias(workspace_dir: str, vault_dir: str, alias: str,
+                        canonical: str, alias_path: str, alias_fragment: str,
+                        canonical_path: str, canonical_fragment: str, reason: str,
+                        expected_token: str, expected_head: str | None) -> str:
+    preview = _entity_preview(workspace_dir, vault_dir, alias, canonical,
+                              alias_path, alias_fragment, canonical_path,
+                              canonical_fragment, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Sources or journal changed after review; start a new preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.alias_reviewed(alias, canonical, preview["evidence"], reason.strip())
+    if kb.journal.verify():
+        raise ValueError("Journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.entities.v1", "decision": "alias",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preview_entity_unalias(workspace_dir: str, alias: str) -> str:
+    kb = _kb(workspace_dir)
+    active, limited = _owner_aliases(kb)
+    if limited or alias not in active:
+        raise ValueError("No unambiguous active owner alias to revoke")
+    mapping = active[alias]
+    token = hashlib.sha256(canonical_json({"mapping": mapping,
+                     "head": kb.journal.head}).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.entities.v1", **mapping,
+                       "journal_head": kb.journal.head, "preview_token": token,
+                       "read_only": True, "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_entity_unalias(workspace_dir: str, alias: str,
+                          expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_entity_unalias(workspace_dir, alias))
+    if preview["journal_head"] != expected_head or preview["preview_token"] != expected_token:
+        raise ValueError("Alias or journal changed after revocation preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.unalias(alias, preview["canonical"], preview["journal_id"])
+    if kb.journal.verify():
+        raise ValueError("Journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.entities.v1", "decision": "unalias",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+# Source-lineage decisions are deliberately distinct from semantic aliases and
+# accepted claims. They assert only a person's *assessment of provenance*, not
+# independent corroboration, truth, or a shared factual identity.
+MAX_SOURCE_LINEAGE_OPERATIONS = 512
+
+
+def _source_lineage_state(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
+               entry.op in ("source_link", "source_unlink")]
+    if len(entries) > MAX_SOURCE_LINEAGE_OPERATIONS:
+        raise ValueError("Source lineage journal limit reached")
+    active: dict[tuple[str, str], dict] = {}
+    recent = []
+    for entry in entries:
+        data = entry.data
+        paths = data.get("paths") if isinstance(data, dict) else None
+        if (not isinstance(paths, list) or len(paths) != 2 or
+                any(not isinstance(p, str) for p in paths) or
+                paths != sorted(paths, key=lambda p: (p.casefold(), p)) or
+                paths[0] == paths[1]):
+            continue
+        key = tuple(paths)
+        if entry.op == "source_link":
+            sources = data.get("sources")
+            if (key in active or not isinstance(sources, list) or len(sources) != 2 or
+                    [s.get("path") for s in sources if isinstance(s, dict)] != paths):
+                continue
+            active[key] = {"paths": paths, "sources": sources,
+                           "reason": data.get("reason", ""),
+                           "journal_id": entry.id, "time": entry.ts}
+        elif entry.op == "source_unlink":
+            previous = active.get(key)
+            if previous and previous["journal_id"] == data.get("decision_id"):
+                del active[key]
+        recent.append({"op": entry.op, "paths": paths, "journal_id": entry.id,
+                       "decision_id": data.get("decision_id"), "time": entry.ts})
+    return [active[key] for key in sorted(active)], list(reversed(recent[-40:]))
+
+
+def source_lineage_decisions(workspace_dir: str) -> str:
+    """Read human provenance annotations even with the notebook disconnected."""
+    kb = _kb(workspace_dir)
+    active, recent = _source_lineage_state(kb.journal)
+    return json.dumps({"protocol": "dpksys.source_lineage.v1",
+                       "active": active, "recent": recent,
+                       "journal_head": kb.journal.head, "read_only": True,
+                       "does_not_establish_independence": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _lineage_paths(first_path: str, second_path: str) -> list[str]:
+    for path in (first_path, second_path):
+        if (not isinstance(path, str) or not path or path.startswith("/") or
+                "\\" in path or ".." in path.split("/") or
+                not path.lower().endswith((".md", ".markdown")) or len(path) > 500):
+            raise ValueError("Select two different relative Markdown files")
+    if first_path == second_path:
+        raise ValueError("Select two different relative Markdown files")
+    return sorted((first_path, second_path), key=lambda p: (p.casefold(), p))
+
+
+def _lineage_source(con, root: Path, path: str) -> dict:
+    row = con.execute("SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                      (path,)).fetchone()
+    actual = _entity_live_hash(root, path)
+    if not row or not actual or actual != row[0]:
+        raise ValueError("Source missing or modified since indexing; analyze again")
+    excerpt = con.execute(
+        "SELECT locator,text FROM fragments WHERE doc=? "
+        "ORDER BY CASE WHEN unit_role='sentence' THEN 0 ELSE 1 END, ordinal LIMIT 1",
+        (path,)).fetchone()
+    if not excerpt:
+        raise ValueError("No indexed source excerpt to review")
+    return {"path": path, "source_sha256": actual,
+            "locator": excerpt[0], "excerpt": excerpt[1][:320]}
+
+
+def _source_lineage_preview(workspace_dir: str, vault_dir: str,
+                            first_path: str, second_path: str, reason: str) -> dict:
+    paths = _lineage_paths(first_path, second_path)
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain the common upstream source in 1..500 characters")
+    kb = _kb(workspace_dir)
+    active, _ = _source_lineage_state(kb.journal)
+    if any(item["paths"] == paths for item in active):
+        raise ValueError("This source-pair decision is already active; revoke it first")
+    owner_ops = sum(entry.actor == kb.journal.actor and
+                    entry.op in ("source_link", "source_unlink")
+                    for entry in kb.journal.entries())
+    if owner_ops >= MAX_SOURCE_LINEAGE_OPERATIONS:
+        raise ValueError("Source lineage journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        sources = [_lineage_source(con, root, path) for path in paths]
+    finally:
+        con.close()
+    payload = {"paths": paths, "sources": sources, "reason": reason.strip(),
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.source_lineage.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "does_not_establish_independence": True,
+            "changes_original_markdown": False}
+
+
+def preview_source_link(workspace_dir: str, vault_dir: str,
+                        first_path: str, second_path: str, reason: str) -> str:
+    return json.dumps(_source_lineage_preview(workspace_dir, vault_dir,
+                      first_path, second_path, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_source_link(workspace_dir: str, vault_dir: str, first_path: str,
+                       second_path: str, reason: str, expected_token: str,
+                       expected_head: str | None) -> str:
+    preview = _source_lineage_preview(workspace_dir, vault_dir,
+                                     first_path, second_path, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source or journal changed after review")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("source_link", {key: preview[key]
+                    for key in ("paths", "sources", "reason")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", "decision": "source_link",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preview_source_unlink(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _source_lineage_state(kb.journal)
+    selected = next((item for item in active if item["journal_id"] == decision_id), None)
+    if selected is None:
+        raise ValueError("No active owner source link for this decision")
+    payload = {"paths": selected["paths"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_unlink(workspace_dir: str, decision_id: str,
+                         expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_source_unlink(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source link or journal changed before revocation")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.journal.append("source_unlink",
+                              {"paths": preview["paths"], "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_lineage.v1", "decision": "source_unlink",
+                       "journal_ids": [event.id], "journal_head": kb.journal.head},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+# An owner's descriptive source-type annotation is *not* a quality score.
+# In particular, "primary_record" never promotes a parser candidate to fact.
+SOURCE_PROVENANCE_KINDS = ("primary_record", "secondary_summary",
+                           "republication", "unclassified")
+MAX_SOURCE_ASSESSMENT_OPERATIONS = 512
+
+
+def _source_assessments(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
+               entry.op in ("source_assess", "source_unassess")]
+    if len(entries) > MAX_SOURCE_ASSESSMENT_OPERATIONS:
+        raise ValueError("Source assessment journal limit reached")
+    active: dict[str, dict] = {}
+    recent = []
+    for entry in entries:
+        data = entry.data
+        path = data.get("path") if isinstance(data, dict) else None
+        if not isinstance(path, str) or not path:
+            continue
+        if entry.op == "source_assess":
+            source = data.get("source")
+            if (path in active or data.get("kind") not in SOURCE_PROVENANCE_KINDS or
+                    not isinstance(source, dict) or source.get("path") != path):
+                continue
+            active[path] = {"path": path, "kind": data["kind"],
+                            "reason": str(data.get("reason", ""))[:500],
+                            "source": source, "journal_id": entry.id, "time": entry.ts}
+        else:
+            previous = active.get(path)
+            if previous and previous["journal_id"] == data.get("decision_id"):
+                del active[path]
+        recent.append({"op": entry.op, "path": path, "journal_id": entry.id,
+                       "decision_id": data.get("decision_id"), "time": entry.ts})
+    return [active[path] for path in sorted(active)], list(reversed(recent[-40:]))
+
+
+def _annotate_source_assessments(con, journal: Journal,
+                                 source_path: str, groups: list[dict]) -> bool:
+    """Show owner labels beside evidence; never turn those labels into scoring.
+
+    'Current' requires a live file hash check and the exact indexed SHA saved
+    at approval. A changed, missing or unchecked note only has a historical
+    annotation. Revoked decisions are absent even though the journal retains
+    their history. This neither reads additional note bytes nor changes SQL.
+    """
+    try:
+        active, _ = _source_assessments(journal)
+    except ValueError:
+        return True
+    by_path = {decision["path"]: decision for decision in active}
+    indexed_shas: dict[str, str | None] = {}
+
+    def annotate(target: dict, path: str, verification: str) -> bool | None:
+        decision = by_path.get(path)
+        if decision is None:
+            return None
+        if path not in indexed_shas:
+            row = con.execute(
+                "SELECT sha256 FROM documents WHERE path=? AND status='PARSED'",
+                (path,)).fetchone()
+            indexed_shas[path] = row[0] if row else None
+        current = (verification == "current" and indexed_shas[path] is not None
+                   and indexed_shas[path] == decision["source"].get("source_sha256"))
+        target["source_assessment_kind"] = decision["kind"]
+        target["source_assessment_state"] = "current" if current else "historical"
+        target["source_assessment_id"] = decision["journal_id"]
+        target["source_assessment_reason"] = decision["reason"][:180]
+        return current
+
+    for group in groups:
+        annotate(group, source_path, group.get("source_verification", "not_checked"))
+        current_count = historical_count = 0
+        for evidence in group["other_sources"]:
+            current = annotate(evidence, evidence["path"],
+                               evidence.get("verification", "not_checked"))
+            if current is True:
+                current_count += 1
+            elif current is False:
+                historical_count += 1
+        group["source_assessment_current_files"] = current_count
+        group["source_assessment_historical_files"] = historical_count
+    return False
+
+
+def source_assessment_decisions(workspace_dir: str) -> str:
+    """Read owner source-type choices without a notebook or internet access."""
+    kb = _kb(workspace_dir)
+    active, recent = _source_assessments(kb.journal)
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "active": active, "recent": recent, "journal_head": kb.journal.head,
+                       "read_only": True, "changes_claim_authority": False,
+                       "reliability_score": None}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def _assessment_preview(workspace_dir: str, vault_dir: str, path: str,
+                        kind: str, reason: str) -> dict:
+    if (not isinstance(path, str) or not path or path.startswith("/") or
+            "\\" in path or ".." in path.split("/") or len(path) > 500 or
+            not path.lower().endswith((".md", ".markdown"))):
+        raise ValueError("Choose an exact relative Markdown source path")
+    if kind not in SOURCE_PROVENANCE_KINDS:
+        raise ValueError("Choose a descriptive source type")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain this source-type choice in 1..500 characters")
+    kb = _kb(workspace_dir)
+    active, _ = _source_assessments(kb.journal)
+    if any(record["path"] == path for record in active):
+        raise ValueError("Source has an active assessment; revoke it before reassessing")
+    owner_ops = sum(entry.actor == kb.journal.actor and
+                    entry.op in ("source_assess", "source_unassess")
+                    for entry in kb.journal.entries())
+    if owner_ops >= MAX_SOURCE_ASSESSMENT_OPERATIONS:
+        raise ValueError("Source assessment journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        source = _lineage_source(con, root, path)
+    finally:
+        con.close()
+    payload = {"path": path, "kind": kind, "source": source,
+               "reason": reason.strip(), "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.source_assessment.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "changes_claim_authority": False,
+            "reliability_score": None, "changes_original_markdown": False}
+
+
+def preview_source_assessment(workspace_dir: str, vault_dir: str, path: str,
+                              kind: str, reason: str) -> str:
+    return json.dumps(_assessment_preview(workspace_dir, vault_dir, path, kind, reason),
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_assessment(workspace_dir: str, vault_dir: str, path: str,
+                             kind: str, reason: str, expected_token: str,
+                             expected_head: str | None) -> str:
+    preview = _assessment_preview(workspace_dir, vault_dir, path, kind, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Source or journal changed after assessment preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("source_assess", {key: preview[key]
+                          for key in ("path", "kind", "source", "reason")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "decision": "source_assess", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def preview_source_unassessment(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _source_assessments(kb.journal)
+    selected = next((record for record in active if record["journal_id"] == decision_id), None)
+    if selected is None:
+        raise ValueError("No active owner source assessment with this decision ID")
+    payload = {"path": selected["path"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.source_assessment.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def record_source_unassessment(workspace_dir: str, decision_id: str,
+                               expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_source_unassessment(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Assessment or journal changed before revocation")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before revocation")
+    kb.ws.init()
+    event = kb.journal.append("source_unassess",
+                              {"path": preview["path"], "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.source_assessment.v1",
+                       "decision": "source_unassess", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+# Human *interpretation* of a dated pair, never an approval of the assertions.
+# Deliberately no probability or truth score: distinct sources may share an
+# upstream origin and source-provided validity dates may be unreliable.
+VERSION_REVIEW_CHOICES = ("unresolved", "possibly_changed", "different_contexts",
+                          "consistent_readings")
+VERSION_REVIEW_KINDS = ("temporal_overlap", "temporal_separation",
+                        "temporal_uncertainty")
+MAX_VERSION_REVIEW_OPS = 512
+
+
+def _version_review_key(path: str, relation: dict) -> str:
+    """Symmetric pair identity anchored to precise parsed source fragments.
+
+    No relative ordering or live SHA belongs in the identity: a withdrawn or
+    historical decision can still be found after changing/reindexing a note.
+    A newly parsed version is recognized as *historical*, never auto-applied.
+    """
+    sides = [
+        {"path": path, "fragment": relation["source_fragment"],
+         "locator": relation["source_locator"], "interval": relation.get("interval")},
+        {"path": relation["path"], "fragment": relation["other_fragment"],
+         "locator": relation["other_locator"], "interval": relation.get("other_interval")},
+    ]
+    sides.sort(key=canonical_json)
+    payload = {"sides": sides, "kind": relation["kind"],
+               "predicate": relation["predicate"], "context": relation.get("context"),
+               "opposing_polarity": relation.get("opposing_polarity", False)}
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _version_review_state(journal: Journal) -> tuple[list[dict], list[dict]]:
+    if journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    entries = [entry for entry in journal.entries()
+               if entry.actor == journal.actor and
+               entry.op in ("version_review", "version_unreview")]
+    if len(entries) > MAX_VERSION_REVIEW_OPS:
+        raise ValueError("Version review journal limit reached")
+    active = {}
+    history = []
+    for entry in entries:
+        data = entry.data
+        if not isinstance(data, dict):
+            continue
+        key = data.get("key")
+        if not isinstance(key, str) or len(key) != 64:
+            continue
+        if entry.op == "version_review":
+            if (key in active or data.get("choice") not in VERSION_REVIEW_CHOICES or
+                    not isinstance(data.get("sources"), list) or len(data["sources"]) != 2):
+                continue
+            active[key] = {"key": key, "choice": data["choice"],
+                           "reason": str(data.get("reason", ""))[:500],
+                           "sources": data["sources"], "relation": data.get("relation"),
+                           "journal_id": entry.id, "time": entry.ts}
+        elif key in active and active[key]["journal_id"] == data.get("decision_id"):
+            del active[key]
+        history.append({"op": entry.op, "key": key, "journal_id": entry.id,
+                        "decision_id": data.get("decision_id"), "time": entry.ts,
+                        "choice": data.get("choice"),
+                        "reason": str(data.get("reason", ""))[:500],
+                        "paths": [s.get("path") for s in (data.get("sources")
+                                  if isinstance(data.get("sources"), list) else [])
+                                  if isinstance(s, dict)]
+                        if entry.op == "version_review" else []})
+    return [active[k] for k in sorted(active)], list(reversed(history[-40:]))
+
+
+def version_review_decisions(workspace_dir: str) -> str:
+    kb = _kb(workspace_dir)
+    active, recent = _version_review_state(kb.journal)
+    return json.dumps({"protocol": "dpksys.version_review.v1", "active": active,
+                       "recent": recent, "journal_head": kb.journal.head,
+                       "read_only": True, "changes_claim_authority": False},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _annotate_version_reviews(con, journal: Journal, path: str,
+                              matches: list[dict]) -> bool:
+    try:
+        active, _ = _version_review_state(journal)
+    except ValueError:
+        return True
+    by_key = {record["key"]: record for record in active}
+    hashes = {}
+    for match in matches:
+        if match.get("kind") not in VERSION_REVIEW_KINDS:
+            continue
+        decision = by_key.get(_version_review_key(path, match))
+        if decision is None:
+            continue
+        current = bool(match.get("live_source_pair"))
+        if current:
+            for source in decision["sources"]:
+                source_path = source.get("path")
+                if source_path not in hashes:
+                    row = con.execute("SELECT sha256 FROM documents "
+                                      "WHERE path=? AND status='PARSED'",
+                                      (source_path,)).fetchone()
+                    hashes[source_path] = row[0] if row else None
+                if hashes[source_path] != source.get("source_sha256"):
+                    current = False
+        match["version_review_choice"] = decision["choice"]
+        match["version_review_reason"] = decision["reason"][:180]
+        match["version_review_id"] = decision["journal_id"]
+        match["version_review_state"] = "current" if current else "historical"
+    return False
+
+
+def _version_review_preview(workspace_dir: str, vault_dir: str, path: str,
+                            relation_json: str, choice: str, reason: str) -> dict:
+    if choice not in VERSION_REVIEW_CHOICES:
+        raise ValueError("Choose a supported descriptive version review")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        raise ValueError("Explain the review in 1..500 characters")
+    try:
+        requested = json.loads(relation_json)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid relation selection") from exc
+    if (not isinstance(requested, dict) or requested.get("kind") not in VERSION_REVIEW_KINDS
+            or not isinstance(path, str) or not path or len(path) > 500):
+        raise ValueError("Choose an exact dated relation from the local index")
+    kb = _kb(workspace_dir)
+    active, _ = _version_review_state(kb.journal)
+    if sum(e.actor == kb.journal.actor and e.op in
+           ("version_review", "version_unreview") for e in kb.journal.entries()) \
+            >= MAX_VERSION_REVIEW_OPS:
+        raise ValueError("Version review journal limit reached")
+    con, root = _entity_index(workspace_dir, vault_dir)
+    try:
+        page = indexed_related_claims(con, path, 100)
+        identifying = ("kind", "path", "source_fragment", "other_fragment",
+                       "source_locator", "other_locator", "predicate", "context",
+                       "interval", "other_interval", "opposing_polarity")
+        selected = [match for match in page["matches"]
+                    if match.get("kind") in VERSION_REVIEW_KINDS and
+                    all(match.get(k) == requested.get(k) for k in identifying)]
+        if len(selected) != 1:
+            raise ValueError("Dated relation changed or is no longer unambiguous")
+        match = selected[0]
+        key = _version_review_key(path, match)
+        if any(record["key"] == key for record in active):
+            raise ValueError("This version pair already has an active review; revoke it first")
+        _annotate_relation_previews(con, path, [match])
+        if not match.get("source_excerpt_available") or not match.get("other_excerpt_available"):
+            raise ValueError("Indexed original fragment provenance is unavailable")
+        sources = [_lineage_source(con, root, source_path)
+                   for source_path in (path, match["path"])]
+        for source, side in zip(sources, ("source", "other")):
+            source["fragment_id"] = match[side + "_fragment"]
+            source["locator"] = match[side + "_locator"]
+            source["excerpt"] = match[side + "_excerpt"]
+        relation = {k: match.get(k) for k in identifying}
+    finally:
+        con.close()
+    payload = {"key": key, "choice": choice, "reason": reason.strip(),
+               "sources": sources, "relation": relation, "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return {"protocol": "dpksys.version_review.v1", **payload,
+            "preview_token": token, "read_only": True,
+            "requires_human_confirmation": True, "changes_claim_authority": False,
+            "changes_original_markdown": False}
+
+
+def preview_version_review(workspace_dir: str, vault_dir: str, path: str,
+                           relation_json: str, choice: str, reason: str) -> str:
+    return json.dumps(_version_review_preview(workspace_dir, vault_dir, path,
+                      relation_json, choice, reason), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_version_review(workspace_dir: str, vault_dir: str, path: str,
+                          relation_json: str, choice: str, reason: str,
+                          expected_token: str, expected_head: str | None) -> str:
+    preview = _version_review_preview(workspace_dir, vault_dir, path,
+                                      relation_json, choice, reason)
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Version sources or journal changed after preview")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before confirmation")
+    kb.ws.init()
+    event = kb.journal.append("version_review", {key: preview[key] for key in
+                              ("key", "choice", "reason", "sources", "relation")})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.version_review.v1",
+                       "decision": "version_review", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def preview_version_unreview(workspace_dir: str, decision_id: str) -> str:
+    kb = _kb(workspace_dir)
+    active, _ = _version_review_state(kb.journal)
+    record = next((item for item in active if item["journal_id"] == decision_id), None)
+    if record is None:
+        raise ValueError("No active owner version review with this decision ID")
+    payload = {"key": record["key"], "decision_id": decision_id,
+               "journal_head": kb.journal.head}
+    token = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    return json.dumps({"protocol": "dpksys.version_review.v1", **payload,
+                       "preview_token": token, "read_only": True,
+                       "requires_human_confirmation": True}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def record_version_unreview(workspace_dir: str, decision_id: str,
+                            expected_token: str, expected_head: str | None) -> str:
+    preview = json.loads(preview_version_unreview(workspace_dir, decision_id))
+    if preview["preview_token"] != expected_token or preview["journal_head"] != expected_head:
+        raise ValueError("Version review or journal changed before withdrawal")
+    kb = _kb(workspace_dir)
+    if kb.journal.head != expected_head:
+        raise ValueError("Journal changed before withdrawal")
+    kb.ws.init()
+    event = kb.journal.append("version_unreview", {"key": preview["key"],
+                              "decision_id": decision_id})
+    if kb.journal.verify():
+        raise ValueError("Knowledge journal integrity check failed")
+    return json.dumps({"protocol": "dpksys.version_review.v1",
+                       "decision": "version_unreview", "journal_ids": [event.id],
+                       "journal_head": kb.journal.head}, ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+
+
+def stage18_version_selftest(cache_dir: str) -> str:
+    """Isolated, count-only device check using synthetic notes and journal.
+
+    The *only* caller input is a private cache root. Never opens the selected
+    notebook, real workspace, journal, credentials or network endpoints.
+    UI touch/accessibility/process lifecycle still require observed QA.
+    """
+    cache = Path(cache_dir).resolve()
+    if not Path(cache_dir).is_absolute() or not cache.is_dir():
+        raise ValueError("Version QA requires an existing private cache folder")
+    checks = []
+
+    def verify(code, fn):
+        try:
+            fn()
+            checks.append({"code": code, "passed": True,
+                           "detail": "synthetic assertions passed"})
+        except Exception as error:
+            checks.append({"code": code, "passed": False,
+                           "detail": "synthetic mismatch (" + type(error).__name__ + ")"})
+
+    with tempfile.TemporaryDirectory(prefix="dpks-stage18-", dir=cache) as temp:
+        root = Path(temp)
+        vault = root / "synthetic_notes"
+        vault.mkdir()
+        workspace = str(root / "private_workspace")
+        notes = {"a.md": "# A\nАлекс является разработчиком.\n",
+                 "b.md": "# B\nАлекс не является разработчиком.\n"}
+        for path, content in notes.items():
+            (vault / path).write_text(content, encoding="utf-8")
+        state = {}
+
+        def setup():
+            json.loads(analyze_vault(workspace, str(vault)))
+            db = Path(workspace) / "var/ks.sqlite"
+            atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+            with sqlite3.connect(db) as con:
+                for path, start, end, negative in (
+                        ("a.md", "2024-01-01", "2024-12-31", False),
+                        ("b.md", "2025-01-01", "2025-12-31", True)):
+                    assertion = {"mod": "asserted", "neg": negative, "atom": atom,
+                                 "iv": {"from": start, "to": end}}
+                    row = projected_atoms({"id": "version-qa", "nodes": [
+                        {"type": "claim", "assertion": assertion}]},
+                        path, "F:version-qa", "version-qa:1")[0]
+                    con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                                "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                                (row[4], row[7], row[8], row[9], row[6], path))
+            page = json.loads(note_relationships(workspace, "a.md", str(vault)))
+            found = [r for r in page["matches"]
+                     if r["kind"] == "temporal_separation" and r["path"] == "b.md"]
+            assert len(found) == 1 and found[0]["live_source_pair"]
+            state["relation"] = json.dumps(found[0])
+        verify("VERSION-INDEX-18", setup)
+
+        def preview():
+            args = (workspace, str(vault), "a.md", state["relation"],
+                    "possibly_changed", "synthetic manual explanation")
+            result = json.loads(preview_version_review(*args))
+            assert result["read_only"] and not result["changes_claim_authority"]
+            assert len(result["sources"]) == 2
+            assert all(src["excerpt"] and src["source_sha256"] for src in result["sources"])
+            state["args"], state["preview"] = args, result
+        verify("VERSION-PREVIEW-18", preview)
+
+        def confirm():
+            pre = state["preview"]
+            with_stale_token = pre["preview_token"] + "x"
+            try:
+                record_version_review(*state["args"], with_stale_token,
+                                      pre["journal_head"])
+                raise AssertionError("Invalid preview token accepted")
+            except ValueError:
+                pass
+            record = json.loads(record_version_review(*state["args"],
+                               pre["preview_token"], pre["journal_head"]))
+            state["id"] = record["journal_ids"][0]
+            assert len(json.loads(version_review_decisions(workspace))["active"]) == 1
+        verify("VERSION-COMMIT-18", confirm)
+
+        def symmetric():
+            matches = json.loads(note_relationships(workspace, "b.md", str(vault)))["matches"]
+            marked = [m for m in matches if m["path"] == "a.md"
+                      and m["kind"] == "temporal_separation"]
+            assert len(marked) == 1 and marked[0]["version_review_id"] == state["id"]
+            assert marked[0]["version_review_state"] == "current"
+        verify("VERSION-SYMMETRY-18", symmetric)
+
+        def stale():
+            (vault / "b.md").write_text(notes["b.md"] + "\n", encoding="utf-8")
+            matches = json.loads(note_relationships(workspace, "a.md", str(vault)))["matches"]
+            marked = [m for m in matches if m.get("version_review_id") == state["id"]]
+            assert len(marked) == 1 and marked[0]["version_review_state"] == "historical"
+        verify("VERSION-STALE-18", stale)
+
+        def withdraw():
+            preview = json.loads(preview_version_unreview(workspace, state["id"]))
+            result = json.loads(record_version_unreview(workspace, state["id"],
+                                preview["preview_token"], preview["journal_head"]))
+            after = json.loads(version_review_decisions(workspace))
+            assert result["decision"] == "version_unreview" and not after["active"]
+            assert [e["op"] for e in after["recent"]] == [
+                "version_unreview", "version_review"]
+            assert (vault / "a.md").read_text(encoding="utf-8") == notes["a.md"]
+        verify("VERSION-WITHDRAW-18", withdraw)
+
+    passed = sum(x["passed"] for x in checks)
+    return json.dumps({"protocol": "dpksys.stage18_version_selftest.v1", "checks": checks,
+                       "passed": passed, "failed": len(checks) - passed,
+                       "synthetic_only": True, "read_only_user_data": True,
+                       "used_selected_vault": False, "requires_manual_ui_qa": True},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _validate_note_input(relative_path: str, markdown: str) -> None:
@@ -638,7 +1863,8 @@ def stage22_editor_selftest(cache_dir: str) -> str:
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -> str:
+def editor_note_context(workspace_dir: str, relative_path: str, markdown: str,
+                        vault_dir: str | None = None) -> str:
     """Read-only, bounded note context from the *saved* source snapshot.
 
     Approved journal records are distinct from unapproved, indexed lexical/
@@ -693,6 +1919,16 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         })
 
     relations, truncated, index_state = [], False, "absent"
+    evidence_groups, evidence_limited = [], False
+    evidence_checks_limited = True
+    modal_checks_limited = False
+    temporal_checks_limited = False
+    relation_checks_limited = False
+    source_lineage_limited = False
+    source_assessment_limited = False
+    version_review_limited = False
+    alias_limited = False
+    modal_limited = False
     con = _decision_index(Path(workspace_dir))
     if con is not None:
         try:
@@ -702,25 +1938,26 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
                 index_state = "stale"
             else:
                 index_state = "current"
-                rows = con.execute(
-                    "SELECT DISTINCT b.doc, a.locator, b.locator, a.fragment_id, "
-                    "b.fragment_id, a.negated, b.negated, a.predicate "
-                    "FROM candidate_atoms a JOIN candidate_atoms b ON a.atom_key=b.atom_key "
-                    "JOIN documents d1 ON d1.path=a.doc AND d1.status='PARSED' "
-                    "JOIN documents d2 ON d2.path=b.doc AND d2.status='PARSED' "
-                    "WHERE a.doc=? AND b.doc<>? "
-                    "ORDER BY b.doc COLLATE NOCASE, b.locator, a.locator LIMIT ?",
-                    (relative_path, relative_path, 21),
-                ).fetchall()
-                truncated = len(rows) > 20
-                relations = [{
-                    "path": r[0], "source_locator": r[1],
-                    "other_locator": r[2], "source_fragment": r[3],
-                    "other_fragment": r[4],
-                    "kind": "possible_conflict" if r[5] != r[6]
-                            else "possible_agreement",
-                    "predicate": r[7],
-                } for r in rows[:20]]
+                # Shared with the library UI: exact conflicts stay separate
+                # from temporal-overlap hints, even in the editor dock.
+                result = indexed_related_claims(con, relative_path, 20,
+                    verified_owner_aliases(kb.journal.entries(), kb.journal.actor))
+                relations = result["matches"]
+                truncated = result["truncated"]
+                alias_limited = result["alias_search_limited"]
+                modal_limited = result["modal_search_limited"]
+                evidence_groups = result["evidence_groups"]
+                evidence_limited = result["evidence_limited"]
+                (evidence_checks_limited, modal_checks_limited,
+                 temporal_checks_limited, relation_checks_limited) = _verify_evidence_freshness(
+                    con, vault_dir, relative_path, evidence_groups, relations)
+                _annotate_relation_previews(con, relative_path, relations)
+                source_lineage_limited = _annotate_reviewed_source_links(
+                    con, kb.journal, relative_path, evidence_groups)
+                source_assessment_limited = _annotate_source_assessments(
+                    con, kb.journal, relative_path, evidence_groups)
+                version_review_limited = _annotate_version_reviews(
+                    con, kb.journal, relative_path, relations)
         except sqlite3.Error:
             index_state, relations, truncated = "unavailable", [], False
         finally:
@@ -736,6 +1973,16 @@ def editor_note_context(workspace_dir: str, relative_path: str, markdown: str) -
         "stale_provenance_count": stale_count,
         "historical_count": historical,
         "candidate_relations": relations, "relations_truncated": truncated,
+        "evidence_groups": evidence_groups, "evidence_limited": evidence_limited,
+        "evidence_checks_limited": evidence_checks_limited,
+        "modal_checks_limited": modal_checks_limited,
+        "temporal_checks_limited": temporal_checks_limited,
+        "relation_checks_limited": relation_checks_limited,
+        "source_lineage_limited": source_lineage_limited,
+        "source_assessment_limited": source_assessment_limited,
+        "version_review_limited": version_review_limited,
+        "alias_search_limited": alias_limited,
+        "modal_search_limited": modal_limited,
         "relation_index_state": index_state,
         "relations_are_unapproved": True,
         "requires_human_review": True,
@@ -1013,10 +2260,21 @@ def _prepare_claim_batch(kb: KnowledgeBase, selection_json: str):
                         "reading_id": option["reading_id"], "paraphrase": option["paraphrase"],
                         "source_hash": source_hash, "fragment_id": fragment.id,
                         "node_id": node.id, "ksf": node.ksf(),
+                        "source_excerpt": fragment.text[:500],
+                        "source_truncated": len(fragment.text) > 500,
                         "diagnostic_count": len(option["diagnostics"])})
     # Batch-wide consistency, in addition to individual checks above.
     if any(d.severity.value == "error" for d in kb.check_candidate_nodes([i["node"] for i in items])):
         raise ValueError("Combined batch fails semantic validation")
+    # Each candidate was checked against the current journal, not against the
+    # other uncommitted candidates. Do not silently bundle two opposing claims.
+    # Both may still be recorded separately after explicit human review.
+    assertions = {item["node"].assertion.id: item["node"].assertion for item in items}
+    batch_engine = Engine.from_items(assertions)
+    if any(other != item["node"].assertion.id
+           for item in items
+           for other in complement_support(batch_engine, item["node"].assertion)):
+        raise ValueError("Opposing batch readings require separate human review")
     token = hashlib.sha256(json.dumps({"head": kb.journal.head, "items": summary},
                                    sort_keys=True, ensure_ascii=False,
                                    separators=(",", ":")).encode("utf-8")).hexdigest()

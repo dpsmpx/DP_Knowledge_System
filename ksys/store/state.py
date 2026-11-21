@@ -67,6 +67,7 @@ class KnowledgeState:
         self.labels: dict[str, str] = {}
         self.auto_labels: dict[str, str] = {}       # поверхностные формы из принятых текстов
         self.aliases: dict[str, str] = {}
+        self.alias_decisions: dict[str, tuple[str, str, str]] = {}
         self.schema_ext: list = []
         self.head: str | None = None
         self.entries: list[Entry] = []
@@ -187,7 +188,21 @@ class KnowledgeState:
         elif e.op == "label":
             self.labels[d["key"]] = d["label"]
         elif e.op == "alias":
+            if self.aliases.get(d["alias"]) != d["canonical"]:
+                self.alias_decisions[d["alias"]] = (d["canonical"], e.id, e.actor)
             self.aliases[d["alias"]] = d["canonical"]
+        elif e.op == "unalias":
+            # The matching owner and original decision ID are mandatory.
+            # Imported/foreign or stale revocations have no effect on replay.
+            if self.alias_decisions.get(d.get("alias")) == (
+                    d.get("canonical"), d.get("decision_id"), e.actor):
+                self.aliases.pop(d["alias"], None)
+                self.alias_decisions.pop(d["alias"], None)
+        elif e.op in ("source_link", "source_unlink", "source_assess", "source_unassess",
+                      "version_review", "version_unreview"):
+            # A separate human provenance annotation. Never change claims,
+            # alias identity, authoritative facts or inference engines.
+            pass
         elif e.op == "schema":
             self.schema_ext.append(d["schema"])
         self.head = e.id

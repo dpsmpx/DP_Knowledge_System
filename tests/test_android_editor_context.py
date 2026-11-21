@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from ksys_android_bridge import (analyze_vault, editor_note_context, inspect_not
                                  _structural_editor_comparison)
 from ksys.semantics.formalize import Formalizer
 from ksys.core.clock import FixedClock
+from ksys.importer.relations import projected_atoms
 from ksys.store.journal import Journal
 from ksys.store.workspace import Workspace
 
@@ -36,10 +38,11 @@ class EditorContextTests(unittest.TestCase):
         for path, content in self.notes.items():
             (self.vault / path).write_text(content, encoding="utf-8")
 
-    def context(self, markdown=None):
+    def context(self, markdown=None, verify_files=False):
         return json.loads(editor_note_context(str(self.workspace), "a.md",
                                               self.notes["a.md"] if markdown is None
-                                              else markdown))
+                                              else markdown,
+                                              str(self.vault) if verify_files else None))
 
     def test_absent_index_and_journal_do_not_create_files(self):
         result = self.context()
@@ -48,6 +51,7 @@ class EditorContextTests(unittest.TestCase):
         self.assertTrue(result["relations_are_unapproved"])
         self.assertEqual("saved_markdown", result["source_snapshot"])
         self.assertEqual("absent", result["relation_index_state"])
+        self.assertEqual([], result["evidence_groups"])
         self.assertEqual(0, result["accepted_total"])
         self.assertEqual([], result["candidate_relations"])
         self.assertFalse(self.workspace.exists())
@@ -101,6 +105,16 @@ class EditorContextTests(unittest.TestCase):
         self.assertEqual({"b.md", "c.md"}, set(related))
         self.assertEqual("possible_agreement", related["b.md"]["kind"])
         self.assertEqual("possible_conflict", related["c.md"]["kind"])
+        self.assertEqual(1, len(context["evidence_groups"]))
+        self.assertEqual((1, 1, 0), (
+            context["evidence_groups"][0]["same_polarity_files"],
+            context["evidence_groups"][0]["opposite_polarity_files"],
+            context["evidence_groups"][0]["mixed_polarity_files"]))
+        self.assertFalse(context["evidence_limited"])
+        self.assertTrue(context["evidence_checks_limited"])
+        self.assertEqual("not_checked", context["evidence_groups"][0]["source_verification"])
+        self.assertIsNone(related["c.md"]["context"])
+        self.assertEqual({"from": None, "to": None}, related["c.md"]["interval"])
         self.assertTrue(all(item["source_locator"] and item["other_locator"]
                             for item in related.values()))
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
@@ -110,6 +124,133 @@ class EditorContextTests(unittest.TestCase):
         changed = self.context(self.notes["a.md"] + "\nДругой текст.")
         self.assertEqual("stale", changed["relation_index_state"])
         self.assertEqual([], changed["candidate_relations"])
+        self.assertEqual([], changed["evidence_groups"])
+        self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+    def test_editor_evidence_checks_live_other_files_only_when_root_matches(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        current = self.context(verify_files=True)
+        self.assertEqual("current", current["relation_index_state"])
+        self.assertFalse(current["evidence_checks_limited"])
+        group = current["evidence_groups"][0]
+        self.assertEqual("current", group["source_verification"])
+        self.assertEqual((1, 1, 0), (
+            group["verified_same_polarity_files"],
+            group["verified_opposite_polarity_files"], group["verified_mixed_polarity_files"]))
+        self.assertEqual(1, len(group["excerpt_families"]))
+        self.assertTrue(group["source_repeated_excerpt"])
+        self.assertEqual("R1", group["source_excerpt_family"])
+        self.assertFalse(group["independence_assessed"])
+        (self.vault / "b.md").write_text("# B\nAnother claim.\n", encoding="utf-8")
+        changed = self.context(verify_files=True)["evidence_groups"][0]
+        self.assertEqual(1, changed["stale_files"])
+        self.assertEqual((0, 1), (changed["verified_same_polarity_files"],
+                                  changed["verified_opposite_polarity_files"]))
+        self.assertEqual("current", changed["source_verification"])
+        self.assertEqual([], changed["excerpt_families"])
+        unsaved = self.context(self.notes["a.md"] + "\nUnsaved", verify_files=True)
+        self.assertEqual("stale", unsaved["relation_index_state"])
+        self.assertEqual([], unsaved["evidence_groups"])
+
+    def test_editor_alias_hints_cite_owner_journal_without_approving_claim(self):
+        (self.vault / "d.md").write_text("# D\nБорис является разработчиком.\n",
+                                          encoding="utf-8")
+        analyze_vault(str(self.workspace), str(self.vault))
+        journal = Journal(Workspace(self.workspace).journal_path, FixedClock())
+        event = journal.append("alias", {"alias": "борис", "canonical": "алекс"})
+        before = hashlib.sha256(Workspace(self.workspace).db_path.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        hints = [r for r in context["candidate_relations"] if r["kind"] == "alias_candidate"]
+        self.assertEqual(["d.md"], [r["path"] for r in hints])
+        self.assertEqual([event.id], list(hints[0]["alias_evidence"]["journal_ids"]))
+        self.assertTrue(context["relations_are_unapproved"])
+        self.assertEqual(0, context["accepted_total"])
+        self.assertEqual(before, hashlib.sha256(Workspace(self.workspace).db_path.read_bytes()).hexdigest())
+
+    def test_editor_relation_shows_matching_context_and_period(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        assertion = {"mod": "asserted", "neg": False,
+                     "atom": {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]},
+                     "ctx": "проект-а",
+                     "iv": {"from": "2024-05-01", "to": "2024-05-31"}}
+        key = projected_atoms({"id": "synthetic", "nodes": [
+            {"type": "claim", "assertion": assertion}
+        ]}, "a.md", "F:syn", "a:2")[0][4]
+        with sqlite3.connect(Workspace(self.workspace).db_path) as con:
+            for path in ("a.md", "b.md"):
+                con.execute("UPDATE candidate_atoms SET atom_key=? WHERE doc=?", (key, path))
+        related = {r["path"]: r for r in self.context()["candidate_relations"]}
+        self.assertEqual({"b.md"}, set(related))
+        self.assertEqual("проект-а", related["b.md"]["context"])
+        self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
+                         related["b.md"]["interval"])
+        overview = self.context()["evidence_groups"][0]
+        self.assertEqual(1, overview["same_polarity_files"])
+        self.assertEqual(0, overview["opposite_polarity_files"])
+        self.assertEqual("проект-а", overview["context"])
+        self.assertEqual({"from": "2024-05-01", "to": "2024-05-31"},
+                         overview["interval"])
+
+    def test_editor_shows_temporal_overlap_without_conflict_verdict(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        db = Workspace(self.workspace).db_path
+        before = {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                  for p in self.notes}
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end in (("a.md", "2023-01-01", "2024-01-01"),
+                                     ("b.md", "2024-01-01", "2025-01-01")):
+                assertion = {"mod": "asserted", "neg": False, "atom": atom,
+                             "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "synthetic", "nodes": [
+                    {"type": "claim", "assertion": assertion}
+                ]}, path, "F:synthetic", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], path))
+        index_before = hashlib.sha256(db.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        self.assertEqual(["b.md"], [r["path"] for r in context["candidate_relations"]])
+        item = context["candidate_relations"][0]
+        self.assertEqual("temporal_overlap", item["kind"])
+        self.assertTrue(item["source_excerpt_available"])
+        self.assertTrue(item["other_excerpt_available"])
+        self.assertEqual({"from": "2024-01-01", "to": "2024-01-01"},
+                         item["overlap_interval"])
+        self.assertTrue(context["relations_are_unapproved"])
+        self.assertEqual(index_before, hashlib.sha256(db.read_bytes()).hexdigest())
+        self.assertEqual(before, {p: hashlib.sha256((self.vault / p).read_bytes()).hexdigest()
+                                  for p in self.notes})
+
+    def test_editor_shows_separated_dated_readings_without_claiming_change(self):
+        analyze_vault(str(self.workspace), str(self.vault))
+        db = Workspace(self.workspace).db_path
+        atom = {"p": "is_a", "args": [{"k": "sym", "v": "алекс"}]}
+        with sqlite3.connect(db) as con:
+            for path, start, end in (("a.md", "2023-01-01", "2023-12-31"),
+                                     ("b.md", "2024-01-01", "2024-12-31")):
+                assertion = {"mod": "asserted", "neg": path == "b.md", "atom": atom,
+                             "iv": {"from": start, "to": end}}
+                row = projected_atoms({"id": "synthetic", "nodes": [
+                    {"type": "claim", "assertion": assertion}
+                ]}, path, "F:synthetic", "test:1")[0]
+                con.execute("UPDATE candidate_atoms SET atom_key=?, scope_key=?, "
+                            "valid_from=?, valid_to=?, negated=? WHERE doc=?",
+                            (row[4], row[7], row[8], row[9], row[6], path))
+        before = hashlib.sha256(db.read_bytes()).hexdigest()
+        context = self.context()
+        self.assertEqual("current", context["relation_index_state"])
+        result = [r for r in context["candidate_relations"] if r["path"] == "b.md"]
+        self.assertEqual(1, len(result))
+        self.assertEqual("temporal_separation", result[0]["kind"])
+        self.assertTrue(result[0]["source_excerpt_available"])
+        self.assertTrue(result[0]["other_excerpt_available"])
+        self.assertEqual("source_before_other", result[0]["relative_order"])
+        self.assertEqual(0, result[0]["gap_days"])
+        self.assertTrue(result[0]["opposing_polarity"])
+        self.assertTrue(context["relations_are_unapproved"])
         self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
 
     def test_accepted_opposites_show_possible_journal_conflict(self):

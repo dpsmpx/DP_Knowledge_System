@@ -30,6 +30,7 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.SimpleAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -197,7 +198,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             R.id.knowledge_nav_library, R.id.knowledge_nav_decisions,
             R.id.knowledge_nav_processes, R.id.knowledge_nav_manage);
     private KnowledgeProcessHistory processHistory;
-    private char[] pendingExportPassword;
+    // Prepared only after verifying and encrypting the existing journal.
+    // No SAF destination is created for an empty or unreadable journal.
+    private byte[] pendingExportEnvelope;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -314,6 +317,18 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 view -> navigateToDecisions("pending"));
         findViewById(R.id.knowledge_active_decisions).setOnClickListener(
                 view -> navigateToDecisions("active"));
+        findViewById(R.id.knowledge_entity_matching).setOnClickListener(view ->
+                new KnowledgeEntityReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_source_lineage).setOnClickListener(view ->
+                new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_source_assessment).setOnClickListener(view ->
+                new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
+                        decisionWorker, this::openIndexedNote, () -> loadDecisionPage(0)).show());
+        findViewById(R.id.knowledge_version_reviews).setOnClickListener(view ->
+                new KnowledgeVersionReviewDialog(this, workspacePath(), notebook,
+                        decisionWorker, null, null, () -> loadDecisionPage(0)).history());
         progress = findViewById(R.id.knowledge_progress);
         filter = findViewById(R.id.knowledge_filter);
 
@@ -354,6 +369,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             }
             return true;
         });
+        findViewById(R.id.knowledge_library_relations).setOnClickListener(
+                view -> showLibraryRelationsPicker());
 
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
@@ -388,6 +405,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         qaQuickButton.setOnClickListener(view -> runDeviceQa(false, false));
         qaStressButton.setOnClickListener(view -> runDeviceQa(true, false));
         qaEditorButton.setOnClickListener(view -> runDeviceQa(false, true));
+        findViewById(R.id.knowledge_process_jump_qa).setOnClickListener(view -> {
+            final ScrollView processes = findViewById(R.id.knowledge_page_processes);
+            final View qaCard = findViewById(R.id.knowledge_process_qa_card);
+            processes.post(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    processes.smoothScrollTo(0, qaCard.getTop());
+                }
+            });
+        });
         findViewById(R.id.knowledge_backup_export).setOnClickListener(view -> requestJournalExport());
         findViewById(R.id.knowledge_backup_import).setOnClickListener(view -> requestJournalImport());
         findViewById(R.id.knowledge_open_guide).setOnClickListener(view -> showKnowledgeGuide());
@@ -1579,6 +1605,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         if (item != null) {
                             details.append(i + 1).append(". ").append(item.optString("path"))
                                     .append(" · ").append(item.optString("locator"))
+                                    .append("\n").append(getString(R.string.knowledge_batch_source))
+                                    .append("\n").append(item.optString("source_excerpt"));
+                            if (item.optBoolean("source_truncated")) {
+                                details.append(getString(R.string.knowledge_batch_source_truncated));
+                            }
+                            details.append("\n")
+                                    .append(getString(R.string.knowledge_batch_interpretation))
                                     .append("\n").append(item.optString("paraphrase"))
                                     .append("\n").append(item.optString("ksf"))
                                     .append("\n\n");
@@ -1596,6 +1629,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
                         status.setText(R.string.knowledge_decision_failed);
+                        new AlertDialog.Builder(this)
+                                .setMessage(R.string.knowledge_batch_rejected)
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
                     }
                 });
             }
@@ -1762,20 +1799,63 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
+    /** Visible discovery path; long-press on a row remains an optional shortcut. */
+    private void showLibraryRelationsPicker() {
+        if (displayed.isEmpty()) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.knowledge_semantic_relations)
+                    .setMessage(R.string.knowledge_relations_empty_page)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        // Keep labels and paths from the same search-page snapshot even if a
+        // background scan refreshes the library while the picker is open.
+        final String[] paths = new String[displayed.size()];
+        final String[] choices = new String[displayed.size()];
+        for (int i = 0; i < paths.length; i++) {
+            paths[i] = displayed.get(i).relativePath;
+            choices[i] = labels.get(i);
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_relations_choose_note)
+                .setItems(choices, (dialog, which) -> {
+                    if (which >= 0 && which < paths.length) {
+                        showSemanticRelations(paths[which]);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
     private void showSemanticRelations(final String relativePath) {
         final int scan = scanGeneration.get();
         status.setText(R.string.knowledge_semantic_working);
         worker.submit(() -> {
             try {
                 final JSONObject result = KnowledgePythonBridge.relationships(
-                        this, workspacePath(), relativePath);
+                        this, workspacePath(), relativePath,
+                        notebook == null ? "" : notebook.getAbsolutePath());
                 final JSONArray matches = result.getJSONArray("matches");
+                final JSONArray evidence = result.optJSONArray("evidence_groups");
                 final String[] labels = new String[matches.length()];
+                final int[] titles = new int[matches.length()];
                 for (int i = 0; i < labels.length; i++) {
                     final JSONObject match = matches.getJSONObject(i);
-                    final boolean conflict = "possible_conflict".equals(match.optString("kind"));
-                    labels[i] = getString(conflict ? R.string.knowledge_possible_conflict
-                                    : R.string.knowledge_possible_agreement)
+                    final String kind = match.optString("kind");
+                    final int label = "alias_candidate".equals(kind)
+                            ? R.string.knowledge_possible_alias
+                            : "temporal_overlap".equals(kind)
+                            ? R.string.knowledge_possible_temporal_overlap
+                            : "temporal_separation".equals(kind)
+                            ? R.string.knowledge_possible_temporal_separation
+                            : "temporal_uncertainty".equals(kind)
+                            ? R.string.knowledge_possible_temporal_uncertainty
+                            : "modal_contrast".equals(kind)
+                            ? R.string.knowledge_possible_modal_contrast
+                            : "possible_conflict".equals(kind)
+                                    ? R.string.knowledge_possible_conflict
+                                    : R.string.knowledge_possible_agreement;
+                    titles[i] = label;
+                    labels[i] = getString(label)
                             + " · " + match.optString("path")
                             + "\n" + match.optString("predicate") + " · "
                             + match.optString("source_locator") + " ↔ "
@@ -1788,15 +1868,36 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                             .setTitle(getString(R.string.knowledge_semantic_relations)
                                     + (result.optBoolean("truncated")
-                                    ? " · " + getString(R.string.knowledge_semantic_limited) : ""))
+                                    ? " · " + getString(R.string.knowledge_semantic_limited) : "")
+                                    + (result.optBoolean("alias_search_limited")
+                                    ? " · " + getString(R.string.knowledge_alias_search_limited) : "")
+                                    + (result.optBoolean("modal_search_limited")
+                                    ? " · " + getString(R.string.knowledge_modal_limited) : "")
+                                    + (result.optBoolean("modal_checks_limited")
+                                    ? " · " + getString(R.string.knowledge_modal_checks_limited) : "")
+                                    + (result.optBoolean("temporal_checks_limited")
+                                    ? " · " + getString(R.string.knowledge_temporal_checks_limited) : "")
+                                    + (result.optBoolean("relation_checks_limited")
+                                    ? " · " + getString(R.string.knowledge_relation_checks_limited) : "")
+                                    + (result.optBoolean("version_review_limited")
+                                    ? " · " + getString(R.string.knowledge_version_limited) : ""))
                             .setPositiveButton(android.R.string.ok, null);
+                    if (evidence != null && evidence.length() > 0) {
+                        dialog.setNeutralButton(R.string.knowledge_evidence_title,
+                                (d, w) -> showEvidenceGroups(evidence,
+                                        result.optBoolean("evidence_limited"),
+                                        result.optBoolean("evidence_checks_limited"),
+                                        result.optBoolean("source_lineage_limited"),
+                                        result.optBoolean("source_assessment_limited"),
+                                        relativePath));
+                    }
                     if (labels.length == 0) {
                         dialog.setMessage(R.string.knowledge_no_semantic_relations);
                     } else {
                         dialog.setItems(labels, (d, position) -> {
                             final JSONObject match = matches.optJSONObject(position);
                             if (match != null) {
-                                openIndexedNote(match.optString("path"));
+                                showSemanticRelationDetail(relativePath, match, titles[position]);
                             }
                         });
                     }
@@ -1814,6 +1915,143 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private void showSemanticRelationDetail(final String sourcePath, final JSONObject relation,
+                                            final int title) {
+        final boolean dated = "temporal_overlap".equals(relation.optString("kind"))
+                || "temporal_separation".equals(relation.optString("kind"))
+                || "temporal_uncertainty".equals(relation.optString("kind"));
+        final AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(KnowledgeRelationPresentation.relationComparison(
+                        this, relation, sourcePath))
+                .setPositiveButton(R.string.knowledge_relation_open_other,
+                        (d, which) -> openIndexedNote(relation.optString("path")));
+        if (dated) {
+            dialog.setNeutralButton(R.string.knowledge_version_action,
+                    (d, which) -> new KnowledgeVersionReviewDialog(this, workspacePath(),
+                            notebook, decisionWorker, sourcePath, relation,
+                            () -> showSemanticRelations(sourcePath)).show());
+            dialog.setNegativeButton(R.string.knowledge_relation_open_inspected,
+                    (d, which) -> openIndexedNote(sourcePath));
+        } else {
+            dialog.setNeutralButton(R.string.knowledge_relation_open_inspected,
+                    (d, which) -> openIndexedNote(sourcePath));
+            dialog.setNegativeButton(android.R.string.cancel, null);
+        }
+        dialog.show();
+    }
+
+    private void showEvidenceGroups(final JSONArray groups, final boolean limited,
+                                    final boolean checksLimited, final boolean lineageLimited,
+                                    final boolean assessmentLimited,
+                                    final String sourcePath) {
+        final String[] rows = new String[groups.length()];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = KnowledgeRelationPresentation.evidenceSummary(
+                    this, groups.optJSONObject(i));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.knowledge_evidence_title)
+                        + (limited ? " · " + getString(R.string.knowledge_evidence_limited) : "")
+                        + (checksLimited ? " · " + getString(R.string.knowledge_evidence_checks_limited) : "")
+                        + (lineageLimited ? " · " + getString(R.string.knowledge_source_lineage_evidence_limited) : "")
+                        + (assessmentLimited ? " · " + getString(R.string.knowledge_source_assessment_evidence_limited) : ""))
+                .setItems(rows, (d, which) -> {
+                    final JSONObject group = groups.optJSONObject(which);
+                    if (group != null) showEvidenceDetail(group, sourcePath);
+                })
+                .setPositiveButton(android.R.string.ok, null).show();
+    }
+
+    private void showEvidenceDetail(final JSONObject group, final String sourcePath) {
+        // The disclosure is shown before the user can inspect another file.
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_evidence_title)
+                .setMessage(KnowledgeRelationPresentation.evidenceDisclosure(this, group))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.knowledge_source_lineage_new, (d, w) ->
+                        chooseLineagePartner(group, sourcePath))
+                .setPositiveButton(R.string.knowledge_evidence_show_sources, (d, w) -> {
+                    final JSONArray sources = group.optJSONArray("other_sources");
+                    final int count = sources == null ? 0 : sources.length();
+                    final String[] rows = new String[count + 1];
+                    rows[0] = getString(R.string.knowledge_source_assessment_evidence_inspected)
+                            + "\n" + sourcePath;
+                    for (int i = 0; i < count; i++) {
+                        final JSONObject source = sources.optJSONObject(i);
+                        rows[i + 1] = source == null ? "" :
+                                KnowledgeRelationPresentation.evidenceSourceLabel(this, source);
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.knowledge_evidence_title)
+                            .setItems(rows, (d2, selected) -> {
+                                if (selected == 0) {
+                                    evidenceSourceActions(group, null, sourcePath);
+                                } else {
+                                    final JSONObject source = sources.optJSONObject(selected - 1);
+                                    if (source != null) evidenceSourceActions(group, source, sourcePath);
+                                }
+                            })
+                            .setNegativeButton(android.R.string.cancel, null).show();
+                }).show();
+    }
+
+    private void evidenceSourceActions(final JSONObject group, final JSONObject selected,
+                                       final String sourcePath) {
+        final String path = selected == null ? sourcePath : selected.optString("path");
+        final String verification = selected == null
+                ? group.optString("source_verification") : selected.optString("verification");
+        final boolean alreadyReviewed = selected == null
+                ? group.has("source_assessment_kind") : selected.has("source_assessment_kind");
+        final AlertDialog.Builder comparison = new AlertDialog.Builder(this)
+                .setTitle(R.string.knowledge_evidence_title)
+                .setMessage(KnowledgeRelationPresentation.evidenceExcerptComparison(
+                        this, group, selected, sourcePath))
+                .setNegativeButton(android.R.string.cancel, null);
+        if (!"current".equals(verification)) {
+            // Snapshot text may be stale, so offer only inspection, not a
+            // preverified classification shortcut. The editor reopens source.
+            comparison.setPositiveButton(R.string.knowledge_entity_view_source,
+                    (d, w) -> openIndexedNote(path)).show();
+            return;
+        }
+        comparison.setNeutralButton(R.string.knowledge_entity_view_source,
+                        (d, w) -> openIndexedNote(path))
+                .setPositiveButton(alreadyReviewed
+                        ? R.string.knowledge_source_assessment_history
+                        : R.string.knowledge_source_assessment_new, (d, w) -> {
+                    final KnowledgeSourceAssessmentDialog dialog =
+                            new KnowledgeSourceAssessmentDialog(this, workspacePath(), notebook,
+                                    decisionWorker, this::openIndexedNote,
+                                    () -> loadDecisionPage(0));
+                    if (alreadyReviewed) dialog.showReviewed(path);
+                    else dialog.showNew(path);
+                }).show();
+    }
+
+    private void chooseLineagePartner(final JSONObject group, final String sourcePath) {
+        final JSONArray sources = group.optJSONArray("other_sources");
+        final ArrayList<String> paths = new ArrayList<>();
+        final ArrayList<String> labels = new ArrayList<>();
+        if (sources != null) for (int i = 0; i < sources.length(); i++) {
+            final JSONObject source = sources.optJSONObject(i);
+            if (source == null || !"current".equals(source.optString("verification"))
+                    || sourcePath.equals(source.optString("path"))) continue;
+            paths.add(source.optString("path"));
+            labels.add(source.optString("path") + " · "
+                    + getString(R.string.knowledge_evidence_current));
+        }
+        labels.add(getString(R.string.knowledge_source_lineage_manual_path));
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_source_lineage_choose_candidate)
+                .setItems(labels.toArray(new String[0]), (d, index) ->
+                        new KnowledgeSourceReviewDialog(this, workspacePath(), notebook,
+                                decisionWorker, this::openIndexedNote,
+                                () -> loadDecisionPage(0)).showNew(
+                                        sourcePath, index < paths.size() ? paths.get(index) : ""))
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void inspectWithCore(final String relativePath) {
@@ -3700,6 +3938,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void requestJournalExport() {
+        final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+        if (!journal.isFile() || journal.length() == 0L) {
+            status.setText(R.string.knowledge_backup_export_empty);
+            Toast.makeText(this, R.string.knowledge_backup_export_empty,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         final android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
         fields.setOrientation(android.widget.LinearLayout.VERTICAL);
         fields.setPadding(24, 0, 24, 0);
@@ -3721,17 +3966,77 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
-                    if (pendingExportPassword != null) {
-                        Arrays.fill(pendingExportPassword, '\0');
+                    prepareJournalExport(first.toCharArray());
+                })
+                .show();
+    }
+
+    private void prepareJournalExport(final char[] password) {
+        status.setText(R.string.knowledge_backup_working);
+        worker.submit(() -> {
+            byte[] plaintext = null;
+            byte[] envelope = null;
+            try {
+                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
+                if (!journal.isFile() || journal.length() == 0L) {
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            status.setText(R.string.knowledge_backup_export_empty);
+                            Toast.makeText(this, R.string.knowledge_backup_export_empty,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                    return;
+                }
+                final JSONObject metadata = KnowledgePythonBridge.journalExportInfo(
+                        this, workspacePath());
+                if (metadata.optInt("count", 0) < 1) {
+                    throw new IOException("No journal decisions to export");
+                }
+                try (FileInputStream in = new FileInputStream(journal)) {
+                    plaintext = readLimited(in, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES);
+                }
+                if (!sha256Hex(plaintext).equals(metadata.getString("sha256"))) {
+                    throw new IOException("Journal changed while preparing backup");
+                }
+                envelope = KnowledgeJournalCrypto.encrypt(plaintext, password);
+                final byte[] prepared = envelope;
+                envelope = null;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) {
+                        Arrays.fill(prepared, (byte) 0);
+                        return;
                     }
-                    pendingExportPassword = first.toCharArray();
+                    if (pendingExportEnvelope != null) {
+                        Arrays.fill(pendingExportEnvelope, (byte) 0);
+                    }
+                    pendingExportEnvelope = prepared;
                     final Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType("application/octet-stream");
                     intent.putExtra(Intent.EXTRA_TITLE, "DP_Knowledge_Journal.dpks");
-                    startActivityForResult(intent, REQUEST_EXPORT_JOURNAL);
-                })
-                .show();
+                    try {
+                        startActivityForResult(intent, REQUEST_EXPORT_JOURNAL);
+                    } catch (RuntimeException unavailable) {
+                        Arrays.fill(prepared, (byte) 0);
+                        pendingExportEnvelope = null;
+                        status.setText(R.string.knowledge_backup_failed);
+                    }
+                });
+            } catch (Exception failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_failed);
+                        Toast.makeText(this, R.string.knowledge_backup_failed,
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+                if (plaintext != null) Arrays.fill(plaintext, (byte) 0);
+                if (envelope != null) Arrays.fill(envelope, (byte) 0);
+            }
+        });
     }
 
     private void requestJournalImport() {
@@ -3752,15 +4057,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_EXPORT_JOURNAL) {
-            final char[] password = pendingExportPassword;
-            pendingExportPassword = null;
-            if (password == null) {
+            final byte[] envelope = pendingExportEnvelope;
+            pendingExportEnvelope = null;
+            if (envelope == null) {
+                status.setText(R.string.knowledge_backup_export_incomplete);
                 return;
             }
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                exportJournalToUri(data.getData(), password);
+                exportJournalToUri(data.getData(), envelope);
             } else {
-                Arrays.fill(password, '\0');
+                Arrays.fill(envelope, (byte) 0);
             }
         } else if (requestCode == REQUEST_IMPORT_JOURNAL
                 && resultCode == RESULT_OK && data != null && data.getData() != null) {
@@ -3791,31 +4097,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return result.toString();
     }
 
-    private void exportJournalToUri(final Uri destination, final char[] password) {
-        final int scan = scanGeneration.get();
+    private void exportJournalToUri(final Uri destination, final byte[] envelope) {
         status.setText(R.string.knowledge_backup_working);
         worker.submit(() -> {
-            byte[] plaintext = null;
             try {
-                final JSONObject metadata = KnowledgePythonBridge.journalExportInfo(
-                        this, workspacePath());
-                final File journal = new File(workspacePath(), "data/formal/journal.jsonl");
-                try (FileInputStream in = new FileInputStream(journal)) {
-                    plaintext = readLimited(in, KnowledgeJournalCrypto.MAX_JOURNAL_BYTES);
-                }
-                if (!sha256Hex(plaintext).equals(metadata.getString("sha256"))) {
-                    throw new IOException("Journal changed while exporting");
-                }
-                final byte[] ciphertext = KnowledgeJournalCrypto.encrypt(plaintext, password);
-                try (OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
-                    if (output == null) {
-                        throw new IOException("Cannot open user-selected destination");
-                    }
-                    output.write(ciphertext);
-                    output.flush();
-                }
+                KnowledgeJournalExportWriter.writeAndVerify(
+                        new KnowledgeJournalExportWriter.Destination() {
+                            @Override public OutputStream openWrite() throws IOException {
+                                return getContentResolver().openOutputStream(destination, "wt");
+                            }
+                            @Override public InputStream openRead() throws IOException {
+                                return getContentResolver().openInputStream(destination);
+                            }
+                        }, envelope);
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_exported);
                         Toast.makeText(this, R.string.knowledge_backup_exported,
                                 Toast.LENGTH_LONG).show();
                         if (syncResult != null && snapshot != null) {
@@ -3823,17 +4120,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                     }
                 });
-            } catch (Exception ignored) {
+            } catch (Exception failed) {
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == scan) {
-                        status.setText(R.string.knowledge_backup_failed);
+                    if (!isFinishing() && !isDestroyed()) {
+                        status.setText(R.string.knowledge_backup_export_incomplete);
+                        Toast.makeText(this, R.string.knowledge_backup_export_incomplete,
+                                Toast.LENGTH_LONG).show();
                     }
                 });
             } finally {
-                Arrays.fill(password, '\0');
-                if (plaintext != null) {
-                    Arrays.fill(plaintext, (byte) 0);
-                }
+                Arrays.fill(envelope, (byte) 0);
             }
         });
     }
@@ -3956,9 +4252,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (runningSearch != null) {
             runningSearch.cancel(true);
         }
-        if (pendingExportPassword != null) {
-            Arrays.fill(pendingExportPassword, '\0');
-            pendingExportPassword = null;
+        if (pendingExportEnvelope != null) {
+            Arrays.fill(pendingExportEnvelope, (byte) 0);
+            pendingExportEnvelope = null;
         }
         worker.shutdownNow();
         analysisWorker.shutdownNow();

@@ -15,11 +15,15 @@ import android.os.SystemClock;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -134,6 +138,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("CORE-01", this::checkPythonCore);
                 step("EMBED-01", this::checkEmbeddingPrimitives);
                 step("CRYPTO-01", this::checkSyntheticCrypto);
+                step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -141,6 +146,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("SPLIT-17", this::checkSyntheticSplit);
                 step("MERGE-17", this::checkSyntheticMerge);
                 step("BATCH-17", this::checkSyntheticClaimBatch);
+                step("VERSION-18-SUITE", this::checkSyntheticStage18Versions);
                 step("BG-01", () -> "scheduler preference readable; enabled="
                         + KnowledgeBackgroundScheduler.isEnabled(context)
                         + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -275,6 +281,43 @@ public final class KnowledgeDeviceQaRunner {
                 + ", failures=0, temporaryCacheCleaned=true, selectedVaultUntouched=true";
     }
 
+    /** Private synthetic source-pair and journal test; no selected vault reads. */
+    private String checkSyntheticStage18Versions() throws Exception {
+        ensureRunning();
+        final JSONObject result = KnowledgePythonBridge.stage18VersionSelfTest(context,
+                context.getCacheDir().getCanonicalPath());
+        if (!"dpksys.stage18_version_selftest.v1".equals(result.getString("protocol"))
+                || !result.getBoolean("synthetic_only")
+                || result.getBoolean("used_selected_vault")
+                || !result.getBoolean("read_only_user_data")
+                || !result.getBoolean("requires_manual_ui_qa")) {
+            throw new SyntheticMismatch("verdict=UNTRUSTED_VERSION_QA_CONTRACT");
+        }
+        final JSONArray checks = result.getJSONArray("checks");
+        if (checks.length() != 6
+                || result.getInt("passed") + result.getInt("failed") != checks.length()) {
+            throw new SyntheticMismatch("verdict=VERSION_QA_COUNT_MISMATCH");
+        }
+        int failures = 0;
+        for (int i = 0; i < checks.length(); i++) {
+            ensureRunning();
+            final JSONObject row = checks.getJSONObject(i);
+            if (!row.getString("code").matches("VERSION-[A-Z0-9-]{4,28}")) {
+                throw new SyntheticMismatch("verdict=VERSION_QA_CODE_MISMATCH");
+            }
+            if (!row.getBoolean("passed")) failures++;
+            report.add(row.getBoolean("passed") ? "PASS" : "FAIL", row.getString("code"), 0,
+                    row.getBoolean("passed") ? "isolated version bridge assertions passed"
+                            : "isolated version bridge assertions failed");
+        }
+        if (failures != 0 || result.getInt("failed") != failures) {
+            throw new SyntheticMismatch("syntheticChecks=" + checks.length()
+                    + ", failedChecks=" + failures);
+        }
+        return "syntheticChecks=6, failures=0, temporaryCacheCleaned=true, "
+                + "selectedVaultUntouched=true";
+    }
+
     private String checkRealVaultReadOnly() throws Exception {
         if (notebook == null || !notebook.isDirectory()) {
             throw new SkippedCheck("notebook not selected/accessible");
@@ -390,6 +433,40 @@ public final class KnowledgeDeviceQaRunner {
             Arrays.fill(passphrase, '\0');
             Arrays.fill(input, (byte) 0);
         }
+    }
+
+    private String checkSyntheticBackupWriter() throws IOException {
+        final byte[] fixture = "synthetic encrypted data; not a real journal"
+                .getBytes(StandardCharsets.UTF_8);
+        final ByteArrayOutputStream saved = new ByteArrayOutputStream();
+        KnowledgeJournalExportWriter.writeAndVerify(new KnowledgeJournalExportWriter.Destination() {
+            @Override public OutputStream openWrite() { return saved; }
+            @Override public InputStream openRead() {
+                return new ByteArrayInputStream(saved.toByteArray());
+            }
+        }, fixture);
+        if (!Arrays.equals(fixture, saved.toByteArray())) {
+            throw new SyntheticMismatch("verdict=SYNTHETIC_BACKUP_WRITE_MISMATCH");
+        }
+        boolean refusedEmptyProvider = false;
+        try {
+            KnowledgeJournalExportWriter.writeAndVerify(
+                    new KnowledgeJournalExportWriter.Destination() {
+                        @Override public OutputStream openWrite() {
+                            return new ByteArrayOutputStream();
+                        }
+                        @Override public InputStream openRead() {
+                            return new ByteArrayInputStream(new byte[0]);
+                        }
+                    }, fixture);
+        } catch (IOException expected) {
+            refusedEmptyProvider = true;
+        }
+        if (!refusedEmptyProvider) {
+            throw new SyntheticMismatch("verdict=EMPTY_BACKUP_PROVIDER_NOT_REJECTED");
+        }
+        return "synthetic stream closed/read-back verified, zero-byte provider rejected; "
+                + "real SAF/document picker still requires manual device QA";
     }
 
     private String checkSyntheticIndex() throws Exception {
@@ -999,8 +1076,41 @@ public final class KnowledgeDeviceQaRunner {
                     workspace, selections.toString());
             if (!preview.getBoolean("read_only")
                     || !preview.getBoolean("requires_human_confirmation")
-                    || preview.getJSONArray("items").length() != 2) {
+                    || preview.getJSONArray("items").length() != 2
+                    || !sources[0].contains(preview.getJSONArray("items").getJSONObject(0)
+                            .getString("source_excerpt"))
+                    || preview.getJSONArray("items").getJSONObject(0)
+                            .getBoolean("source_truncated")) {
                 throw new SyntheticMismatch("verdict=BATCH_PREVIEW_MISMATCH");
+            }
+            // Fresh opposing claims must not bypass individual review merely
+            // because neither assertion appears in the current journal.
+            final String opposingSource = "# Opposing\nСтресс не приводит к бессоннице.\n";
+            final String opposingPath = "synthetic-batch-opposing.md";
+            final String opposingFragment = KnowledgePythonBridge.inspect(context,
+                    opposingPath, opposingSource).getJSONArray("fragments")
+                    .getJSONObject(1).getString("id");
+            final String opposingReading = KnowledgePythonBridge.preview(context, workspace,
+                    opposingPath, opposingSource, opposingFragment)
+                    .getJSONObject("preview").getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            final JSONObject opposingEntry = new JSONObject();
+            opposingEntry.put("path", opposingPath);
+            opposingEntry.put("markdown", opposingSource);
+            opposingEntry.put("fragment_id", opposingFragment);
+            opposingEntry.put("reading_id", opposingReading);
+            final JSONArray opposingBatch = new JSONArray();
+            opposingBatch.put(selections.getJSONObject(0));
+            opposingBatch.put(opposingEntry);
+            boolean opposingRejected = false;
+            try {
+                KnowledgePythonBridge.previewClaimBatch(context, workspace,
+                        opposingBatch.toString());
+            } catch (Exception expected) {
+                opposingRejected = true;
+            }
+            if (!opposingRejected) {
+                throw new SyntheticMismatch("verdict=BATCH_OPPOSING_READINGS_ALLOWED");
             }
             boolean staleRejected = false;
             try {
@@ -1054,6 +1164,7 @@ public final class KnowledgeDeviceQaRunner {
             }
             if (!replayRejected) throw new SyntheticMismatch("verdict=BATCH_REPLAY_ALLOWED");
             return "syntheticClaims=2, activeAfterBatch=2, atomicJournalEntry=true, "
+                    + "sourceExcerptVerified=true, opposingBundleRejected=true, "
                     + "staleHeadRejected=true, changedSourceRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {

@@ -60,6 +60,8 @@ class FullAuditTests(unittest.TestCase):
         self.assertEqual(1, len(conflicts["findings"]))
         item = conflicts["findings"][0]
         self.assertEqual("possible_source_conflict", item["type"])
+        self.assertIsNone(item["context"])
+        self.assertEqual({"from": None, "to": None}, item["interval"])
         self.assertEqual({"a.md"}, {x["path"] for x in item["positive_sources"]})
         self.assertEqual({"b.markdown"}, {x["path"] for x in item["negative_sources"]})
         self.assertFalse(conflicts["has_more"])
