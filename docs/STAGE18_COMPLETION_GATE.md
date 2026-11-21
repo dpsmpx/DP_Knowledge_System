@@ -25,7 +25,8 @@ This sign-off cannot be inferred from Python tests, a successful APK build or
 GitHub Actions. Run with a **synthetic notebook** only; no private vault data
 needs to be exported or uploaded.
 
-1. On Android 15 and an Android 11 device, open **Library → Related claims**;
+1. On Android 15 and an Android 11 device, open **Library → Related claims —
+   choose a note** (or long-press a library row and choose its relation action);
    review exact, opposite, modality, overlap, gap and partly open hints.
 2. For two dated notes, open both original sources, record each manual version
    choice in turn, verify the saved explanation in Library and editor, withdraw
@@ -39,7 +40,9 @@ needs to be exported or uploaded.
 5. Check 200% font, TalkBack reading order, scrollable excerpt comparison,
    minimum touch target and screen-reader labels on both languages.
 6. Run the existing 20k synthetic fixture with source verification caps and
-   inspect latency, memory, cancellation and completeness warnings.
+   inspect latency, memory, cancellation and completeness warnings. In
+   **Processes**, use the visible **Go to device tests** shortcut to reach the
+   quick/stress buttons; no separate "Tests" navigation tab exists.
 
 ## Explicit epistemic boundaries
 

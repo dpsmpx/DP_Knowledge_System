@@ -181,7 +181,8 @@
     <string name="knowledge_history_partial">Partially completed</string>
     <string name="knowledge_history_cancelled">Cancelled</string>
     <string name="knowledge_history_failed">Failed</string>
-    <string name="knowledge_process_qa">Device diagnostics</string>
+    <string name="knowledge_process_qa">Device tests and diagnostics</string>
+    <string name="knowledge_process_jump_qa">Go to device tests ↓</string>
     <string name="knowledge_manage_decisions">Knowledge decisions and audit</string>
     <string name="knowledge_manage_backup">Journal backup</string>
     <string name="knowledge_manage_backup_warning">This is an encrypted backup of the decisions journal only, not a complete backup of all notes or application settings.</string>
@@ -206,6 +207,9 @@
     <string name="knowledge_possible_backlinks">Possible incoming links (not verified)</string>
     <string name="knowledge_no_backlinks">No possible incoming links found.</string>
     <string name="knowledge_semantic_relations">Related claims across notes</string>
+    <string name="knowledge_library_relations">Related claims — choose a note</string>
+    <string name="knowledge_relations_choose_note">Choose a note on this library page to inspect cross-note relationships</string>
+    <string name="knowledge_relations_empty_page">No notes on this page. Wait for the scan or change the library search.</string>
     <string name="knowledge_semantic_working">Comparing local unapproved claim interpretations…</string>
     <string name="knowledge_possible_agreement">Potential agreement</string>
     <string name="knowledge_possible_conflict">Potential conflict</string>
