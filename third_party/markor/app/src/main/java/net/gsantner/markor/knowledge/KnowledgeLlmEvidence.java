@@ -4,6 +4,7 @@
  */
 package net.gsantner.markor.knowledge;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +27,15 @@ public final class KnowledgeLlmEvidence {
     }
 
     private KnowledgeLlmEvidence() {
+    }
+
+    /** Reject evidence that no longer matches the generation of the local index.
+     * This is an mtime/size check, not a cryptographic source revision proof.
+     */
+    public static boolean matchesIndexedSnapshot(final File file, final long modified,
+                                                  final long size) {
+        return file != null && modified > 0 && size >= 0 && file.isFile()
+                && file.lastModified() == modified && file.length() == size;
     }
 
     public static String excerpt(final String source, final String question) {

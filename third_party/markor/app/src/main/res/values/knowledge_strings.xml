@@ -474,6 +474,8 @@
     <string name="knowledge_llm_answer">Unverified model response</string>
     <string name="knowledge_llm_unverified">UNVERIFIED AI INTERPRETATION — not an accepted fact, proof or journal decision. Citations point to candidate excerpts only.</string>
     <string name="knowledge_llm_no_citations">The response has no valid numbered source citation. Treat all statements as unsupported.</string>
+    <string name="knowledge_llm_invalid_citations">Warning: %1$d invented or malformed source references. Verify the whole response against the actual excerpts.</string>
+    <string name="knowledge_llm_unverified_quotes">Warning: %1$d quoted passages were not found verbatim in any cited excerpt. Do not rely on these quotations.</string>
     <string name="knowledge_llm_sources">Local source paths used (open notes to verify):</string>
     <string name="knowledge_embedding_build">Build embeddings</string>
     <string name="knowledge_semantic_search">Semantic search</string>
@@ -504,8 +506,8 @@
     <string name="knowledge_embedding_results">Approximate semantic matches (exact cosine reranking, not facts)</string>
     <string name="knowledge_embedding_no_matches">No compatible indexed source vectors were found. Check the embedding model and build the index.</string>
     <string name="knowledge_embedding_choose_retrieval">Choose excerpts for LLM answer</string>
-    <string name="knowledge_embedding_choose_retrieval_message">There is a local semantic index for your embedding service. Semantic retrieval sends the question to that service only after separate consent; lexical retrieval never sends a question during source selection.</string>
-    <string name="knowledge_embedding_use_semantic">Use embeddings</string>
+    <string name="knowledge_embedding_choose_retrieval_message">A local semantic index is available. Hybrid retrieval combines lexical and vector results; sending your question to the embedding service still requires separate consent. Lexical retrieval does not send the question to a model.</string>
+    <string name="knowledge_embedding_use_semantic">Hybrid search</string>
     <string name="knowledge_embedding_use_lexical">Use lexical</string>
     <string name="knowledge_scan_progress">Scanning Markdown: %1$d notes, %2$d directories inspected…</string>
     <string name="knowledge_index_progress">Updating private local index: %1$d/%2$d notes…</string>

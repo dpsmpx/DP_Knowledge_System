@@ -74,8 +74,6 @@ import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -3444,7 +3442,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         (queryEndpoint, queryModel, embeddingKey) ->
                                                 consentSemanticQuestion(question, queryEndpoint,
                                                         queryModel, embeddingKey, ranked ->
-                                                                prepareSemanticLlmEvidence(question,
+                                                                prepareHybridLlmEvidence(question,
                                                                         chatEndpoint, chatModel,
                                                                         chatKey, ranked))))
                         .show();
@@ -3456,7 +3454,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         prepareLlmEvidence(question, chatEndpoint, chatModel, chatKey);
     }
 
-    private void prepareSemanticLlmEvidence(final String question, final URL endpoint,
+    private void prepareHybridLlmEvidence(final String question, final URL endpoint,
                                             final String model, final String apiKey,
                                             final List<KnowledgeLocalIndex.SemanticHit> ranked) {
         final int scan = scanGeneration.get();
@@ -3464,7 +3462,25 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.submit(() -> {
             try {
                 final List<KnowledgeLlmEvidence.Item> sources = new ArrayList<>();
+                final Map<String, KnowledgeLocalIndex.SemanticHit> semantic = new HashMap<>();
+                final List<String> semanticPaths = new ArrayList<>();
                 for (final KnowledgeLocalIndex.SemanticHit match : ranked) {
+                    if (!semantic.containsKey(match.relativePath)) {
+                        semantic.put(match.relativePath, match);
+                        semanticPaths.add(match.relativePath);
+                    }
+                }
+                final Map<String, KnowledgeLocalIndex.Hit> lexical = new HashMap<>();
+                final List<String> lexicalPaths = new ArrayList<>();
+                for (final KnowledgeLocalIndex.Hit match : index.evidenceSearch(question, 24)) {
+                    if (!lexical.containsKey(match.relativePath)) {
+                        lexical.put(match.relativePath, match);
+                        lexicalPaths.add(match.relativePath);
+                    }
+                }
+                final List<String> combined = KnowledgeHybridRanking.combine(
+                        lexicalPaths, semanticPaths, 24);
+                for (final String relativePath : combined) {
                     if (Thread.currentThread().isInterrupted() || scanGeneration.get() != scan) {
                         return;
                     }
@@ -3472,20 +3488,27 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         break;
                     }
                     try {
-                        final File file = new File(notebook, match.relativePath);
-                        if (file.lastModified() != match.modifiedAtMillis
-                                || file.length() != match.sizeBytes) {
+                        final KnowledgeLocalIndex.SemanticHit vector = semantic.get(relativePath);
+                        final KnowledgeLocalIndex.Hit text = lexical.get(relativePath);
+                        final long modified = vector != null ? vector.modifiedAtMillis
+                                : text.modifiedAtMillis;
+                        final long size = vector != null ? vector.sizeBytes : text.sizeBytes;
+                        final File file = new File(notebook, relativePath);
+                        if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                                modified, size)) {
                             continue;
                         }
-                        final String content = readSelectedNote(match.relativePath);
-                        if (file.lastModified() != match.modifiedAtMillis
-                                || file.length() != match.sizeBytes) {
+                        final String content = readSelectedNote(relativePath);
+                        if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                                modified, size)) {
                             continue;
                         }
-                        final String excerpt = KnowledgeEmbeddingChunks.atOffset(
-                                content, match.excerptStart, match.excerptLength);
+                        final String excerpt = vector == null
+                                ? KnowledgeLlmEvidence.excerpt(content, question)
+                                : KnowledgeEmbeddingChunks.atOffset(
+                                        content, vector.excerptStart, vector.excerptLength);
                         if (!excerpt.trim().isEmpty()) {
-                            sources.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
+                            sources.add(new KnowledgeLlmEvidence.Item(relativePath, excerpt));
                         }
                     } catch (IOException ignored) {
                         // Changed or inaccessible indexed files are never disclosed.
@@ -3592,7 +3615,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         break;
                     }
                     try {
+                        final File file = new File(notebook, match.relativePath);
+                        if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                                match.modifiedAtMillis, match.sizeBytes)) {
+                            continue;
+                        }
                         final String content = readSelectedNote(match.relativePath);
+                        if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                                match.modifiedAtMillis, match.sizeBytes)) {
+                            continue;
+                        }
                         final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);
                         if (!excerpt.trim().isEmpty()) {
                             excerpts.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
@@ -3650,11 +3682,20 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.submit(() -> {
             try {
                 final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview);
-                final boolean cited = hasValidLlmCitation(answer, excerpts.size());
+                final KnowledgeLlmCitationAudit.Review review =
+                        KnowledgeLlmCitationAudit.inspect(answer, excerpts);
                 final StringBuilder display = new StringBuilder(
                         getString(R.string.knowledge_llm_unverified));
-                if (!cited) {
+                if (!review.hasValidReferences()) {
                     display.append("\n").append(getString(R.string.knowledge_llm_no_citations));
+                }
+                if (review.invalidReferences > 0) {
+                    display.append("\n").append(getString(R.string.knowledge_llm_invalid_citations,
+                            review.invalidReferences));
+                }
+                if (review.unverifiedQuotes > 0) {
+                    display.append("\n").append(getString(R.string.knowledge_llm_unverified_quotes,
+                            review.unverifiedQuotes));
                 }
                 display.append("\n\n").append(answer).append("\n\n")
                         .append(getString(R.string.knowledge_llm_sources)).append("\n");
@@ -3683,17 +3724,6 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
-    }
-
-    static boolean hasValidLlmCitation(final String answer, final int sourceCount) {
-        final Matcher citations = Pattern.compile("\\[(\\d{1,2})\\]").matcher(answer);
-        while (citations.find()) {
-            final int number = Integer.parseInt(citations.group(1));
-            if (number >= 1 && number <= sourceCount) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void promptKnowledgeQuery() {
