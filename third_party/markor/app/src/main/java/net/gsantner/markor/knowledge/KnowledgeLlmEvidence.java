@@ -8,7 +8,9 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -17,6 +19,8 @@ import java.util.List;
  */
 public final class KnowledgeLlmEvidence {
     public static final int MAX_EXCERPT_CHARS = 900;
+    /** Avoid reading all 24 ranked notes just to choose six chat excerpts. */
+    public static final int MAX_LEXICAL_CANDIDATES = 12;
     private static final int EXCERPT_LEADING_CONTEXT = 180;
     private static final int EXCERPT_MIN_TRAILING_CONTEXT = 80;
     private static final int MAX_COVERAGE_SPAN = MAX_EXCERPT_CHARS
@@ -186,32 +190,91 @@ public final class KnowledgeLlmEvidence {
         int count = 0;
         for (final Item item : excerpts) {
             if (item == null || item.excerpt == null) continue;
-            final String folded = foldForOffsets(item.excerpt);
-            // Match a source token to only its longest query prefix. Otherwise
-            // one token ("amberlight") could falsely cover two query terms
-            // ("amber" and "amberlight") in the consent disclosure.
-            for (int at = 0; at < folded.length();) {
-                if (!Character.isLetterOrDigit(folded.charAt(at))) {
-                    at++;
-                    continue;
-                }
-                final int start = at;
-                while (at < folded.length() && Character.isLetterOrDigit(folded.charAt(at))) at++;
-                int matching = -1;
-                for (int i = 0; i < terms.size(); i++) {
-                    if (folded.startsWith(terms.get(i), start)
-                            && (matching < 0 || terms.get(i).length() > terms.get(matching).length())) {
-                        matching = i;
-                    }
-                }
-                if (matching >= 0 && !present[matching]) {
-                    present[matching] = true;
+            final boolean[] matches = presentTerms(item.excerpt, terms);
+            for (int i = 0; i < terms.size(); i++) {
+                if (matches[i] && !present[i]) {
+                    present[i] = true;
                     count++;
                 }
             }
             if (count == terms.size()) break;
         }
         return new TermCoverage(count, terms.size());
+    }
+
+    /** Select at most six already verified lexical excerpts from a bounded
+     * relevance-ranked candidate list. Preserve the first two hits (including
+     * potentially opposing exact-phrase sources); use remaining slots for
+     * incremental distinct query-term coverage, with rank as the tie-break.
+     * Return indices in their ORIGINAL ranking order for stable citations.
+     * This cannot prove that any chosen excerpt supports the question.
+     */
+    public static List<Integer> selectLexicalIndices(final String question,
+                                                      final List<Item> ranked,
+                                                      final int maximum) {
+        final List<Integer> selected = new ArrayList<>();
+        if (ranked == null || maximum <= 0) return selected;
+        final int candidates = Math.min(ranked.size(), MAX_LEXICAL_CANDIDATES);
+        final int target = Math.min(candidates, maximum);
+        final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
+        final boolean[][] termFlags = new boolean[candidates][];
+        final boolean[] covered = new boolean[terms.size()];
+        final boolean[] chosen = new boolean[candidates];
+        for (int i = 0; i < candidates; i++) {
+            final Item item = ranked.get(i);
+            termFlags[i] = presentTerms(item == null ? null : item.excerpt, terms);
+        }
+        for (int i = 0; i < Math.min(2, target); i++) {
+            selected.add(i);
+            chosen[i] = true;
+            for (int t = 0; t < terms.size(); t++) covered[t] |= termFlags[i][t];
+        }
+        while (selected.size() < target) {
+            int best = -1;
+            int gain = -1;
+            for (int i = 0; i < candidates; i++) {
+                if (chosen[i]) continue;
+                int newlyCovered = 0;
+                for (int t = 0; t < terms.size(); t++) {
+                    if (termFlags[i][t] && !covered[t]) newlyCovered++;
+                }
+                if (newlyCovered > gain) {
+                    best = i;
+                    gain = newlyCovered;
+                }
+            }
+            if (best < 0) break;
+            selected.add(best);
+            chosen[best] = true;
+            for (int t = 0; t < terms.size(); t++) covered[t] |= termFlags[best][t];
+        }
+        Collections.sort(selected);
+        return selected;
+    }
+
+    private static boolean[] presentTerms(final String excerpt, final List<String> terms) {
+        final boolean[] present = new boolean[terms.size()];
+        if (excerpt == null || terms.isEmpty()) return present;
+        final String folded = foldForOffsets(excerpt);
+        // A source token matches only its longest query prefix, not two
+        // overlapping prefixes from one word (e.g. amber/amberlight).
+        for (int at = 0; at < folded.length();) {
+            if (!Character.isLetterOrDigit(folded.charAt(at))) {
+                at++;
+                continue;
+            }
+            final int start = at;
+            while (at < folded.length() && Character.isLetterOrDigit(folded.charAt(at))) at++;
+            int matching = -1;
+            for (int i = 0; i < terms.size(); i++) {
+                if (folded.startsWith(terms.get(i), start)
+                        && (matching < 0 || terms.get(i).length() > terms.get(matching).length())) {
+                    matching = i;
+                }
+            }
+            if (matching >= 0) present[matching] = true;
+        }
+        return present;
     }
 
     private static String foldForOffsets(final String text) {
