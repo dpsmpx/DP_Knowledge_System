@@ -71,6 +71,17 @@ even if every reference and quotation passes the checks below.
     and localized warnings identify the unsupported attribution. This is a
     deterministic syntax/provenance check, not semantic entailment. JVM and
     cache-free `CITE-LOCAL-19` synthetic device regressions are included.
+11. Model-output citation coverage now counts **substantive prose spans**
+    without a valid `[N]` in that same sentence or line. A single `[1]` in
+    one sentence cannot silence the warning for a different uncited claim.
+    Markdown fenced/inline code, quoted `[1]` labels, and `[1](url)` links do
+    not count as source citations. The Android UI displays a localized warning
+    with the count, while a new synthetic `CITE-COVER-19` device check and JVM
+    regressions exercise the parser. This is a **conservative formatting
+    heuristic** (minimum 16 letters/three words); it can miss short claims,
+    skip headings/uncertainty, flag disclaimers and cannot establish that a
+    cited sentence is actually entailed by its source. It does not block or
+    modify the displayed model response or any journal decision.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -99,7 +110,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
-  quotation, clause-local attribution, mixed valid/invalid source labels;
+  quotation, clause-local attribution, mixed valid/invalid source labels,
+  uncited prose spans and fake citation markers in code/links/quoted text;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
@@ -152,7 +164,9 @@ grounding. Device and broader human-labeled benchmarks remain open.
 - An exact quote appearing somewhere in the cited excerpts does not prove
   the model's surrounding assertion. Unquoted hallucinations, prompt injection
   (including semantic manipulation *inside* delimited source lines), mixed
-  citations and paraphrase entailment cannot be ruled out by syntax.
+  citations and paraphrase entailment cannot be ruled out by syntax. A
+  substantive-span citation warning is not a sentence classifier: it may miss
+  unsupported claims or flag harmless explanatory text.
 - No automatic rejection of the answer, fact promotion or journal change;
   users retain final judgment. Real provider, network/privacy, rotation,
   TalkBack and OEM/lifecycle QA remain unverified on physical devices.

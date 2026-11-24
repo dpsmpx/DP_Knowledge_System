@@ -3745,6 +3745,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             R.string.knowledge_llm_mismatched_quote_citations,
                             review.mismatchedQuoteCitations));
                 }
+                if (review.uncitedProseSpans > 0) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_uncited_prose_spans,
+                            review.uncitedProseSpans));
+                }
                 display.append("\n\n").append(answer).append("\n\n")
                         .append(getString(R.string.knowledge_llm_sources)).append("\n");
                 for (int i = 0; i < excerpts.size(); i++) {

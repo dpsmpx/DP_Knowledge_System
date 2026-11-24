@@ -257,4 +257,63 @@ public class KnowledgeLlmClientTest {
                 "«The sky is blue.» A different sentence. [1]", sources);
         assertEquals(1, separated.unverifiedQuotes);
     }
+
+    @Test
+    public void citationCoverageFlagsAdditionalUnreferencedSentencesAndBullets() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."),
+                new KnowledgeLlmEvidence.Item("two.md", "The observed result was 43."));
+        final KnowledgeLlmCitationAudit.Review cited = KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1]. The observed result was 43 [2].", sources);
+        assertEquals(0, cited.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
+                "## Observations\nThe observed result was 42 [1]. "
+                        + "The model invented a completely different conclusion.\n"
+                        + "- Another unsupported synthetic observation was mentioned.\n"
+                        + "- The observed result was 43 [2].", sources);
+        assertTrue(mixed.hasValidReferences());
+        assertEquals(2, mixed.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review quoteThenClaim = KnowledgeLlmCitationAudit.inspect(
+                "The source states «The observed result was 42.» [1]. "
+                        + "It proves a totally unrelated unsupported conclusion.", sources);
+        assertEquals(0, quoteThenClaim.unverifiedQuotes);
+        assertEquals(1, quoteThenClaim.uncitedProseSpans);
+    }
+
+    @Test
+    public void markdownCodeAndLinkLabelsCannotLaunderCitationsOrQuotations() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final KnowledgeLlmCitationAudit.Review fenced = KnowledgeLlmCitationAudit.inspect(
+                "```markdown\nThe observed result was 42 [1].\n"
+                        + "«The fabricated result was 9000.» [1]\n```\n"
+                        + "The prose claims another unsupported result without evidence.", sources);
+        assertEquals(0, fenced.referenceCount);
+        assertEquals(0, fenced.quotedPassages);
+        assertEquals(1, fenced.uncitedProseSpans);
+        assertFalse(fenced.hasValidReferences());
+
+        final KnowledgeLlmCitationAudit.Review inline = KnowledgeLlmCitationAudit.inspect(
+                "The assertion is merely illustrated by `[1]` and lacks a proper citation.", sources);
+        assertFalse(inline.hasValidReferences());
+        assertEquals(1, inline.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review linked = KnowledgeLlmCitationAudit.inspect(
+                "The model linked [1](https://example.org) while providing no actual evidence.", sources);
+        assertFalse(linked.hasValidReferences());
+        assertEquals(1, linked.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review tilde = KnowledgeLlmCitationAudit.inspect(
+                "~~~\nThe observed result was 42 [1].\n~~~\nUNKNOWN", sources);
+        assertEquals(0, tilde.referenceCount);
+        assertEquals(0, tilde.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review quotedMarker = KnowledgeLlmCitationAudit.inspect(
+                "The note literally says «A fabricated source label [1] appears here». "
+                        + "No other source citation was actually supplied.", sources);
+        assertFalse(quotedMarker.hasValidReferences());
+        assertEquals(1, quotedMarker.unverifiedQuotes);
+    }
 }
