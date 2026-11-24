@@ -160,6 +160,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Future<?> runningAnalysis;
     private Future<?> runningAudit;
     private Future<?> runningEmbedding;
+    private KnowledgeNetworkApproval.Permit activeIndexApproval;
     private Future<?> runningDeviceQa;
     private Future<?> runningDecisionLoad;
     private Future<?> runningModelImport;
@@ -3358,7 +3359,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setNegativeButton(android.R.string.cancel, null)
                             .setPositiveButton(R.string.knowledge_llm_send,
                                     (dialog, which) -> startEmbeddingBuild(endpoint, model,
-                                            apiKey, key, pending, scan))
+                                            apiKey, key, pending, scan,
+                                            KnowledgeNetworkApproval.forIndex(endpoint, model)))
                             .show();
                 });
             } catch (Exception ignored) {
@@ -3373,6 +3375,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void cancelEmbeddingBuild() {
         embeddingGeneration.incrementAndGet();
+        if (activeIndexApproval != null) {
+            activeIndexApproval.revoke();
+            activeIndexApproval = null;
+        }
         if (runningEmbedding != null) {
             runningEmbedding.cancel(true);
         }
@@ -3391,11 +3397,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private void startEmbeddingBuild(final URL endpoint, final String model, final String apiKey,
                                      final String modelKey,
                                      final List<KnowledgeVaultScanner.Note> pending,
-                                     final int scan) {
+                                     final int scan,
+                                     final KnowledgeNetworkApproval.Permit approval) {
         if (embeddingActive || scanGeneration.get() != scan) {
+            approval.revoke();
             return;
         }
         embeddingActive = true;
+        activeIndexApproval = approval;
         recordProcessEvent(KnowledgeProcessHistory.Operation.EMBEDDING,
                 KnowledgeProcessHistory.Outcome.STARTED);
         updateProcessBadge();
@@ -3460,7 +3469,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             final float[][] vectors;
                             try {
                                 vectors = KnowledgeEmbeddingClient.embed(
-                                        endpoint, model, apiKey, inputs);
+                                        endpoint, model, apiKey, inputs, approval,
+                                        KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX);
                             } catch (IOException network) {
                                 // A failed service must stop this run; retain checkpoints.
                                 throw new IllegalStateException("Embedding service unavailable");
@@ -3528,6 +3538,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         showEmbeddingStatus(R.string.knowledge_embedding_failed);
                     }
                 });
+            } finally {
+                approval.revoke();
             }
         });
     }
@@ -3570,19 +3582,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_embedding_send_query,
                         (dialog, which) -> performSemanticQuery(
-                                question, endpoint, model, apiKey, modelKey, callback))
+                                question, endpoint, model, apiKey, modelKey, callback,
+                                KnowledgeNetworkApproval.forQuery(endpoint, model, question)))
                 .show();
     }
 
     private void performSemanticQuery(final String question, final URL endpoint,
                                       final String model, final String apiKey,
-                                      final String modelKey, final SemanticMatches callback) {
+                                      final String modelKey, final SemanticMatches callback,
+                                      final KnowledgeNetworkApproval.Permit approval) {
         final int scan = scanGeneration.get();
         status.setText(R.string.knowledge_embedding_querying);
         embeddingWorker.submit(() -> {
             try {
                 final float[] query = KnowledgeEmbeddingClient.embed(endpoint, model, apiKey,
-                        Collections.singletonList(question))[0];
+                        Collections.singletonList(question), approval,
+                        KnowledgeNetworkApproval.Purpose.EMBEDDING_QUERY)[0];
                 final List<KnowledgeLocalIndex.SemanticHit> matches =
                         index.semanticSearch(modelKey, query, 24);
                 runOnUiThread(() -> {
@@ -3915,7 +3930,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_llm_send,
                         (dialog, which) -> sendLlmQuestion(endpoint, model, apiKey,
-                                exactPreview, excerpts, seals, coverage, consentGeneration))
+                                exactPreview, excerpts, seals, coverage, consentGeneration,
+                                KnowledgeNetworkApproval.forAnswer(endpoint, model, exactPreview)))
                 .show();
     }
 
@@ -3958,7 +3974,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                  final List<KnowledgeLlmEvidence.Item> excerpts,
                                  final List<KnowledgeLlmEvidence.ConsentSeal> seals,
                                  final KnowledgeLlmEvidence.TermCoverage coverage,
-                                 final int generation) {
+                                 final int generation,
+                                 final KnowledgeNetworkApproval.Permit approval) {
         status.setText(R.string.knowledge_llm_requesting);
         worker.submit(() -> {
             try {
@@ -3971,7 +3988,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     });
                     return;
                 }
-                final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview);
+                final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey,
+                        exactPreview, approval);
                 // A user or another app may edit Markdown while the provider
                 // generates its response. References still describe only the
                 // bytes actually sent, not necessarily the current vault.
@@ -4628,6 +4646,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         analysisGeneration.incrementAndGet();
         auditGeneration.incrementAndGet();
         embeddingGeneration.incrementAndGet();
+        if (activeIndexApproval != null) activeIndexApproval.revoke();
         decisionGeneration.incrementAndGet();
         if (runningDecisionLoad != null) runningDecisionLoad.cancel(true);
         if (runningAudit != null) {

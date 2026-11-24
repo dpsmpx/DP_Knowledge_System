@@ -53,7 +53,9 @@ public final class KnowledgeEmbeddingClient {
     }
 
     public static float[][] embed(final URL endpoint, final String model, final String apiKey,
-                                  final List<String> inputs) throws IOException {
+                                  final List<String> inputs,
+                                  final KnowledgeNetworkApproval.Permit approval,
+                                  final KnowledgeNetworkApproval.Purpose purpose) throws IOException {
         modelKey(endpoint, model);
         if (inputs == null || inputs.isEmpty() || inputs.size() > MAX_BATCH) {
             throw new IllegalArgumentException("Embedding input count exceeds bounds");
@@ -78,6 +80,13 @@ public final class KnowledgeEmbeddingClient {
         }
         if (body.length > MAX_REQUEST_BYTES) {
             throw new IOException("Embedding request exceeds size limit");
+        }
+        // Fail closed before opening a socket. Each batch consumes an explicit,
+        // revocable UI approval for the same endpoint/model/operation.
+        if (approval == null) throw new IOException("Embedding network consent required");
+        approval.consume(endpoint, model, purpose, inputs);
+        if (Thread.currentThread().isInterrupted()) {
+            throw new java.io.InterruptedIOException("Embedding transfer cancelled");
         }
         final HttpURLConnection connection = (HttpURLConnection) endpoint.openConnection();
         connection.setConnectTimeout(10_000);

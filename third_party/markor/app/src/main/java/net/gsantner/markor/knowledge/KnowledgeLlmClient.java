@@ -200,7 +200,8 @@ public final class KnowledgeLlmClient {
     }
 
     public static String ask(final URL endpoint, final String model,
-                             final String apiKey, final String exactPreview) throws IOException {
+                             final String apiKey, final String exactPreview,
+                             final KnowledgeNetworkApproval.Permit approval) throws IOException {
         final byte[] request;
         try {
             request = requestBody(model, exactPreview).toString().getBytes(StandardCharsets.UTF_8);
@@ -210,6 +211,12 @@ public final class KnowledgeLlmClient {
         if (request.length > MAX_REQUEST_BYTES || (apiKey != null && (apiKey.length() > 1024
                 || apiKey.indexOf('\r') >= 0 || apiKey.indexOf('\n') >= 0))) {
             throw new IOException("LLM request or session key exceeds the permitted size");
+        }
+        if (approval == null) throw new IOException("LLM network consent required");
+        approval.consume(endpoint, model, KnowledgeNetworkApproval.Purpose.GENERATION,
+                java.util.Collections.singletonList(exactPreview));
+        if (Thread.currentThread().isInterrupted()) {
+            throw new java.io.InterruptedIOException("LLM transfer cancelled");
         }
         final HttpURLConnection conn = (HttpURLConnection) endpoint.openConnection();
         conn.setConnectTimeout(10_000);
