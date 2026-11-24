@@ -746,6 +746,17 @@
     <string name="knowledge_models_delete_failed">Не удалось удалить файл модели. Заметки и журнал не изменены.</string>
     <string name="knowledge_models_imported_not_runnable">Пока это только сохранённый файл: локальное исполнение, проверка совместимости, оценки RAM и бенчмарки будут добавлены в следующих этапах. Выбор файла не запускает нейросеть.</string>
     <string name="knowledge_models_details">%1$s\nРазмер: %2$s (%3$d байт)\nФормат: %4$s (движком не проверен)\nSHA-256: %5$s</string>
+    <string name="knowledge_models_package_report">Контракт комплекта v%1$d\nПроисхождение: %2$s\nЗаявленная лицензия: %3$s\nПредполагаемый движок: %4$s (НЕ ПРОВЕРЕН)\nНедостаёт для локального запуска:%5$s</string>
+    <string name="knowledge_models_req_revision">Закреплённая ревизия репозитория / манифест комплекта</string>
+    <string name="knowledge_models_req_license">Проверенные источник и лицензия</string>
+    <string name="knowledge_models_req_tokenizer">Проверенные файлы и метаданные токенизатора</string>
+    <string name="knowledge_models_req_config">Конфигурация модели и контракт входов/выходов</string>
+    <string name="knowledge_models_req_chat">Проверенный шаблон промпта/диалога</string>
+    <string name="knowledge_models_req_pooling">Правила pooling и query/passage для эмбеддингов</string>
+    <string name="knowledge_models_req_reranker">Контракт оценки реранкера и парных входов</string>
+    <string name="knowledge_models_req_features">Схема признаков и меток персонализации</string>
+    <string name="knowledge_models_req_backend">Совместимый Android-движок и проверка ABI</string>
+    <string name="knowledge_models_req_format">Формат не поддерживается для этой роли</string>
     <string name="knowledge_models_importing">Копирование модели в приватное хранилище. Повторное нажатие отменит импорт. DPKS не вызывает сервис ИИ; выбранный файловый провайдер Android может получать собственные данные из сети.</string>
     <string name="knowledge_models_imported">Сохранено: %1$s (%2$s). Модель не запущена, файлы остаются на устройстве.</string>
     <string name="knowledge_models_import_failed">Не удалось импортировать: выберите доступный .gguf или .onnx и проверьте свободное место. Модель не запущена, заметки не изменены.</string>

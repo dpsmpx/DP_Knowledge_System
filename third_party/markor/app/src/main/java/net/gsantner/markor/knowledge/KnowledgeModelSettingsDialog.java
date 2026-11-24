@@ -212,9 +212,18 @@ final class KnowledgeModelSettingsDialog {
         final String provenance = known == null ? "" : "\n\n"
                 + context.getString(R.string.knowledge_models_catalog_provenance,
                         known.id, known.license, known.sourcePage);
+        final KnowledgeModelPackageContract.Report packageReport =
+                KnowledgeModelPackageContract.inspect(entry);
+        final StringBuilder missing = new StringBuilder();
+        for (final KnowledgeModelPackageContract.Requirement requirement : packageReport.missing) {
+            missing.append("\n• ").append(packageRequirementName(requirement));
+        }
+        final String packageSummary = context.getString(R.string.knowledge_models_package_report,
+                packageReport.schemaVersion, packageReport.sourceId,
+                packageReport.license, packageReport.engineCandidate, missing.toString());
         new AlertDialog.Builder(context)
                 .setTitle(roleName(entry.role))
-                .setMessage(summary + provenance + "\n\n"
+                .setMessage(summary + provenance + "\n\n" + packageSummary + "\n\n"
                         + context.getString(R.string.knowledge_models_imported_not_runnable))
                 .setPositiveButton(R.string.knowledge_models_select, (dialog, which) -> {
                     preferences.edit().putString(entry.role.name(), entry.sha256).apply();
@@ -225,6 +234,22 @@ final class KnowledgeModelSettingsDialog {
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showRole(entry.role))
                 .show();
+    }
+
+    private String packageRequirementName(final KnowledgeModelPackageContract.Requirement item) {
+        switch (item) {
+            case PINNED_REVISION: return context.getString(R.string.knowledge_models_req_revision);
+            case LICENSE_REVIEW: return context.getString(R.string.knowledge_models_req_license);
+            case TOKENIZER: return context.getString(R.string.knowledge_models_req_tokenizer);
+            case MODEL_CONFIG: return context.getString(R.string.knowledge_models_req_config);
+            case CHAT_TEMPLATE: return context.getString(R.string.knowledge_models_req_chat);
+            case EMBEDDING_POOLING: return context.getString(R.string.knowledge_models_req_pooling);
+            case RERANKER_SCORE: return context.getString(R.string.knowledge_models_req_reranker);
+            case FEATURE_LABEL_SCHEMA: return context.getString(R.string.knowledge_models_req_features);
+            case VALIDATED_ANDROID_BACKEND: return context.getString(R.string.knowledge_models_req_backend);
+            case UNSUPPORTED_ROLE_FORMAT: return context.getString(R.string.knowledge_models_req_format);
+            default: throw new IllegalArgumentException("Unknown package requirement");
+        }
     }
 
     private void confirmDelete(final KnowledgeModelFiles.Entry entry) {

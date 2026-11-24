@@ -746,6 +746,17 @@
     <string name="knowledge_models_delete_failed">Could not remove the model file. No note or journal was changed.</string>
     <string name="knowledge_models_imported_not_runnable">Stored file only: on-device inference, model compatibility verification, RAM estimates and benchmarks will arrive in later stages. Selecting a file does not start an AI model.</string>
     <string name="knowledge_models_details">%1$s\nSize: %2$s (%3$d bytes)\nFormat: %4$s (not runtime validated)\nSHA-256: %5$s</string>
+    <string name="knowledge_models_package_report">Package contract v%1$d\nProvenance: %2$s\nDeclared license: %3$s\nPossible runtime: %4$s (NOT VERIFIED)\nMissing before local execution:%5$s</string>
+    <string name="knowledge_models_req_revision">Pinned repository revision / package manifest</string>
+    <string name="knowledge_models_req_license">Verified source and license</string>
+    <string name="knowledge_models_req_tokenizer">Validated tokenizer metadata and files</string>
+    <string name="knowledge_models_req_config">Model configuration and input/output contract</string>
+    <string name="knowledge_models_req_chat">Prompt/chat template verification</string>
+    <string name="knowledge_models_req_pooling">Embedding pooling and query/passage rules</string>
+    <string name="knowledge_models_req_reranker">Reranker scoring and pair-input contract</string>
+    <string name="knowledge_models_req_features">Personalization feature and label schema</string>
+    <string name="knowledge_models_req_backend">Compatible Android runtime and ABI validation</string>
+    <string name="knowledge_models_req_format">Format unsupported for this role</string>
     <string name="knowledge_models_importing">Copying model into private storage. Tap Manage again to cancel. DPKS does not call an AI service; the chosen Android file provider may retrieve its own bytes over the network.</string>
     <string name="knowledge_models_imported">Stored %1$s (%2$s). No model was started; files remain local.</string>
     <string name="knowledge_models_import_failed">Import failed: use a readable .gguf or .onnx file and check free space. No model is running, and notes were not changed.</string>

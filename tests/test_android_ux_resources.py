@@ -246,6 +246,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                           "knowledge_models_resume_restart", "knowledge_models_resume_failed"):
                 self.assertIn(label, names)
 
+    def test_m1_model_package_readiness_is_not_inferred_from_weight_file(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        contract = (folder / "KnowledgeModelPackageContract.java").read_text()
+        ui = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        for marker in ("SCHEMA_VERSION = 1", "PINNED_REVISION", "LICENSE_REVIEW",
+                       "MODEL_CONFIG", "EMBEDDING_POOLING", "CHAT_TEMPLATE",
+                       "RERANKER_SCORE", "FEATURE_LABEL_SCHEMA",
+                       "VALIDATED_ANDROID_BACKEND", "UNSUPPORTED_ROLE_FORMAT",
+                       "boolean runnable()"):
+            self.assertIn(marker, contract)
+        self.assertIn("KnowledgeModelPackageContract.inspect(entry)", ui)
+        self.assertIn("packageRequirementName(requirement)", ui)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for item in ("knowledge_models_package_report", "knowledge_models_req_revision",
+                         "knowledge_models_req_tokenizer", "knowledge_models_req_backend",
+                         "knowledge_models_req_features"):
+                self.assertIn(item, names)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

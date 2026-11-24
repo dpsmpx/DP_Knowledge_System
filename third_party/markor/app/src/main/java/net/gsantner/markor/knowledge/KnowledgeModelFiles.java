@@ -60,7 +60,9 @@ final class KnowledgeModelFiles {
         for (int i = 0; i < value.length() && cleaned.length() < 72; i++) {
             final char ch = value.charAt(i);
             if (ch == '/' || ch == '\\' || Character.isISOControl(ch)
-                    || Character.getType(ch) == Character.FORMAT) continue;
+                    || Character.getType(ch) == Character.FORMAT
+                    || Character.getType(ch) == Character.LINE_SEPARATOR
+                    || Character.getType(ch) == Character.PARAGRAPH_SEPARATOR) continue;
             cleaned.append(ch);
         }
         final String label = cleaned.toString().trim();
