@@ -961,19 +961,27 @@ public final class KnowledgeDeviceQaRunner {
                 + "\nAMBER, violet supports an artificial example.";
         final String russian = "Память упомянута отдельно.\n" + padding
                 + "\nПАМЯТЬЮ — синтезом объясняется вымышленный пример.";
+        final String multiTerm = "Amber appears alone near the beginning.\n" + padding
+                + "\nViolet cobalt willow citrine form a later artificial cluster.";
         final String enExcerpt = KnowledgeLlmEvidence.excerpt(
                 english, "Tell me about amber violet");
         final String ruExcerpt = KnowledgeLlmEvidence.excerpt(
                 russian, "Расскажи, что известно про память синтез?");
+        final String multiExcerpt = KnowledgeLlmEvidence.excerpt(
+                multiTerm, "amber violet cobalt willow citrine");
         if (!enExcerpt.contains("AMBER, violet supports")
                 || enExcerpt.contains("Amber appears alone")
                 || !ruExcerpt.contains("ПАМЯТЬЮ — синтезом объясняется")
                 || ruExcerpt.contains("Память упомянута отдельно")
+                || !multiExcerpt.contains("Violet cobalt willow citrine")
+                || multiExcerpt.contains("Amber appears alone")
                 || enExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
-                || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
+                || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || multiExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
             throw new SyntheticMismatch("verdict=EXCERPT_PHRASE_PRIORITY_LOST");
         }
-        return "syntheticQuestions=2, enRuPhraseAligned=true, bounded=true, "
+        return "syntheticQuestions=3, enRuPhraseAligned=true, "
+                + "multiTermCoverageAligned=true, bounded=true, "
                 + "sourceReadOnly=true, noProviderCall=true; in-memory text only";
     }
 

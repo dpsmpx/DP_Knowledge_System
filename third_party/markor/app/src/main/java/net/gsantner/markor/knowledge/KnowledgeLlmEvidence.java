@@ -8,6 +8,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -16,6 +17,10 @@ import java.util.List;
  */
 public final class KnowledgeLlmEvidence {
     public static final int MAX_EXCERPT_CHARS = 900;
+    private static final int EXCERPT_LEADING_CONTEXT = 180;
+    private static final int EXCERPT_MIN_TRAILING_CONTEXT = 80;
+    private static final int MAX_COVERAGE_SPAN = MAX_EXCERPT_CHARS
+            - EXCERPT_LEADING_CONTEXT - EXCERPT_MIN_TRAILING_CONTEXT;
 
     public static final class Item {
         public final String path;
@@ -131,6 +136,13 @@ public final class KnowledgeLlmEvidence {
         // Keep the actual excerpt aligned to that phrase, even if a decoy
         // occurrence of one term appears far earlier in the same long note.
         int firstMatch = adjacentPhraseStart(folded, terms);
+        // If no adjacent phrase exists (or the question has 5-8 terms),
+        // prefer a short window covering more DISTINCT query words. The
+        // previous earliest-single-word fallback could omit a later cluster
+        // even when the same note matched every term somewhere in FTS4.
+        if (firstMatch < 0 && terms.size() >= 2) {
+            firstMatch = bestCoverageStart(folded, terms);
+        }
         if (firstMatch < 0) {
             for (final String term : terms) {
                 final int position = firstTokenPrefixStart(folded, term, 0);
@@ -139,7 +151,8 @@ public final class KnowledgeLlmEvidence {
                 }
             }
         }
-        final int leading = firstMatch < 0 ? 0 : Math.max(0, firstMatch - 180);
+        final int leading = firstMatch < 0 ? 0
+                : Math.max(0, firstMatch - EXCERPT_LEADING_CONTEXT);
         final int length = Math.min(MAX_EXCERPT_CHARS, text.length() - leading);
         final int end = Math.min(text.length(), leading + length);
         final String clipped = text.substring(leading, end);
@@ -157,6 +170,60 @@ public final class KnowledgeLlmEvidence {
             }
         }
         return -1;
+    }
+
+    /** Bounded O(source characters × at most 8 terms), O(8) memory. Count each
+     * source token once even if it matches overlapping query prefixes. A
+     * winning window must cover at least two distinct question terms, leave
+     * room for context after the last hit, and favor denser/earlier ties.
+     * This is a preview-location heuristic, never semantic entailment.
+     */
+    private static int bestCoverageStart(final String text, final List<String> terms) {
+        final int[] lastSeen = new int[terms.size()];
+        Arrays.fill(lastSeen, -1);
+        int bestCount = 0;
+        int bestSpan = Integer.MAX_VALUE;
+        int bestStart = -1;
+        for (int at = 0; at < text.length();) {
+            if (!Character.isLetterOrDigit(text.charAt(at))) {
+                at++;
+                continue;
+            }
+            final int tokenStart = at;
+            while (at < text.length() && Character.isLetterOrDigit(text.charAt(at))) {
+                at++;
+            }
+            int matching = -1;
+            for (int i = 0; i < terms.size(); i++) {
+                if (text.startsWith(terms.get(i), tokenStart)
+                        && (matching < 0
+                        || terms.get(i).length() > terms.get(matching).length())) {
+                    matching = i;
+                }
+            }
+            if (matching < 0) {
+                continue;
+            }
+            lastSeen[matching] = tokenStart;
+            int count = 0;
+            int earliest = tokenStart;
+            for (final int seen : lastSeen) {
+                if (seen >= 0 && tokenStart - seen <= MAX_COVERAGE_SPAN) {
+                    count++;
+                    earliest = Math.min(earliest, seen);
+                }
+            }
+            final int span = tokenStart - earliest;
+            if (count < 2) {
+                continue;
+            }
+            if (count > bestCount || (count == bestCount && span < bestSpan)) {
+                bestCount = count;
+                bestSpan = span;
+                bestStart = earliest;
+            }
+        }
+        return bestStart;
     }
 
     /** A lightweight in-text mirror of the FTS4 2-4-token phrase priority.
