@@ -474,6 +474,8 @@
     <string name="knowledge_llm_answer">Непроверенный ответ модели</string>
     <string name="knowledge_llm_unverified">НЕПОДТВЕРЖДЁННАЯ ИНТЕРПРЕТАЦИЯ ИИ — не факт, не доказательство и не решение журнала. Ссылки обозначают только использованные выдержки.</string>
     <string name="knowledge_llm_no_citations">В ответе нет корректных ссылок на пронумерованные источники. Все утверждения требуют дополнительной проверки.</string>
+    <string name="knowledge_llm_invalid_citations">Внимание: %1$d вымышленных или неправильно оформленных ссылок на источники. Сверьте весь ответ с исходными выдержками.</string>
+    <string name="knowledge_llm_unverified_quotes">Внимание: %1$d цитат не найдены дословно ни в одной из указанных выдержек. Не полагайтесь на эти цитаты.</string>
     <string name="knowledge_llm_sources">Локальные пути источников (откройте заметки для проверки):</string>
     <string name="knowledge_embedding_build">Построить эмбеддинги</string>
     <string name="knowledge_semantic_search">Смысловой поиск</string>
@@ -504,8 +506,8 @@
     <string name="knowledge_embedding_results">Приближённый смысловой поиск (точная косинусная оценка кандидатов; не доказательство)</string>
     <string name="knowledge_embedding_no_matches">Совместимые векторы заметок не найдены. Проверьте модель эмбеддингов и пересоздайте индекс.</string>
     <string name="knowledge_embedding_choose_retrieval">Подбор источников для ответа LLM</string>
-    <string name="knowledge_embedding_choose_retrieval_message">Для сервера эмбеддингов существует локальный индекс. Смысловой подбор передаст вопрос серверу только после отдельного разрешения. Лексический подбор не отправляет вопрос при поиске источников.</string>
-    <string name="knowledge_embedding_use_semantic">По эмбеддингам</string>
+    <string name="knowledge_embedding_choose_retrieval_message">Локальный смысловой индекс доступен. Гибридный поиск объединяет лексические и векторные результаты; передача вопроса серверу эмбеддингов по-прежнему требует отдельного разрешения. Лексический поиск не отправляет вопрос модели.</string>
+    <string name="knowledge_embedding_use_semantic">Гибридный поиск</string>
     <string name="knowledge_embedding_use_lexical">По словам</string>
     <string name="knowledge_scan_progress">Сканирование Markdown: %1$d заметок, просмотрено %2$d папок…</string>
     <string name="knowledge_index_progress">Обновление приватного локального индекса: %1$d/%2$d заметок…</string>

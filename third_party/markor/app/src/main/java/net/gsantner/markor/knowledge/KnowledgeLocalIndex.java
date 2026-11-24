@@ -47,11 +47,21 @@ public final class KnowledgeLocalIndex {
         public final String title;
         /** False for a preserved row not seen in the most recent partial scan. */
         public final boolean confirmedInLastScan;
+        /** Indexed file identity for LLM evidence; -1 for ordinary browsing hits. */
+        public final long modifiedAtMillis;
+        public final long sizeBytes;
 
         private Hit(final String relativePath, final String title, final boolean confirmed) {
+            this(relativePath, title, confirmed, -1, -1);
+        }
+
+        private Hit(final String relativePath, final String title, final boolean confirmed,
+                    final long modified, final long size) {
             this.relativePath = relativePath;
             this.title = title;
             confirmedInLastScan = confirmed;
+            modifiedAtMillis = modified;
+            sizeBytes = size;
         }
     }
 
@@ -482,14 +492,15 @@ public final class KnowledgeLocalIndex {
             if (generation == null) {
                 return result;
             }
-            try (Cursor c = db.rawQuery("SELECT notes.path, notes.title FROM documents_fts "
+            try (Cursor c = db.rawQuery("SELECT notes.path, notes.title, notes.modified, notes.size FROM documents_fts "
                         + "JOIN notes ON notes.id=documents_fts.docid "
                         + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
                         + "AND notes.generation=? "
                         + "ORDER BY notes.path COLLATE NOCASE LIMIT ?",
                     new String[]{safe, generation, Integer.toString(limit)})) {
                 while (c.moveToNext()) {
-                    result.add(new Hit(c.getString(0), c.getString(1), true));
+                    result.add(new Hit(c.getString(0), c.getString(1), true,
+                            c.getLong(2), c.getLong(3)));
                 }
             }
         } finally {
