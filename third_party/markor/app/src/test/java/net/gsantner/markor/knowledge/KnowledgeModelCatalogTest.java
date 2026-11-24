@@ -23,6 +23,8 @@ public class KnowledgeModelCatalogTest {
             assertTrue(item.downloadUrl.startsWith(item.sourcePage + "/resolve/main/"));
             assertFalse(item.license.isEmpty());
             assertNotNull(KnowledgeModelDownload.parseSource(item.downloadUrl));
+            assertEquals(KnowledgeModelDownload.parseSource(item.downloadUrl).filename,
+                    item.filename);
             assertSame(item, KnowledgeModelCatalog.findInstalled(item.role, item.expectedSha256));
         }
         for (final KnowledgeModelPolicy.Role role : KnowledgeModelPolicy.Role.values()) {

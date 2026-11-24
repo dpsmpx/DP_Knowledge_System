@@ -122,6 +122,20 @@ public class KnowledgeModelFilesTest {
         } finally { cleanup(root); }
     }
 
+    @Test public void emptyTrustedCheckpointCanBeRestartedOrDiscarded() throws Exception {
+        final File root = Files.createTempDirectory("dpks-empty-resume").toFile();
+        try {
+            final String digest = sha256(gguf());
+            final KnowledgeModelFiles store = new KnowledgeModelFiles(root);
+            final File zero = new File(root, "resume-" + digest + ".gguf.part");
+            assertTrue(zero.createNewFile());
+            assertEquals(0, store.resumeBytes(digest, "q4.gguf"));
+            store.discardResume(digest, "q4.gguf");
+            assertFalse(zero.exists());
+            assertTrue(store.installed().isEmpty());
+        } finally { cleanup(root); }
+    }
+
     private static String repeat(final char ch, final int length) {
         final char[] chars = new char[length];
         Arrays.fill(chars, ch);

@@ -9,7 +9,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
-import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -97,6 +96,32 @@ final class KnowledgeModelFiles {
         return privateFile(hash + extension(format));
     }
 
+    /** Trusted-digest-only checkpoint. No URL, token or personal path is persisted. */
+    private File resumeFile(final String expectedSha256, final Format format) throws IOException {
+        if (!validHash(expectedSha256) || format == null) {
+            throw new IOException("Resumable download requires an expected SHA-256");
+        }
+        return privateFile("resume-" + expectedSha256 + extension(format) + ".part");
+    }
+
+    synchronized long resumeBytes(final String expectedSha256, final String filename)
+            throws IOException {
+        final File part = resumeFile(expectedSha256, requestedFormat(filename));
+        if (!part.exists()) return 0;
+        if (!part.isFile()) {
+            throw new IOException("Invalid model download checkpoint");
+        }
+        return part.length();
+    }
+
+    synchronized void discardResume(final String expectedSha256, final String filename)
+            throws IOException {
+        final File part = resumeFile(expectedSha256, requestedFormat(filename));
+        if (part.exists() && (!part.isFile() || !part.delete())) {
+            throw new IOException("Could not discard model download checkpoint");
+        }
+    }
+
     private File metadataFile(final String hash, final KnowledgeModelPolicy.Role role)
             throws IOException {
         if (!validHash(hash) || role == null) throw new IOException("Invalid model identity");
@@ -145,7 +170,7 @@ final class KnowledgeModelFiles {
             final byte[] buffer = new byte[BUFFER_BYTES];
             final byte[] beginning = new byte[8];
             long written = 0;
-            try (OutputStream output = new FileOutputStream(pending)) {
+            try (FileOutputStream output = new FileOutputStream(pending)) {
                 int count;
                 while ((count = input.read(buffer)) != -1) {
                     if (Thread.currentThread().isInterrupted()) {
@@ -162,6 +187,7 @@ final class KnowledgeModelFiles {
                         throw new IOException("Insufficient space for safe import");
                     }
                 }
+                output.getFD().sync();
             }
             if (written < 16) throw new IOException("Model file is too small");
             if (format == Format.GGUF) {
@@ -201,6 +227,124 @@ final class KnowledgeModelFiles {
         } finally {
             // An interrupted/invalid import has no visible metadata entry.
             if (pending.exists()) pending.delete();
+            if (!recorded && createdBlob != null) createdBlob.delete();
+        }
+    }
+
+    /**
+     * Append a server-validated HTTP Range response to a private checkpoint.
+     * Rehash EVERY saved byte; a completed blob is only registered if it matches
+     * the user-provided trusted digest. Network failures retain the checkpoint,
+     * while bad content/header/digest deletes it. No resume without a digest.
+     */
+    synchronized Entry importResumed(final InputStream input, final String originalName,
+                                     final KnowledgeModelPolicy.Role role,
+                                     final String expectedSha256, final long resumeFrom,
+                                     final Progress progress) throws IOException {
+        if (input == null || role == null || resumeFrom < 0) {
+            throw new IOException("Invalid resumed model download");
+        }
+        final Format format = requestedFormat(originalName);
+        final File pending = resumeFile(expectedSha256, format);
+        prepareDirectory();
+        if (resumeFrom == 0) {
+            discardResume(expectedSha256, originalName);
+        } else if (!pending.isFile() || pending.length() != resumeFrom) {
+            throw new IOException("Model download checkpoint changed");
+        }
+        final MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IOException("SHA-256 unavailable", impossible);
+        }
+        final byte[] beginning = new byte[8];
+        final byte[] buffer = new byte[BUFFER_BYTES];
+        long written = 0;
+        File createdBlob = null;
+        boolean recorded = false;
+        boolean invalidContent = false;
+        try {
+            if (resumeFrom > 0) {
+                try (InputStream saved = new FileInputStream(pending)) {
+                    int count;
+                    while ((count = saved.read(buffer)) != -1) {
+                        if (Thread.currentThread().isInterrupted()) {
+                            throw new InterruptedIOException("Model resume cancelled");
+                        }
+                        if (count == 0) continue;
+                        final int capture = (int) Math.min(count, Math.max(0L, 8L - written));
+                        if (capture > 0) {
+                            System.arraycopy(buffer, 0, beginning, (int) written, capture);
+                        }
+                        digest.update(buffer, 0, count);
+                        written += count;
+                    }
+                }
+                if (written != resumeFrom) {
+                    throw new IOException("Model checkpoint changed while reading");
+                }
+            }
+            try (FileOutputStream output = new FileOutputStream(pending, resumeFrom > 0)) {
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        throw new InterruptedIOException("Model download cancelled");
+                    }
+                    if (count == 0) continue;
+                    final int capture = (int) Math.min(count, Math.max(0L, 8L - written));
+                    if (capture > 0) {
+                        System.arraycopy(buffer, 0, beginning, (int) written, capture);
+                    }
+                    output.write(buffer, 0, count);
+                    digest.update(buffer, 0, count);
+                    written += count;
+                    if (progress != null) progress.onBytes(written);
+                    if (directory.getUsableSpace() < MIN_FREE_BYTES) {
+                        throw new IOException("Insufficient space for safe download");
+                    }
+                }
+                output.getFD().sync();
+            }
+            invalidContent = true;
+            if (written < 16) throw new IOException("Model file is too small");
+            if (format == Format.GGUF) {
+                final int version = (beginning[4] & 255) | ((beginning[5] & 255) << 8)
+                        | ((beginning[6] & 255) << 16) | ((beginning[7] & 255) << 24);
+                if (beginning[0] != 'G' || beginning[1] != 'G'
+                        || beginning[2] != 'U' || beginning[3] != 'F'
+                        || (version != 2 && version != 3)) {
+                    throw new IOException("Invalid GGUF container header");
+                }
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("Model download cancelled before installation");
+            }
+            if (!expectedSha256.equals(hex(digest.digest()))) {
+                throw new IOException("Resumed model SHA-256 does not match expected digest");
+            }
+            invalidContent = false;
+            final File target = modelFile(expectedSha256, format);
+            if (target.exists()) {
+                if (!target.isFile() || target.length() != written) {
+                    throw new IOException("Conflicting existing model blob");
+                }
+            } else if (!pending.renameTo(target)) {
+                throw new IOException("Could not commit resumed model");
+            } else {
+                createdBlob = target;
+            }
+            final Entry entry = new Entry(role, format, expectedSha256,
+                    safeName(originalName), written);
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("Model download cancelled before registration");
+            }
+            final File metadata = metadataFile(expectedSha256, role);
+            if (!metadata.exists()) writeMetadata(metadata, entry);
+            recorded = true;
+            return entry;
+        } finally {
+            if ((recorded || invalidContent) && pending.exists()) pending.delete();
             if (!recorded && createdBlob != null) createdBlob.delete();
         }
     }

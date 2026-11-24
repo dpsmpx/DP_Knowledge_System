@@ -10,6 +10,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Explicit public HTTPS model-file transfer, never a provider for note text.
@@ -20,6 +22,8 @@ final class KnowledgeModelDownload {
     private static final int MAX_REDIRECTS = 5;
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 25000;
+    private static final Pattern CONTENT_RANGE =
+            Pattern.compile("bytes ([0-9]+)-([0-9]+)/([0-9]+)");
 
     interface Progress { void onBytes(long copied, long announcedTotal); }
     interface ConnectionFactory { HttpURLConnection open(URL url) throws IOException; }
@@ -95,6 +99,9 @@ final class KnowledgeModelDownload {
                                                final Progress progress,
                                                final ConnectionFactory factory) throws IOException {
         final Source source = parseSource(rawUrl);
+        final boolean trustedResume = expectedSha256 != null && !expectedSha256.isEmpty();
+        final long checkpoint = trustedResume
+                ? files.resumeBytes(expectedSha256, source.filename) : 0;
         URI current = source.uri;
         for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
             if (Thread.currentThread().isInterrupted()) {
@@ -106,6 +113,9 @@ final class KnowledgeModelDownload {
                 connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
                 connection.setReadTimeout(READ_TIMEOUT_MS);
                 connection.setRequestProperty("Accept-Encoding", "identity");
+                if (checkpoint > 0) {
+                    connection.setRequestProperty("Range", "bytes=" + checkpoint + "-");
+                }
                 final int status = connection.getResponseCode();
                 if (status == HttpURLConnection.HTTP_MOVED_PERM
                         || status == HttpURLConnection.HTTP_MOVED_TEMP
@@ -118,7 +128,8 @@ final class KnowledgeModelDownload {
                     current = secureUri(current.resolve(location).toString());
                     continue;
                 }
-                if (status != HttpURLConnection.HTTP_OK) {
+                if (status != HttpURLConnection.HTTP_OK
+                        && status != HttpURLConnection.HTTP_PARTIAL) {
                     throw new IOException("Model download HTTP " + status);
                 }
                 final String contentType = connection.getContentType();
@@ -127,19 +138,61 @@ final class KnowledgeModelDownload {
                         || contentType.toLowerCase(Locale.ROOT).startsWith("application/xml"))) {
                     throw new IOException("URL returned a web page instead of weights");
                 }
-                final long total = connection.getContentLengthLong();
-                if (total == 0) throw new IOException("Empty model download");
-                try (InputStream remote = new LengthCheckedStream(connection.getInputStream(), total)) {
-                    return files.importFile(remote, source.filename, role, expectedSha256,
-                            copied -> {
-                                if (progress != null) progress.onBytes(copied, total);
-                            });
+                final long responseBytes = connection.getContentLengthLong();
+                final long offset;
+                final long total;
+                if (status == HttpURLConnection.HTTP_PARTIAL) {
+                    if (checkpoint == 0) {
+                        throw new IOException("Unrequested partial model response");
+                    }
+                    final long[] range = checkedContentRange(
+                            connection.getHeaderField("Content-Range"), checkpoint);
+                    offset = checkpoint;
+                    total = range[1];
+                    if (responseBytes != range[0]) {
+                        throw new IOException("Partial response length does not match range");
+                    }
+                } else {
+                    // A server may ignore Range. A full 200 response explicitly
+                    // restarts from byte zero, never appends to old content.
+                    offset = 0;
+                    total = responseBytes;
+                }
+                if (responseBytes == 0) throw new IOException("Empty model download");
+                try (InputStream remote = new LengthCheckedStream(
+                        connection.getInputStream(), responseBytes)) {
+                    final KnowledgeModelFiles.Progress imported = copied -> {
+                        if (progress != null) progress.onBytes(copied, total);
+                    };
+                    return trustedResume
+                            ? files.importResumed(remote, source.filename, role,
+                                    expectedSha256, offset, imported)
+                            : files.importFile(remote, source.filename, role,
+                                    expectedSha256, imported);
                 }
             } finally {
                 connection.disconnect();
             }
         }
         throw new IOException("Too many download redirects");
+    }
+
+    /** [segment bytes, complete bytes]; never accept an ambiguous Range reply. */
+    private static long[] checkedContentRange(final String header, final long offset)
+            throws IOException {
+        final Matcher match = CONTENT_RANGE.matcher(header == null ? "" : header.trim());
+        if (!match.matches()) throw new IOException("Missing exact Content-Range");
+        try {
+            final long first = Long.parseLong(match.group(1));
+            final long last = Long.parseLong(match.group(2));
+            final long total = Long.parseLong(match.group(3));
+            if (first != offset || last < first || last != total - 1 || total < 16) {
+                throw new IOException("Mismatched model Content-Range");
+            }
+            return new long[]{last - first + 1, total};
+        } catch (NumberFormatException invalid) {
+            throw new IOException("Invalid model Content-Range", invalid);
+        }
     }
 
     private static final class LengthCheckedStream extends FilterInputStream {

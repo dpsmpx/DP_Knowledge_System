@@ -21,6 +21,7 @@ final class KnowledgeModelCatalog {
         final String title;
         final String sourcePage;
         final String downloadUrl;
+        final String filename;
         final String expectedSha256;
         final String license;
         final int approximateMegabytes;
@@ -41,6 +42,7 @@ final class KnowledgeModelCatalog {
                         || !directUrl.startsWith(repositoryPage + "/resolve/main/")) {
                     throw new IllegalArgumentException("Artifact source is not its declared model");
                 }
+                filename = source.filename;
             } catch (IOException invalid) {
                 throw new IllegalArgumentException("Invalid direct artifact URL", invalid);
             }

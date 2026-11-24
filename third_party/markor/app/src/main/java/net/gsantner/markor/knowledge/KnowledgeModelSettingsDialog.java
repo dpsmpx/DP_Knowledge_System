@@ -146,7 +146,8 @@ final class KnowledgeModelSettingsDialog {
                                                 ? context.getString(R.string.knowledge_models_sha_not_provided)
                                                 : digest))
                                 .setPositiveButton(R.string.knowledge_models_download_confirm_action,
-                                        (confirm, button) -> downloader.start(role, url, digest))
+                                        (confirm, button) -> beginTrustedDownload(
+                                                role, url, digest, source.filename))
                                 .setNegativeButton(android.R.string.cancel, (confirm, button) ->
                                         showRole(role))
                                 .show();
@@ -160,6 +161,46 @@ final class KnowledgeModelSettingsDialog {
                 })
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> showRole(role))
                 .show();
+    }
+
+    /** A stored partial is only reused by a new explicit user action. */
+    private void beginTrustedDownload(final KnowledgeModelPolicy.Role role, final String url,
+                                      final String expectedSha, final String filename) {
+        if (expectedSha == null || expectedSha.isEmpty()) {
+            downloader.start(role, url, ""); // No digest means no resume checkpoint.
+            return;
+        }
+        try {
+            final long saved = files.resumeBytes(expectedSha, filename);
+            if (saved == 0) {
+                downloader.start(role, url, expectedSha);
+                return;
+            }
+            new AlertDialog.Builder(context)
+                    .setTitle(R.string.knowledge_models_resume_title)
+                    .setMessage(context.getString(R.string.knowledge_models_resume_message,
+                            filename, formatSize(saved)))
+                    .setPositiveButton(R.string.knowledge_models_resume_continue,
+                            (dialog, which) -> downloader.start(role, url, expectedSha))
+                    .setNeutralButton(R.string.knowledge_models_resume_restart,
+                            (dialog, which) -> {
+                                try {
+                                    files.discardResume(expectedSha, filename);
+                                    downloader.start(role, url, expectedSha);
+                                } catch (IOException invalid) {
+                                    new AlertDialog.Builder(context)
+                                            .setMessage(R.string.knowledge_models_resume_failed)
+                                            .setPositiveButton(android.R.string.ok, null)
+                                            .show();
+                                }
+                            })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        } catch (IOException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_resume_failed)
+                    .setPositiveButton(android.R.string.ok, null).show();
+        }
     }
 
     private void showDetails(final KnowledgeModelFiles.Entry entry) {
@@ -264,8 +305,9 @@ final class KnowledgeModelSettingsDialog {
                 .setTitle(artifact.title)
                 .setMessage(message)
                 .setPositiveButton(R.string.knowledge_models_download_confirm_action,
-                        (dialog, which) -> downloader.start(artifact.role, artifact.downloadUrl,
-                                artifact.expectedSha256))
+                        (dialog, which) -> beginTrustedDownload(artifact.role,
+                                artifact.downloadUrl, artifact.expectedSha256,
+                                artifact.filename))
                 .setNeutralButton(R.string.knowledge_models_catalog_open_source,
                         (dialog, which) -> {
                             try {

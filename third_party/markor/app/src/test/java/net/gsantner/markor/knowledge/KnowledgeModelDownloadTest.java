@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Queue;
@@ -78,6 +79,105 @@ public class KnowledgeModelDownloadTest {
         } finally { cleanup(root); }
     }
 
+    @Test public void trustedDigestResumesOnlyAnExactRemainingHttpRange() throws Exception {
+        final File root = Files.createTempDirectory("dpks-resume-valid").toFile();
+        try {
+            final byte[] bytes = gguf();
+            final String digest = digest(bytes);
+            final KnowledgeModelFiles shelf = new KnowledgeModelFiles(root);
+            final FakeConnection truncated = new FakeConnection(200, null,
+                    Arrays.copyOfRange(bytes, 0, 20), bytes.length);
+            assertFailsWithoutInstalling(shelf, truncated, digest);
+            assertEquals(20, shelf.resumeBytes(digest, "q4.gguf"));
+            final FakeConnection resumed = new FakeConnection(206, null,
+                    Arrays.copyOfRange(bytes, 20, 64), 44, "bytes 20-63/64");
+            final long[] progress = {-1};
+            final KnowledgeModelFiles.Entry entry = KnowledgeModelDownload.download(
+                    FILE_URL, KnowledgeModelPolicy.Role.GENERATION, digest, shelf,
+                    (copied, total) -> { progress[0] = copied; assertEquals(64, total); },
+                    url -> resumed);
+            assertEquals("bytes=20-", resumed.getRequestProperty("Range"));
+            assertEquals(64, progress[0]);
+            assertEquals(digest, entry.sha256);
+            assertEquals(1, shelf.installed().size());
+            assertEquals(0, shelf.resumeBytes(digest, "q4.gguf"));
+        } finally { cleanup(root); }
+    }
+
+    @Test public void wrongRangeAndUnsolicited206CannotMixModelBytes() throws Exception {
+        final File root = Files.createTempDirectory("dpks-resume-refuse").toFile();
+        try {
+            final byte[] bytes = gguf();
+            final String digest = digest(bytes);
+            final KnowledgeModelFiles shelf = new KnowledgeModelFiles(root);
+            assertFailsWithoutInstalling(shelf, new FakeConnection(200, null,
+                    Arrays.copyOfRange(bytes, 0, 20), 64), digest);
+            for (final String mismatch : Arrays.asList("bytes 19-63/64",
+                    "bytes 20-62/64", "bytes */64", "bytes 20-63/65")) {
+                assertFailsWithoutInstalling(shelf, new FakeConnection(206, null,
+                        Arrays.copyOfRange(bytes, 20, 64), 44, mismatch), digest);
+                assertEquals(20, shelf.resumeBytes(digest, "q4.gguf"));
+            }
+            assertTrue(shelf.installed().isEmpty());
+            // Even a well-formed 206 is not acceptable on a fresh download.
+            shelf.discardResume(digest, "q4.gguf");
+            assertFailsWithoutInstalling(shelf, new FakeConnection(206, null,
+                    Arrays.copyOfRange(bytes, 20, 64), 44, "bytes 20-63/64"), digest);
+        } finally { cleanup(root); }
+    }
+
+    @Test public void ignoredRangeRestartsSafelyAndBadShaDiscardsCheckpoint() throws Exception {
+        final File root = Files.createTempDirectory("dpks-resume-restart").toFile();
+        try {
+            final byte[] bytes = gguf();
+            final String digest = digest(bytes);
+            final KnowledgeModelFiles shelf = new KnowledgeModelFiles(root);
+            assertFailsWithoutInstalling(shelf, new FakeConnection(200, null,
+                    Arrays.copyOfRange(bytes, 0, 16), 64), digest);
+            final FakeConnection ignoredRange = new FakeConnection(200, null, bytes, bytes.length);
+            final KnowledgeModelFiles.Entry entry = KnowledgeModelDownload.download(
+                    FILE_URL, KnowledgeModelPolicy.Role.GENERATION, digest, shelf,
+                    null, url -> ignoredRange);
+            assertEquals("bytes=16-", ignoredRange.getRequestProperty("Range"));
+            assertEquals(digest, entry.sha256);
+            assertEquals(0, shelf.resumeBytes(digest, "q4.gguf"));
+            final String untrueDigest = repeat('0', 64);
+            assertFailsWithoutInstalling(shelf, new FakeConnection(200, null,
+                    Arrays.copyOfRange(bytes, 0, 20), 64), untrueDigest);
+            assertEquals(20, shelf.resumeBytes(untrueDigest, "q4.gguf"));
+            assertFailsWithoutInstalling(shelf, new FakeConnection(206, null,
+                    Arrays.copyOfRange(bytes, 20, 64), 44, "bytes 20-63/64"), untrueDigest);
+            assertEquals("Wrong digest must discard all untrusted partial bytes", 0,
+                    shelf.resumeBytes(untrueDigest, "q4.gguf"));
+            assertEquals(1, shelf.installed().size());
+        } finally { cleanup(root); }
+    }
+
+    private static void assertFailsWithoutInstalling(final KnowledgeModelFiles shelf,
+            final FakeConnection response, final String expectedSha) throws Exception {
+        final int original = shelf.installed().size();
+        try {
+            KnowledgeModelDownload.download(FILE_URL, KnowledgeModelPolicy.Role.GENERATION,
+                    expectedSha, shelf, null, url -> response);
+            fail("Failed to reject incomplete or mismatched model response");
+        } catch (IOException expected) { }
+        assertEquals("Failed transfer must not register another model", original,
+                shelf.installed().size());
+    }
+
+    private static String digest(final byte[] bytes) throws Exception {
+        final byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
+        final StringBuilder result = new StringBuilder();
+        for (final byte value : hash) result.append(String.format("%02x", value & 255));
+        return result.toString();
+    }
+
+    private static String repeat(final char value, final int count) {
+        final char[] chars = new char[count];
+        Arrays.fill(chars, value);
+        return new String(chars);
+    }
+
     private static void assertFailsWithoutInstalling(final KnowledgeModelFiles shelf,
                                                      final FakeConnection response) throws Exception {
         try {
@@ -105,19 +205,29 @@ public class KnowledgeModelDownloadTest {
         private final String location;
         private final byte[] bytes;
         private final long length;
+        private final String contentRange;
 
         FakeConnection(final int statusCode, final String redirect,
                        final byte[] body, final long announcedSize) throws Exception {
+            this(statusCode, redirect, body, announcedSize, null);
+        }
+
+        FakeConnection(final int statusCode, final String redirect,
+                       final byte[] body, final long announcedSize,
+                       final String announcedRange) throws Exception {
             super(new URL(FILE_URL));
             status = statusCode;
             location = redirect;
             bytes = body;
             length = announcedSize;
+            contentRange = announcedRange;
         }
 
         @Override public int getResponseCode() { return status; }
         @Override public String getHeaderField(final String field) {
-            return "Location".equals(field) ? location : null;
+            if ("Location".equals(field)) return location;
+            if ("Content-Range".equals(field)) return contentRange;
+            return null;
         }
         @Override public String getContentType() { return "application/octet-stream"; }
         @Override public long getContentLengthLong() { return length; }
