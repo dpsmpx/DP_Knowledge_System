@@ -172,6 +172,42 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void excerptWithFiveTermsPrefersLaterClusterOverEarlyIsolatedMatch() {
+        final String source = "Amber appears alone at the beginning.\n"
+                + new String(new char[1400]).replace('\0', 'x')
+                + "\nViolet cobalt willow citrine are together in the later paragraph.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(
+                source, "amber violet cobalt willow citrine");
+        assertTrue(excerpt.contains("Violet cobalt willow citrine"));
+        assertFalse(excerpt.contains("Amber appears alone"));
+        assertTrue(excerpt.length() <= KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4);
+        // Five terms intentionally do not trigger the 2-4-term phrase pass.
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(
+                "amber violet cobalt willow citrine"));
+    }
+
+    @Test
+    public void excerptWithoutAdjacentPhrasePrefersDenserEvidenceWindow() {
+        final String source = "Amber and a remote violet reference.\n"
+                + new String(new char[1400]).replace('\0', 'x')
+                + "\nAmber and violet appear near each other here.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(source, "amber violet");
+        assertTrue(excerpt.contains("Amber and violet appear near each other"));
+        assertFalse(excerpt.contains("remote violet reference"));
+    }
+
+    @Test
+    public void excerptDoesNotCountTwoQueryPrefixesFromOneSourceToken() {
+        final String source = "Amberlight alone is not two distinct words.\n"
+                + new String(new char[1400]).replace('\0', 'x')
+                + "\nAmber cobalt describe the later evidence.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(
+                source, "amber amberlight cobalt willow citrine");
+        assertTrue(excerpt.contains("Amber cobalt describe the later evidence"));
+        assertFalse(excerpt.contains("Amberlight alone"));
+    }
+
+    @Test
     public void evidenceMustStillMatchIndexedFileMetadata() throws Exception {
         final File file = File.createTempFile("dpks-evidence-", ".md");
         try {

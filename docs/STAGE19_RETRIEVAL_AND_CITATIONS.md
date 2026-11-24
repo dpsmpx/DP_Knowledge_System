@@ -154,6 +154,20 @@ even if every reference and quotation passes the checks below.
     QA use artificial long notes; the new device step is not yet physically
     verified. The excerpt is still a heuristic, not proof that the complete
     note supports the model's answer, and user consent remains mandatory.
+18. For longer **5–8-term questions** (where FTS4 intentionally does not use
+    an adjacent-phrase pass), or when a short phrase is absent, the excerpt
+    selector now prefers a bounded window containing the most **distinct**
+    query terms, rather than an unrelated earliest single word. It examines
+    the verified note text once, retains at most eight recent term positions,
+    counts a source token only once even if it matches overlapping prefixes,
+    and favors a denser then earlier window on ties. The 900-character window
+    retains 180 characters of leading context and at least 80 after the last
+    matched term. A true adjacent 2–4-term phrase still takes precedence.
+    English/JVM regressions cover long and nonadjacent queries, tie density
+    and overlapping prefixes; `CITE-EXCERPT-19` also tests a synthetic
+    multi-term question in memory. This is **local lexical coverage**, not
+    entailment or a guarantee that every relevant part of a long note fits
+    in one excerpt. Physical Android QA remains pending.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -195,7 +209,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   syntax checks, Python label-based opposing-statement and synonym-negative
   tests, and Android synthetic `LEX-PHRASE-19` are included. Phrase-aligned
   lexical excerpt selection has separate English/Russian JVM and
-  `CITE-EXCERPT-19` synthetic device regressions.
+  `CITE-EXCERPT-19` synthetic device regressions, including multi-term
+  coverage versus an earlier isolated hit.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,

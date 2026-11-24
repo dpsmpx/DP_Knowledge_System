@@ -23,9 +23,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("final List<String> selected = ftsEvidenceTerms(question);", parser)
         self.assertIn("KnowledgeMarkdownMetadata.ftsEvidenceTerms(question)", evidence)
         self.assertLess(evidence.index("adjacentPhraseStart(folded, terms)"),
+                        evidence.index("bestCoverageStart(folded, terms)"))
+        self.assertLess(evidence.index("bestCoverageStart(folded, terms)"),
                         evidence.index("firstTokenPrefixStart(folded, term, 0)"))
         self.assertIn('step("CITE-EXCERPT-19",', qa)
         self.assertIn("EXCERPT_PHRASE_PRIORITY_LOST", qa)
+        self.assertIn("multiTermCoverageAligned=true", qa)
 
     def test_llm_answer_warns_when_sources_change_during_generation(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
