@@ -477,6 +477,7 @@
     <string name="knowledge_llm_invalid_citations">Warning: %1$d invented or malformed source references. Verify the whole response against the actual excerpts.</string>
     <string name="knowledge_llm_unverified_quotes">Warning: %1$d quoted passages have no verbatim support in nearby cited excerpts. Do not rely on these quotations.</string>
     <string name="knowledge_llm_mismatched_quote_citations">Warning: %1$d nearby quote citations point to excerpts that do not contain the quoted words. Check each reference.</string>
+    <string name="knowledge_llm_uncited_prose_spans">Warning: %1$d substantive text spans have no valid source citation in the same sentence or line. This is a formatting heuristic, not a factuality check; inspect the entire answer.</string>
     <string name="knowledge_llm_sources">Local source paths used (open notes to verify):</string>
     <string name="knowledge_embedding_build">Build embeddings</string>
     <string name="knowledge_semantic_search">Semantic search</string>

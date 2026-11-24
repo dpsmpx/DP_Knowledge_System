@@ -145,6 +145,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
                 step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
+                step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
@@ -903,6 +904,29 @@ public final class KnowledgeDeviceQaRunner {
         return "syntheticSources=2, localQuotesVerified=true, "
                 + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true; "
                 + "no model request or selected vault access";
+    }
+
+    /** Code samples cannot masquerade as cited claims; content is synthetic. */
+    private String checkSyntheticCitationCoverage() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("synthetic-one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("synthetic-two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review covered = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Amber violet is false [2].", sources);
+        final KnowledgeLlmCitationAudit.Review uncited = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Another unsupported synthetic claim is asserted.",
+                sources);
+        final KnowledgeLlmCitationAudit.Review spoofed = KnowledgeLlmCitationAudit.inspect(
+                "```\nAmber violet is true [1].\n```\n"
+                        + "Another unsupported synthetic claim is asserted.", sources);
+        if (covered.uncitedProseSpans != 0 || uncited.uncitedProseSpans != 1
+                || !uncited.hasValidReferences() || spoofed.hasValidReferences()
+                || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1) {
+            throw new SyntheticMismatch("verdict=UNCITED_CLAIM_OR_CODE_REFERENCE_LAUNDERING");
+        }
+        return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
+                + "codeFenceCitationsExcluded=true, heuristicNotSemanticProof=true; "
+                + "no network or selected vault access";
     }
 
     /** Exercise decision preview, append-only retraction and stale-head rejection. */

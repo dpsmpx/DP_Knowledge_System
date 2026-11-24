@@ -30,6 +30,21 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_llm_mismatched_quote_citations", names)
 
+    def test_llm_structural_citation_coverage_cannot_use_markdown_code(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("maskMarkdownCode(answer)", "countUncitedProseSpans(",
+                       "uncitedProseSpans", "uncitedSubstantiveSpan("):
+            self.assertIn(marker, audit)
+        self.assertIn("R.string.knowledge_llm_uncited_prose_spans", hub)
+        self.assertIn('step("CITE-COVER-19",', qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_uncited_prose_spans", names)
+
     def test_lexical_evidence_boosts_short_phrases_without_dropping_fallback(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         index = (folder / "KnowledgeLocalIndex.java").read_text()

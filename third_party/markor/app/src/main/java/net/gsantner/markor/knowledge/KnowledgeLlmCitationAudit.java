@@ -18,6 +18,8 @@ public final class KnowledgeLlmCitationAudit {
     private static final Pattern NUMBER = Pattern.compile("[1-9][0-9]?");
     private static final Pattern QUOTE = Pattern.compile("«([^»\\r\\n]{4,240})»|“([^”\\r\\n]{4,240})”");
     private static final int MAX_LOCAL_CITATION_GAP = 180;
+    private static final int MIN_PROSE_LETTERS = 16;
+    private static final int MIN_PROSE_WORDS = 3;
 
     private static final class Citation {
         final int start;
@@ -51,14 +53,17 @@ public final class KnowledgeLlmCitationAudit {
         public final int quotedPassages;
         public final int unverifiedQuotes;
         public final int mismatchedQuoteCitations;
+        /** Formatting heuristic only; these spans are not factuality judgments. */
+        public final int uncitedProseSpans;
 
         Review(final int count, final int invalid, final int quotes, final int unsupported,
-               final int mismatched) {
+               final int mismatched, final int uncited) {
             referenceCount = count;
             invalidReferences = invalid;
             quotedPassages = quotes;
             unverifiedQuotes = unsupported;
             mismatchedQuoteCitations = mismatched;
+            uncitedProseSpans = uncited;
         }
 
         public boolean hasValidReferences() {
@@ -75,11 +80,35 @@ public final class KnowledgeLlmCitationAudit {
                 || sources.size() > KnowledgeLlmClient.MAX_EVIDENCE || answer.length() > 12_000) {
             throw new IllegalArgumentException("Unbounded or absent LLM citation input");
         }
+        // The model can echo fake [1] references inside a fenced example or
+        // inline code. Preserve offsets while excluding those from evidence.
+        final String visible = maskMarkdownCode(answer);
+        final List<Quotation> quotes = new ArrayList<>();
+        final Matcher quotations = QUOTE.matcher(visible);
+        while (quotations.find()) {
+            quotes.add(new Quotation(quotations.start(), quotations.end(),
+                    quotations.group(1) != null ? quotations.group(1) : quotations.group(2)));
+        }
         final List<Citation> markers = new ArrayList<>();
         int count = 0;
         int invalid = 0;
-        final Matcher citations = BRACKETS.matcher(answer);
+        final Matcher citations = BRACKETS.matcher(visible);
         while (citations.find()) {
+            boolean quotedLabel = false;
+            for (final Quotation quote : quotes) {
+                if (citations.start() >= quote.start && citations.end() <= quote.end) {
+                    quotedLabel = true;
+                    break;
+                }
+            }
+            if (quotedLabel) continue;
+            // [1](url) is a Markdown link label, not our standalone [1] source
+            // citation. The same applies to a bracket nested inside [[1]].
+            if ((citations.end() < visible.length() && visible.charAt(citations.end()) == '(')
+                    || (citations.start() > 0 && visible.charAt(citations.start() - 1) == '[')
+                    || (citations.end() < visible.length() && visible.charAt(citations.end()) == ']')) {
+                continue;
+            }
             final String label = citations.group(1);
             if (NUMBER.matcher(label).matches()) {
                 final int number = Integer.parseInt(label);
@@ -97,19 +126,13 @@ public final class KnowledgeLlmCitationAudit {
                 markers.add(new Citation(citations.start(), citations.end(), -1));
             }
         }
-        final List<Quotation> quotes = new ArrayList<>();
-        final Matcher quotations = QUOTE.matcher(answer);
-        while (quotations.find()) {
-            quotes.add(new Quotation(quotations.start(), quotations.end(),
-                    quotations.group(1) != null ? quotations.group(1) : quotations.group(2)));
-        }
         int unsupported = 0;
         int mismatched = 0;
         for (int i = 0; i < quotes.size(); i++) {
             final Quotation quote = quotes.get(i);
             final int nextQuote = i + 1 < quotes.size() ? quotes.get(i + 1).start : answer.length();
             final int previousQuote = i > 0 ? quotes.get(i - 1).end : 0;
-            final List<Citation> local = nearestLocalCitations(answer, quote, previousQuote,
+            final List<Citation> local = nearestLocalCitations(visible, quote, previousQuote,
                     nextQuote, markers);
             boolean found = false;
             for (final Citation marker : local) {
@@ -129,7 +152,140 @@ public final class KnowledgeLlmCitationAudit {
             }
             if (!found) unsupported++;
         }
-        return new Review(count, invalid, quotes.size(), unsupported, mismatched);
+        return new Review(count, invalid, quotes.size(), unsupported, mismatched,
+                countUncitedProseSpans(visible, markers));
+    }
+
+    /** Markdown code is not the model's cited prose. Mask without changing
+     * character offsets so every other audit can still locate its markers.
+     * Unclosed fences and inline backticks are conservatively masked to EOL.
+     */
+    private static String maskMarkdownCode(final String answer) {
+        final StringBuilder visible = new StringBuilder(answer);
+        char fenceChar = 0;
+        int fenceLength = 0;
+        for (int lineStart = 0; lineStart < answer.length();) {
+            int lineEnd = answer.indexOf('\n', lineStart);
+            if (lineEnd < 0) lineEnd = answer.length();
+            int first = lineStart;
+            while (first < lineEnd && first - lineStart < 4 && answer.charAt(first) == ' ') {
+                first++;
+            }
+            final char candidate = first < lineEnd ? answer.charAt(first) : 0;
+            int runEnd = first;
+            if (candidate == '`' || candidate == '~') {
+                while (runEnd < lineEnd && answer.charAt(runEnd) == candidate) runEnd++;
+            }
+            final int run = runEnd - first;
+            if (fenceChar == 0 && first - lineStart <= 3 && run >= 3) {
+                fenceChar = candidate;
+                fenceLength = run;
+            } else if (fenceChar != 0 && candidate == fenceChar && run >= fenceLength
+                    && answer.substring(runEnd, lineEnd).trim().isEmpty()) {
+                fenceChar = 0;
+                fenceLength = 0;
+                maskRange(visible, lineStart, lineEnd);
+                lineStart = lineEnd + 1;
+                continue;
+            }
+            if (fenceChar != 0) {
+                maskRange(visible, lineStart, lineEnd);
+            } else {
+                for (int at = lineStart; at < lineEnd;) {
+                    if (answer.charAt(at) != '`') {
+                        at++;
+                        continue;
+                    }
+                    int close = at + 1;
+                    while (close < lineEnd && answer.charAt(close) == '`') close++;
+                    final int ticks = close - at;
+                    int end = close;
+                    while (end < lineEnd) {
+                        if (answer.charAt(end) != '`') {
+                            end++;
+                            continue;
+                        }
+                        int tail = end + 1;
+                        while (tail < lineEnd && answer.charAt(tail) == '`') tail++;
+                        if (tail - end == ticks) {
+                            end = tail;
+                            break;
+                        }
+                        end = tail;
+                    }
+                    maskRange(visible, at, Math.min(end, lineEnd));
+                    at = Math.min(end, lineEnd);
+                }
+            }
+            lineStart = lineEnd + 1;
+        }
+        return visible.toString();
+    }
+
+    private static void maskRange(final StringBuilder text, final int from, final int to) {
+        for (int i = from; i < to; i++) {
+            if (text.charAt(i) != '\r' && text.charAt(i) != '\n') text.setCharAt(i, ' ');
+        }
+    }
+
+    /** Warn only on substantive uncited written spans. A citation in another
+     * sentence or bullet cannot confer even syntactic coverage here. This
+     * intentionally makes no semantic/factuality determination; uncertainty
+     * and short labels can be skipped while some prose disclaimers may count.
+     */
+    private static int countUncitedProseSpans(final String visible,
+                                             final List<Citation> markers) {
+        int uncited = 0;
+        for (int lineStart = 0; lineStart < visible.length();) {
+            int lineEnd = visible.indexOf('\n', lineStart);
+            if (lineEnd < 0) lineEnd = visible.length();
+            final String trimmed = visible.substring(lineStart, lineEnd).trim();
+            if (!trimmed.startsWith("# ") && !trimmed.startsWith("## ")
+                    && !trimmed.startsWith("### ")) {
+                int spanStart = lineStart;
+                for (int i = lineStart; i < lineEnd; i++) {
+                    if (isSentenceTerminator(visible.charAt(i))) {
+                        int next = i + 1;
+                        while (next < lineEnd && Character.isWhitespace(visible.charAt(next))) next++;
+                        if ((next == lineEnd || next > i + 1)
+                                && (next == lineEnd || visible.charAt(next) != '[')) {
+                            if (uncitedSubstantiveSpan(visible, spanStart, i + 1, markers)) {
+                                uncited++;
+                            }
+                            spanStart = i + 1;
+                        }
+                    }
+                }
+                if (uncitedSubstantiveSpan(visible, spanStart, lineEnd, markers)) uncited++;
+            }
+            lineStart = lineEnd + 1;
+        }
+        return uncited;
+    }
+
+    private static boolean isSentenceTerminator(final char ch) {
+        return ch == '.' || ch == '!' || ch == '?' || ch == ';'
+                || ch == '。' || ch == '！' || ch == '？' || ch == '；';
+    }
+
+    private static boolean uncitedSubstantiveSpan(final String visible, final int from,
+                                                  final int to, final List<Citation> markers) {
+        for (final Citation marker : markers) {
+            if (marker.start >= from && marker.end <= to && marker.source >= 0) return false;
+        }
+        int letters = 0;
+        int words = 0;
+        boolean inWord = false;
+        for (int i = from; i < to; i++) {
+            if (Character.isLetter(visible.charAt(i))) {
+                letters++;
+                if (!inWord) words++;
+                inWord = true;
+            } else {
+                inWord = false;
+            }
+        }
+        return letters >= MIN_PROSE_LETTERS && words >= MIN_PROSE_WORDS;
     }
 
     /** Prefer the citation cluster after a quote in the same clause. Fall back
