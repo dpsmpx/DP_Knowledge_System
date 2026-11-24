@@ -1,9 +1,6 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-
 import org.json.JSONObject;
 import org.junit.Test;
 
@@ -11,7 +8,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -185,16 +185,26 @@ public final class KnowledgeNetworkTransportTest {
     }
 
     private static final class FakeApi implements AutoCloseable {
-        final HttpServer server;
+        final ServerSocket server;
+        final Thread receiver;
+        final String expectedPath;
+        final int replyCode;
+        final String replyBody;
+        final String redirect;
         final AtomicInteger requests = new AtomicInteger();
         final AtomicReference<String> payload = new AtomicReference<>();
         final AtomicReference<String> authorization = new AtomicReference<>();
 
         FakeApi(final String path, final int code, final String response,
                 final String redirectTo) throws IOException {
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext(path, exchange -> reply(exchange, code, response, redirectTo));
-            server.start();
+            expectedPath = path;
+            replyCode = code;
+            replyBody = response;
+            redirect = redirectTo;
+            server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
+            receiver = new Thread(this::serve, "dpks-synthetic-loopback-only");
+            receiver.setDaemon(true);
+            receiver.start();
         }
 
         URL embeddingEndpoint() {
@@ -206,41 +216,79 @@ public final class KnowledgeNetworkTransportTest {
         }
 
         private String base() {
-            return "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
+            return "http://127.0.0.1:" + server.getLocalPort() + "/v1";
         }
 
-        private void reply(final HttpExchange exchange, final int code,
-                           final String response, final String redirectTo) throws IOException {
-            try {
-                requests.incrementAndGet();
-                payload.set(read(exchange.getRequestBody()));
-                authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
-                final byte[] body = response.getBytes(StandardCharsets.UTF_8);
-                if (redirectTo != null) exchange.getResponseHeaders().set("Location", redirectTo);
-                exchange.sendResponseHeaders(code, body.length == 0 ? -1 : body.length);
-                if (body.length != 0) {
-                    try (OutputStream stream = exchange.getResponseBody()) {
-                        stream.write(body);
-                    }
+        private void serve() {
+            while (!server.isClosed()) {
+                try (Socket connection = server.accept()) {
+                    connection.setSoTimeout(8_000);
+                    requests.incrementAndGet();
+                    reply(connection);
+                } catch (SocketException closed) {
+                    if (server.isClosed()) return;
+                } catch (IOException invalid) {
+                    if (server.isClosed()) return;
                 }
-            } finally {
-                exchange.close();
             }
         }
 
-        private static String read(final InputStream input) throws IOException {
-            try (InputStream stream = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-                final byte[] buffer = new byte[4096];
-                int n;
-                while ((n = stream.read(buffer)) != -1) {
-                    out.write(buffer, 0, n);
-                }
-                return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        private void reply(final Socket connection) throws IOException {
+            final InputStream input = connection.getInputStream();
+            final ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
+            int delimiter = 0;
+            while (headerBytes.size() < 8192) {
+                final int value = input.read();
+                if (value == -1) throw new IOException("Synthetic request headers incomplete");
+                headerBytes.write(value);
+                delimiter = value == "\r\n\r\n".charAt(delimiter)
+                        ? delimiter + 1 : value == '\r' ? 1 : 0;
+                if (delimiter == 4) break;
             }
+            if (delimiter != 4) throw new IOException("Synthetic request headers oversized");
+            final String[] headers = new String(headerBytes.toByteArray(),
+                    StandardCharsets.US_ASCII).split("\r\n");
+            if (!headers[0].startsWith("POST " + expectedPath + " HTTP/1.")) {
+                throw new IOException("Unexpected synthetic endpoint path");
+            }
+            int length = -1;
+            for (final String header : headers) {
+                final String lower = header.toLowerCase(java.util.Locale.ROOT);
+                if (lower.startsWith("content-length:")) {
+                    length = Integer.parseInt(header.substring(header.indexOf(':') + 1).trim());
+                } else if (lower.startsWith("authorization:")) {
+                    authorization.set(header.substring(header.indexOf(':') + 1).trim());
+                }
+            }
+            if (length < 0 || length > 20_000) throw new IOException("Invalid synthetic body size");
+            final byte[] bytes = new byte[length];
+            int count = 0;
+            while (count < length) {
+                final int n = input.read(bytes, count, length - count);
+                if (n == -1) throw new IOException("Synthetic request body truncated");
+                count += n;
+            }
+            payload.set(new String(bytes, StandardCharsets.UTF_8));
+            final byte[] body = replyBody.getBytes(StandardCharsets.UTF_8);
+            final String responseHeaders = "HTTP/1.1 " + replyCode + " Synthetic\r\n"
+                    + "Content-Type: application/json\r\nContent-Length: " + body.length
+                    + "\r\nConnection: close\r\n"
+                    + (redirect == null ? "" : "Location: " + redirect + "\r\n") + "\r\n";
+            final OutputStream output = connection.getOutputStream();
+            output.write(responseHeaders.getBytes(StandardCharsets.US_ASCII));
+            output.write(body);
+            output.flush();
         }
 
         @Override public void close() {
-            server.stop(0);
+            try {
+                server.close();
+                receiver.join(1_000);
+            } catch (IOException ignored) {
+                // The server owns no persistent state or resources beyond the socket.
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }
