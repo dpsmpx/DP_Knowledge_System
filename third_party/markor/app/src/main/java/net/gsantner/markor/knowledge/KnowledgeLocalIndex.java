@@ -664,6 +664,39 @@ public final class KnowledgeLocalIndex {
         return paths;
     }
 
+    /** Read-only preview of the resumable offset; must agree with beginEmbedding
+     * after consent, otherwise the upload plan is stale and must be rejected.
+     */
+    public synchronized int previewEmbeddingResumeOffset(final String path,
+                                                          final long modified,
+                                                          final long size,
+                                                          final String modelKey,
+                                                          final int expectedChunks,
+                                                          final boolean truncated,
+                                                          final byte[] sourceSha256) {
+        final SQLiteDatabase db = open();
+        try {
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
+            try (Cursor c = db.rawQuery("SELECT model_key, modified, size, chunks, completed,"
+                            + "chunker_version, truncated, source_sha256 "
+                            + "FROM embedding_notes WHERE path=?",
+                    new String[]{path})) {
+                if (c.moveToFirst() && modelKey.equals(c.getString(0))
+                        && modified == c.getLong(1) && size == c.getLong(2)
+                        && expectedChunks == c.getInt(3)
+                        && KnowledgeEmbeddingChunks.CHUNKER_VERSION == c.getInt(5)
+                        && (truncated ? 1 : 0) == c.getInt(6)
+                        && MessageDigest.isEqual(sourceSha256, c.getBlob(7))
+                        && c.getInt(4) >= 0 && c.getInt(4) <= expectedChunks) {
+                    return c.getInt(4);
+                }
+            }
+            return 0;
+        } finally {
+            db.close();
+        }
+    }
+
     /** Start or resume an explicitly approved upload for the exact source hash.
      * Unsealed old vectors remain on disk, but cannot be used or resumed.
      */
