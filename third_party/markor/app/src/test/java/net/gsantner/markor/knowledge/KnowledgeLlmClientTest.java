@@ -391,6 +391,37 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void citedClaimsWarnOnMissingTextAnchorAndExplicitOppositeLabels() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("true.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("false.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review grounded = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Amber violet is false [2].", sources);
+        assertEquals(0, grounded.weakTextAttributions);
+        assertEquals(0, grounded.polarityMismatchedCitations);
+        assertEquals(1, grounded.potentiallyOpposingSources);
+
+        final KnowledgeLlmCitationAudit.Review misattributed = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [2]. An unrelated invented conclusion is certain [1].",
+                sources);
+        assertEquals(1, misattributed.weakTextAttributions);
+        assertEquals(1, misattributed.polarityMismatchedCitations);
+        assertEquals(1, misattributed.potentiallyOpposingSources);
+        assertTrue(misattributed.hasValidReferences()); // valid number is NOT valid support
+
+        final KnowledgeLlmCitationAudit.Review code = KnowledgeLlmCitationAudit.inspect(
+                "`Amber violet is false [1]`\nAmber violet is true [1].", sources);
+        assertEquals(0, code.polarityMismatchedCitations);
+        assertEquals(0, code.weakTextAttributions);
+        final KnowledgeLlmCitationAudit.Review ambiguous = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1].", Collections.singletonList(
+                        new KnowledgeLlmEvidence.Item("both.md",
+                                "Amber violet can be true or false depending on conditions.")));
+        assertEquals(0, ambiguous.polarityMismatchedCitations);
+        assertEquals(0, ambiguous.potentiallyOpposingSources);
+    }
+
+    @Test
     public void quoteAuditRejectsGlobalCitationLaunderingAndMixedLocalSources() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
                 new KnowledgeLlmEvidence.Item("one.md", "The sky is blue."),

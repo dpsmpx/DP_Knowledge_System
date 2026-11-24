@@ -3498,8 +3498,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         status.setText(R.string.knowledge_llm_retrieving);
         worker.submit(() -> {
             try {
-                final List<KnowledgeLlmEvidence.Item> sources = new ArrayList<>();
-                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.Item> candidates = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> candidateSeals = new ArrayList<>();
+                final List<String> verifiedPaths = new ArrayList<>();
                 final Map<String, KnowledgeLocalIndex.SemanticHit> semantic = new HashMap<>();
                 final List<String> semanticPaths = new ArrayList<>();
                 for (final KnowledgeLocalIndex.SemanticHit match : ranked) {
@@ -3522,7 +3523,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (Thread.currentThread().isInterrupted() || scanGeneration.get() != scan) {
                         return;
                     }
-                    if (sources.size() >= KnowledgeLlmClient.MAX_EVIDENCE) {
+                    if (candidates.size() >= KnowledgeHybridRanking.MAX_VERIFIED_PREVIEW_CANDIDATES) {
                         break;
                     }
                     try {
@@ -3549,13 +3550,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 : KnowledgeEmbeddingChunks.atOffset(
                                         content, vector.excerptStart, vector.excerptLength);
                         if (!excerpt.trim().isEmpty()) {
-                            sources.add(new KnowledgeLlmEvidence.Item(relativePath, excerpt));
-                            seals.add(new KnowledgeLlmEvidence.ConsentSeal(
+                            candidates.add(new KnowledgeLlmEvidence.Item(relativePath, excerpt));
+                            candidateSeals.add(new KnowledgeLlmEvidence.ConsentSeal(
                                     relativePath, modified, size, source.bytes));
+                            verifiedPaths.add(relativePath);
                         }
                     } catch (IOException ignored) {
                         // Changed or inaccessible indexed files are never disclosed.
                     }
+                }
+                final List<KnowledgeLlmEvidence.Item> sources = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
+                for (final int selected : KnowledgeHybridRanking.selectBalancedIndices(
+                        verifiedPaths, lexicalPaths, semanticPaths,
+                        KnowledgeLlmClient.MAX_EVIDENCE)) {
+                    sources.add(candidates.get(selected));
+                    seals.add(candidateSeals.get(selected));
                 }
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
@@ -3837,6 +3847,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     display.append("\n").append(getString(
                             R.string.knowledge_llm_uncited_prose_spans,
                             review.uncitedProseSpans));
+                }
+                if (review.weakTextAttributions > 0) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_weak_text_attributions,
+                            review.weakTextAttributions));
+                }
+                if (review.polarityMismatchedCitations > 0) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_polarity_mismatch,
+                            review.polarityMismatchedCitations));
+                }
+                if (review.potentiallyOpposingSources > 0) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_possible_source_conflicts,
+                            review.potentiallyOpposingSources));
                 }
                 display.append("\n\n").append(answer).append("\n\n")
                         .append(getString(R.string.knowledge_llm_sources)).append("\n");

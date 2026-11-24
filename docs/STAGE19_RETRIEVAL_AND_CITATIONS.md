@@ -198,6 +198,31 @@ even if every reference and quotation passes the checks below.
     excerpts, not real vault data. The heuristic may still miss a relevant
     source outside the bounded candidate pool and does not establish
     entailment, accuracy, or representative recall/precision.
+21. Citation inspection now warns when a substantive attributed claim shares
+    **fewer than two distinct 4+ character words** with its individual cited
+    excerpt, and separately flags the narrow, explicit `true` vs `false`
+    polarity mismatch. It also checks the six supplied excerpts for pairs
+    sharing two content words but expressing opposite unambiguous boolean
+    labels. Code fences, inline code and Markdown link labels retain their
+    existing citation-masking rules; warning counts are local and do not
+    transmit the answer or private excerpts elsewhere. JVM and isolated
+    `CITE-ANCHOR-19` device regressions include correct citations,
+    misattribution and opposing fabricated statements. These checks are
+    **not semantic entailment or general contradiction detection**:
+    synonyms, negation beyond the explicit labels, modal verbs, multiple
+    claims in a source, and valid paraphrases remain open. A warning never
+    auto-rejects an answer or changes an authoritative journal decision.
+22. Hybrid LLM evidence now examines at most twelve **already byte-verified**
+    RRF candidates before choosing six. The first two ranked sources remain
+    intact; if neither selected source represents a retrieval channel, the
+    next available verified source from that channel is included. Remaining
+    slots follow the original fused order and final citation indices preserve
+    that order. This avoids accidental loss of a semantic-only or lexical-only
+    representative while retaining original SHA-256 approval seals. Local
+    reading may double (6 to 12 notes), but there are no extra provider
+    requests or automatic consent. JVM and isolated `HYBRID-BALANCE-19`
+    synthetic checks exercise modality loss and rank preservation; genuine
+    semantic recall/precision and device latency/energy remain unevaluated.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -245,6 +270,13 @@ grounding. Device and broader human-labeled benchmarks remain open.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,
   outbound model calls or real knowledge journal are used by tests.
+- Deferred physical acceptance: run `CITE-ANCHOR-19` and
+  `HYBRID-BALANCE-19` from the synthetic device QA screen, then verify
+  accessibility/scrolling, cancellation and exact consent content with a
+  synthetic local library. Compare lexical and hybrid preview p50/p95,
+  perceived UI responsiveness, peak RAM and battery cost before/after the
+  6-to-12 local-read change; do not use private notes for benchmark evidence
+  or call a real model without separate opt-in. CI PASS does not close this.
 
 ## Deliberately still open
 
