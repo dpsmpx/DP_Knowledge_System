@@ -745,7 +745,7 @@
     <string name="knowledge_models_delete_failed">Не удалось удалить файл модели. Заметки и журнал не изменены.</string>
     <string name="knowledge_models_imported_not_runnable">Пока это только сохранённый файл: локальное исполнение, проверка совместимости, оценки RAM и бенчмарки будут добавлены в следующих этапах. Выбор файла не запускает нейросеть.</string>
     <string name="knowledge_models_details">%1$s\nРазмер: %2$s (%3$d байт)\nФормат: %4$s (движком не проверен)\nSHA-256: %5$s</string>
-    <string name="knowledge_models_importing">Копирование модели в приватное хранилище. Нажмите «Управление» ещё раз для отмены. Сети нет.</string>
+    <string name="knowledge_models_importing">Копирование модели в приватное хранилище. Повторное нажатие отменит импорт. DPKS не вызывает сервис ИИ; выбранный файловый провайдер Android может получать собственные данные из сети.</string>
     <string name="knowledge_models_imported">Сохранено: %1$s (%2$s). Модель не запущена, файлы остаются на устройстве.</string>
     <string name="knowledge_models_import_failed">Не удалось импортировать: выберите доступный .gguf или .onnx и проверьте свободное место. Модель не запущена, заметки не изменены.</string>
     <string name="knowledge_models_import_cancelled">Импорт отменён. Незавершённый временный файл будет удалён.</string>
