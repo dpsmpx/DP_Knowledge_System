@@ -53,23 +53,33 @@ even if every reference and quotation passes the checks below.
    by restoring the original mtime now fails closed even if the cheap metadata
    check succeeds. Empty, oversized, absent or unverified index rows are
    refused; neither source Markdown nor the approval journal is changed.
+9. Lexical FTS4 evidence now uses **three bounded passes** for queries with
+   2–4 informative tokens: an adjacent phrase match first, then all-term
+   matches, then OR fallback. Common English/Russian interrogative framing
+   words are removed only if other searchable terms remain. Both explicit
+   opposing statements are kept as sources; no conclusion is inferred. The
+   path/scan-generation, oversized and SHA-256 gates remain in force. There
+   is **no** automatic synonym expansion or semantic relevance claim.
 
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
 The script creates **only an in-memory SQLite FTS4 database** with generated
 text and known synthetic relevance labels. It reads no vault, uses no network,
-and prints aggregate metrics, not source paths. Six regression tests exercise
-the query syntax, FTS4 semantics, all-term priority, OR fallback, bounds and
-label-based recall.
+and prints aggregate metrics, not source paths. Eight regression tests cover
+FTS4 query syntax, phrase/strict/OR ordering, bounds, labeled recall,
+opposing synthetic claims and the absence of unproven synonym expansion.
 
-Example Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
+Updated Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
 artificial notes, four adversarial two-word queries and four known relevant
-documents per query. Old path-ordered OR baseline: **recall@24 = 0/4** for
-every query. Two-pass retrieval: **recall@6 = 4/4**, **precision@6 = 4/6**
-and **recall@24 = 4/4** for each. Measured local query time across 20 runs:
-approximately **p50 = 0.20 ms** and **p95 = 0.24 ms**; these timings vary by
-machine and SQLite build. The deliberately adversarial corpus is not a
+documents per query. Early distractors contain both words **separated**,
+while four late labeled files contain the adjacent phrase and include
+explicitly opposing synthetic claims. Both the original path-ordered OR and
+prior path-ordered two-pass baseline had **recall@24 = 0/4** for every query;
+the three-pass variant had **recall@6 = 4/4**, **precision@6 = 4/6** and
+**recall@24 = 4/4**. Query timing across 20 host trials was approximately
+**p50 = 0.27 ms** and **p95 = 0.39 ms**, but varies by machine and build.
+The deliberately adversarial corpus is not a
 representative search evaluation, and this measures a Python SQL mirror,
 **not** Android, embeddings, battery/RAM, provider quality or semantic
 grounding. Device and broader human-labeled benchmarks remain open.
@@ -82,7 +92,9 @@ grounding. Device and broader human-labeled benchmarks remain open.
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
   partial-match pathname, correct indexed text, same-length changed text
-  rejection, and exclusion of unverified source content.
+  rejection, and exclusion of unverified source content. New JVM token/phrase
+  syntax checks, Python label-based opposing-statement and synonym-negative
+  tests, and Android synthetic `LEX-PHRASE-19` are included.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,
@@ -90,9 +102,9 @@ grounding. Device and broader human-labeled benchmarks remain open.
 
 ## Deliberately still open
 
-- RRF and the two-pass lexical priority are **relevance heuristics**, not
+- RRF and the three-pass lexical priority are **relevance heuristics**, not
   learned rerankers or proof. Results are still pathname-ordered **within
-  each pass**. The reproducible adversarial FTS4 fixture does not close the
+  each pass**, with no synonym expansion. The adversarial FTS4 fixture does not close the
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
   semantic model behavior and Android 20k latency remain unmeasured.
 - Schema v4 additionally stores a **SHA-256 of the raw indexed Markdown bytes**

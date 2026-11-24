@@ -50,4 +50,22 @@ public class KnowledgeMarkdownMetadataTest {
                 KnowledgeMarkdownMetadata.ftsEvidenceQuery("DROP; TABLE"));
         assertEquals("", KnowledgeMarkdownMetadata.ftsEvidenceQuery(""));
     }
+
+    @Test
+    public void naturalQuestionsPreferInformativeTermsAndSafeShortPhrases() {
+        assertEquals("\"amber*\" OR \"violet*\"",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery("Which amber violet?"));
+        assertEquals("\"amber* violet*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Which amber violet?"));
+        assertEquals("\"синтез*\" OR \"память*\"",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery("Какие синтез память?"));
+        assertEquals("\"синтез* память*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Какие синтез память?"));
+        assertEquals("\"which*\"", KnowledgeMarkdownMetadata.ftsEvidenceQuery("Which?"));
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Which?"));
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(
+                "alpha bravo charlie delta echo"));
+        assertEquals("\"drop* table*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("DROP; TABLE"));
+    }
 }
