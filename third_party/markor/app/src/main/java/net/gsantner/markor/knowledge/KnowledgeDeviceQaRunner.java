@@ -657,8 +657,14 @@ public final class KnowledgeDeviceQaRunner {
                     || testIndex.evidenceSearch("synthetic", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
             }
-            for (final KnowledgeLocalIndex.Hit evidence :
-                    testIndex.evidenceSearch("amber violet synthetic", 10)) {
+            final List<KnowledgeLocalIndex.Hit> partialEvidence =
+                    testIndex.evidenceSearch("amber violet synthetic", 10);
+            // Catch a formerly silent FTS4 multi-term OR zero-hit failure.
+            if (partialEvidence.size() != 1
+                    || !"alpha.md".equals(partialEvidence.get(0).relativePath)) {
+                throw new SyntheticMismatch("verdict=PARTIAL_OR_EVIDENCE_MISMATCH");
+            }
+            for (final KnowledgeLocalIndex.Hit evidence : partialEvidence) {
                 if (!evidence.confirmedInLastScan) {
                     throw new SyntheticMismatch("verdict=UNVERIFIED_EVIDENCE");
                 }
@@ -667,6 +673,9 @@ public final class KnowledgeDeviceQaRunner {
                     vault, renamedScan, this::isCancelled);
             if (restored.reused != 2 || restored.unverified != 0) {
                 throw new SyntheticMismatch("verdict=FULL_RESCAN_MISMATCH");
+            }
+            if (testIndex.evidenceSearch("amber violet synthetic", 10).size() != 2) {
+                throw new SyntheticMismatch("verdict=RESTORED_OR_EVIDENCE_MISMATCH");
             }
             boolean cancelled = false;
             try {

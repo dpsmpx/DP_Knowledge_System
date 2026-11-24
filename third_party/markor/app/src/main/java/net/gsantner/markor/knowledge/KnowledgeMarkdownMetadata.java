@@ -168,7 +168,9 @@ public final class KnowledgeMarkdownMetadata {
             if (query.length() > 0) {
                 query.append(" OR ");
             }
-            query.append('"').append(part).append('"').append('*');
+            // In FTS4 OR expressions, '*' must be inside each quoted term.
+            // The "term"* OR "other"* form can silently return no rows.
+            query.append('"').append(part).append('*').append('"');
         }
         return query.toString();
     }

@@ -34,6 +34,12 @@ even if every reference and quotation passes the checks below.
    and Unicode line separators. This is delimiter hardening only, **not** a
    guarantee that a model will ignore malicious source instructions.
 
+5. Fixed SQLite FTS4 multi-term OR syntax: prefix `*` belongs **inside**
+   each quoted term. The previous expression could silently return zero
+   matching notes. Synthetic `RECONCILE-16` now asserts actual multi-term
+   evidence hits before and after a partial scan, while still excluding
+   unverified source files. Android device re-run is pending.
+
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
