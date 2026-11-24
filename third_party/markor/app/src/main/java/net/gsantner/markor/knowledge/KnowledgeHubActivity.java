@@ -13,9 +13,11 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.text.Editable;
 import android.text.InputFilter;
@@ -119,6 +121,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
+    private static final int REQUEST_IMPORT_MODEL = 40024;
+    private static final String STATE_PENDING_MODEL_IMPORT = "dpks_pending_model_import";
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -135,6 +139,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private final ExecutorService embeddingWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService deviceQaWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService decisionWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService modelWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration = new AtomicInteger();
     private final AtomicInteger queryGeneration = new AtomicInteger();
     private final AtomicInteger analysisGeneration = new AtomicInteger();
@@ -142,6 +147,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private final AtomicInteger embeddingGeneration = new AtomicInteger();
     private final AtomicInteger deviceQaGeneration = new AtomicInteger();
     private final AtomicInteger decisionGeneration = new AtomicInteger();
+    private final AtomicInteger modelGeneration = new AtomicInteger();
     private final List<KnowledgeLocalIndex.Hit> displayed = new ArrayList<>();
     private final List<String> labels = new ArrayList<>();
     private final List<JSONObject> decisionItems = new ArrayList<>();
@@ -154,6 +160,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private Future<?> runningEmbedding;
     private Future<?> runningDeviceQa;
     private Future<?> runningDecisionLoad;
+    private Future<?> runningModelImport;
     private KnowledgeVaultScanner.Snapshot snapshot;
     private KnowledgeLocalIndex.SyncResult syncResult;
     private KnowledgeLocalIndex index;
@@ -162,6 +169,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView status;
     private TextView analysisStatus;
     private TextView embeddingStatus;
+    private TextView modelStatus;
+    private KnowledgeModelFiles modelFiles;
+    private KnowledgeModelPolicy.Role pendingModelImportRole;
+    private boolean modelImportActive;
     private Button analysisButton;
     private Button auditButton;
     private Button embeddingButton;
@@ -223,6 +234,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             final String previous = savedInstanceState.getString(STATE_DECISION_CATEGORY, "pending");
             if (Arrays.asList(DECISION_CATEGORIES).contains(previous)) decisionCategory = previous;
             libraryOffset = Math.max(0, savedInstanceState.getInt(STATE_LIBRARY_OFFSET, 0));
+            final String pending = savedInstanceState.getString(STATE_PENDING_MODEL_IMPORT, "");
+            try {
+                if (!pending.isEmpty()) {
+                    pendingModelImportRole = KnowledgeModelPolicy.Role.valueOf(pending);
+                }
+            } catch (IllegalArgumentException unknown) {
+                pendingModelImportRole = null;
+            }
         }
         final int initialPage = savedInstanceState == null
                 ? R.id.knowledge_nav_library
@@ -249,6 +268,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
         notebook = _appSettings.getNotebookDirectory();
         index = new KnowledgeLocalIndex(this);
+        modelFiles = new KnowledgeModelFiles(new File(getFilesDir(), "dpks-models-v1"));
+        modelStatus = findViewById(R.id.knowledge_models_status);
+        findViewById(R.id.knowledge_models_open).setOnClickListener(view -> {
+            if (modelImportActive) {
+                cancelModelImport();
+            } else {
+                new KnowledgeModelSettingsDialog(this, modelFiles, this::pickModelFile).show();
+            }
+        });
         final TextView root = findViewById(R.id.knowledge_root);
         root.setText(notebook == null ? getString(R.string.knowledge_no_folder)
                 : getString(R.string.knowledge_root_label, notebook.getAbsolutePath()));
@@ -466,7 +494,74 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         outState.putInt(STATE_WORKSPACE_PAGE, workspaceNavigation.page());
         outState.putString(STATE_DECISION_CATEGORY, decisionCategory);
         outState.putInt(STATE_LIBRARY_OFFSET, libraryOffset);
+        if (pendingModelImportRole != null) {
+            outState.putString(STATE_PENDING_MODEL_IMPORT, pendingModelImportRole.name());
+        }
         super.onSaveInstanceState(outState);
+    }
+
+    /** Android SAF is only a source of bytes. It is never granted vault access. */
+    private void pickModelFile(final KnowledgeModelPolicy.Role role) {
+        if (modelImportActive || role == null) return;
+        pendingModelImportRole = role;
+        final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_MODEL);
+        } catch (RuntimeException unavailable) {
+            pendingModelImportRole = null;
+            modelStatus.setText(R.string.knowledge_models_picker_failed);
+        }
+    }
+
+    private String modelDisplayName(final Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                final int column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (column >= 0) return cursor.getString(column);
+            }
+        } catch (RuntimeException unavailable) {
+            // Do not copy path or URI into UI or logs.
+        }
+        return "";
+    }
+
+    private void importModelFromUri(final Uri source, final KnowledgeModelPolicy.Role role) {
+        if (modelImportActive) return;
+        final String name = modelDisplayName(source);
+        modelImportActive = true;
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_importing);
+        runningModelImport = modelWorker.submit(() -> {
+            try (InputStream input = getContentResolver().openInputStream(source)) {
+                final KnowledgeModelFiles.Entry imported = modelFiles.importFile(input, name, role);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        modelStatus.setText(getString(R.string.knowledge_models_imported,
+                                imported.name, KnowledgeModelSettingsDialog.formatSize(imported.bytes)));
+                    }
+                });
+            } catch (IOException | RuntimeException failure) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        modelStatus.setText(R.string.knowledge_models_import_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void cancelModelImport() {
+        modelGeneration.incrementAndGet();
+        if (runningModelImport != null) runningModelImport.cancel(true);
+        modelImportActive = false;
+        modelStatus.setText(R.string.knowledge_models_import_cancelled);
     }
 
     /** Switch destinations without recreating the activity or its active workers. */
@@ -4278,7 +4373,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     @Override
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_EXPORT_JOURNAL) {
+        if (requestCode == REQUEST_IMPORT_MODEL) {
+            final KnowledgeModelPolicy.Role role = pendingModelImportRole;
+            pendingModelImportRole = null;
+            if (role != null && resultCode == RESULT_OK && data != null
+                    && data.getData() != null) {
+                importModelFromUri(data.getData(), role);
+            }
+        } else if (requestCode == REQUEST_EXPORT_JOURNAL) {
             final byte[] envelope = pendingExportEnvelope;
             pendingExportEnvelope = null;
             if (envelope == null) {
@@ -4452,6 +4554,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     @Override
     protected void onDestroy() {
+        modelGeneration.incrementAndGet();
+        if (runningModelImport != null) runningModelImport.cancel(true);
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
         analysisGeneration.incrementAndGet();
@@ -4483,6 +4587,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         embeddingWorker.shutdownNow();
         deviceQaWorker.shutdownNow();
         decisionWorker.shutdownNow();
+        modelWorker.shutdownNow();
         super.onDestroy();
     }
 }
