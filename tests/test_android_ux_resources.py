@@ -15,13 +15,32 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_embedding_vectors_are_revision_sealed_before_api_upload_or_search(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("embeddingSourceUnchanged(note, sourceSha256)",
+                       "index.matchesIndexedEvidenceSource(note.relativePath,",
+                       "index.beginEmbedding(note.relativePath,",
+                       "index.appendEmbeddingBatch(note.relativePath,"):
+            self.assertIn(marker, hub)
+        self.assertEqual(2, hub.count("embeddingSourceUnchanged(note, sourceSha256)"))
+        for marker in ("ALTER TABLE embedding_notes ADD COLUMN source_sha256 BLOB",
+                       "n.raw_sha256=e.source_sha256", "MessageDigest.isEqual(sourceSha256,",
+                       'note.put("source_sha256", sourceSha256)'):
+            self.assertIn(marker, index)
+        self.assertIn('step("EMBED-SOURCE-19",', qa)
+        self.assertIn("UNSEALED_LEGACY_VECTOR_REUSED", qa)
+
     def test_llm_evidence_uses_sealed_raw_source_in_both_retrieval_paths(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         index = (folder / "KnowledgeLocalIndex.java").read_text()
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
-        self.assertEqual(2, hub.count("index.matchesIndexedEvidenceSource("))
-        self.assertEqual(2, hub.count("final SelectedSource source = readSelectedSource("))
+        # Two LLM paths and the separately consented embedding upload path.
+        self.assertEqual(3, hub.count("index.matchesIndexedEvidenceSource("))
+        self.assertEqual(3, hub.count("final SelectedSource source = readSelectedSource("))
         self.assertIn("currentBytes.length != size", index)
         self.assertIn("KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)", index)
         self.assertIn("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB", index)

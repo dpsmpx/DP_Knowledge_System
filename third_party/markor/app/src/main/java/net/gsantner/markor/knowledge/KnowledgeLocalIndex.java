@@ -15,6 +15,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -35,7 +36,7 @@ import java.util.UUID;
 public final class KnowledgeLocalIndex {
     public static final int MAX_INDEX_BYTES_PER_NOTE = 2_000_000;
     private static final String DB_NAME = "knowledge_index_v1.sqlite";
-    private static final int SCHEMA_VERSION = 4;
+    private static final int SCHEMA_VERSION = 5;
     private static final int MAX_SEMANTIC_CANDIDATES = 45_000;
 
     public interface Progress {
@@ -616,9 +617,12 @@ public final class KnowledgeLocalIndex {
     public synchronized boolean hasEmbeddings(final String path, final long modified,
                                                final long size, final String modelKey) {
         final SQLiteDatabase db = open();
-        try (Cursor c = db.rawQuery("SELECT 1 FROM embedding_notes "
-                        + "WHERE path=? AND modified=? AND size=? AND model_key=? "
-                        + "AND chunker_version=? AND completed=chunks",
+        try (Cursor c = db.rawQuery("SELECT 1 FROM embedding_notes e "
+                        + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.path=? AND e.modified=? AND e.size=? AND e.model_key=? "
+                        + "AND e.chunker_version=? AND e.completed=e.chunks "
+                        + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation')",
                 new String[]{path, Long.toString(modified), Long.toString(size), modelKey,
                         Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION)})) {
             return c.moveToFirst();
@@ -638,7 +642,8 @@ public final class KnowledgeLocalIndex {
             }
             try (Cursor c = db.rawQuery("SELECT e.path FROM embedding_notes e "
                         + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
-                        + "AND n.size=e.size WHERE e.model_key=? AND e.completed=e.chunks "
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.model_key=? AND e.completed=e.chunks "
                         + "AND e.chunker_version=? AND n.generation=?",
                     new String[]{modelKey,
                             Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION),
@@ -653,32 +658,35 @@ public final class KnowledgeLocalIndex {
         return paths;
     }
 
-    /**
-     * Start or resume an explicit user-approved note upload. Old sampled vectors
-     * remain usable until the user initiates a rebuild with the new chunker.
+    /** Start or resume an explicitly approved upload for the exact source hash.
+     * Unsealed old vectors remain on disk, but cannot be used or resumed.
      */
     public synchronized int beginEmbedding(final String path, final long modified,
                                             final long size, final String modelKey,
-                                            final int expectedChunks, final boolean truncated) {
+                                            final int expectedChunks, final boolean truncated,
+                                            final byte[] sourceSha256) {
         if (path == null || path.isEmpty() || modelKey == null || modelKey.isEmpty()
                 || expectedChunks < 1
-                || expectedChunks > KnowledgeEmbeddingChunks.MAX_CHUNKS_PER_NOTE) {
+                || expectedChunks > KnowledgeEmbeddingChunks.MAX_CHUNKS_PER_NOTE
+                || sourceSha256 == null || sourceSha256.length != 32) {
             throw new IllegalArgumentException("Invalid embedding note");
         }
         final SQLiteDatabase db = open();
         int start = 0;
         db.beginTransaction();
         try {
-            verifyCurrentNote(db, path, modified, size);
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
             boolean reuse = false;
             try (Cursor c = db.rawQuery("SELECT model_key, modified, size, chunks, completed,"
-                            + "chunker_version, truncated FROM embedding_notes WHERE path=?",
+                            + "chunker_version, truncated, source_sha256 "
+                            + "FROM embedding_notes WHERE path=?",
                     new String[]{path})) {
                 if (c.moveToFirst() && modelKey.equals(c.getString(0))
                         && modified == c.getLong(1) && size == c.getLong(2)
                         && expectedChunks == c.getInt(3)
                         && KnowledgeEmbeddingChunks.CHUNKER_VERSION == c.getInt(5)
                         && (truncated ? 1 : 0) == c.getInt(6)
+                        && MessageDigest.isEqual(sourceSha256, c.getBlob(7))
                         && c.getInt(4) >= 0 && c.getInt(4) <= expectedChunks) {
                     reuse = true;
                     start = c.getInt(4);
@@ -698,6 +706,7 @@ public final class KnowledgeLocalIndex {
                 note.put("completed", 0);
                 note.put("truncated", truncated ? 1 : 0);
                 note.put("chunker_version", KnowledgeEmbeddingChunks.CHUNKER_VERSION);
+                note.put("source_sha256", sourceSha256);
                 db.insertOrThrow("embedding_notes", null, note);
             }
             db.setTransactionSuccessful();
@@ -712,23 +721,27 @@ public final class KnowledgeLocalIndex {
     public synchronized void appendEmbeddingBatch(final String path, final long modified,
                                                     final long size, final String modelKey,
                                                     final List<KnowledgeEmbeddingChunks.Chunk> chunks,
-                                                    final int from, final float[][] normalized) {
+                                                    final int from, final float[][] normalized,
+                                                    final byte[] sourceSha256) {
         if (normalized == null || normalized.length < 1
                 || normalized.length > KnowledgeEmbeddingClient.MAX_BATCH
-                || from < 0 || chunks == null || from + normalized.length > chunks.size()) {
+                || from < 0 || chunks == null || from + normalized.length > chunks.size()
+                || sourceSha256 == null || sourceSha256.length != 32) {
             throw new IllegalArgumentException("Invalid embedding checkpoint");
         }
         final SQLiteDatabase db = open();
         db.beginTransaction();
         try {
-            verifyCurrentNote(db, path, modified, size);
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
             int storedDimension = -1;
-            try (Cursor c = db.rawQuery("SELECT completed, chunks, dimension FROM embedding_notes "
+            try (Cursor c = db.rawQuery("SELECT completed, chunks, dimension, source_sha256 "
+                            + "FROM embedding_notes "
                             + "WHERE path=? AND model_key=? AND modified=? AND size=? "
                             + "AND chunker_version=?",
                     new String[]{path, modelKey, Long.toString(modified), Long.toString(size),
                             Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION)})) {
-                if (!c.moveToFirst() || c.getInt(0) != from || c.getInt(1) != chunks.size()) {
+                if (!c.moveToFirst() || c.getInt(0) != from || c.getInt(1) != chunks.size()
+                        || !MessageDigest.isEqual(sourceSha256, c.getBlob(3))) {
                     throw new IllegalStateException("Embedding checkpoint is stale");
                 }
                 storedDimension = c.getInt(2);
@@ -767,11 +780,15 @@ public final class KnowledgeLocalIndex {
     }
 
     private static void verifyCurrentNote(final SQLiteDatabase db, final String path,
-                                           final long modified, final long size) {
-        try (Cursor c = db.rawQuery("SELECT modified, size, oversized FROM notes WHERE path=?",
+                                           final long modified, final long size,
+                                           final byte[] sourceSha256) {
+        try (Cursor c = db.rawQuery("SELECT modified, size, oversized, raw_sha256, generation "
+                        + "FROM notes WHERE path=?",
                 new String[]{path})) {
             if (!c.moveToFirst() || c.getLong(0) != modified
-                    || c.getLong(1) != size || c.getInt(2) != 0) {
+                    || c.getLong(1) != size || c.getInt(2) != 0
+                    || !MessageDigest.isEqual(sourceSha256, c.getBlob(3))
+                    || !c.getString(4).equals(getMeta(db, "last_scan_generation"))) {
                 throw new IllegalStateException("Source changed before embedding save");
             }
         }
@@ -781,7 +798,9 @@ public final class KnowledgeLocalIndex {
         final SQLiteDatabase db = open();
         try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_notes e "
                         + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
-                        + "AND n.size=e.size WHERE e.model_key=? AND e.completed=e.chunks",
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.model_key=? AND e.completed=e.chunks "
+                        + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation')",
                 new String[]{modelKey})) {
             return c.moveToFirst() ? c.getInt(0) : 0;
         } finally {
@@ -817,6 +836,7 @@ public final class KnowledgeLocalIndex {
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
+                + "AND n.raw_sha256=e.source_sha256 "
                 + "WHERE l.bucket IN (" + placeholders + ") AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
@@ -1108,6 +1128,19 @@ public final class KnowledgeLocalIndex {
             db.beginTransaction();
             try {
                 db.execSQL("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB");
+                db.execSQL("PRAGMA user_version=4");
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        if (version < 5) {
+            // Legacy vectors cannot prove which exact bytes were embedded.
+            // Keep their rows for inspection, but exclude them from retrieval
+            // until the user explicitly approves rebuilding the embeddings.
+            db.beginTransaction();
+            try {
+                db.execSQL("ALTER TABLE embedding_notes ADD COLUMN source_sha256 BLOB");
                 db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
                 db.setTransactionSuccessful();
             } finally {

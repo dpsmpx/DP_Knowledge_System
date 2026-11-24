@@ -105,14 +105,26 @@ grounding. Device and broader human-labeled benchmarks remain open.
   original FTS text and backfills the digest, or reindexes changed content.
   Synthetic QA exercises the v3 upgrade, unverified scans and changed-byte
   refusal. Java regression tests exercise the malformed-UTF-8 edge case.
+- Schema v5 additionally pins **each embedding checkpoint** to the source-byte
+  SHA-256 already stored with the indexed note. Reuse, resume, counts and
+  semantic retrieval require matching non-null hashes; both beginning an
+  embedding and committing a returned vector batch reject a mismatched
+  source revision. The UI re-reads and verifies the source **before and after
+  each manually consented network embedding batch**, including edits that
+  preserved file size and mtime. An isolated synthetic device QA step covers
+  valid vectors, stale-batch rejection and exclusion of unsealed legacy rows.
+  Existing v1-v4 vector rows remain on disk but are **not silently trusted**;
+  users must explicitly approve generating replacement vectors. No model
+  request or destructive migration is initiated automatically.
 - Incremental sync still uses mtime/size to reuse *already sealed* rows and
   does not proactively hash every unchanged file on every scan. Thus external
   same-size/same-mtime edits can leave stale **search and embedding rankings**
   until a changed-metadata rescan or rebuild, although they cannot pass the
-  raw-byte LLM disclosure gate. Embeddings are keyed to source metadata and
-  model/chunker version, not a separate digest; an independently verifiable
-  embedding-to-source provenance seal and a representative semantic evaluation
-  remain future work.
+  raw-byte LLM disclosure gate or a new embedding upload. The local embedding
+  digest protects **local revision association**; it cannot authenticate the
+  external model's returned vector or prove semantic correctness. Independent
+  provider attestation and representative semantic evaluation remain future
+  work.
 - An exact quote appearing somewhere in the cited excerpts does not prove
   the model's surrounding assertion. Unquoted hallucinations, prompt injection
   (including semantic manipulation *inside* delimited source lines), mixed

@@ -2123,6 +2123,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         return new SelectedSource(bytes.toByteArray());
     }
 
+    /** Re-read user-selected bytes around each external embedding request.
+     * File metadata alone cannot detect same-size rewrites with restored mtime.
+     */
+    private boolean embeddingSourceUnchanged(final KnowledgeVaultScanner.Note note,
+                                             final byte[] originalSha256) throws IOException {
+        if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(note.file,
+                note.modifiedAtMillis, note.sizeBytes)) {
+            return false;
+        }
+        final SelectedSource current = readSelectedSource(note.relativePath);
+        return KnowledgeLlmEvidence.matchesIndexedSnapshot(note.file,
+                note.modifiedAtMillis, note.sizeBytes)
+                && java.security.MessageDigest.isEqual(originalSha256,
+                        KnowledgeLlmEvidence.rawSha256(current.bytes));
+    }
+
     private String formatCoreResult(final JSONObject result) throws Exception {
         final StringBuilder b = new StringBuilder();
         b.append(getString(R.string.knowledge_core_version, result.getString("engine_version")))
@@ -3241,12 +3257,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             skipped++;
                             continue;
                         }
-                        final String text = readSelectedNote(note.relativePath);
+                        final SelectedSource source = readSelectedSource(note.relativePath);
                         if (note.file.lastModified() != note.modifiedAtMillis
-                                || note.file.length() != note.sizeBytes) {
+                                || note.file.length() != note.sizeBytes
+                                || !index.matchesIndexedEvidenceSource(note.relativePath,
+                                        note.modifiedAtMillis, note.sizeBytes, source.bytes)) {
                             skipped++;
                             continue;
                         }
+                        final byte[] sourceSha256 = KnowledgeLlmEvidence.rawSha256(source.bytes);
+                        final String text = source.text;
                         final List<KnowledgeEmbeddingChunks.Chunk> chunks =
                                 KnowledgeEmbeddingChunks.fromNote(text);
                         if (chunks.isEmpty()) {
@@ -3257,7 +3277,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 text, chunks);
                         final int from = index.beginEmbedding(note.relativePath,
                                 note.modifiedAtMillis, note.sizeBytes, modelKey,
-                                chunks.size(), truncated);
+                                chunks.size(), truncated, sourceSha256);
                         for (int position = from; position < chunks.size();
                              position += KnowledgeEmbeddingClient.MAX_BATCH) {
                             if (Thread.currentThread().isInterrupted()
@@ -3271,6 +3291,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             for (int k = position; k < until; k++) {
                                 inputs.add(chunks.get(k).text);
                             }
+                            if (!embeddingSourceUnchanged(note, sourceSha256)) {
+                                throw new IOException("Source changed before embedding upload");
+                            }
                             // No text leaves without the batch-level user confirmation.
                             final float[][] vectors;
                             try {
@@ -3280,12 +3303,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 // A failed service must stop this run; retain checkpoints.
                                 throw new IllegalStateException("Embedding service unavailable");
                             }
-                            if (note.file.lastModified() != note.modifiedAtMillis
-                                    || note.file.length() != note.sizeBytes) {
+                            if (!embeddingSourceUnchanged(note, sourceSha256)) {
                                 throw new IOException("Source changed during embedding");
                             }
                             index.appendEmbeddingBatch(note.relativePath, note.modifiedAtMillis,
-                                    note.sizeBytes, modelKey, chunks, position, vectors);
+                                    note.sizeBytes, modelKey, chunks, position, vectors,
+                                    sourceSha256);
                             final int indexedChunks = until;
                             final int currentNote = i + 1;
                             runOnUiThread(() -> {
