@@ -138,6 +138,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("MD-01", this::checkMarkdown);
                 step("CORE-01", this::checkPythonCore);
                 step("EMBED-01", this::checkEmbeddingPrimitives);
+                step("EMBED-SOURCE-19", this::checkSyntheticEmbeddingSourceSeal);
                 step("CRYPTO-01", this::checkSyntheticCrypto);
                 step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
@@ -408,6 +409,89 @@ public final class KnowledgeDeviceQaRunner {
         }
         return "float32 roundtrip; cosine=" + String.format(Locale.ROOT, "%.4f", similarity)
                 + "; LSH tables=" + buckets.length + "; probes=" + probes.length;
+    }
+
+    /** No real model call: validate revision-sealed checkpoints and legacy exclusion. */
+    private String checkSyntheticEmbeddingSourceSeal() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create embedding sandbox");
+        }
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) {
+                throw new IOException("Could not create synthetic embedding vault");
+            }
+            final File source = new File(vault, "vector.md");
+            final String text = "# Vector\nSynthetic embeddable source, no network.\n";
+            writeFixture(source, text);
+            final byte[] sourceHash = sha256(source);
+            final byte[] wrongHash = sourceHash.clone();
+            wrongHash[0] ^= 0x01;
+            final File dbFile = new File(sandbox, "qa-vectors.sqlite");
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(dbFile);
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 10,
+                    this::isCancelled), this::isCancelled);
+            final String key = "qa-synthetic-vector-model";
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(text);
+            final float[] vector = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{2, 1, 0, 0, 1, 0, -1, 0});
+            if (chunks.size() != 1 || testIndex.beginEmbedding("vector.md",
+                    source.lastModified(), source.length(), key,
+                    chunks.size(), false, sourceHash) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_BEGIN_MISMATCH");
+            }
+            boolean mismatchedBatchRejected = false;
+            try {
+                testIndex.appendEmbeddingBatch("vector.md", source.lastModified(),
+                        source.length(), key, chunks, 0, new float[][]{vector}, wrongHash);
+            } catch (IllegalStateException expected) {
+                mismatchedBatchRejected = true;
+            }
+            if (!mismatchedBatchRejected || testIndex.hasEmbeddings("vector.md",
+                    source.lastModified(), source.length(), key)) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_STALE_BATCH_ACCEPTED");
+            }
+            testIndex.appendEmbeddingBatch("vector.md", source.lastModified(), source.length(),
+                    key, chunks, 0, new float[][]{vector}, sourceHash);
+            if (!testIndex.hasEmbeddings("vector.md", source.lastModified(), source.length(), key)
+                    || !testIndex.embeddedPaths(key).contains("vector.md")
+                    || testIndex.embeddingNoteCount(key) != 1
+                    || testIndex.semanticSearch(key, vector, 8).size() != 1) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_RETRIEVAL_MISMATCH");
+            }
+            boolean wrongSourceRejected = false;
+            try {
+                testIndex.beginEmbedding("vector.md", source.lastModified(), source.length(),
+                        key, chunks.size(), false, wrongHash);
+            } catch (IllegalStateException expected) {
+                wrongSourceRejected = true;
+            }
+            if (!wrongSourceRejected || !testIndex.embeddedPaths(key).contains("vector.md")) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_REVISION_ACCEPTED");
+            }
+            // Existing v1-v4 vectors have no trustworthy source-byte identity.
+            // Keep their rows, but prevent search and reuse until explicit rebuild.
+            try (SQLiteDatabase legacy = SQLiteDatabase.openOrCreateDatabase(dbFile, null)) {
+                legacy.execSQL("UPDATE embedding_notes SET source_sha256=NULL "
+                        + "WHERE path='vector.md'");
+            }
+            if (testIndex.hasEmbeddings("vector.md", source.lastModified(), source.length(), key)
+                    || testIndex.embeddedPaths(key).contains("vector.md")
+                    || testIndex.embeddingNoteCount(key) != 0
+                    || !testIndex.semanticSearch(key, vector, 8).isEmpty()
+                    || testIndex.beginEmbedding("vector.md", source.lastModified(),
+                            source.length(), key, chunks.size(), false, sourceHash) != 0
+                    || !Arrays.equals(sourceHash, sha256(source))) {
+                throw new SyntheticMismatch("verdict=UNSEALED_LEGACY_VECTOR_REUSED");
+            }
+            return "syntheticVector=1, byteSeal=true, staleBatchRejected=true, "
+                    + "legacyUnsealedExcluded=true, sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
     }
 
     private String checkSyntheticCrypto() throws GeneralSecurityException {
