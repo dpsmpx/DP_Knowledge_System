@@ -57,6 +57,16 @@ redirect и длины HTTP-ответа. [PR #134](https://github.com/dpsmpx/DP
 трёх PR прошли. Другие примеры каталога открывают **страницы** моделей;
 автоматического подбора совместимого комплекта и gated/лицензионной
 авторизации нет.
+**Дополнение MODEL-M1:**
+[PR #141](https://github.com/dpsmpx/DP_Knowledge_System/pull/141)
+добавил ручную докачку единичного `.gguf`/`.onnx` **только при указанном
+эталонном SHA-256**: приватный checkpoint, явные «Продолжить/С нуля/Отмена»,
+точная проверка `206 Content-Range`, полный перезапуск при ответе `200`
+вместо `206`, повторный SHA-256 **всего** файла перед регистрацией.
+Без эталонного хеша неполная загрузка по-прежнему не сохраняется для
+продолжения. Это не докачка многокомпонентных комплектов и не
+автоматическая авторизация в gated-репозиториях. Подробности —
+[`MODEL_M1_DOWNLOAD_RESUME.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_DOWNLOAD_RESUME.md).
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
@@ -77,7 +87,8 @@ PC/Tailscale/cloud-подключений на Android. Проверки Android
 отмены на телефоне. MODEL-M0 **остаётся незакрытым** до аппаратного QA
 PC/LAN/Tailscale/cloud/offline-отказов; подробности — в
 [`MODEL_M0_NETWORK_CONSENT.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M0_NETWORK_CONSENT.md).
-Не реализованы resume, полная валидация модель/tokenizer/engine, оценки RAM,
+Не реализованы полноценные package manifest и возобновление загрузок без
+эталонного хеша, валидация модель/tokenizer/engine, оценки RAM,
 исполнение и четыре benchmark; пользовательское тестирование на Redmi Note 13
 не проводилось. Отсутствие модели/API не блокирует offline-ядро.
 
