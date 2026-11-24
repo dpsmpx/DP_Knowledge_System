@@ -408,6 +408,16 @@ public class KnowledgeLlmClientTest {
         assertEquals(1, misattributed.polarityMismatchedCitations);
         assertEquals(1, misattributed.potentiallyOpposingSources);
         assertTrue(misattributed.hasValidReferences()); // valid number is NOT valid support
+        assertEquals(2, misattributed.flaggedSpans.size());
+        assertEquals(KnowledgeLlmCitationAudit.Flag.Kind.EXPLICIT_POLARITY,
+                misattributed.flaggedSpans.get(0).kind);
+        assertEquals(2, misattributed.flaggedSpans.get(0).sourceNumber);
+        assertTrue(KnowledgeLlmCitationAudit.flaggedAnswerSnippet(
+                "Amber violet is true [2]. An unrelated invented conclusion is certain [1].",
+                misattributed.flaggedSpans.get(0)).contains("Amber violet is true"));
+        assertEquals(KnowledgeLlmCitationAudit.Flag.Kind.WEAK_TEXT,
+                misattributed.flaggedSpans.get(1).kind);
+        assertEquals(1, misattributed.flaggedSpans.get(1).sourceNumber);
 
         final KnowledgeLlmCitationAudit.Review code = KnowledgeLlmCitationAudit.inspect(
                 "`Amber violet is false [1]`\nAmber violet is true [1].", sources);
@@ -419,6 +429,35 @@ public class KnowledgeLlmClientTest {
                                 "Amber violet can be true or false depending on conditions.")));
         assertEquals(0, ambiguous.polarityMismatchedCitations);
         assertEquals(0, ambiguous.potentiallyOpposingSources);
+    }
+
+    @Test
+    public void flaggedAnswerDetailsAreBoundedAndImmutableWithoutSourceTextLeakage() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("private/path.md", "Amber violet is true. SECRET SOURCE TEXT"));
+        final StringBuilder answer = new StringBuilder();
+        for (int i = 0; i < 12; i++) {
+            answer.append("An unrelated fabricated conclusion is certain [1].\n");
+        }
+        final KnowledgeLlmCitationAudit.Review review = KnowledgeLlmCitationAudit.inspect(
+                answer.toString(), sources);
+        assertEquals(12, review.weakTextAttributions);
+        assertEquals(KnowledgeLlmCitationAudit.MAX_FLAG_DETAILS, review.flaggedSpans.size());
+        for (final KnowledgeLlmCitationAudit.Flag flagged : review.flaggedSpans) {
+            assertEquals(1, flagged.sourceNumber);
+            final String snippet = KnowledgeLlmCitationAudit.flaggedAnswerSnippet(
+                    answer.toString(), flagged);
+            assertTrue(snippet.contains("fabricated conclusion"));
+            assertFalse(snippet.contains("SECRET SOURCE"));
+            assertTrue(snippet.length() <= KnowledgeLlmCitationAudit.MAX_FLAG_SNIPPET);
+            assertEquals(-1, snippet.indexOf('\n'));
+        }
+        try {
+            review.flaggedSpans.clear();
+            fail("A post-audit caller cannot mutate the review details");
+        } catch (UnsupportedOperationException expected) {
+            // Snapshot is immutable.
+        }
     }
 
     @Test

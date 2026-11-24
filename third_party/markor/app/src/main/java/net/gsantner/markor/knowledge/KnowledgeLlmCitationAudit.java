@@ -5,6 +5,7 @@
 package net.gsantner.markor.knowledge;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -23,6 +24,39 @@ public final class KnowledgeLlmCitationAudit {
     private static final int MAX_LOCAL_CITATION_GAP = 180;
     private static final int MIN_PROSE_LETTERS = 16;
     private static final int MIN_PROSE_WORDS = 3;
+    public static final int MAX_FLAG_DETAILS = 8;
+    public static final int MAX_FLAG_SNIPPET = 140;
+
+    /** Offsets refer to the original model answer, not private source text. */
+    public static final class Flag {
+        public enum Kind { WEAK_TEXT, EXPLICIT_POLARITY }
+
+        public final Kind kind;
+        public final int sourceNumber;
+        public final int from;
+        public final int to;
+
+        private Flag(final Kind reason, final int source, final int start, final int end) {
+            kind = reason;
+            sourceNumber = source;
+            from = start;
+            to = end;
+        }
+    }
+
+    private static final class ClaimAudit {
+        int weak;
+        int polarity;
+        final List<Flag> details = new ArrayList<>();
+
+        void add(final Flag.Kind kind, final int source, final int from, final int to) {
+            if (kind == Flag.Kind.WEAK_TEXT) weak++;
+            else polarity++;
+            if (details.size() < MAX_FLAG_DETAILS) {
+                details.add(new Flag(kind, source + 1, from, to));
+            }
+        }
+    }
 
     private static final class Citation {
         final int start;
@@ -64,10 +98,12 @@ public final class KnowledgeLlmCitationAudit {
         public final int polarityMismatchedCitations;
         /** Pairs of supplied excerpts with opposing explicit true/false labels. */
         public final int potentiallyOpposingSources;
+        /** At most eight exact model-answer spans, never vault excerpts. */
+        public final List<Flag> flaggedSpans;
 
         Review(final int count, final int invalid, final int quotes, final int unsupported,
                final int mismatched, final int uncited, final int weak,
-               final int polarity, final int opposing) {
+               final int polarity, final int opposing, final List<Flag> details) {
             referenceCount = count;
             invalidReferences = invalid;
             quotedPassages = quotes;
@@ -77,6 +113,7 @@ public final class KnowledgeLlmCitationAudit {
             weakTextAttributions = weak;
             polarityMismatchedCitations = polarity;
             potentiallyOpposingSources = opposing;
+            flaggedSpans = Collections.unmodifiableList(new ArrayList<>(details));
         }
 
         public boolean hasValidReferences() {
@@ -165,10 +202,10 @@ public final class KnowledgeLlmCitationAudit {
             }
             if (!found) unsupported++;
         }
-        final int[] attribution = inspectCitedTextAnchors(visible, markers, sources);
+        final ClaimAudit attribution = inspectCitedTextAnchors(visible, markers, sources);
         return new Review(count, invalid, quotes.size(), unsupported, mismatched,
-                countUncitedProseSpans(visible, markers), attribution[0], attribution[1],
-                countOpposingSourcePairs(sources));
+                countUncitedProseSpans(visible, markers), attribution.weak, attribution.polarity,
+                countOpposingSourcePairs(sources), attribution.details);
     }
 
     /** Markdown code is not the model's cited prose. Mask without changing
@@ -313,10 +350,10 @@ public final class KnowledgeLlmCitationAudit {
      * A narrow explicit true/false mismatch gets its own warning. Neither
      * check changes the answer or any authoritative journal state.
      */
-    private static int[] inspectCitedTextAnchors(final String visible,
-                                                 final List<Citation> markers,
-                                                 final List<KnowledgeLlmEvidence.Item> sources) {
-        final int[] result = new int[2];
+    private static ClaimAudit inspectCitedTextAnchors(final String visible,
+                                                      final List<Citation> markers,
+                                                      final List<KnowledgeLlmEvidence.Item> sources) {
+        final ClaimAudit result = new ClaimAudit();
         for (int lineStart = 0; lineStart < visible.length();) {
             int lineEnd = visible.indexOf('\n', lineStart);
             if (lineEnd < 0) lineEnd = visible.length();
@@ -344,7 +381,7 @@ public final class KnowledgeLlmCitationAudit {
     private static void inspectOneAttributedSpan(final String visible, final int from,
                                                  final int to, final List<Citation> markers,
                                                  final List<KnowledgeLlmEvidence.Item> sources,
-                                                 final int[] counts) {
+                                                 final ClaimAudit counts) {
         if (!substantiveSpan(visible, from, to)) return;
         final String statement = visible.substring(from, to);
         final Set<String> terms = contentWords(statement);
@@ -361,12 +398,42 @@ public final class KnowledgeLlmCitationAudit {
             for (final String term : terms) {
                 if (sourceTerms.contains(term)) overlap++;
             }
-            if (overlap < 2) counts[0]++;
+            if (overlap < 2) {
+                counts.add(Flag.Kind.WEAK_TEXT, marker.source, from, to);
+            }
             final int sourcePolarity = explicitBooleanPolarity(excerpt, sourceTerms);
             if (statementPolarity != 0 && sourcePolarity == -statementPolarity) {
-                counts[1]++;
+                counts.add(Flag.Kind.EXPLICIT_POLARITY, marker.source, from, to);
             }
         }
+    }
+
+    /** Render a bounded, single-line excerpt from the untrusted MODEL ANSWER,
+     * never from a private Markdown note. Keep exact offsets for testability.
+     */
+    public static String flaggedAnswerSnippet(final String answer, final Flag flag) {
+        if (answer == null || flag == null || flag.from < 0 || flag.to > answer.length()
+                || flag.from >= flag.to) return "";
+        final String raw = answer.substring(flag.from, flag.to).trim();
+        final StringBuilder clean = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            final char ch = raw.charAt(i);
+            if (Character.isISOControl(ch) || Character.isWhitespace(ch)
+                    || Character.getType(ch) == Character.LINE_SEPARATOR
+                    || Character.getType(ch) == Character.PARAGRAPH_SEPARATOR
+                    || Character.getType(ch) == Character.FORMAT) {
+                if (clean.length() > 0 && clean.charAt(clean.length() - 1) != ' ') {
+                    clean.append(' ');
+                }
+            } else {
+                clean.append(ch);
+            }
+            if (clean.length() > MAX_FLAG_SNIPPET) break;
+        }
+        if (clean.length() > MAX_FLAG_SNIPPET) {
+            return clean.substring(0, MAX_FLAG_SNIPPET - 1) + "…";
+        }
+        return clean.toString().trim();
     }
 
     /** Identify ONLY simple explicit true/false opposition in otherwise

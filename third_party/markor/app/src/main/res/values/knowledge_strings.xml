@@ -485,6 +485,10 @@
     <string name="knowledge_llm_weak_text_attributions">Warning: %1$d cited text spans share fewer than two substantial words with their referenced excerpts. This lexical warning cannot rule out valid paraphrases or prove factual accuracy.</string>
     <string name="knowledge_llm_polarity_mismatch">Warning: %1$d cited statements conflict with a source on an explicit true/false label. Verify the exact wording and context; this is not general contradiction detection.</string>
     <string name="knowledge_llm_possible_source_conflicts">Warning: %1$d pairs of selected excerpts contain opposing explicit true/false labels on overlapping terms. Review both sources; neither is automatically accepted as fact.</string>
+    <string name="knowledge_llm_flagged_spans_title">Local review hints (model answer only; not proof):</string>
+    <string name="knowledge_llm_flagged_weak">Source [%1$d], weak text overlap: %2$s</string>
+    <string name="knowledge_llm_flagged_polarity">Source [%1$d], explicit true/false mismatch: %2$s</string>
+    <string name="knowledge_llm_flagged_more">%1$d additional flagged references omitted from this short review list.</string>
     <string name="knowledge_llm_sources_changed_before_send">Request NOT sent: at least one approved source changed or became unavailable after preview. Reopen the question and review the exact excerpts again.</string>
     <string name="knowledge_llm_sources_changed_after_reply">Warning: one or more approved sources changed or became unavailable while the model was answering. Citations refer only to the excerpts sent earlier, not necessarily to the current notes. Recheck the sources before relying on this answer.</string>
     <string name="knowledge_llm_sources">Local source paths used (open notes to verify):</string>

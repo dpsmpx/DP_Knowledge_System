@@ -1097,11 +1097,15 @@ public final class KnowledgeDeviceQaRunner {
                 || correct.potentiallyOpposingSources != 1
                 || wrong.weakTextAttributions != 1
                 || wrong.polarityMismatchedCitations != 1
-                || wrong.potentiallyOpposingSources != 1) {
+                || wrong.potentiallyOpposingSources != 1
+                || wrong.flaggedSpans.size() != 2
+                || wrong.flaggedSpans.get(0).sourceNumber != 2
+                || wrong.flaggedSpans.get(1).sourceNumber != 1) {
             throw new SyntheticMismatch("verdict=CLAIM_SOURCE_ANCHOR_WARNING_LOST");
         }
         return "syntheticOpposingSources=2, weakAttributionFlagged=true, "
                 + "explicitBooleanMismatchFlagged=true, sourceConflictFlagged=true, "
+                + "exactAnswerOffsets=true, sourceNumbersRetained=true, "
                 + "notSemanticProof=true, noNetwork=true, selectedVaultUntouched=true";
     }
 

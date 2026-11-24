@@ -3863,6 +3863,24 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             R.string.knowledge_llm_possible_source_conflicts,
                             review.potentiallyOpposingSources));
                 }
+                if (!review.flaggedSpans.isEmpty()) {
+                    display.append("\n\n").append(getString(
+                            R.string.knowledge_llm_flagged_spans_title));
+                    for (final KnowledgeLlmCitationAudit.Flag flagged : review.flaggedSpans) {
+                        final int label = flagged.kind
+                                == KnowledgeLlmCitationAudit.Flag.Kind.WEAK_TEXT
+                                ? R.string.knowledge_llm_flagged_weak
+                                : R.string.knowledge_llm_flagged_polarity;
+                        display.append("\n• ").append(getString(label, flagged.sourceNumber,
+                                KnowledgeLlmCitationAudit.flaggedAnswerSnippet(answer, flagged)));
+                    }
+                    final int hidden = review.weakTextAttributions
+                            + review.polarityMismatchedCitations - review.flaggedSpans.size();
+                    if (hidden > 0) {
+                        display.append("\n").append(getString(
+                                R.string.knowledge_llm_flagged_more, hidden));
+                    }
+                }
                 display.append("\n\n").append(answer).append("\n\n")
                         .append(getString(R.string.knowledge_llm_sources)).append("\n");
                 for (int i = 0; i < excerpts.size(); i++) {
