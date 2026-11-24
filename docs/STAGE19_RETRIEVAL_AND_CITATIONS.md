@@ -1,6 +1,7 @@
 # Stage 19 — hybrid evidence and citation checks (first engineering slice)
 
-Status: **code complete, Android CI and physical acceptance pending**.
+Status: **first engineering slice implemented and Android CI passed; physical
+acceptance and broader Stage 19 work pending**.
 
 This increment does not change the authoritative knowledge journal or any
 original Markdown. A model response remains an **unverified interpretation**,
@@ -26,12 +27,19 @@ even if every reference and quotation passes the checks below.
    passages, require exact text to appear in at least one referenced excerpt
    or display an additional quotation warning. The answer always retains its
    prominent unverified/not-a-fact banner.
+5. Prompt previews now prefix every line of a Markdown excerpt (including
+   empty lines) as untrusted source data. Apparent `--- END UNTRUSTED SOURCE ---`
+   markers, fake `[2]` headers or instruction text within a note cannot mimic
+   the **outer prompt structure**. The source path rejects control characters
+   and Unicode line separators. This is delimiter hardening only, **not** a
+   guarantee that a model will ignore malicious source instructions.
 
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
-  quotation; untrusted instruction-like source content.
+  quotation; untrusted instruction-like source content; forged delimiter,
+  source-label and Unicode line-break injection.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,
@@ -46,8 +54,9 @@ even if every reference and quotation passes the checks below.
   the indexed bytes. A same-size rewrite with deliberately restored mtime can
   escape this check; immutable indexed content hashes remain future work.
 - An exact quote appearing somewhere in the cited excerpts does not prove
-  the model's surrounding assertion. Unquoted hallucinations, prompt injection,
-  mixed citations and paraphrase entailment cannot be ruled out by syntax.
+  the model's surrounding assertion. Unquoted hallucinations, prompt injection
+  (including semantic manipulation *inside* delimited source lines), mixed
+  citations and paraphrase entailment cannot be ruled out by syntax.
 - No automatic rejection of the answer, fact promotion or journal change;
   users retain final judgment. Real provider, network/privacy, rotation,
   TalkBack and OEM/lifecycle QA remain unverified on physical devices.
