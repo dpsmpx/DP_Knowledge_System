@@ -751,7 +751,13 @@
     <string name="knowledge_models_import_cancelled">Import cancelled. Any unfinished temporary file will be discarded.</string>
     <string name="knowledge_models_store_failed">Cannot inspect the private model shelf. No stored model is treated as runnable.</string>
     <string name="knowledge_models_picker_failed">Android file picker is unavailable.</string>
-    <string name="knowledge_models_catalog_info">Examples, not automatically installed. A tap opens the public model page in the browser; compatible local inference is still under development.</string>
+    <string name="knowledge_models_catalog_info">Downloadable file entries have a checked source SHA-256; inspect size and license before an explicit download. Other entries open model pages. No file is automatically installed or declared runnable. For custom models, use the separate URL/SAF import actions.</string>
+    <string name="knowledge_models_catalog_file_label">Downloadable: %1$s · ~%2$d MB</string>
+    <string name="knowledge_models_catalog_artifact_details">Artifact: %1$s\nPublished file size: ~%2$d MB (estimate)\nReported license: %3$s\nSource: %4$s\nExpected SHA-256: %5$s\nFree private storage: %6$s\n\nDownload this file only if you trust the publisher and accept its license. Source revision follows the current repository main branch, but the exact bytes must match the SHA-256 shown. No API token or note text is sent.</string>
+    <string name="knowledge_models_catalog_provenance">Catalog match: %1$s\nReported license: %2$s\nSource: %3$s</string>
+    <string name="knowledge_models_catalog_open_source">Source page</string>
+    <string name="knowledge_models_space_unknown">Unknown</string>
+    <string name="knowledge_models_space_warning">Warning: estimated file size may exceed currently free app storage. The transfer will abort if safe remaining space becomes insufficient.</string>
     <string name="knowledge_models_no_browser">No browser is available to open this model page.</string>
     <string name="knowledge_models_personalizer_pending">The small personal classifier requires its future training and feature schema. Nothing was downloaded or trained.</string>
     <string name="knowledge_models_download_url">Download from HTTPS URL…</string>
