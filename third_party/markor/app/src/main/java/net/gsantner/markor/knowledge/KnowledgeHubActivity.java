@@ -120,6 +120,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             R.string.knowledge_decisions_obsolete, R.string.knowledge_decisions_history
     };
     private static final int MAX_EMBED_NOTES_PER_RUN = 120;
+    /** A whole reviewable transfer manifest, never a truncated preview. */
+    private static final int MAX_EMBED_PREVIEW_CHARS = 128_000;
     private static final int REQUEST_EXPORT_JOURNAL = 40021;
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
@@ -3254,6 +3256,24 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         void proceed(URL endpoint, String model, String apiKey);
     }
 
+    private static final class PreparedEmbedding {
+        final KnowledgeVaultScanner.Note note;
+        final byte[] sourceHash;
+        final List<KnowledgeEmbeddingChunks.Chunk> chunks;
+        final int resumeFrom;
+        final boolean truncated;
+
+        PreparedEmbedding(final KnowledgeVaultScanner.Note source, final byte[] sha256,
+                          final List<KnowledgeEmbeddingChunks.Chunk> fragments,
+                          final int offset, final boolean partial) {
+            note = source;
+            sourceHash = sha256.clone();
+            chunks = fragments;
+            resumeFrom = offset;
+            truncated = partial;
+        }
+    }
+
     private interface SemanticMatches {
         void receive(List<KnowledgeLocalIndex.SemanticHit> matches);
     }
@@ -3333,34 +3353,111 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                     }
                 }
+                final List<PreparedEmbedding> ready = new ArrayList<>();
+                final List<List<String>> reviewedBatches = new ArrayList<>();
+                final StringBuilder exactPreview = new StringBuilder();
+                int outgoingChars = 0;
+                int outgoingFragments = 0;
+                int rejected = 0;
+                for (final KnowledgeVaultScanner.Note note : pending) {
+                    if (scanGeneration.get() != scan || Thread.currentThread().isInterrupted()) {
+                        return;
+                    }
+                    try {
+                        if (note.file.lastModified() != note.modifiedAtMillis
+                                || note.file.length() != note.sizeBytes) {
+                            rejected++;
+                            continue;
+                        }
+                        final SelectedSource source = readSelectedSource(note.relativePath);
+                        if (note.file.lastModified() != note.modifiedAtMillis
+                                || note.file.length() != note.sizeBytes
+                                || !index.matchesIndexedEvidenceSource(note.relativePath,
+                                        note.modifiedAtMillis, note.sizeBytes, source.bytes)) {
+                            rejected++;
+                            continue;
+                        }
+                        final byte[] hash = KnowledgeLlmEvidence.rawSha256(source.bytes);
+                        final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                                KnowledgeEmbeddingChunks.fromNote(source.text);
+                        if (chunks.isEmpty()) {
+                            rejected++;
+                            continue;
+                        }
+                        final boolean truncated = KnowledgeEmbeddingChunks.coverageTruncated(
+                                source.text, chunks);
+                        final int from = index.previewEmbeddingResumeOffset(
+                                note.relativePath, note.modifiedAtMillis, note.sizeBytes,
+                                key, chunks.size(), truncated, hash);
+                        int noteChars = 0;
+                        for (int j = from; j < chunks.size(); j++) {
+                            noteChars += chunks.get(j).text.length();
+                        }
+                        if (noteChars == 0) {
+                            continue;
+                        }
+                        if (outgoingChars + noteChars > MAX_EMBED_PREVIEW_CHARS) {
+                            // A smaller operation can be reviewed next time; never hide text.
+                            break;
+                        }
+                        ready.add(new PreparedEmbedding(note, hash, chunks, from, truncated));
+                        outgoingChars += noteChars;
+                        for (int position = from; position < chunks.size();
+                             position += KnowledgeEmbeddingClient.MAX_BATCH) {
+                            final List<String> inputs = new ArrayList<>();
+                            final int until = Math.min(chunks.size(),
+                                    position + KnowledgeEmbeddingClient.MAX_BATCH);
+                            for (int j = position; j < until; j++) {
+                                final KnowledgeEmbeddingChunks.Chunk chunk = chunks.get(j);
+                                exactPreview.append("\n\n[ ").append(note.relativePath)
+                                        .append(" · ").append(j + 1).append('/')
+                                        .append(chunks.size()).append(" ]\n")
+                                        .append(chunk.text);
+                                inputs.add(chunk.text);
+                                outgoingFragments++;
+                            }
+                            reviewedBatches.add(inputs);
+                        }
+                    } catch (Exception invalid) {
+                        rejected++;
+                    }
+                }
+                final int fragments = outgoingFragments;
+                final int skipped = rejected;
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || scanGeneration.get() != scan) {
                         return;
                     }
-                    if (pending.isEmpty()) {
+                    if (ready.isEmpty()) {
                         status.setText(R.string.knowledge_embedding_up_to_date);
                         return;
                     }
-                    final StringBuilder names = new StringBuilder();
-                    for (int i = 0; i < Math.min(40, pending.size()); i++) {
-                        names.append("\n• ").append(pending.get(i).relativePath);
-                    }
-                    if (pending.size() > 40) {
-                        names.append("\n… +").append(pending.size() - 40);
-                    }
                     final String plainWarning = "http".equals(endpoint.getProtocol())
                             ? "\n\n" + getString(R.string.knowledge_llm_plaintext_warning) : "";
+                    final TextView outgoing = new TextView(this);
+                    outgoing.setPadding(24, 12, 24, 12);
+                    outgoing.setTextIsSelectable(true);
+                    outgoing.setText(exactPreview.toString());
+                    final ScrollView scroll = new ScrollView(this);
+                    scroll.addView(outgoing);
+                    scroll.setLayoutParams(new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            (int) (340 * getResources().getDisplayMetrics().density)));
                     new AlertDialog.Builder(this)
                             .setTitle(R.string.knowledge_embedding_consent_title)
                             .setMessage(getString(R.string.knowledge_embedding_consent,
-                                    pending.size(), endpoint.getHost(), model,
+                                    ready.size(), endpoint.getHost(), model,
                                     getString(R.string.knowledge_embedding_partial_warning))
-                                    + plainWarning + names)
+                                    + plainWarning + "\n\n" + getString(
+                                    R.string.knowledge_embedding_exact_preview_help,
+                                    fragments, reviewedBatches.size(), skipped))
+                            .setView(scroll)
                             .setNegativeButton(android.R.string.cancel, null)
                             .setPositiveButton(R.string.knowledge_llm_send,
                                     (dialog, which) -> startEmbeddingBuild(endpoint, model,
-                                            apiKey, key, pending, scan,
-                                            KnowledgeNetworkApproval.forIndex(endpoint, model)))
+                                            apiKey, key, ready, scan,
+                                            KnowledgeNetworkApproval.forIndex(endpoint, model,
+                                                    reviewedBatches)))
                             .show();
                 });
             } catch (Exception ignored) {
@@ -3396,7 +3493,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void startEmbeddingBuild(final URL endpoint, final String model, final String apiKey,
                                      final String modelKey,
-                                     final List<KnowledgeVaultScanner.Note> pending,
+                                     final List<PreparedEmbedding> pending,
                                      final int scan,
                                      final KnowledgeNetworkApproval.Permit approval) {
         if (embeddingActive || scanGeneration.get() != scan) {
@@ -3421,34 +3518,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             || embeddingGeneration.get() != operation) {
                         return;
                     }
-                    final KnowledgeVaultScanner.Note note = pending.get(i);
+                    final PreparedEmbedding prepared = pending.get(i);
+                    final KnowledgeVaultScanner.Note note = prepared.note;
                     try {
-                        if (note.file.lastModified() != note.modifiedAtMillis
-                                || note.file.length() != note.sizeBytes) {
-                            skipped++;
-                            continue;
+                        final byte[] sourceSha256 = prepared.sourceHash;
+                        if (!embeddingSourceUnchanged(note, sourceSha256)) {
+                            throw new IOException("Reviewed source changed before upload");
                         }
-                        final SelectedSource source = readSelectedSource(note.relativePath);
-                        if (note.file.lastModified() != note.modifiedAtMillis
-                                || note.file.length() != note.sizeBytes
-                                || !index.matchesIndexedEvidenceSource(note.relativePath,
-                                        note.modifiedAtMillis, note.sizeBytes, source.bytes)) {
-                            skipped++;
-                            continue;
-                        }
-                        final byte[] sourceSha256 = KnowledgeLlmEvidence.rawSha256(source.bytes);
-                        final String text = source.text;
-                        final List<KnowledgeEmbeddingChunks.Chunk> chunks =
-                                KnowledgeEmbeddingChunks.fromNote(text);
-                        if (chunks.isEmpty()) {
-                            skipped++;
-                            continue;
-                        }
-                        final boolean truncated = KnowledgeEmbeddingChunks.coverageTruncated(
-                                text, chunks);
+                        final List<KnowledgeEmbeddingChunks.Chunk> chunks = prepared.chunks;
+                        final boolean truncated = prepared.truncated;
                         final int from = index.beginEmbedding(note.relativePath,
                                 note.modifiedAtMillis, note.sizeBytes, modelKey,
                                 chunks.size(), truncated, sourceSha256);
+                        if (from != prepared.resumeFrom) {
+                            throw new IOException("Embedding resume offset changed after consent");
+                        }
                         for (int position = from; position < chunks.size();
                              position += KnowledgeEmbeddingClient.MAX_BATCH) {
                             if (Thread.currentThread().isInterrupted()
@@ -3465,7 +3549,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             if (!embeddingSourceUnchanged(note, sourceSha256)) {
                                 throw new IOException("Source changed before embedding upload");
                             }
-                            // No text leaves without the batch-level user confirmation.
+                            // Exact batch content and order were reviewed in full by the user.
                             final float[][] vectors;
                             try {
                                 vectors = KnowledgeEmbeddingClient.embed(
@@ -3497,7 +3581,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             incompleteCoverage++;
                         }
                     } catch (IOException inaccessible) {
-                        skipped++;
+                        // Fail closed: skipping a planned batch would desynchronize
+                        // the hash-bound permit from the approved upload sequence.
+                        throw new IllegalStateException("Reviewed embedding plan changed",
+                                inaccessible);
                     }
                     final int progressNow = i + 1;
                     runOnUiThread(() -> {

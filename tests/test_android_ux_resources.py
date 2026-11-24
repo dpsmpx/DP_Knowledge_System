@@ -130,7 +130,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        "index.beginEmbedding(note.relativePath,",
                        "index.appendEmbeddingBatch(note.relativePath,"):
             self.assertIn(marker, hub)
-        self.assertEqual(2, hub.count("embeddingSourceUnchanged(note, sourceSha256)"))
+        self.assertEqual(3, hub.count("embeddingSourceUnchanged(note, sourceSha256)"))
         for marker in ("ALTER TABLE embedding_notes ADD COLUMN source_sha256 BLOB",
                        "n.raw_sha256=e.source_sha256", "MessageDigest.isEqual(sourceSha256,",
                        'note.put("source_sha256", sourceSha256)'):
@@ -187,11 +187,28 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         llm.index("endpoint.openConnection()"))
         self.assertLess(embedding.index("approval.consume("),
                         embedding.index("endpoint.openConnection()"))
-        for marker in ("KnowledgeNetworkApproval.forIndex(endpoint, model)",
+        for marker in ("KnowledgeNetworkApproval.forIndex(endpoint, model,",
                        "KnowledgeNetworkApproval.forQuery(endpoint, model, question)",
                        "KnowledgeNetworkApproval.forAnswer(endpoint, model, exactPreview)",
                        "activeIndexApproval.revoke()"):
             self.assertIn(marker, hub)
+
+    def test_embedding_bulk_consent_previews_the_exact_hash_bound_outgoing_plan(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        gate = (folder / "KnowledgeNetworkApproval.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        self.assertIn("outgoing.setText(exactPreview.toString())", hub)
+        self.assertIn("inputs.add(chunk.text)", hub)
+        self.assertIn("reviewedBatches.add(inputs)", hub)
+        self.assertIn("index.previewEmbeddingResumeOffset(", hub)
+        self.assertIn("from != prepared.resumeFrom", hub)
+        self.assertIn("indexBatchHashes.get(used), digest(outgoingText)", gate)
+        self.assertIn("verifyCurrentNote(db, path, modified, size, sourceSha256)", index)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_embedding_exact_preview_help", names)
 
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()

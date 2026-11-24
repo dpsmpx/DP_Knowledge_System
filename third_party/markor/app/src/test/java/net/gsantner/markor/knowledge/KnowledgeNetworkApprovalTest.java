@@ -70,7 +70,15 @@ public class KnowledgeNetworkApprovalTest {
 
     @Test public void indexScopeSupportsBoundedBatchesButRevocationStopsIt() throws Exception {
         final KnowledgeNetworkApproval.Permit gate =
-                KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb");
+                KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb", Arrays.asList(
+                        Arrays.asList("first fragment", "second fragment"),
+                        Collections.singletonList("another note")));
+        denied(() -> gate.consume(EMBEDDINGS, "emb",
+                KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
+                Collections.singletonList("unreviewed fragment")));
+        denied(() -> gate.consume(EMBEDDINGS, "emb",
+                KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
+                Collections.singletonList("another note")));
         gate.consume(EMBEDDINGS, "emb", KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
                 Arrays.asList("first fragment", "second fragment"));
         gate.consume(EMBEDDINGS, "emb", KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
@@ -82,8 +90,12 @@ public class KnowledgeNetworkApprovalTest {
     }
 
     @Test public void indexScopeCannotOutliveItsRequestBudget() throws Exception {
+        final java.util.List<java.util.List<String>> batches = new java.util.ArrayList<>();
+        for (int i = 0; i < 4096; i++) {
+            batches.add(Collections.singletonList("synthetic fragment"));
+        }
         final KnowledgeNetworkApproval.Permit gate =
-                KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb");
+                KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb", batches);
         for (int i = 0; i < 4096; i++) {
             gate.consume(EMBEDDINGS, "emb", KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
                     Collections.singletonList("synthetic fragment"));
@@ -91,6 +103,24 @@ public class KnowledgeNetworkApprovalTest {
         denied(() -> gate.consume(EMBEDDINGS, "emb",
                 KnowledgeNetworkApproval.Purpose.EMBEDDING_INDEX,
                 Collections.singletonList("synthetic fragment")));
+    }
+
+    @Test public void indexScopeRejectsUnplannedOrEmptyBatchLists() throws Exception {
+        try {
+            KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb", Collections.emptyList());
+            fail("Empty upload plan must fail");
+        } catch (IllegalArgumentException expected) { }
+        try {
+            KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb", Collections.singletonList(
+                    Collections.singletonList("approved")));
+        } catch (IllegalArgumentException unexpected) {
+            fail("A reviewed single batch is valid");
+        }
+        try {
+            KnowledgeNetworkApproval.forIndex(EMBEDDINGS, "emb", Collections.singletonList(
+                    Collections.emptyList()));
+            fail("Empty individual batch must fail");
+        } catch (IllegalArgumentException expected) { }
     }
 
     @Test public void malformedOrWrongPurposeEndpointNeverGetsAConsentPermit() throws Exception {

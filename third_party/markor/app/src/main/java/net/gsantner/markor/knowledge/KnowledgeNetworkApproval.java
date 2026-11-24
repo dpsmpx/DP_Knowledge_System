@@ -6,6 +6,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -13,8 +14,8 @@ import java.util.List;
  * MODEL-M0: in-memory, revocable permit created ONLY from an explicit UI
  * confirmation. Network clients require it before opening a connection.
  * The permit contains no notes, API keys or paths and cannot survive restart.
- * Index consent is scoped to one bounded run; its outgoing batches must still
- * pass independent source-revision checks before each upload.
+ * Index consent binds each exact outgoing batch, in order, to the preview the
+ * user approved. Source revisions are also rechecked before each upload.
  */
 final class KnowledgeNetworkApproval {
     enum Purpose { EMBEDDING_INDEX, EMBEDDING_QUERY, GENERATION }
@@ -26,13 +27,16 @@ final class KnowledgeNetworkApproval {
         private final String model;
         private final Purpose purpose;
         private final byte[] exactTextHash;
+        private final List<byte[]> indexBatchHashes;
         private final int maxRequests;
         private final long issuedAt;
         private int used;
         private boolean revoked;
 
         private Permit(final URL target, final String modelId, final Purpose task,
-                       final List<String> exactTexts, final int requests) {
+                       final List<String> exactTexts,
+                       final List<List<String>> indexBatches) {
+            final int requests = indexBatches == null ? 1 : indexBatches.size();
             if (target == null || modelId == null || modelId.trim().isEmpty()
                     || task == null || requests < 1 || requests > MAX_INDEX_REQUESTS
                     || !KnowledgeModelPolicy.mayTransferNoteText(
@@ -49,8 +53,22 @@ final class KnowledgeNetworkApproval {
             model = modelId.trim();
             purpose = task;
             exactTextHash = exactTexts == null ? null : digest(exactTexts);
-            if ((task == Purpose.EMBEDDING_INDEX) != (exactTexts == null)) {
-                throw new IllegalArgumentException("Exact preview required for single-shot consent");
+            if ((task == Purpose.EMBEDDING_INDEX) != (indexBatches != null)
+                    || (task == Purpose.EMBEDDING_INDEX) == (exactTexts != null)) {
+                throw new IllegalArgumentException("Exactly one approved payload form required");
+            }
+            if (indexBatches != null) {
+                final List<byte[]> hashes = new ArrayList<>();
+                for (final List<String> batch : indexBatches) {
+                    if (batch == null || batch.isEmpty()
+                            || batch.size() > KnowledgeEmbeddingClient.MAX_BATCH) {
+                        throw new IllegalArgumentException("Invalid approved embedding batch");
+                    }
+                    hashes.add(digest(batch));
+                }
+                indexBatchHashes = Collections.unmodifiableList(hashes);
+            } else {
+                indexBatchHashes = null;
             }
             maxRequests = requests;
             issuedAt = System.nanoTime();
@@ -64,7 +82,9 @@ final class KnowledgeNetworkApproval {
                     || task != purpose || !endpoint.equals(target.toExternalForm())
                     || !model.equals(modelId.trim()) || outgoingText == null
                     || outgoingText.isEmpty() || (exactTextHash != null
-                    && !MessageDigest.isEqual(exactTextHash, digest(outgoingText)))) {
+                    && !MessageDigest.isEqual(exactTextHash, digest(outgoingText)))
+                    || (indexBatchHashes != null && !MessageDigest.isEqual(
+                    indexBatchHashes.get(used), digest(outgoingText)))) {
                 throw new IOException("Missing, expired or mismatched explicit network consent");
             }
             used++;
@@ -75,18 +95,19 @@ final class KnowledgeNetworkApproval {
 
     private KnowledgeNetworkApproval() { }
 
-    static Permit forIndex(final URL endpoint, final String model) {
-        return new Permit(endpoint, model, Purpose.EMBEDDING_INDEX, null, MAX_INDEX_REQUESTS);
+    static Permit forIndex(final URL endpoint, final String model,
+                           final List<List<String>> reviewedBatches) {
+        return new Permit(endpoint, model, Purpose.EMBEDDING_INDEX, null, reviewedBatches);
     }
 
     static Permit forQuery(final URL endpoint, final String model, final String question) {
         return new Permit(endpoint, model, Purpose.EMBEDDING_QUERY,
-                Collections.singletonList(question), 1);
+                Collections.singletonList(question), null);
     }
 
     static Permit forAnswer(final URL endpoint, final String model, final String exactPreview) {
         return new Permit(endpoint, model, Purpose.GENERATION,
-                Collections.singletonList(exactPreview), 1);
+                Collections.singletonList(exactPreview), null);
     }
 
     /** Classifies only network destinations; Android-local never opens HTTP. */
