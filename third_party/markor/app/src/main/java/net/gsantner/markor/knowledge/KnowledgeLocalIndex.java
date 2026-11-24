@@ -35,7 +35,7 @@ import java.util.UUID;
 public final class KnowledgeLocalIndex {
     public static final int MAX_INDEX_BYTES_PER_NOTE = 2_000_000;
     private static final String DB_NAME = "knowledge_index_v1.sqlite";
-    private static final int SCHEMA_VERSION = 3;
+    private static final int SCHEMA_VERSION = 4;
     private static final int MAX_SEMANTIC_CANDIDATES = 45_000;
 
     public interface Progress {
@@ -274,35 +274,56 @@ public final class KnowledgeLocalIndex {
                 final long existingId;
                 final long existingModified;
                 final long existingSize;
+                final byte[] existingRawSha256;
                 try (Cursor c = db.rawQuery(
-                        "SELECT id, modified, size FROM notes WHERE path=?",
+                        "SELECT id, modified, size, raw_sha256 FROM notes WHERE path=?",
                         new String[]{note.relativePath})) {
                     if (c.moveToFirst()) {
                         existingId = c.getLong(0);
                         existingModified = c.getLong(1);
                         existingSize = c.getLong(2);
+                        existingRawSha256 = c.getBlob(3);
                     } else {
                         existingId = -1;
                         existingModified = -1;
                         existingSize = -1;
+                        existingRawSha256 = null;
                     }
                 }
+                byte[] bounded = null;
                 if (existingId >= 0 && existingModified == note.modifiedAtMillis
                         && existingSize == note.sizeBytes) {
+                    if ((existingRawSha256 != null && existingRawSha256.length == 32)
+                            || note.sizeBytes > MAX_INDEX_BYTES_PER_NOTE) {
+                        checkNoteUnchanged(note);
+                        db.execSQL("UPDATE notes SET generation=? WHERE id=?",
+                                new Object[]{generation, existingId});
+                        reused++;
+                        continue;
+                    }
+                    // Schema v3 contains decoded FTS text but no original-byte seal.
+                    // Backfill only when the current source still decodes to the
+                    // indexed body. Preserve expensive embeddings for that case.
+                    bounded = readBounded(note.file, cancellation);
                     checkNoteUnchanged(note);
-                    db.execSQL("UPDATE notes SET generation=? WHERE id=?",
-                            new Object[]{generation, existingId});
-                    reused++;
-                    continue;
+                    if (bounded != null && matchesStoredBody(db, existingId,
+                            new String(bounded, StandardCharsets.UTF_8))) {
+                        db.execSQL("UPDATE notes SET generation=?, raw_sha256=? WHERE id=?",
+                                new Object[]{generation, KnowledgeLlmEvidence.rawSha256(bounded),
+                                        existingId});
+                        reused++;
+                        continue;
+                    }
                 }
 
                 // A note may grow between discovery and indexing. In that case,
                 // retain its filename and postpone content indexing to a rescan.
-                final String bounded = note.sizeBytes > MAX_INDEX_BYTES_PER_NOTE
-                        ? null : readBounded(note.file, cancellation);
+                if (bounded == null && note.sizeBytes <= MAX_INDEX_BYTES_PER_NOTE) {
+                    bounded = readBounded(note.file, cancellation);
+                }
                 checkNoteUnchanged(note);
                 final boolean tooLarge = bounded == null;
-                final String text = tooLarge ? "" : bounded;
+                final String text = tooLarge ? "" : new String(bounded, StandardCharsets.UTF_8);
                 final KnowledgeMarkdownMetadata.Parsed parsed =
                         KnowledgeMarkdownMetadata.parse(note.relativePath, text);
                 final String title = tooLarge
@@ -314,6 +335,7 @@ public final class KnowledgeLocalIndex {
                 values.put("title", title);
                 values.put("oversized", tooLarge ? 1 : 0);
                 values.put("generation", generation);
+                values.put("raw_sha256", tooLarge ? null : KnowledgeLlmEvidence.rawSha256(bounded));
                 final long rowId;
                 if (existingId < 0) {
                     rowId = db.insertOrThrow("notes", null, values);
@@ -528,11 +550,41 @@ public final class KnowledgeLocalIndex {
         }
     }
 
-    /**
-     * Fail closed if a note's CURRENT decoded text differs from the text that
-     * the index actually used. Metadata alone cannot detect same-size rewrites
-     * with deliberately restored mtimes. Never update notes or projections.
+    /** Fail closed on any raw-byte change, including noncanonical UTF-8 that
+     * decodes to the same text. Missing v3 seals cannot authorize disclosure.
+     * The decoded FTS body is also compared to reject corrupt projections.
+     * Never update notes or projections here.
      */
+    public synchronized boolean matchesIndexedEvidenceSource(final String path,
+                                                              final long modified, final long size,
+                                                              final byte[] currentBytes) {
+        if (path == null || path.isEmpty() || modified <= 0 || size < 0
+                || currentBytes == null || currentBytes.length != size
+                || currentBytes.length > MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        final SQLiteDatabase db = open();
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return false;
+            }
+            try (Cursor c = db.rawQuery("SELECT notes.raw_sha256, documents_fts.body FROM notes "
+                            + "JOIN documents_fts ON documents_fts.docid=notes.id "
+                            + "WHERE notes.path=? AND notes.modified=? AND notes.size=? "
+                            + "AND notes.oversized=0 AND notes.generation=? LIMIT 1",
+                    new String[]{path, Long.toString(modified), Long.toString(size), generation})) {
+                return c.moveToFirst()
+                        && KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)
+                        && KnowledgeLlmEvidence.matchesIndexedText(c.getString(1),
+                                new String(currentBytes, StandardCharsets.UTF_8));
+            }
+        } finally {
+            db.close();
+        }
+    }
+
+    /** Legacy decoded-text gate, kept for synthetic source-regression tests. */
     public synchronized boolean matchesIndexedEvidenceText(final String path,
                                                             final long modified, final long size,
                                                             final String currentText) {
@@ -938,7 +990,7 @@ public final class KnowledgeLocalIndex {
         }
     }
 
-    private static String readBounded(final File file,
+    private static byte[] readBounded(final File file,
                                       final KnowledgeVaultScanner.Cancellation cancellation)
             throws IOException {
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -953,7 +1005,16 @@ public final class KnowledgeLocalIndex {
                 bytes.write(buffer, 0, count);
             }
         }
-        return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        return bytes.toByteArray();
+    }
+
+    private static boolean matchesStoredBody(final SQLiteDatabase db, final long rowId,
+                                             final String currentText) {
+        try (Cursor c = db.rawQuery("SELECT body FROM documents_fts WHERE docid=? LIMIT 1",
+                new String[]{Long.toString(rowId)})) {
+            return c.moveToFirst()
+                    && KnowledgeLlmEvidence.matchesIndexedText(c.getString(0), currentText);
+        }
     }
 
     /** A disappearing or externally edited file cannot confirm a stale snapshot. */
@@ -1035,13 +1096,23 @@ public final class KnowledgeLocalIndex {
                         }
                     }
                 }
+                db.execSQL("PRAGMA user_version=3");
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        if (version < 4) {
+            // All v1-v3 source rows remain intact. Null seals require a
+            // verified backfill during sync before AI evidence is permitted.
+            db.beginTransaction();
+            try {
+                db.execSQL("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB");
                 db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
             }
-        } else if (version != SCHEMA_VERSION) {
-            db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
         }
         return db;
     }

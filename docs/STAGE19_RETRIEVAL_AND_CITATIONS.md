@@ -95,13 +95,24 @@ grounding. Device and broader human-labeled benchmarks remain open.
   each pass**. The reproducible adversarial FTS4 fixture does not close the
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
   semantic model behavior and Android 20k latency remain unmeasured.
-- The new SHA-256 gate compares **decoded text** against the existing FTS4
-  snapshot, not the original raw file bytes. Invalid UTF-8 byte variants can
-  decode to identical replacement characters. There is no persistent raw-byte
-  digest in the schema, nor a cryptographic seal for embeddings; an externally
-  modified file with unchanged mtime/size can remain stale in the index until
-  a rebuild, but cannot silently pass the LLM text-content comparison if its
-  decoded text differs. End-to-end immutable source hashes are still future work.
+- Schema v4 additionally stores a **SHA-256 of the raw indexed Markdown bytes**
+  in the *disposable* local index. Both lexical and hybrid LLM evidence paths
+  now verify that digest against the **same bytes read for the excerpt**, as
+  well as the existing FTS4 decoded text and pre/post mtime/size checks.
+  Distinct malformed UTF-8 byte sequences that decode identically cannot
+  authorize disclosure. A v1-v3 index is upgraded without modifying vault
+  files; missing seals **fail closed** until synchronization verifies the
+  original FTS text and backfills the digest, or reindexes changed content.
+  Synthetic QA exercises the v3 upgrade, unverified scans and changed-byte
+  refusal. Java regression tests exercise the malformed-UTF-8 edge case.
+- Incremental sync still uses mtime/size to reuse *already sealed* rows and
+  does not proactively hash every unchanged file on every scan. Thus external
+  same-size/same-mtime edits can leave stale **search and embedding rankings**
+  until a changed-metadata rescan or rebuild, although they cannot pass the
+  raw-byte LLM disclosure gate. Embeddings are keyed to source metadata and
+  model/chunker version, not a separate digest; an independently verifiable
+  embedding-to-source provenance seal and a representative semantic evaluation
+  remain future work.
 - An exact quote appearing somewhere in the cited excerpts does not prove
   the model's surrounding assertion. Unquoted hallucinations, prompt injection
   (including semantic manipulation *inside* delimited source lines), mixed
