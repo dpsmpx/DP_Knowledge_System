@@ -25,7 +25,8 @@ class SignedApkSmokePolicyTests(unittest.TestCase):
         script = SCRIPT.read_text(encoding="utf-8")
         for required in ("set -euo pipefail", "adb install -r \"$apk_path\"",
                          "sys.boot_completed", "adb shell pidof", "package:$package_name",
-                         "::error::", "trap cleanup EXIT"):
+                         "::error::", "trap cleanup EXIT", "tail -n 60 \"$emulator_log\"",
+                         "kill -0 \"$emulator_pid\"", "adb devices"):
             self.assertIn(required, script)
         self.assertNotIn("assembleDebug", script)
         syntax = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True)
