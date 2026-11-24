@@ -118,6 +118,18 @@ even if every reference and quotation passes the checks below.
     **reported** interruption and local length overflow: a provider falsely
     reporting `stop` cannot be independently authenticated, and malformed
     or empty responses still follow the existing generic error path.
+15. The **same original source seals** are checked again *after* a completed
+    provider response and *before* displaying the answer. A source that was
+    valid at send time may have changed or become unavailable while the
+    network request was running. In that case the answer remains an explicitly
+    unverified interpretation, but a prominent EN/RU warning says its source
+    links refer to the **previously sent excerpts**, not necessarily the
+    current vault. It never silently re-labels the answer as current evidence,
+    automatically resends the question, or changes Markdown/journal entries.
+    This second local check uses the exact same raw-byte seals, mtime/size,
+    scan generation and index provenance as the pre-send gate. It does not
+    give atomic post-display freshness or semantic truth; on-device
+    concurrency/lifecycle behavior remains a separate QA requirement.
 
 ## Reproducible synthetic retrieval benchmark
 

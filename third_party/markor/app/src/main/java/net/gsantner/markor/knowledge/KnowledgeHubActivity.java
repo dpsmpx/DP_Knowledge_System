@@ -3780,10 +3780,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     return;
                 }
                 final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview);
+                // A user or another app may edit Markdown while the provider
+                // generates its response. References still describe only the
+                // bytes actually sent, not necessarily the current vault.
+                final boolean sourceStillCurrentAfterReply =
+                        consentEvidenceStillCurrent(seals, generation);
                 final KnowledgeLlmCitationAudit.Review review =
                         KnowledgeLlmCitationAudit.inspect(answer, excerpts);
                 final StringBuilder display = new StringBuilder(
                         getString(R.string.knowledge_llm_unverified));
+                if (!sourceStillCurrentAfterReply) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_sources_changed_after_reply));
+                }
                 if (!review.hasValidReferences()) {
                     display.append("\n").append(getString(R.string.knowledge_llm_no_citations));
                 }

@@ -15,6 +15,21 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_llm_answer_warns_when_sources_change_during_generation(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        self.assertEqual(2, hub.count("consentEvidenceStillCurrent(seals, generation)"))
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)")
+        after = hub.index("final boolean sourceStillCurrentAfterReply =", network)
+        audit = hub.index("KnowledgeLlmCitationAudit.inspect(answer, excerpts)", after)
+        self.assertLess(network, after)
+        self.assertLess(after, audit)
+        self.assertIn("R.string.knowledge_llm_sources_changed_after_reply", hub)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_sources_changed_after_reply", names)
+
     def test_llm_refuses_explicit_incomplete_provider_response(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         client = (folder / "KnowledgeLlmClient.java").read_text()
