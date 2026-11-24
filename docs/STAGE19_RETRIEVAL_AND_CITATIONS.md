@@ -130,6 +130,17 @@ even if every reference and quotation passes the checks below.
     scan generation and index provenance as the pre-send gate. It does not
     give atomic post-display freshness or semantic truth; on-device
     concurrency/lifecycle behavior remains a separate QA requirement.
+16. Limited common **English and Russian question framing** is now discarded
+    before constructing the bounded FTS4 phrase/all-term/OR query: for example,
+    "Tell me about amber violet" and "Расскажи, что известно про память
+    синтез?" select the same local evidence ranking as their corresponding
+    bare two-term queries. A query consisting only of discarded framing words
+    falls back to its original sanitized tokens; the app never invents
+    synonyms, changes the source Markdown or infers either side of a conflict.
+    Pure JVM and Python fixture assertions cover this, and the cache-only
+    `LEX-PHRASE-19` device QA fixture now includes *both* language variants
+    with opposing synthetic claims. The updated device fixture has not yet
+    been run on a physical phone.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -141,14 +152,16 @@ FTS4 query syntax, phrase/strict/OR ordering, bounds, labeled recall,
 opposing synthetic claims and the absence of unproven synonym expansion.
 
 Updated Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
-artificial notes, four adversarial two-word queries and four known relevant
-documents per query. Early distractors contain both words **separated**,
-while four late labeled files contain the adjacent phrase and include
-explicitly opposing synthetic claims. Both the original path-ordered OR and
-prior path-ordered two-pass baseline had **recall@24 = 0/4** for every query;
-the three-pass variant had **recall@6 = 4/4**, **precision@6 = 4/6** and
-**recall@24 = 4/4**. Query timing across 20 host trials was approximately
-**p50 = 0.27 ms** and **p95 = 0.39 ms**, but varies by machine and build.
+artificial notes, five adversarial two-word queries (including one Cyrillic
+pair) and four known relevant documents per query. Early distractors contain
+both words **separated**, while four late labeled files contain the adjacent
+phrase and include explicitly opposing synthetic claims. Both the original
+path-ordered OR and prior path-ordered two-pass baseline had **recall@24 =
+0/4** for every bare query; the three-pass variant had **recall@6 = 4/4**,
+**precision@6 = 4/6** and **recall@24 = 4/4** for all five. Five corresponding
+natural English/Russian question forms produced identical shortlists and
+the same labeled metrics. Query timing across 25 host trials was approximately
+**p50 = 0.23 ms** and **p95 = 0.28 ms**, but varies by machine and build.
 The deliberately adversarial corpus is not a
 representative search evaluation, and this measures a Python SQL mirror,
 **not** Android, embeddings, battery/RAM, provider quality or semantic

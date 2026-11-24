@@ -19,17 +19,27 @@ TOPICS = (
     ("cobalt", "willow"),
     ("citrine", "juniper"),
     ("saffron", "otter"),
+    ("память", "синтез"),
+)
+NATURAL_QUESTIONS = (
+    "Tell me about amber violet",
+    "What do we know about cobalt willow?",
+    "Please explain citrine juniper",
+    "Describe saffron otter",
+    "Расскажи, что известно про память синтез?",
 )
 GENERATION = "synthetic-stage19"
 QUESTION_FILLERS = frozenset((
     'what', 'which', 'where', 'when', 'whose', 'please', 'could', 'would', 'should',
+    'tell', 'about', 'know', 'explain', 'describe',
     'какие', 'какой', 'какая', 'какое', 'когда', 'почему', 'зачем', 'сколько',
     'такое', 'каковы',
+    'расскажи', 'расскажите', 'известно', 'объясни', 'объясните', 'опиши', 'опишите',
 ))
 
 
 def fts_evidence_query(question: str) -> str:
-    """ASCII test-case equivalent of KnowledgeMarkdownMetadata.ftsEvidenceQuery."""
+    """ASCII/Cyrillic fixture equivalent of KnowledgeMarkdownMetadata.ftsEvidenceQuery."""
     terms = []
     word = ""
     for char in question + " ":
@@ -172,6 +182,7 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
         expected = build_synthetic_index(connection, notes)
         index_ms = (time.perf_counter() - start) * 1000
         queries = []
+        framed_queries = []
         latency_ms = []
         for topic, words in enumerate(TOPICS):
             question = " ".join(words)
@@ -200,6 +211,19 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
                 "recall_at_6": round(len(relevant.intersection(top_six)) / len(relevant), 4),
                 "recall_at_24": round(len(relevant.intersection(shortlist)) / len(relevant), 4),
             })
+            framed_question = NATURAL_QUESTIONS[topic]
+            framed = search_production_lexical_mirror(
+                connection, framed_question, 24)
+            framed_queries.append({
+                "synthetic_question": framed_question,
+                "same_shortlist_as_bare_terms": framed == shortlist,
+                "precision_at_6": round(
+                    len(relevant.intersection(framed[:6])) / 6, 4),
+                "recall_at_6": round(
+                    len(relevant.intersection(framed[:6])) / len(relevant), 4),
+                "recall_at_24": round(
+                    len(relevant.intersection(framed)) / len(relevant), 4),
+            })
         timings = sorted(latency_ms)
         p95 = timings[max(0, (95 * len(timings) + 99) // 100 - 1)]
         return {
@@ -211,8 +235,10 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             "query_p50_ms": round(statistics.median(timings), 3),
             "query_p95_ms": round(p95, 3),
             "queries": queries,
+            "natural_question_cases": framed_queries,
             "limitations": [
                 "synthetic adversarial corpus, not representative relevance labels",
+                "limited English/Russian question prefixes, not language understanding",
                 "synthetic opposing claims are retrieved, not semantically reconciled",
                 "no synonym expansion or natural-language entailment",
                 "SQLite FTS4 SQL mirror, not device or app I/O",

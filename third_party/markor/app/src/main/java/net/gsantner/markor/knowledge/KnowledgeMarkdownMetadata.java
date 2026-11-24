@@ -215,6 +215,13 @@ public final class KnowledgeMarkdownMetadata {
             case "could":
             case "would":
             case "should":
+            // Frequent introductory wording in natural-language questions.
+            // Keep the original terms when *all* of them are fillers.
+            case "tell":
+            case "about":
+            case "know":
+            case "explain":
+            case "describe":
             case "какие":
             case "какой":
             case "какая":
@@ -225,6 +232,13 @@ public final class KnowledgeMarkdownMetadata {
             case "сколько":
             case "такое":
             case "каковы":
+            case "расскажи":
+            case "расскажите":
+            case "известно":
+            case "объясни":
+            case "объясните":
+            case "опиши":
+            case "опишите":
                 return true;
             default:
                 return false;
