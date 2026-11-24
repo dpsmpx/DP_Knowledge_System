@@ -15,6 +15,21 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_llm_quote_attribution_uses_nearby_citations_with_visible_warnings(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("nearestLocalCitations(", "containsSentenceBreak(",
+                       "MAX_LOCAL_CITATION_GAP", "mismatchedQuoteCitations"):
+            self.assertIn(marker, audit)
+        self.assertIn('R.string.knowledge_llm_mismatched_quote_citations', hub)
+        self.assertIn('step("CITE-LOCAL-19",', qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_mismatched_quote_citations", names)
+
     def test_lexical_evidence_boosts_short_phrases_without_dropping_fallback(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         index = (folder / "KnowledgeLocalIndex.java").read_text()

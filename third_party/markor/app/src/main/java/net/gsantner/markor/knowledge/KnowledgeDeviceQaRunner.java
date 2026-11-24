@@ -144,6 +144,7 @@ public final class KnowledgeDeviceQaRunner {
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
+                step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
@@ -881,6 +882,27 @@ public final class KnowledgeDeviceQaRunner {
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    /** Pure, count-only quote attribution fixture; no network or user vault. */
+    private String checkSyntheticLocalCitations() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("synthetic-one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("synthetic-two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review correct = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [1], «Amber violet is false.» [2]", sources);
+        final KnowledgeLlmCitationAudit.Review laundered = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [2]. A different sentence cites [1].", sources);
+        final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [1][2]", sources);
+        if (correct.unverifiedQuotes != 0 || correct.mismatchedQuoteCitations != 0
+                || laundered.unverifiedQuotes != 1 || laundered.mismatchedQuoteCitations != 1
+                || mixed.unverifiedQuotes != 0 || mixed.mismatchedQuoteCitations != 1) {
+            throw new SyntheticMismatch("verdict=LOCAL_CITATION_ATTRIBUTION_MISMATCH");
+        }
+        return "syntheticSources=2, localQuotesVerified=true, "
+                + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true; "
+                + "no model request or selected vault access";
     }
 
     /** Exercise decision preview, append-only retraction and stale-head rejection. */

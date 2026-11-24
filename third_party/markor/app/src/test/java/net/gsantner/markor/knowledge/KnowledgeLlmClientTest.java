@@ -223,4 +223,38 @@ public class KnowledgeLlmClientTest {
         assertEquals(0, cited.unverifiedQuotes);
         assertTrue(cited.hasValidReferences());
     }
+
+    @Test
+    public void quoteAuditRejectsGlobalCitationLaunderingAndMixedLocalSources() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("one.md", "The sky is blue."),
+                new KnowledgeLlmEvidence.Item("two.md", "The sky is not always blue."));
+        final KnowledgeLlmCitationAudit.Review distant = KnowledgeLlmCitationAudit.inspect(
+                "The model says «The sky is blue.» [2]. A different claim cites [1].", sources);
+        assertTrue(distant.hasValidReferences());
+        assertEquals(1, distant.unverifiedQuotes);
+        assertEquals(1, distant.mismatchedQuoteCitations);
+
+        final KnowledgeLlmCitationAudit.Review correct = KnowledgeLlmCitationAudit.inspect(
+                "«The sky is blue.» [1], «The sky is not always blue.» [2]", sources);
+        assertEquals(0, correct.unverifiedQuotes);
+        assertEquals(0, correct.mismatchedQuoteCitations);
+
+        final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
+                "«The sky is blue.» [1][2]", sources);
+        assertEquals(0, mixed.unverifiedQuotes);
+        assertEquals(1, mixed.mismatchedQuoteCitations);
+
+        final KnowledgeLlmCitationAudit.Review prefix = KnowledgeLlmCitationAudit.inspect(
+                "[1] «The sky is blue.»", sources);
+        assertEquals(0, prefix.unverifiedQuotes);
+
+        final KnowledgeLlmCitationAudit.Review borrowed = KnowledgeLlmCitationAudit.inspect(
+                "«The sky is blue.» [1], «The sky is not always blue.»", sources);
+        assertEquals(1, borrowed.unverifiedQuotes);
+
+        final KnowledgeLlmCitationAudit.Review separated = KnowledgeLlmCitationAudit.inspect(
+                "«The sky is blue.» A different sentence. [1]", sources);
+        assertEquals(1, separated.unverifiedQuotes);
+    }
 }
