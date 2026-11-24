@@ -605,8 +605,10 @@ public final class KnowledgeDeviceQaRunner {
             final File alpha = new File(vault, "alpha.md");
             final File oldName = new File(vault, "beta.md");
             final File newName = new File(vault, "gamma.md");
-            writeFixture(alpha, "# Alpha\nSynthetic amber source points to [[beta]].\n");
-            writeFixture(oldName, "# Beta\nSynthetic violet source.\n");
+            final String alphaText = "# Alpha\nSynthetic amber source points to [[beta]].\n";
+            final String betaText = "# Beta\nSynthetic violet source.\n";
+            writeFixture(alpha, alphaText);
+            writeFixture(oldName, betaText);
             final byte[] unchangedHash = sha256(alpha);
             final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
                     new File(sandbox, "qa-reconciliation.sqlite"));
@@ -617,6 +619,12 @@ public final class KnowledgeDeviceQaRunner {
             if (first.indexed != 2 || first.removed != 0
                     || testIndex.possibleBacklinks("beta.md", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=INITIAL_RECONCILIATION_MISMATCH");
+            }
+            if (!testIndex.matchesIndexedEvidenceText("alpha.md", alpha.lastModified(),
+                    alpha.length(), alphaText)
+                    || testIndex.matchesIndexedEvidenceText("alpha.md", alpha.lastModified(),
+                            alpha.length(), alphaText.replace("amber", "amper"))) {
+                throw new SyntheticMismatch("verdict=INDEXED_SOURCE_HASH_MISMATCH");
             }
             final List<KnowledgeLocalIndex.Hit> rankedEvidence =
                     testIndex.evidenceSearch("synthetic violet", 10);
@@ -662,6 +670,10 @@ public final class KnowledgeDeviceQaRunner {
                     || partialHits.size() != 2 || !partialHits.get(0).confirmedInLastScan
                     || testIndex.evidenceSearch("synthetic", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
+            }
+            if (testIndex.matchesIndexedEvidenceText("gamma.md", newName.lastModified(),
+                    newName.length(), betaText)) {
+                throw new SyntheticMismatch("verdict=UNVERIFIED_INDEXED_TEXT_ACCEPTED");
             }
             final List<KnowledgeLocalIndex.Hit> partialEvidence =
                     testIndex.evidenceSearch("amber violet synthetic", 10);

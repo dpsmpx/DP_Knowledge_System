@@ -3500,7 +3500,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                         final String content = readSelectedNote(relativePath);
                         if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
-                                modified, size)) {
+                                modified, size)
+                                || !index.matchesIndexedEvidenceText(relativePath,
+                                        modified, size, content)) {
                             continue;
                         }
                         final String excerpt = vector == null
@@ -3622,7 +3624,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                         final String content = readSelectedNote(match.relativePath);
                         if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
-                                match.modifiedAtMillis, match.sizeBytes)) {
+                                match.modifiedAtMillis, match.sizeBytes)
+                                || !index.matchesIndexedEvidenceText(match.relativePath,
+                                        match.modifiedAtMillis, match.sizeBytes, content)) {
                             continue;
                         }
                         final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);

@@ -144,6 +144,33 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void indexedTextHashCatchesSameSizeRewriteEvenWithRestoredMtime() throws Exception {
+        final String original = "# Note\nAmber source is true.\n";
+        final String edited = "# Note\nAmber source is fake.\n";
+        assertEquals(original.getBytes(StandardCharsets.UTF_8).length,
+                edited.getBytes(StandardCharsets.UTF_8).length);
+        assertTrue(KnowledgeLlmEvidence.matchesIndexedText(original, original));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedText(original, edited));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedText(original, null));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedText(null, edited));
+        assertTrue(KnowledgeLlmEvidence.matchesIndexedText("# Привет\n", "# Привет\n"));
+        final File file = File.createTempFile("dpks-same-metadata-", ".md");
+        try {
+            Files.write(file.toPath(), original.getBytes(StandardCharsets.UTF_8));
+            final long modified = file.lastModified();
+            final long bytes = file.length();
+            Files.write(file.toPath(), edited.getBytes(StandardCharsets.UTF_8));
+            assertTrue(file.setLastModified(modified));
+            // The old metadata-only gate cannot detect the manipulated file.
+            assertTrue(KnowledgeLlmEvidence.matchesIndexedSnapshot(file, modified, bytes));
+            assertFalse(KnowledgeLlmEvidence.matchesIndexedText(original,
+                    new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8)));
+        } finally {
+            assertTrue(file.delete());
+        }
+    }
+
+    @Test
     public void citationAuditRejectsInventedAndMalformedReferenceNumbers() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
                 new KnowledgeLlmEvidence.Item("one.md", "The sky is blue."),

@@ -528,6 +528,38 @@ public final class KnowledgeLocalIndex {
         }
     }
 
+    /**
+     * Fail closed if a note's CURRENT decoded text differs from the text that
+     * the index actually used. Metadata alone cannot detect same-size rewrites
+     * with deliberately restored mtimes. Never update notes or projections.
+     */
+    public synchronized boolean matchesIndexedEvidenceText(final String path,
+                                                            final long modified, final long size,
+                                                            final String currentText) {
+        if (path == null || path.isEmpty() || modified <= 0 || size < 0
+                || currentText == null
+                || currentText.length() > MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        final SQLiteDatabase db = open();
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return false;
+            }
+            try (Cursor c = db.rawQuery("SELECT documents_fts.body FROM notes "
+                            + "JOIN documents_fts ON documents_fts.docid=notes.id "
+                            + "WHERE notes.path=? AND notes.modified=? AND notes.size=? "
+                            + "AND notes.oversized=0 AND notes.generation=? LIMIT 1",
+                    new String[]{path, Long.toString(modified), Long.toString(size), generation})) {
+                return c.moveToFirst() && KnowledgeLlmEvidence.matchesIndexedText(
+                        c.getString(0), currentText);
+            }
+        } finally {
+            db.close();
+        }
+    }
+
     /** True only when every part of this unchanged document has been embedded. */
     public synchronized boolean hasEmbeddings(final String path, final long modified,
                                                final long size, final String modelKey) {
