@@ -34,7 +34,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         self.assertEqual(2, hub.count("consentEvidenceStillCurrent(seals, generation)"))
-        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)")
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,")
         after = hub.index("final boolean sourceStillCurrentAfterReply =", network)
         audit = hub.index("KnowledgeLlmCitationAudit.inspect(answer, excerpts)", after)
         self.assertLess(network, after)
@@ -55,7 +55,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             self.assertIn(token, client)
         self.assertNotIn("answer.substring(0, 12_000)", client)
         self.assertLess(hub.index("consentEvidenceStillCurrent(seals, generation)"),
-                        hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)"))
+                        hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,"))
         self.assertIn("R.string.knowledge_llm_incomplete_response", hub)
         self.assertIn('step("CITE-RESPONSE-19",', qa)
         for locale in ("values", "values-ru"):
@@ -159,7 +159,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
         self.assertEqual(2, hub.count("new KnowledgeLlmEvidence.ConsentSeal("))
         guard = hub.index("if (!consentEvidenceStillCurrent(seals, generation))")
-        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)", guard)
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,", guard)
         self.assertLess(guard, network)
         for marker in ("scanGeneration.get() != consentGeneration",
                        "seal.matchesCurrentBytes(current.bytes)",
@@ -172,6 +172,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             names = {element.get("name") for element in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_llm_sources_changed_before_send", names)
+
+    def test_m0_network_clients_require_scoped_approval_before_connection(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        gate = (folder / "KnowledgeNetworkApproval.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        llm = (folder / "KnowledgeLlmClient.java").read_text()
+        embedding = (folder / "KnowledgeEmbeddingClient.java").read_text()
+        for marker in ("Purpose.EMBEDDING_INDEX", "Purpose.EMBEDDING_QUERY",
+                       "Purpose.GENERATION", "MessageDigest.isEqual", "synchronized void revoke",
+                       "providerFor(target)"):
+            self.assertIn(marker, gate)
+        self.assertLess(llm.index("approval.consume("),
+                        llm.index("endpoint.openConnection()"))
+        self.assertLess(embedding.index("approval.consume("),
+                        embedding.index("endpoint.openConnection()"))
+        for marker in ("KnowledgeNetworkApproval.forIndex(endpoint, model)",
+                       "KnowledgeNetworkApproval.forQuery(endpoint, model, question)",
+                       "KnowledgeNetworkApproval.forAnswer(endpoint, model, exactPreview)",
+                       "activeIndexApproval.revoke()"):
+            self.assertIn(marker, hub)
 
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
