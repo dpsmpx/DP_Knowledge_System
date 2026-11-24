@@ -1,6 +1,6 @@
 # Release gate: signed DPKS APK install and cold launch
 
-Status: **implemented in CI, first emulator execution FAILED; diagnosis in progress**. The gate is
+Status: **automated signed-emulator gate PASS on 2026-11-24, Preview #31**. The gate is
 tested on a clean Android API 35 x86_64 image, not an owner's phone.
 
 After the Python suite, Android JVM tests, release APK build, package-ID
@@ -43,5 +43,15 @@ in its default `$HOME/.android/avd`. The AVD management and launch tools
 had different implicit home-directory conventions on the CI runner.
 The follow-up sets `ANDROID_AVD_HOME` once for both tools, then checks the
 exact `.ini` and `emulator -list-avds` before any launch. The first two
-attempts correctly blocked release publication; the new configuration needs
-its own signed-workflow PASS before CI-02 is closed.
+attempts correctly blocked release publication; the new configuration was
+subsequently validated by the third signed workflow below.
+
+**Third run PASS:** [signed workflow 45398332895](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45398332895)
+on commit `67a9fdf26976834579b787a51dfa7cdd55c26d74` built the release
+APK, passed `apksigner` and SHA-256 checks, used the single explicit AVD
+directory, installed the **same signed** `com.dpsmpx.dpks` file and cold
+launched it on Android API 35. The release step executed only after that
+PASS, publishing [Stage 18 Preview #31](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage18-31-67a9fdf269)
+with APK and `.sha256` asset. CI-02's **automated installation/cold-launch**
+condition is satisfied. This does not close physical-phone QA, Android
+permissions, source-vault integrity, restore or background lifecycle.
