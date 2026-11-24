@@ -15,6 +15,19 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_llm_evidence_uses_sealed_raw_source_in_both_retrieval_paths(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertEqual(2, hub.count("index.matchesIndexedEvidenceSource("))
+        self.assertEqual(2, hub.count("final SelectedSource source = readSelectedSource("))
+        self.assertIn("currentBytes.length != size", index)
+        self.assertIn("KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)", index)
+        self.assertIn("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB", index)
+        self.assertIn("matchesStoredBody(db, existingId,", index)
+        self.assertIn("V3_SOURCE_SEAL_MIGRATION_MISMATCH", qa)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

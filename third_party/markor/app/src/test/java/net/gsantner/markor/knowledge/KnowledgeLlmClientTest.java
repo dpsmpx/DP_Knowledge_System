@@ -171,6 +171,22 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void rawSourceSealDistinguishesBytesWithIdenticalDecodedText() {
+        final byte[] invalidA = new byte[]{'#', ' ', (byte) 0x80, '\n'};
+        final byte[] invalidB = new byte[]{'#', ' ', (byte) 0x81, '\n'};
+        final String decodedA = new String(invalidA, StandardCharsets.UTF_8);
+        final String decodedB = new String(invalidB, StandardCharsets.UTF_8);
+        assertEquals(decodedA, decodedB);
+        assertTrue(KnowledgeLlmEvidence.matchesIndexedText(decodedA, decodedB));
+        final byte[] seal = KnowledgeLlmEvidence.rawSha256(invalidA);
+        assertTrue(KnowledgeLlmEvidence.matchesIndexedBytes(seal, invalidA));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedBytes(seal, invalidB));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedBytes(null, invalidA));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedBytes(new byte[31], invalidA));
+        assertFalse(KnowledgeLlmEvidence.matchesIndexedBytes(seal, null));
+    }
+
+    @Test
     public void citationAuditRejectsInventedAndMalformedReferenceNumbers() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
                 new KnowledgeLlmEvidence.Item("one.md", "The sky is blue."),

@@ -2085,7 +2085,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
+    private static final class SelectedSource {
+        final byte[] bytes;
+        final String text;
+
+        SelectedSource(final byte[] sourceBytes) {
+            bytes = sourceBytes;
+            text = new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
     private String readSelectedNote(final String relativePath) throws IOException {
+        return readSelectedSource(relativePath).text;
+    }
+
+    private SelectedSource readSelectedSource(final String relativePath) throws IOException {
         if (notebook == null) {
             throw new IOException("No notebook");
         }
@@ -2106,7 +2120,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 bytes.write(buffer, 0, n);
             }
         }
-        return new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        return new SelectedSource(bytes.toByteArray());
     }
 
     private String formatCoreResult(final JSONObject result) throws Exception {
@@ -3498,13 +3512,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 modified, size)) {
                             continue;
                         }
-                        final String content = readSelectedNote(relativePath);
+                        final SelectedSource source = readSelectedSource(relativePath);
                         if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
                                 modified, size)
-                                || !index.matchesIndexedEvidenceText(relativePath,
-                                        modified, size, content)) {
+                                || !index.matchesIndexedEvidenceSource(relativePath,
+                                        modified, size, source.bytes)) {
                             continue;
                         }
+                        final String content = source.text;
                         final String excerpt = vector == null
                                 ? KnowledgeLlmEvidence.excerpt(content, question)
                                 : KnowledgeEmbeddingChunks.atOffset(
@@ -3622,13 +3637,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 match.modifiedAtMillis, match.sizeBytes)) {
                             continue;
                         }
-                        final String content = readSelectedNote(match.relativePath);
+                        final SelectedSource source = readSelectedSource(match.relativePath);
                         if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
                                 match.modifiedAtMillis, match.sizeBytes)
-                                || !index.matchesIndexedEvidenceText(match.relativePath,
-                                        match.modifiedAtMillis, match.sizeBytes, content)) {
+                                || !index.matchesIndexedEvidenceSource(match.relativePath,
+                                        match.modifiedAtMillis, match.sizeBytes, source.bytes)) {
                             continue;
                         }
+                        final String content = source.text;
                         final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);
                         if (!excerpt.trim().isEmpty()) {
                             excerpts.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));

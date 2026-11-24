@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.database.sqlite.SQLiteDatabase;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.SystemClock;
@@ -614,6 +615,36 @@ public final class KnowledgeDeviceQaRunner {
                     new File(sandbox, "qa-reconciliation.sqlite"));
             final KnowledgeVaultScanner.Snapshot firstScan = KnowledgeVaultScanner.scan(
                     vault, 10, this::isCancelled);
+            // Simulate a populated v3 index. The v4 upgrade must preserve its
+            // FTS row, verify source text, and backfill the missing byte seal.
+            final File legacyDb = new File(sandbox, "qa-v3-migration.sqlite");
+            try (SQLiteDatabase legacy = SQLiteDatabase.openOrCreateDatabase(legacyDb, null)) {
+                legacy.execSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                        + "path TEXT NOT NULL UNIQUE, modified INTEGER NOT NULL, "
+                        + "size INTEGER NOT NULL, title TEXT NOT NULL, "
+                        + "oversized INTEGER NOT NULL, generation TEXT NOT NULL)");
+                legacy.execSQL("CREATE VIRTUAL TABLE documents_fts "
+                        + "USING fts4(path, title, body, tokenize=unicode61)");
+                legacy.execSQL("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+                legacy.execSQL("INSERT INTO notes(id,path,modified,size,title,oversized,generation) "
+                                + "VALUES(1,?,?,?,?,0,'old-generation')",
+                        new Object[]{"alpha.md", alpha.lastModified(), alpha.length(), "Alpha"});
+                legacy.execSQL("INSERT INTO documents_fts(docid,path,title,body) VALUES(1,?,?,?)",
+                        new Object[]{"alpha.md", "Alpha", alphaText});
+                legacy.execSQL("INSERT INTO meta(key,value) VALUES('root',?)",
+                        new Object[]{vault.getCanonicalPath()});
+                legacy.execSQL("INSERT INTO meta(key,value) VALUES('last_scan_generation',"
+                        + "'old-generation')");
+                legacy.execSQL("PRAGMA user_version=3");
+            }
+            final KnowledgeLocalIndex migratedIndex = new KnowledgeLocalIndex(legacyDb);
+            final KnowledgeLocalIndex.SyncResult migrated = migratedIndex.synchronize(
+                    vault, firstScan, this::isCancelled);
+            if (migrated.reused != 1 || migrated.indexed != 1
+                    || !migratedIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                            alpha.length(), alphaText.getBytes(StandardCharsets.UTF_8))) {
+                throw new SyntheticMismatch("verdict=V3_SOURCE_SEAL_MIGRATION_MISMATCH");
+            }
             final KnowledgeLocalIndex.SyncResult first = testIndex.synchronize(
                     vault, firstScan, this::isCancelled);
             if (first.indexed != 2 || first.removed != 0
@@ -625,6 +656,15 @@ public final class KnowledgeDeviceQaRunner {
                     || testIndex.matchesIndexedEvidenceText("alpha.md", alpha.lastModified(),
                             alpha.length(), alphaText.replace("amber", "amper"))) {
                 throw new SyntheticMismatch("verdict=INDEXED_SOURCE_HASH_MISMATCH");
+            }
+            final byte[] indexedAlpha = alphaText.getBytes(StandardCharsets.UTF_8);
+            final byte[] rewrittenAlpha = alphaText.replace("amber", "amper")
+                    .getBytes(StandardCharsets.UTF_8);
+            if (!testIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                    alpha.length(), indexedAlpha)
+                    || testIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                            alpha.length(), rewrittenAlpha)) {
+                throw new SyntheticMismatch("verdict=RAW_SOURCE_SEAL_MISMATCH");
             }
             final List<KnowledgeLocalIndex.Hit> rankedEvidence =
                     testIndex.evidenceSearch("synthetic violet", 10);
@@ -672,7 +712,9 @@ public final class KnowledgeDeviceQaRunner {
                 throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
             }
             if (testIndex.matchesIndexedEvidenceText("gamma.md", newName.lastModified(),
-                    newName.length(), betaText)) {
+                    newName.length(), betaText)
+                    || testIndex.matchesIndexedEvidenceSource("gamma.md", newName.lastModified(),
+                            newName.length(), betaText.getBytes(StandardCharsets.UTF_8))) {
                 throw new SyntheticMismatch("verdict=UNVERIFIED_INDEXED_TEXT_ACCEPTED");
             }
             final List<KnowledgeLocalIndex.Hit> partialEvidence =
@@ -708,7 +750,8 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "renamed=1, derivedOldRemoved=1, partialUnverified=1, "
                     + "partialRemoved=0, evidenceExcluded=true, "
-                    + "cancelRollback=true, sourceHashUnchanged=true; synthetic cache only";
+                    + "v3Migration=true, rawSourceSeal=true, cancelRollback=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);
         }

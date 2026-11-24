@@ -69,6 +69,26 @@ public final class KnowledgeLlmEvidence {
         }
     }
 
+    /** Persist only the source-byte digest in the disposable SQLite index. */
+    static byte[] rawSha256(final byte[] source) {
+        if (source == null || source.length > KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE) {
+            throw new IllegalArgumentException("Source bytes exceed the index bound");
+        }
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(source);
+        } catch (NoSuchAlgorithmException unsupported) {
+            throw new IllegalStateException("SHA-256 is required for source verification", unsupported);
+        }
+    }
+
+    /** Decoding replacement characters must never collapse distinct raw files. */
+    public static boolean matchesIndexedBytes(final byte[] indexedDigest, final byte[] currentBytes) {
+        return indexedDigest != null && indexedDigest.length == 32
+                && currentBytes != null
+                && currentBytes.length <= KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE
+                && MessageDigest.isEqual(indexedDigest, rawSha256(currentBytes));
+    }
+
     public static String excerpt(final String source, final String question) {
         if (source == null || source.isEmpty()) {
             return "";
