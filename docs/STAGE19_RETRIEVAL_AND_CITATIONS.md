@@ -46,6 +46,13 @@ even if every reference and quotation passes the checks below.
    original 24-result path-ordered OR search could crowd out every multi-term
    match behind earlier filenames. This improves literal token coverage but
    is not a language-aware relevance scorer.
+8. Before any lexical **or hybrid** excerpt reaches the consent preview,
+   hash its current decoded UTF-8 text with SHA-256 and compare it to the
+   decoded text already stored in the disposable FTS4 index for that exact
+   path, mtime, size and current scan generation. A same-length edit followed
+   by restoring the original mtime now fails closed even if the cheap metadata
+   check succeeds. Empty, oversized, absent or unverified index rows are
+   refused; neither source Markdown nor the approval journal is changed.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -74,7 +81,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   quotation; untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
-  partial-match pathname.
+  partial-match pathname, correct indexed text, same-length changed text
+  rejection, and exclusion of unverified source content.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,
@@ -87,9 +95,13 @@ grounding. Device and broader human-labeled benchmarks remain open.
   each pass**. The reproducible adversarial FTS4 fixture does not close the
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
   semantic model behavior and Android 20k latency remain unmeasured.
-- File modification time and size do **not** prove a cryptographic match to
-  the indexed bytes. A same-size rewrite with deliberately restored mtime can
-  escape this check; immutable indexed content hashes remain future work.
+- The new SHA-256 gate compares **decoded text** against the existing FTS4
+  snapshot, not the original raw file bytes. Invalid UTF-8 byte variants can
+  decode to identical replacement characters. There is no persistent raw-byte
+  digest in the schema, nor a cryptographic seal for embeddings; an externally
+  modified file with unchanged mtime/size can remain stale in the index until
+  a rebuild, but cannot silently pass the LLM text-content comparison if its
+  decoded text differs. End-to-end immutable source hashes are still future work.
 - An exact quote appearing somewhere in the cited excerpts does not prove
   the model's surrounding assertion. Unquoted hallucinations, prompt injection
   (including semantic manipulation *inside* delimited source lines), mixed

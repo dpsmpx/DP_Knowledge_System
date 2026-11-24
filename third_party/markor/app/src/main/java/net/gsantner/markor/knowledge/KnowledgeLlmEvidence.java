@@ -5,6 +5,9 @@
 package net.gsantner.markor.knowledge;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +39,34 @@ public final class KnowledgeLlmEvidence {
                                                   final long size) {
         return file != null && modified > 0 && size >= 0 && file.isFile()
                 && file.lastModified() == modified && file.length() == size;
+    }
+
+    /**
+     * Match the exact UTF-8 text supplied to the model against the text kept
+     * in the disposable FTS4 projection. This catches a same-size rewrite
+     * with a restored mtime. The index stores decoded text, not raw file
+     * bytes, so this is a decoded-source identity check, not a raw-byte seal.
+     */
+    public static boolean matchesIndexedText(final String indexed, final String current) {
+        if (indexed == null || current == null
+                || indexed.length() > KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE
+                || current.length() > KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        final byte[] before = indexed.getBytes(StandardCharsets.UTF_8);
+        final byte[] after = current.getBytes(StandardCharsets.UTF_8);
+        if (before.length > KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE
+                || after.length > KnowledgeLocalIndex.MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        try {
+            final MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            final byte[] indexedHash = digest.digest(before);
+            final byte[] currentHash = digest.digest(after);
+            return MessageDigest.isEqual(indexedHash, currentHash);
+        } catch (NoSuchAlgorithmException unsupported) {
+            throw new IllegalStateException("SHA-256 is required for source verification", unsupported);
+        }
     }
 
     public static String excerpt(final String source, final String question) {
