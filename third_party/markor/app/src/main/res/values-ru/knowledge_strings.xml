@@ -475,7 +475,8 @@
     <string name="knowledge_llm_unverified">НЕПОДТВЕРЖДЁННАЯ ИНТЕРПРЕТАЦИЯ ИИ — не факт, не доказательство и не решение журнала. Ссылки обозначают только использованные выдержки.</string>
     <string name="knowledge_llm_no_citations">В ответе нет корректных ссылок на пронумерованные источники. Все утверждения требуют дополнительной проверки.</string>
     <string name="knowledge_llm_invalid_citations">Внимание: %1$d вымышленных или неправильно оформленных ссылок на источники. Сверьте весь ответ с исходными выдержками.</string>
-    <string name="knowledge_llm_unverified_quotes">Внимание: %1$d цитат не найдены дословно ни в одной из указанных выдержек. Не полагайтесь на эти цитаты.</string>
+    <string name="knowledge_llm_unverified_quotes">Внимание: %1$d цитат не подтверждены дословно выдержками по ближайшим ссылкам. Не полагайтесь на эти цитаты.</string>
+    <string name="knowledge_llm_mismatched_quote_citations">Внимание: %1$d ссылок рядом с цитатами указывают на выдержки без процитированного текста. Проверьте каждую ссылку.</string>
     <string name="knowledge_llm_sources">Локальные пути источников (откройте заметки для проверки):</string>
     <string name="knowledge_embedding_build">Построить эмбеддинги</string>
     <string name="knowledge_semantic_search">Смысловой поиск</string>

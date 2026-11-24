@@ -24,9 +24,13 @@ even if every reference and quotation passes the checks below.
 4. For untrusted model output, validate **every** bracketed numeric reference
    against the exact 1..N sent source set. Detect out-of-range, zero or
    malformed numeric markers and show a warning. For `«...»` and `“...”`
-   passages, require exact text to appear in at least one referenced excerpt
-   or display an additional quotation warning. The answer always retains its
-   prominent unverified/not-a-fact banner.
+   passages, require exact text to appear in the excerpt identified by the
+   **nearby citation group in the same clause**. A reference elsewhere in the
+   answer cannot verify an unrelated quotation; a mixed nearby `[1][2]`
+   group additionally warns when one of the cited sources lacks the quoted
+   words. Missing/misattributed quotes are flagged separately, with no claim
+   that syntactic verification proves the underlying assertion. The answer
+   retains its prominent unverified/not-a-fact banner.
 5. Prompt previews now prefix every line of a Markdown excerpt (including
    empty lines) as untrusted source data. Apparent `--- END UNTRUSTED SOURCE ---`
    markers, fake `[2]` headers or instruction text within a note cannot mimic
@@ -60,6 +64,13 @@ even if every reference and quotation passes the checks below.
    opposing statements are kept as sources; no conclusion is inferred. The
    path/scan-generation, oversized and SHA-256 gates remain in force. There
    is **no** automatic synonym expansion or semantic relevance claim.
+10. Verbatim quote audit now uses a bounded, clause-local citation group
+    rather than **all references anywhere** in the generated answer. A quote
+    followed by an incorrect `[2]` is not laundered by a valid `[1]` in a
+    later sentence. Adjacent mixed citations are also checked individually,
+    and localized warnings identify the unsupported attribution. This is a
+    deterministic syntax/provenance check, not semantic entailment. JVM and
+    cache-free `CITE-LOCAL-19` synthetic device regressions are included.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -88,7 +99,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
-  quotation; untrusted instruction-like source content; forged delimiter,
+  quotation, clause-local attribution, mixed valid/invalid source labels;
+  untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
   partial-match pathname, correct indexed text, same-length changed text

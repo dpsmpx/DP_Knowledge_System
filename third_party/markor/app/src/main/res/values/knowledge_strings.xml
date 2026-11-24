@@ -475,7 +475,8 @@
     <string name="knowledge_llm_unverified">UNVERIFIED AI INTERPRETATION — not an accepted fact, proof or journal decision. Citations point to candidate excerpts only.</string>
     <string name="knowledge_llm_no_citations">The response has no valid numbered source citation. Treat all statements as unsupported.</string>
     <string name="knowledge_llm_invalid_citations">Warning: %1$d invented or malformed source references. Verify the whole response against the actual excerpts.</string>
-    <string name="knowledge_llm_unverified_quotes">Warning: %1$d quoted passages were not found verbatim in any cited excerpt. Do not rely on these quotations.</string>
+    <string name="knowledge_llm_unverified_quotes">Warning: %1$d quoted passages have no verbatim support in nearby cited excerpts. Do not rely on these quotations.</string>
+    <string name="knowledge_llm_mismatched_quote_citations">Warning: %1$d nearby quote citations point to excerpts that do not contain the quoted words. Check each reference.</string>
     <string name="knowledge_llm_sources">Local source paths used (open notes to verify):</string>
     <string name="knowledge_embedding_build">Build embeddings</string>
     <string name="knowledge_semantic_search">Semantic search</string>
