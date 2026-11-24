@@ -754,4 +754,19 @@
     <string name="knowledge_models_catalog_info">Examples, not automatically installed. A tap opens the public model page in the browser; compatible local inference is still under development.</string>
     <string name="knowledge_models_no_browser">No browser is available to open this model page.</string>
     <string name="knowledge_models_personalizer_pending">The small personal classifier requires its future training and feature schema. Nothing was downloaded or trained.</string>
+    <string name="knowledge_models_download_url">Download from HTTPS URL…</string>
+    <string name="knowledge_models_download_url_hint">Direct .gguf or .onnx URL</string>
+    <string name="knowledge_models_download_sha_hint">Expected SHA-256 (optional, 64 hex characters)</string>
+    <string name="knowledge_models_download_url_info">Paste a direct public HTTPS link to one GGUF/ONNX weight file, not a model page. No API key is used. Only model bytes are requested; no notes leave the device. Storage size is not limited by DPKS, so check available space. A file is not proof of inference compatibility.</string>
+    <string name="knowledge_models_download_review">Review download</string>
+    <string name="knowledge_models_download_confirm">Source: %1$s\nFile: %2$s\nExpected SHA-256: %3$s\n\nFile size is not known until the server replies. The transfer may be large and can use mobile data. Continue?</string>
+    <string name="knowledge_models_sha_not_provided">Not supplied; only the calculated digest will be shown</string>
+    <string name="knowledge_models_download_confirm_action">Download</string>
+    <string name="knowledge_models_download_bad_url">Invalid link or SHA-256. Use a direct public HTTPS URL ending in .gguf or .onnx, without credentials, and optionally a 64-character hex digest.</string>
+    <string name="knowledge_models_download_starting">Connecting to model-file source… Tap Cancel transfer to stop. No notes are being sent.</string>
+    <string name="knowledge_models_download_progress">Downloading %1$s of %2$s. Tap Cancel transfer to stop.</string>
+    <string name="knowledge_models_download_progress_unknown">Downloading %1$s (server did not announce a total). Tap Cancel transfer to stop.</string>
+    <string name="knowledge_models_download_done">Downloaded %1$s (%2$s), saved privately with SHA-256. No model was started.</string>
+    <string name="knowledge_models_download_failed">Download failed: check the direct HTTPS link, network, file format, free space and optional SHA-256. No model was registered; notes remain unchanged.</string>
+    <string name="knowledge_models_cancel_transfer">Cancel transfer</string>
 </resources>

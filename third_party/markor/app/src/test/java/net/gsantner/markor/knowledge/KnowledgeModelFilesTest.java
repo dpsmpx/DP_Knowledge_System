@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
 
@@ -95,6 +96,43 @@ public class KnowledgeModelFilesTest {
             assertTrue(store.installed().isEmpty());
             assertEquals(0, countMetadata(root));
         } finally { cleanup(root); }
+    }
+
+    @Test public void expectedDigestIsCheckedBeforeModelBecomesVisible() throws Exception {
+        final File root = Files.createTempDirectory("dpks-model-checksum").toFile();
+        try {
+            final KnowledgeModelFiles store = new KnowledgeModelFiles(root);
+            final long[] observed = {0};
+            try {
+                store.importFile(new ByteArrayInputStream(gguf()), "weights.gguf",
+                        KnowledgeModelPolicy.Role.GENERATION, repeat('0', 64),
+                        size -> observed[0] = size);
+                fail("Incorrect expected SHA-256 accepted");
+            } catch (IOException expected) { }
+            assertEquals(64, observed[0]);
+            assertTrue(store.installed().isEmpty());
+            assertEquals(0, countMetadata(root));
+
+            final String digest = sha256(gguf());
+            final KnowledgeModelFiles.Entry verified = store.importFile(
+                    new ByteArrayInputStream(gguf()), "weights.gguf",
+                    KnowledgeModelPolicy.Role.GENERATION, digest, null);
+            assertEquals(digest, verified.sha256);
+            assertEquals(1, store.installed().size());
+        } finally { cleanup(root); }
+    }
+
+    private static String repeat(final char ch, final int length) {
+        final char[] chars = new char[length];
+        Arrays.fill(chars, ch);
+        return new String(chars);
+    }
+
+    private static String sha256(final byte[] bytes) throws Exception {
+        final byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
+        final StringBuilder result = new StringBuilder();
+        for (final byte b : digest) result.append(String.format("%02x", b & 0xff));
+        return result.toString();
     }
 
     private static int countMetadata(final File root) {

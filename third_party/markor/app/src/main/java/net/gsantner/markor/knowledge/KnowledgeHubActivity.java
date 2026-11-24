@@ -17,6 +17,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.text.Editable;
@@ -80,6 +81,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Offline knowledge workspace: discover files without changing them, maintain
@@ -274,7 +276,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             if (modelImportActive) {
                 cancelModelImport();
             } else {
-                new KnowledgeModelSettingsDialog(this, modelFiles, this::pickModelFile).show();
+                new KnowledgeModelSettingsDialog(this, modelFiles, this::pickModelFile,
+                        this::downloadModel).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -532,6 +535,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (modelImportActive) return;
         final String name = modelDisplayName(source);
         modelImportActive = true;
+        findViewById(R.id.knowledge_models_open).setContentDescription(
+                getString(R.string.knowledge_models_cancel_transfer));
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
         final int operation = modelGeneration.incrementAndGet();
         modelStatus.setText(R.string.knowledge_models_importing);
         runningModelImport = modelWorker.submit(() -> {
@@ -541,6 +548,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && modelGeneration.get() == operation) {
                         modelImportActive = false;
+                        restoreModelButton();
                         modelStatus.setText(getString(R.string.knowledge_models_imported,
                                 imported.name, KnowledgeModelSettingsDialog.formatSize(imported.bytes)));
                     }
@@ -550,6 +558,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (!isFinishing() && !isDestroyed()
                             && modelGeneration.get() == operation) {
                         modelImportActive = false;
+                        restoreModelButton();
                         modelStatus.setText(R.string.knowledge_models_import_failed);
                     }
                 });
@@ -557,10 +566,68 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
+    /** User-initiated transfer of public model bytes only. No vault reads or API requests. */
+    private void downloadModel(final KnowledgeModelPolicy.Role role, final String url,
+                               final String expectedSha256) {
+        if (modelImportActive || role == null) return;
+        modelImportActive = true;
+        final int operation = modelGeneration.incrementAndGet();
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        modelStatus.setText(R.string.knowledge_models_download_starting);
+        final AtomicLong lastReport = new AtomicLong();
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final KnowledgeModelFiles.Entry result = KnowledgeModelDownload.download(
+                        url, role, expectedSha256, modelFiles, (copied, total) -> {
+                            final long now = SystemClock.elapsedRealtime();
+                            final long last = lastReport.get();
+                            if (now - last < 500 || !lastReport.compareAndSet(last, now)) return;
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()
+                                        && modelGeneration.get() == operation) {
+                                    modelStatus.setText(total > 0
+                                            ? getString(R.string.knowledge_models_download_progress,
+                                                    KnowledgeModelSettingsDialog.formatSize(copied),
+                                                    KnowledgeModelSettingsDialog.formatSize(total))
+                                            : getString(R.string.knowledge_models_download_progress_unknown,
+                                                    KnowledgeModelSettingsDialog.formatSize(copied)));
+                                }
+                            });
+                        });
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(getString(R.string.knowledge_models_download_done,
+                                result.name, KnowledgeModelSettingsDialog.formatSize(result.bytes)));
+                    }
+                });
+            } catch (IOException | RuntimeException failure) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_download_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    private void restoreModelButton() {
+        final Button button = findViewById(R.id.knowledge_models_open);
+        button.setText(R.string.knowledge_models_open);
+        button.setContentDescription(getString(R.string.knowledge_models_open));
+    }
+
     private void cancelModelImport() {
         modelGeneration.incrementAndGet();
         if (runningModelImport != null) runningModelImport.cancel(true);
         modelImportActive = false;
+        restoreModelButton();
         modelStatus.setText(R.string.knowledge_models_import_cancelled);
     }
 

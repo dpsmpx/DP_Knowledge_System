@@ -32,6 +32,8 @@ final class KnowledgeModelFiles {
 
     enum Format { GGUF, ONNX_UNVERIFIED }
 
+    interface Progress { void onBytes(long written); }
+
     static final class Entry {
         final KnowledgeModelPolicy.Role role;
         final Format format;
@@ -117,7 +119,17 @@ final class KnowledgeModelFiles {
 
     synchronized Entry importFile(final InputStream input, final String originalName,
                                   final KnowledgeModelPolicy.Role role) throws IOException {
+        return importFile(input, originalName, role, "", null);
+    }
+
+    synchronized Entry importFile(final InputStream input, final String originalName,
+                                  final KnowledgeModelPolicy.Role role, final String expectedSha256,
+                                  final Progress progress) throws IOException {
         if (input == null || role == null) throw new IOException("Missing model input");
+        if (expectedSha256 == null || (!expectedSha256.isEmpty()
+                && !validHash(expectedSha256))) {
+            throw new IOException("Invalid expected SHA-256");
+        }
         final Format format = requestedFormat(originalName);
         prepareDirectory();
         final File pending = File.createTempFile("model-", ".part", directory);
@@ -145,6 +157,7 @@ final class KnowledgeModelFiles {
                     output.write(buffer, 0, count);
                     digest.update(buffer, 0, count);
                     written += count;
+                    if (progress != null) progress.onBytes(written);
                     if (directory.getUsableSpace() < MIN_FREE_BYTES) {
                         throw new IOException("Insufficient space for safe import");
                     }
@@ -164,6 +177,9 @@ final class KnowledgeModelFiles {
                 throw new InterruptedIOException("Model import cancelled before installation");
             }
             final String sha = hex(digest.digest());
+            if (!expectedSha256.isEmpty() && !expectedSha256.equals(sha)) {
+                throw new IOException("SHA-256 does not match expected digest");
+            }
             final File target = modelFile(sha, format);
             if (target.exists()) {
                 if (!target.isFile() || target.length() != written) {
