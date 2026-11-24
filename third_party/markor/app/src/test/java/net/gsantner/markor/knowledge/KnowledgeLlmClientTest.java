@@ -197,6 +197,51 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void excerptRejectsApparentPhraseWithUnboundedPunctuationGap() {
+        // FTS4 sees adjacent tokens here, but a 900-character excerpt cannot
+        // display both. A later compact phrase must win instead.
+        final String source = "Amber" + new String(new char[1100]).replace('\0', '-')
+                + "violet is too far from the first word.\n"
+                + new String(new char[1300]).replace('\0', 'x')
+                + "\nAMBER, violet are genuinely close together here.";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(source, "amber violet");
+        assertTrue(excerpt.contains("AMBER, violet are genuinely close"));
+        assertFalse(excerpt.contains("too far from the first word"));
+        assertTrue(excerpt.length() <= KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4);
+    }
+
+    @Test
+    public void evidenceCoverageCountsDistinctTermsOnlyInApprovedExcerptText() {
+        final java.util.List<KnowledgeLlmEvidence.Item> excerpts = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("amber.md", "Chamber has no prefix match."),
+                new KnowledgeLlmEvidence.Item("second.md", "VIOLET and cobaltic appear here."));
+        final KnowledgeLlmEvidence.TermCoverage incomplete =
+                KnowledgeLlmEvidence.termCoverage("Tell me about amber violet cobalt", excerpts);
+        assertEquals(3, incomplete.total);
+        assertEquals(2, incomplete.matched);
+        assertTrue(incomplete.isIncomplete());
+
+        final KnowledgeLlmEvidence.TermCoverage complete = KnowledgeLlmEvidence.termCoverage(
+                "amber violet cobalt", Arrays.asList(
+                        excerpts.get(0), excerpts.get(1),
+                        new KnowledgeLlmEvidence.Item("third.md", "AMBERISH is mentioned.")));
+        assertEquals(3, complete.matched);
+        assertFalse(complete.isIncomplete());
+        final KnowledgeLlmEvidence.TermCoverage russian = KnowledgeLlmEvidence.termCoverage(
+                "Расскажи про память синтез", Collections.singletonList(
+                        new KnowledgeLlmEvidence.Item("note.md", "ПАМЯТЬЮ — синтезом.")));
+        assertEquals(2, russian.total);
+        assertEquals(2, russian.matched);
+        final KnowledgeLlmEvidence.TermCoverage overlaps = KnowledgeLlmEvidence.termCoverage(
+                "amber amberlight", Collections.singletonList(
+                        new KnowledgeLlmEvidence.Item("amber.md", "Amberlight alone.")));
+        assertEquals(2, overlaps.total);
+        assertEquals(1, overlaps.matched);
+        assertTrue(overlaps.isIncomplete());
+        assertEquals(0, KnowledgeLlmEvidence.termCoverage("", excerpts).total);
+    }
+
+    @Test
     public void excerptDoesNotCountTwoQueryPrefixesFromOneSourceToken() {
         final String source = "Amberlight alone is not two distinct words.\n"
                 + new String(new char[1400]).replace('\0', 'x')

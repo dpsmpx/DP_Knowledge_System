@@ -3564,7 +3564,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     if (sources.isEmpty()) {
                         status.setText(R.string.knowledge_llm_no_sources);
                     } else {
-                        requestLlmConsent(endpoint, model, apiKey,
+                        requestLlmConsent(endpoint, model, apiKey, question,
                                 KnowledgeLlmClient.requestPreview(question, sources), sources,
                                 seals, scan);
                     }
@@ -3695,7 +3695,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final String exactPreview = KnowledgeLlmClient.requestPreview(question, excerpts);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
-                        requestLlmConsent(endpoint, model, apiKey, exactPreview, excerpts,
+                        requestLlmConsent(endpoint, model, apiKey, question, exactPreview, excerpts,
                                 seals, generation);
                     }
                 });
@@ -3710,7 +3710,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void requestLlmConsent(final URL endpoint, final String model,
-                                   final String apiKey, final String exactPreview,
+                                   final String apiKey, final String question,
+                                   final String exactPreview,
                                    final List<KnowledgeLlmEvidence.Item> excerpts,
                                    final List<KnowledgeLlmEvidence.ConsentSeal> seals,
                                    final int consentGeneration) {
@@ -3718,13 +3719,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 endpoint.getHost(), model, excerpts.size());
         final String warning = "http".equals(endpoint.getProtocol())
                 ? "\n" + getString(R.string.knowledge_llm_plaintext_warning) : "";
+        final KnowledgeLlmEvidence.TermCoverage coverage =
+                KnowledgeLlmEvidence.termCoverage(question, excerpts);
+        final String lexicalCoverage = coverage.total == 0
+                ? getString(R.string.knowledge_llm_coverage_unavailable)
+                : getString(R.string.knowledge_llm_coverage, coverage.matched, coverage.total);
+        final String missingCoverage = coverage.isIncomplete()
+                ? "\n" + getString(R.string.knowledge_llm_coverage_incomplete) : "";
         new AlertDialog.Builder(this)
                 .setTitle(R.string.knowledge_llm_consent_title)
-                .setMessage(privacy + warning + "\n\n" + exactPreview)
+                .setMessage(privacy + warning + "\n\n" + lexicalCoverage
+                        + missingCoverage + "\n\n" + exactPreview)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_llm_send,
                         (dialog, which) -> sendLlmQuestion(endpoint, model, apiKey,
-                                exactPreview, excerpts, seals, consentGeneration))
+                                exactPreview, excerpts, seals, coverage, consentGeneration))
                 .show();
     }
 
@@ -3766,6 +3775,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                  final String apiKey, final String exactPreview,
                                  final List<KnowledgeLlmEvidence.Item> excerpts,
                                  final List<KnowledgeLlmEvidence.ConsentSeal> seals,
+                                 final KnowledgeLlmEvidence.TermCoverage coverage,
                                  final int generation) {
         status.setText(R.string.knowledge_llm_requesting);
         worker.submit(() -> {
@@ -3789,6 +3799,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         KnowledgeLlmCitationAudit.inspect(answer, excerpts);
                 final StringBuilder display = new StringBuilder(
                         getString(R.string.knowledge_llm_unverified));
+                if (coverage.isIncomplete()) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_coverage_incomplete));
+                }
                 if (!sourceStillCurrentAfterReply) {
                     display.append("\n").append(getString(
                             R.string.knowledge_llm_sources_changed_after_reply));

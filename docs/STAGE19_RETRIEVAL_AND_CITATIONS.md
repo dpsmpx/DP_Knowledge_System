@@ -168,6 +168,21 @@ even if every reference and quotation passes the checks below.
     multi-term question in memory. This is **local lexical coverage**, not
     entailment or a guarantee that every relevant part of a long note fits
     in one excerpt. Physical Android QA remains pending.
+19. A **token-adjacent FTS4 phrase may still be far apart in source bytes**:
+    for example, two terms separated by over 900 punctuation characters.
+    Phrase-based excerpt selection now rejects spans beyond its bounded
+    900-character preview window (including reserved context), then uses
+    ordinary coverage selection or the isolated-token fallback. A late compact
+    phrase can no longer lose to an early unshowable one. Before network
+    consent, the user sees a count of the distinct question terms actually
+    present in the **exact selected excerpts**, ignoring filenames and
+    word-internal substrings. Missing terms produce an explicit warning both
+    before sending and above the returned answer, without silently changing
+    the approved payload or refusing a potentially valid semantic result.
+    This is a *lexical visibility diagnostic*, not a measure of retrieval
+    recall, source trust, contradiction handling or logical entailment.
+    EN/RU UI text, JVM tests and synthetic `CITE-EXCERPT-19` assertions cover
+    the change; physical acceptance remains outstanding.
 
 ## Reproducible synthetic retrieval benchmark
 

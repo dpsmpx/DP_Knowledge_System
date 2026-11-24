@@ -32,6 +32,23 @@ public final class KnowledgeLlmEvidence {
         }
     }
 
+    /** Lexical visibility only: term presence in the exact approved excerpts
+     * is neither proof of a claim nor a recall/precision estimate.
+     */
+    public static final class TermCoverage {
+        public final int matched;
+        public final int total;
+
+        private TermCoverage(final int matchedTerms, final int totalTerms) {
+            matched = matchedTerms;
+            total = totalTerms;
+        }
+
+        public boolean isIncomplete() {
+            return total > 0 && matched < total;
+        }
+    }
+
     /** Ephemeral copy of what the user actually approved for this one LLM
      * request. Never persisted, logged, or derived from a different scan.
      */
@@ -126,11 +143,7 @@ public final class KnowledgeLlmEvidence {
         final String text = source.replace("\r\n", "\n");
         // Character-wise lowercase preserves UTF-16 offsets into the original
         // text, including uncommon characters whose full case-fold expands.
-        final char[] foldedChars = text.toCharArray();
-        for (int i = 0; i < foldedChars.length; i++) {
-            foldedChars[i] = Character.toLowerCase(foldedChars[i]);
-        }
-        final String folded = new String(foldedChars);
+        final String folded = foldForOffsets(text);
         final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
         // FTS4 ranks a contiguous 2-4-term phrase ahead of isolated terms.
         // Keep the actual excerpt aligned to that phrase, even if a decoy
@@ -158,6 +171,55 @@ public final class KnowledgeLlmEvidence {
         final String clipped = text.substring(leading, end);
         return (leading > 0 ? "…\n" : "") + clipped
                 + (end < text.length() ? "\n…" : "");
+    }
+
+    /** Count distinct normalized query terms visibly present in the approved
+     * excerpts, using the same word-prefix rule as the excerpt locator.
+     * Source filenames are deliberately excluded: they are labels, not proof.
+     */
+    public static TermCoverage termCoverage(final String question, final List<Item> excerpts) {
+        final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
+        if (terms.isEmpty() || excerpts == null || excerpts.isEmpty()) {
+            return new TermCoverage(0, terms.size());
+        }
+        final boolean[] present = new boolean[terms.size()];
+        int count = 0;
+        for (final Item item : excerpts) {
+            if (item == null || item.excerpt == null) continue;
+            final String folded = foldForOffsets(item.excerpt);
+            // Match a source token to only its longest query prefix. Otherwise
+            // one token ("amberlight") could falsely cover two query terms
+            // ("amber" and "amberlight") in the consent disclosure.
+            for (int at = 0; at < folded.length();) {
+                if (!Character.isLetterOrDigit(folded.charAt(at))) {
+                    at++;
+                    continue;
+                }
+                final int start = at;
+                while (at < folded.length() && Character.isLetterOrDigit(folded.charAt(at))) at++;
+                int matching = -1;
+                for (int i = 0; i < terms.size(); i++) {
+                    if (folded.startsWith(terms.get(i), start)
+                            && (matching < 0 || terms.get(i).length() > terms.get(matching).length())) {
+                        matching = i;
+                    }
+                }
+                if (matching >= 0 && !present[matching]) {
+                    present[matching] = true;
+                    count++;
+                }
+            }
+            if (count == terms.size()) break;
+        }
+        return new TermCoverage(count, terms.size());
+    }
+
+    private static String foldForOffsets(final String text) {
+        // Do not use String.toLowerCase(Locale): Unicode expansions would
+        // invalidate the UTF-16 offsets used for the exact source substring.
+        final char[] chars = text.toCharArray();
+        for (int i = 0; i < chars.length; i++) chars[i] = Character.toLowerCase(chars[i]);
+        return new String(chars);
     }
 
     /** Prefix hits begin at token boundaries, not inside unrelated words. */
@@ -229,6 +291,8 @@ public final class KnowledgeLlmEvidence {
     /** A lightweight in-text mirror of the FTS4 2-4-token phrase priority.
      * Word punctuation/whitespace may separate tokens, and each token may
      * have a suffix because the indexed query uses the `prefix*` operator.
+     * Reject phrases spanning more than the bounded preview can show; FTS4
+     * token adjacency alone may hide arbitrarily long punctuation gaps.
      * This only selects a preview window; it does not certify a quotation.
      */
     private static int adjacentPhraseStart(final String text, final List<String> terms) {
@@ -241,7 +305,9 @@ public final class KnowledgeLlmEvidence {
             int at = start;
             boolean matches = true;
             for (int i = 0; i < terms.size(); i++) {
-                if (!text.startsWith(terms.get(i), at)) {
+                if (at - start > MAX_COVERAGE_SPAN
+                        || !text.startsWith(terms.get(i), at)
+                        || at + terms.get(i).length() - start > MAX_COVERAGE_SPAN) {
                     matches = false;
                     break;
                 }
@@ -251,10 +317,12 @@ public final class KnowledgeLlmEvidence {
                 }
                 if (i + 1 < terms.size()) {
                     int next = end;
-                    while (next < text.length() && !Character.isLetterOrDigit(text.charAt(next))) {
+                    while (next < text.length() && next - start <= MAX_COVERAGE_SPAN
+                            && !Character.isLetterOrDigit(text.charAt(next))) {
                         next++;
                     }
-                    if (next == end || next == text.length()) {
+                    if (next == end || next == text.length()
+                            || next - start > MAX_COVERAGE_SPAN) {
                         matches = false;
                         break;
                     }
