@@ -15,6 +15,18 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_llm_excerpt_uses_same_search_terms_and_phrase_priority(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("final List<String> selected = ftsEvidenceTerms(question);", parser)
+        self.assertIn("KnowledgeMarkdownMetadata.ftsEvidenceTerms(question)", evidence)
+        self.assertLess(evidence.index("adjacentPhraseStart(folded, terms)"),
+                        evidence.index("firstTokenPrefixStart(folded, term, 0)"))
+        self.assertIn('step("CITE-EXCERPT-19",', qa)
+        self.assertIn("EXCERPT_PHRASE_PRIORITY_LOST", qa)
+
     def test_llm_answer_warns_when_sources_change_during_generation(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

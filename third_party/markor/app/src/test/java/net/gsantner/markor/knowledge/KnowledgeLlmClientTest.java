@@ -127,6 +127,51 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void excerptPrefersLateExactPhraseOverEarlierIsolatedWord() {
+        final String source = "# Synthetic note\nAmber appears alone near the start.\n"
+                + new String(new char[1400]).replace('\0', 'x')
+                + "\nAMBER, violet is the actual two-word evidence.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(
+                source, "Tell me about amber violet");
+        assertTrue(excerpt.contains("AMBER, violet is the actual two-word evidence"));
+        assertFalse(excerpt.contains("Amber appears alone near the start"));
+        assertTrue(excerpt.length() <= KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4);
+        assertEquals("\"amber* violet*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Tell me about amber violet"));
+    }
+
+    @Test
+    public void excerptMatchesRussianCaseAndPrefixAcrossPunctuation() {
+        final String source = "# Искусственная заметка\nПамять упоминалась раньше.\n"
+                + new String(new char[1400]).replace('\0', 'x')
+                + "\nПАМЯТЬЮ — синтезом объясняется вымышленный пример.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(
+                source, "Расскажи, что известно про память синтез?");
+        assertTrue(excerpt.contains("ПАМЯТЬЮ — синтезом объясняется"));
+        assertFalse(excerpt.contains("Память упоминалась раньше"));
+        assertTrue(excerpt.length() <= KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4);
+    }
+
+    @Test
+    public void excerptFallbackRejectsSubstringInsideUnrelatedWord() {
+        final String source = "chamber contains an unrelated substring\n"
+                + new String(new char[1300]).replace('\0', 'x')
+                + "\nAmber has a standalone occurrence.\n";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(source, "amber");
+        assertTrue(excerpt.contains("Amber has a standalone occurrence"));
+        assertFalse(excerpt.contains("chamber contains an unrelated substring"));
+    }
+
+    @Test
+    public void excerptPreservesOffsetsWhenUnicodeLowercaseWouldExpand() {
+        final String source = new String(new char[1200]).replace('\0', '\u0130')
+                + "\nAmber violet evidence after the unusual Unicode prefix.";
+        final String excerpt = KnowledgeLlmEvidence.excerpt(source, "amber violet");
+        assertTrue(excerpt.contains("Amber violet evidence"));
+        assertTrue(excerpt.length() <= KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4);
+    }
+
+    @Test
     public void evidenceMustStillMatchIndexedFileMetadata() throws Exception {
         final File file = File.createTempFile("dpks-evidence-", ".md");
         try {
