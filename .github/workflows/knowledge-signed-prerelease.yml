@@ -122,7 +122,7 @@ jobs:
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
           echo 'Verified signed Android preview. No signing passwords were logged.'
 
-      - name: Install and cold-launch the exact signed APK on Android 15 emulator
+      - name: Verify AVD home, install and cold-launch the exact signed APK on Android 15
         shell: bash
         timeout-minutes: 20
         run: bash scripts/ci-android-signed-smoke.sh "$APK_PATH"

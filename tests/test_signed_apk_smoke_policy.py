@@ -14,7 +14,7 @@ class SignedApkSmokePolicyTests(unittest.TestCase):
     def test_same_signed_artifact_installed_before_publish(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         sign = workflow.index("- name: Align, sign and independently verify preview APK")
-        smoke = workflow.index("- name: Install and cold-launch the exact signed APK")
+        smoke = workflow.index("- name: Verify AVD home, install and cold-launch the exact signed APK")
         publish = workflow.index("- name: Publish signed DP Knowledge APK")
         self.assertLess(sign, smoke)
         self.assertLess(smoke, publish)
@@ -26,7 +26,9 @@ class SignedApkSmokePolicyTests(unittest.TestCase):
         for required in ("set -euo pipefail", "adb install -r \"$apk_path\"",
                          "sys.boot_completed", "adb shell pidof", "package:$package_name",
                          "::error::", "trap cleanup EXIT", "tail -n 60 \"$emulator_log\"",
-                         "kill -0 \"$emulator_pid\"", "adb devices"):
+                         "kill -0 \"$emulator_pid\"", "adb devices",
+                         "export ANDROID_AVD_HOME=", "-list-avds",
+                         "Created AVD is not visible to the emulator"):
             self.assertIn(required, script)
         self.assertNotIn("assembleDebug", script)
         syntax = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True)

@@ -24,8 +24,17 @@ fi
 
 sdkmanager 'emulator' 'system-images;android-35;google_apis;x86_64'
 avd_name="dpks_smoke_${GITHUB_RUN_ID:-local}"
+# GitHub runners can give avdmanager and emulator different implicit HOME / SDK
+# directories. Force both tools to use one fresh, explicitly verified location.
+export ANDROID_AVD_HOME="${RUNNER_TEMP:-/tmp}/dpks-emulator-avds"
+mkdir -p "$ANDROID_AVD_HOME"
 printf 'no\n' | avdmanager create avd --force --name "$avd_name" \
   --package 'system-images;android-35;google_apis;x86_64' > /dev/null
+if [[ ! -f "$ANDROID_AVD_HOME/$avd_name.ini" ]] \
+  || ! "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds | grep -Fxq "$avd_name"; then
+  echo '::error::Created AVD is not visible to the emulator in ANDROID_AVD_HOME'
+  exit 1
+fi
 
 emulator_log="${RUNNER_TEMP:-/tmp}/dpks-android-emulator.log"
 "$ANDROID_SDK_ROOT/emulator/emulator" -avd "$avd_name" -no-window -no-audio \

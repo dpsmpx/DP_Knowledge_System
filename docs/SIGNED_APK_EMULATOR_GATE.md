@@ -35,3 +35,13 @@ so that run does not establish the emulator's root failure. The follow-up
 changes replace that opaque wait with a bounded adb/process poll and expose
 the last 60 lines of the **empty synthetic emulator** engine log on failure.
 No device/hardware or CI-02 PASS is inferred from this attempt.
+
+Second run: [signed workflow 45396660435](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45396660435)
+confirmed the root cause from the bounded empty-emulator log:
+`Unknown AVD name`, followed by the emulator looking for a missing `.ini`
+in its default `$HOME/.android/avd`. The AVD management and launch tools
+had different implicit home-directory conventions on the CI runner.
+The follow-up sets `ANDROID_AVD_HOME` once for both tools, then checks the
+exact `.ini` and `emulator -list-avds` before any launch. The first two
+attempts correctly blocked release publication; the new configuration needs
+its own signed-workflow PASS before CI-02 is closed.
