@@ -134,6 +134,9 @@ dependencies {
     // Testing
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.assertj:assertj-core:3.27.7'
+    // JVM mock-server tests exercise request serialization: Android's org.json
+    // framework classes are stubs in local unit tests. Test-only, not in APK.
+    testImplementation 'org.json:json:20240303'
 
     // Android standard libs
     implementation 'androidx.appcompat:appcompat:1.7.1'          // 1.8+    -> minSdk23

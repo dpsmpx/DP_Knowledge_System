@@ -210,6 +210,20 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_embedding_exact_preview_help", names)
 
+    def test_network_failure_matrix_is_loopback_only_and_synthetic(self):
+        # The Android source root is app/src/main; tests live under app/src/test.
+        test = ROOT.parent / "test/java/net/gsantner/markor/knowledge/KnowledgeNetworkTransportTest.java"
+        source = test.read_text()
+        for marker in ("127.0.0.1", "missingOrMismatchedConsentSendsNoHttpRequest",
+                       "embeddingUploadsOnlyReviewedOrderedChunks",
+                       "serverErrorsAndMalformedRepliesNeverRetryAutomatically",
+                       "redirectCannotForwardPrivateTextOrKeyToAnotherServer",
+                       "interruptedCallIsRefusedBeforeSocketOpen",
+                       "stoppedEndpointFailsWithoutHiddenCloudFallback"):
+            self.assertIn(marker, source)
+        gradle = (ROOT.parent.parent / "build.gradle").read_text()
+        self.assertIn("testImplementation 'org.json:json:20240303'", gradle)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
