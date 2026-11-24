@@ -3499,6 +3499,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.submit(() -> {
             try {
                 final List<KnowledgeLlmEvidence.Item> sources = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
                 final Map<String, KnowledgeLocalIndex.SemanticHit> semantic = new HashMap<>();
                 final List<String> semanticPaths = new ArrayList<>();
                 for (final KnowledgeLocalIndex.SemanticHit match : ranked) {
@@ -3549,6 +3550,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         content, vector.excerptStart, vector.excerptLength);
                         if (!excerpt.trim().isEmpty()) {
                             sources.add(new KnowledgeLlmEvidence.Item(relativePath, excerpt));
+                            seals.add(new KnowledgeLlmEvidence.ConsentSeal(
+                                    relativePath, modified, size, source.bytes));
                         }
                     } catch (IOException ignored) {
                         // Changed or inaccessible indexed files are never disclosed.
@@ -3562,7 +3565,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         status.setText(R.string.knowledge_llm_no_sources);
                     } else {
                         requestLlmConsent(endpoint, model, apiKey,
-                                KnowledgeLlmClient.requestPreview(question, sources), sources);
+                                KnowledgeLlmClient.requestPreview(question, sources), sources,
+                                seals, scan);
                     }
                 });
             } catch (Exception ignored) {
@@ -3647,6 +3651,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             try {
                 final List<KnowledgeLocalIndex.Hit> matches = index.evidenceSearch(question, 24);
                 final List<KnowledgeLlmEvidence.Item> excerpts = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
                 for (final KnowledgeLocalIndex.Hit match : matches) {
                     if (Thread.currentThread().isInterrupted() || scanGeneration.get() != generation) {
                         return;
@@ -3671,6 +3676,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);
                         if (!excerpt.trim().isEmpty()) {
                             excerpts.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
+                            seals.add(new KnowledgeLlmEvidence.ConsentSeal(
+                                    match.relativePath, match.modifiedAtMillis,
+                                    match.sizeBytes, source.bytes));
                         }
                     } catch (IOException ignored) {
                         // An inaccessible or stale indexed note must not be sent.
@@ -3687,7 +3695,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 final String exactPreview = KnowledgeLlmClient.requestPreview(question, excerpts);
                 runOnUiThread(() -> {
                     if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
-                        requestLlmConsent(endpoint, model, apiKey, exactPreview, excerpts);
+                        requestLlmConsent(endpoint, model, apiKey, exactPreview, excerpts,
+                                seals, generation);
                     }
                 });
             } catch (Exception ignored) {
@@ -3702,7 +3711,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void requestLlmConsent(final URL endpoint, final String model,
                                    final String apiKey, final String exactPreview,
-                                   final List<KnowledgeLlmEvidence.Item> excerpts) {
+                                   final List<KnowledgeLlmEvidence.Item> excerpts,
+                                   final List<KnowledgeLlmEvidence.ConsentSeal> seals,
+                                   final int consentGeneration) {
         final String privacy = getString(R.string.knowledge_llm_privacy,
                 endpoint.getHost(), model, excerpts.size());
         final String warning = "http".equals(endpoint.getProtocol())
@@ -3713,17 +3724,61 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_llm_send,
                         (dialog, which) -> sendLlmQuestion(endpoint, model, apiKey,
-                                exactPreview, excerpts))
+                                exactPreview, excerpts, seals, consentGeneration))
                 .show();
+    }
+
+    /** A dialog may sit open while another app edits the selected Markdown.
+     * Revalidate every approved source immediately before network I/O; never
+     * auto-rebuild, re-consent, or substitute different excerpts here.
+     */
+    private boolean consentEvidenceStillCurrent(
+            final List<KnowledgeLlmEvidence.ConsentSeal> seals,
+            final int consentGeneration) {
+        if (notebook == null || seals == null || seals.isEmpty()
+                || seals.size() > KnowledgeLlmClient.MAX_EVIDENCE
+                || scanGeneration.get() != consentGeneration) {
+            return false;
+        }
+        for (final KnowledgeLlmEvidence.ConsentSeal seal : seals) {
+            if (Thread.currentThread().isInterrupted()
+                    || scanGeneration.get() != consentGeneration) return false;
+            final File file = new File(notebook, seal.relativePath);
+            if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                    seal.modifiedAtMillis, seal.sizeBytes)) return false;
+            try {
+                final SelectedSource current = readSelectedSource(seal.relativePath);
+                if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                        seal.modifiedAtMillis, seal.sizeBytes)
+                        || !seal.matchesCurrentBytes(current.bytes)
+                        || !index.matchesIndexedEvidenceSource(seal.relativePath,
+                                seal.modifiedAtMillis, seal.sizeBytes, current.bytes)) {
+                    return false;
+                }
+            } catch (IOException unavailable) {
+                return false;
+            }
+        }
+        return scanGeneration.get() == consentGeneration;
     }
 
     private void sendLlmQuestion(final URL endpoint, final String model,
                                  final String apiKey, final String exactPreview,
-                                 final List<KnowledgeLlmEvidence.Item> excerpts) {
-        final int generation = scanGeneration.get();
+                                 final List<KnowledgeLlmEvidence.Item> excerpts,
+                                 final List<KnowledgeLlmEvidence.ConsentSeal> seals,
+                                 final int generation) {
         status.setText(R.string.knowledge_llm_requesting);
         worker.submit(() -> {
             try {
+                if (!consentEvidenceStillCurrent(seals, generation)) {
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed()
+                                && scanGeneration.get() == generation) {
+                            status.setText(R.string.knowledge_llm_sources_changed_before_send);
+                        }
+                    });
+                    return;
+                }
                 final String answer = KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview);
                 final KnowledgeLlmCitationAudit.Review review =
                         KnowledgeLlmCitationAudit.inspect(answer, excerpts);

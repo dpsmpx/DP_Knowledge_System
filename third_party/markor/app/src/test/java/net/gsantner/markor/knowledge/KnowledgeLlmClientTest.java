@@ -316,4 +316,29 @@ public class KnowledgeLlmClientTest {
         assertFalse(quotedMarker.hasValidReferences());
         assertEquals(1, quotedMarker.unverifiedQuotes);
     }
+
+    @Test
+    public void consentSealDetectsSourceRewriteAfterExactExcerptApproval() {
+        final byte[] approved = "Amber violet is true.".getBytes(StandardCharsets.UTF_8);
+        final byte[] changed = "Amber violet is fake.".getBytes(StandardCharsets.UTF_8);
+        assertEquals(approved.length, changed.length);
+        final KnowledgeLlmEvidence.ConsentSeal seal = new KnowledgeLlmEvidence.ConsentSeal(
+                "private/example.md", 12345L, approved.length, approved);
+        assertEquals("private/example.md", seal.relativePath);
+        assertEquals(12345L, seal.modifiedAtMillis);
+        assertEquals(approved.length, seal.sizeBytes);
+        assertTrue(seal.matchesCurrentBytes(approved));
+        assertFalse(seal.matchesCurrentBytes(changed));
+        assertFalse(seal.matchesCurrentBytes(null));
+        assertFalse(seal.matchesCurrentBytes(new byte[0]));
+        for (final byte[] bytes : new byte[][]{null, new byte[0]}) {
+            try {
+                new KnowledgeLlmEvidence.ConsentSeal("private/example.md", 12345L,
+                        approved.length, bytes);
+                fail("Missing approved bytes must not produce a seal");
+            } catch (IllegalArgumentException expected) {
+                // Strict validation is part of the consent boundary.
+            }
+        }
+    }
 }

@@ -146,6 +146,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
                 step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
                 step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
+                step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
@@ -927,6 +928,41 @@ public final class KnowledgeDeviceQaRunner {
         return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
                 + "codeFenceCitationsExcluded=true, heuristicNotSemanticProof=true; "
                 + "no network or selected vault access";
+    }
+
+    /** Synthetic cache-only post-approval mutation; no LLM call is made. */
+    private String checkSyntheticConsentSourceRevision() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create consent sandbox");
+        try {
+            final File file = new File(sandbox, "approved.md");
+            final byte[] approved = "Amber violet is true.".getBytes(StandardCharsets.UTF_8);
+            final byte[] changed = "Amber violet is fake.".getBytes(StandardCharsets.UTF_8);
+            if (approved.length != changed.length) {
+                throw new SyntheticMismatch("verdict=FIXTURE_SIZE_MISMATCH");
+            }
+            writeFixture(file, "Amber violet is true.");
+            final long modified = file.lastModified();
+            final KnowledgeLlmEvidence.ConsentSeal seal = new KnowledgeLlmEvidence.ConsentSeal(
+                    "approved.md", modified, file.length(), approved);
+            if (!seal.matchesCurrentBytes(approved)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(file, modified, approved.length)) {
+                throw new SyntheticMismatch("verdict=APPROVED_SEAL_INVALID");
+            }
+            writeFixture(file, "Amber violet is fake.");
+            if (!file.setLastModified(modified)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                            modified, approved.length)
+                    || seal.matchesCurrentBytes(changed)) {
+                throw new SyntheticMismatch("verdict=SAME_METADATA_EDIT_NOT_REJECTED");
+            }
+            return "syntheticSource=1, approvedBytesSealed=true, "
+                    + "sameSizeSameMtimeRewriteRejected=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true; temporary cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
     }
 
     /** Exercise decision preview, append-only retraction and stale-head rejection. */
