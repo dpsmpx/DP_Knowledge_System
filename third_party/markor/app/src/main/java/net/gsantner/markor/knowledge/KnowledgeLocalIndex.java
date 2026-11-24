@@ -492,21 +492,40 @@ public final class KnowledgeLocalIndex {
             if (generation == null) {
                 return result;
             }
-            try (Cursor c = db.rawQuery("SELECT notes.path, notes.title, notes.modified, notes.size FROM documents_fts "
-                        + "JOIN notes ON notes.id=documents_fts.docid "
-                        + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
-                        + "AND notes.generation=? "
-                        + "ORDER BY notes.path COLLATE NOCASE LIMIT ?",
-                    new String[]{safe, generation, Integer.toString(limit)})) {
-                while (c.moveToNext()) {
-                    result.add(new Hit(c.getString(0), c.getString(1), true,
-                            c.getLong(2), c.getLong(3)));
-                }
+            final Set<String> seen = new HashSet<>();
+            // On large vaults a path-sorted OR shortlist can entirely omit
+            // documents containing every query term. Prefer strict matches
+            // first, then fill the remaining bounded slots with partial hits.
+            // `safe` is generated from letter/digit tokens, never raw FTS.
+            appendEvidenceHits(db, safe.replace(" OR ", " "), generation,
+                    limit, limit, result, seen);
+            if (result.size() < limit && safe.contains(" OR ")) {
+                appendEvidenceHits(db, safe, generation, limit * 2, limit, result, seen);
             }
         } finally {
             db.close();
         }
         return result;
+    }
+
+    private static void appendEvidenceHits(final SQLiteDatabase db, final String query,
+                                           final String generation, final int scanLimit,
+                                           final int outputLimit, final List<Hit> result,
+                                           final Set<String> seen) {
+        try (Cursor c = db.rawQuery("SELECT notes.path, notes.title, notes.modified, notes.size FROM documents_fts "
+                        + "JOIN notes ON notes.id=documents_fts.docid "
+                        + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
+                        + "AND notes.generation=? "
+                        + "ORDER BY notes.path COLLATE NOCASE, notes.path COLLATE BINARY LIMIT ?",
+                new String[]{query, generation, Integer.toString(scanLimit)})) {
+            while (result.size() < outputLimit && c.moveToNext()) {
+                final String path = c.getString(0);
+                if (seen.add(path)) {
+                    result.add(new Hit(path, c.getString(1), true,
+                            c.getLong(2), c.getLong(3)));
+                }
+            }
+        }
     }
 
     /** True only when every part of this unchanged document has been embedded. */

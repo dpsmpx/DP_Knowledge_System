@@ -34,18 +34,47 @@ even if every reference and quotation passes the checks below.
    and Unicode line separators. This is delimiter hardening only, **not** a
    guarantee that a model will ignore malicious source instructions.
 
-5. Fixed SQLite FTS4 multi-term OR syntax: prefix `*` belongs **inside**
+6. Fixed SQLite FTS4 multi-term OR syntax: prefix `*` belongs **inside**
    each quoted term. The previous expression could silently return zero
    matching notes. Synthetic `RECONCILE-16` now asserts actual multi-term
    evidence hits before and after a partial scan, while still excluding
    unverified source files. Android device re-run is pending.
+7. Lexical evidence search now performs **two bounded, read-only FTS4 passes**:
+   documents containing every query token first, then a de-duplicated OR
+   fallback to fill remaining slots. Both passes exclude oversized and
+   unverified index entries, with deterministic pathname tie-breaking; the
+   original 24-result path-ordered OR search could crowd out every multi-term
+   match behind earlier filenames. This improves literal token coverage but
+   is not a language-aware relevance scorer.
+
+## Reproducible synthetic retrieval benchmark
+
+Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
+The script creates **only an in-memory SQLite FTS4 database** with generated
+text and known synthetic relevance labels. It reads no vault, uses no network,
+and prints aggregate metrics, not source paths. Six regression tests exercise
+the query syntax, FTS4 semantics, all-term priority, OR fallback, bounds and
+label-based recall.
+
+Example Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
+artificial notes, four adversarial two-word queries and four known relevant
+documents per query. Old path-ordered OR baseline: **recall@24 = 0/4** for
+every query. Two-pass retrieval: **recall@6 = 4/4**, **precision@6 = 4/6**
+and **recall@24 = 4/4** for each. Measured local query time across 20 runs:
+approximately **p50 = 0.20 ms** and **p95 = 0.24 ms**; these timings vary by
+machine and SQLite build. The deliberately adversarial corpus is not a
+representative search evaluation, and this measures a Python SQL mirror,
+**not** Android, embeddings, battery/RAM, provider quality or semantic
+grounding. Device and broader human-labeled benchmarks remain open.
 
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
   quotation; untrusted instruction-like source content; forged delimiter,
-  source-label and Unicode line-break injection.
+  source-label and Unicode line-break injection. The synthetic reconciliation
+  selftest now also asserts strict multi-token ranking ahead of an earlier
+  partial-match pathname.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,
@@ -53,9 +82,11 @@ even if every reference and quotation passes the checks below.
 
 ## Deliberately still open
 
-- RRF is a **relevance heuristic**, not a learned reranker or proof. The
-  lexical FTS shortlist is path-ordered, so a calibrated 20k corpus benchmark
-  with measured recall, precision and latency remains Stage 19 work.
+- RRF and the two-pass lexical priority are **relevance heuristics**, not
+  learned rerankers or proof. Results are still pathname-ordered **within
+  each pass**. The reproducible adversarial FTS4 fixture does not close the
+  wider `RET-15` gate: representative labeled precision/recall, synonyms,
+  semantic model behavior and Android 20k latency remain unmeasured.
 - File modification time and size do **not** prove a cryptographic match to
   the indexed bytes. A same-size rewrite with deliberately restored mtime can
   escape this check; immutable indexed content hashes remain future work.
