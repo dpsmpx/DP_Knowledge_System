@@ -15,6 +15,23 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_lexical_evidence_boosts_short_phrases_without_dropping_fallback(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        first = index.index('final String phrase = KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(')
+        strict = index.index('safe.replace(" OR ", " ")', first)
+        fallback = index.index('appendEvidenceHits(db, safe, generation', strict)
+        self.assertLess(first, strict)
+        self.assertLess(strict, fallback)
+        for marker in ('ftsEvidencePhraseQuery(final String question)',
+                       'selected.subList(0, Math.min(selected.size(), 8))',
+                       'private static boolean isQuestionFiller('):
+            self.assertIn(marker, parser)
+        self.assertIn('step("LEX-PHRASE-19",', qa)
+        self.assertIn('PHRASE_PRIORITY_OR_CONFLICT_LOSS', qa)
+
     def test_embedding_vectors_are_revision_sealed_before_api_upload_or_search(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

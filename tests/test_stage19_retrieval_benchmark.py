@@ -5,9 +5,11 @@ import unittest
 
 from scripts.benchmark_stage19_retrieval import (
     benchmark,
+    fts_evidence_phrase,
     fts_evidence_query,
     search_path_order_or_baseline,
     search_production_lexical_mirror,
+    search_two_pass_baseline,
 )
 
 
@@ -18,6 +20,10 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual('', fts_evidence_query('a/b; 23'))
         self.assertEqual(8, len(fts_evidence_query(
             'alpha bravo charlie delta echo foxtrot golf hotel india').split(' OR ')))
+        self.assertEqual('"amber* violet*"', fts_evidence_phrase('Which amber violet?'))
+        self.assertEqual('"синтез* память*"', fts_evidence_phrase('Какие синтез память?'))
+        self.assertEqual('"which*"', fts_evidence_query('Which?'))
+        self.assertEqual('', fts_evidence_phrase('alpha bravo charlie delta echo'))
 
     def test_measures_current_sql_shortlist_and_known_ground_truth(self):
         result = benchmark(notes=2048, repeats=2)
@@ -28,6 +34,7 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         for row in result['queries']:
             self.assertEqual(24, row['retrieved_24'])
             self.assertEqual(0, row['baseline_or_path_recall_at_24'])
+            self.assertEqual(0, row['baseline_two_pass_recall_at_24'])
             self.assertEqual(1, row['recall_at_6'])
             self.assertGreaterEqual(row['recall_at_24'], row['recall_at_6'])
             self.assertLessEqual(row['recall_at_24'], 1)
@@ -84,6 +91,43 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
                 connection, 'amber violet', 2))
             self.assertEqual(['z.md', 'a.md'], search_production_lexical_mirror(
                 connection, 'amber violet', 2))
+
+    def test_adjacent_phrase_beats_earlier_separated_terms_without_hiding_conflicts(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            for ident, path, body in (
+                    (1, 'a.md', 'amber synthetic-distance violet'),
+                    (2, 'y.md', 'amber violet supports claim'),
+                    (3, 'z.md', 'amber violet refutes claim')):
+                connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                                   (ident, path, 'test', 'synthetic-stage19'))
+                connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                                   ' VALUES (?,?,?,?)', (ident, path, 'test', body))
+            self.assertEqual(['a.md', 'y.md'], search_two_pass_baseline(
+                connection, 'amber violet', 2))
+            self.assertEqual(['y.md', 'z.md'], search_production_lexical_mirror(
+                connection, 'Which amber violet?', 2))
+            # Retrieval retains opposite synthetic evidence; it cannot decide truth.
+            self.assertEqual([], search_production_lexical_mirror(
+                connection, 'cobalt willow', 2))
+
+    def test_no_unjustified_synonym_expansion(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            connection.execute('INSERT INTO notes VALUES (1,?,?,?,0)',
+                               ('couch.md', 'Furniture', 'synthetic-stage19'))
+            connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                               ' VALUES (1,?,?,?)', ('couch.md', 'Furniture', 'couch'))
+            self.assertEqual(['couch.md'], search_production_lexical_mirror(
+                connection, 'couch', 2))
+            self.assertEqual([], search_production_lexical_mirror(
+                connection, 'sofa', 2))
 
 
 if __name__ == '__main__':

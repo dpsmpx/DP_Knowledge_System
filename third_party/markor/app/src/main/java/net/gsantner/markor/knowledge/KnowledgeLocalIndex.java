@@ -516,12 +516,18 @@ public final class KnowledgeLocalIndex {
                 return result;
             }
             final Set<String> seen = new HashSet<>();
-            // On large vaults a path-sorted OR shortlist can entirely omit
-            // documents containing every query term. Prefer strict matches
-            // first, then fill the remaining bounded slots with partial hits.
-            // `safe` is generated from letter/digit tokens, never raw FTS.
-            appendEvidenceHits(db, safe.replace(" OR ", " "), generation,
-                    limit, limit, result, seen);
+            // A path-ordered all-term shortlist may itself crowd out exact
+            // adjacent phrases. Prefer a bounded phrase pass for 2–4 terms,
+            // then all-term matches, then partial OR fallback. Never infer
+            // semantic equivalence or silently synthesize synonyms.
+            final String phrase = KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(question);
+            if (!phrase.isEmpty()) {
+                appendEvidenceHits(db, phrase, generation, limit, limit, result, seen);
+            }
+            if (result.size() < limit) {
+                appendEvidenceHits(db, safe.replace(" OR ", " "), generation,
+                        limit * 2, limit, result, seen);
+            }
             if (result.size() < limit && safe.contains(" OR ")) {
                 appendEvidenceHits(db, safe, generation, limit * 2, limit, result, seen);
             }

@@ -163,8 +163,17 @@ public final class KnowledgeMarkdownMetadata {
                 word.setLength(0);
             }
         }
+        // Drop only common question framing when meaningful search terms remain.
+        // A one-word question is still searchable; this is not synonym expansion.
+        final List<String> informative = new ArrayList<>();
+        for (final String term : terms) {
+            if (!isQuestionFiller(term)) {
+                informative.add(term);
+            }
+        }
+        final List<String> selected = informative.isEmpty() ? terms : informative;
         final StringBuilder query = new StringBuilder();
-        for (final String part : terms.subList(0, Math.min(terms.size(), 8))) {
+        for (final String part : selected.subList(0, Math.min(selected.size(), 8))) {
             if (query.length() > 0) {
                 query.append(" OR ");
             }
@@ -173,6 +182,53 @@ public final class KnowledgeMarkdownMetadata {
             query.append('"').append(part).append('*').append('"');
         }
         return query.toString();
+    }
+
+    /** Boost an adjacent 2–4-term phrase; the ordinary ALL/OR passes remain.
+     * Only sanitized FTS4 tokens are concatenated, never raw query syntax.
+     */
+    public static String ftsEvidencePhraseQuery(final String question) {
+        final String safe = ftsEvidenceQuery(question);
+        final String[] quoted = safe.split(" OR ");
+        if (quoted.length < 2 || quoted.length > 4) {
+            return "";
+        }
+        final StringBuilder phrase = new StringBuilder("\"");
+        for (final String token : quoted) {
+            if (phrase.length() > 1) {
+                phrase.append(' ');
+            }
+            // Each token is generated above as "letters-or-digits*".
+            phrase.append(token, 1, token.length() - 1);
+        }
+        return phrase.append('"').toString();
+    }
+
+    private static boolean isQuestionFiller(final String term) {
+        switch (term) {
+            case "what":
+            case "which":
+            case "where":
+            case "when":
+            case "whose":
+            case "please":
+            case "could":
+            case "would":
+            case "should":
+            case "какие":
+            case "какой":
+            case "какая":
+            case "какое":
+            case "когда":
+            case "почему":
+            case "зачем":
+            case "сколько":
+            case "такое":
+            case "каковы":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static void addTarget(final Set<String> links, final String raw) {

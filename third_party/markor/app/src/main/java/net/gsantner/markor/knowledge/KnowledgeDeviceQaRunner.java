@@ -143,6 +143,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
+                step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
@@ -835,6 +836,47 @@ public final class KnowledgeDeviceQaRunner {
             return "renamed=1, derivedOldRemoved=1, partialUnverified=1, "
                     + "partialRemoved=0, evidenceExcluded=true, "
                     + "v3Migration=true, rawSourceSeal=true, cancelRollback=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Adversarial path ordering with opposite artificial statements, no LLM. */
+    private String checkSyntheticPhraseRetrieval() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create lexical sandbox");
+        }
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) {
+                throw new IOException("Could not create lexical fixture vault");
+            }
+            final File reference = new File(vault, "a-00.md");
+            for (int i = 0; i < 30; i++) {
+                writeFixture(new File(vault, String.format(Locale.ROOT, "a-%02d.md", i)),
+                        "# Decoy\nAmber synthetic-distance violet.\n");
+            }
+            final byte[] unchanged = sha256(reference);
+            writeFixture(new File(vault, "z-support.md"),
+                    "# Evidence\nAmber violet supports an artificial statement.\n");
+            writeFixture(new File(vault, "z-refute.md"),
+                    "# Evidence\nAmber violet refutes an artificial statement.\n");
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-phrase.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 50,
+                    this::isCancelled), this::isCancelled);
+            final List<KnowledgeLocalIndex.Hit> ranked =
+                    testIndex.evidenceSearch("Which amber violet?", 6);
+            if (ranked.size() != 6 || !"z-refute.md".equals(ranked.get(0).relativePath)
+                    || !"z-support.md".equals(ranked.get(1).relativePath)
+                    || !Arrays.equals(unchanged, sha256(reference))) {
+                throw new SyntheticMismatch("verdict=PHRASE_PRIORITY_OR_CONFLICT_LOSS");
+            }
+            return "syntheticNotes=32, exactPhraseTop2=true, "
+                    + "opposingSourcesPreserved=true, noSemanticProof=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
             removeSandbox(sandbox);
