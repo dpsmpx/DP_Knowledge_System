@@ -318,6 +318,32 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void incompleteProviderOutputIsRefusedInsteadOfBeingSilentlyTruncated()
+            throws Exception {
+        final String complete = "The synthetic answer is supported [1].";
+        assertEquals(complete, KnowledgeLlmClient.validatedAnswer(complete, "stop"));
+        // Some OpenAI-compatible adapters omit finish_reason altogether.
+        assertEquals(complete, KnowledgeLlmClient.validatedAnswer(complete, ""));
+        assertEquals(complete, KnowledgeLlmClient.validatedAnswer(complete, null));
+        for (final String reason : Arrays.asList("length", "content_filter",
+                "tool_calls", "function_call", "aborted")) {
+            try {
+                KnowledgeLlmClient.validatedAnswer(complete, reason);
+                fail("Provider completion reason must reject the answer: " + reason);
+            } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+                // No answer is displayed and no automatic retry is permitted.
+            }
+        }
+        final String oversized = new String(new char[12_001]).replace((char) 0, 'x');
+        try {
+            KnowledgeLlmClient.validatedAnswer(oversized, "stop");
+            fail("A response beyond the display limit must not be truncated");
+        } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+            // The full result is withheld instead of silently losing citations.
+        }
+    }
+
+    @Test
     public void consentSealDetectsSourceRewriteAfterExactExcerptApproval() {
         final byte[] approved = "Amber violet is true.".getBytes(StandardCharsets.UTF_8);
         final byte[] changed = "Amber violet is fake.".getBytes(StandardCharsets.UTF_8);

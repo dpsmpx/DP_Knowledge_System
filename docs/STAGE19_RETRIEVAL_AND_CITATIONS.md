@@ -106,6 +106,19 @@ even if every reference and quotation passes the checks below.
     the updated 20k button has not yet run on a physical Android device.
     No real vault, provider, model or network is involved in the fixture.
 
+14. Fail closed on **explicitly incomplete model output**. The chat adapter
+    now rejects response `finish_reason` values other than `stop` (while
+    permitting older compatible providers that omit the field), and refuses
+    responses exceeding the 12,000-character UI audit bound instead of
+    silently truncating the text or losing trailing citations. The UI shows
+    a localized incomplete-response warning; no result is presented as a
+    finished answer and no retry/resend is automatic. Pure JVM tests and a
+    cache-free `CITE-RESPONSE-19` synthetic device QA step exercise this
+    with fabricated JSON-independent response values. This only catches
+    **reported** interruption and local length overflow: a provider falsely
+    reporting `stop` cannot be independently authenticated, and malformed
+    or empty responses still follow the existing generic error path.
+
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.

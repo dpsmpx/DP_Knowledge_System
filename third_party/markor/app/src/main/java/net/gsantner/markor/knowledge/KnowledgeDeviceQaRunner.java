@@ -147,6 +147,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
                 step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
+                step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
@@ -932,6 +933,36 @@ public final class KnowledgeDeviceQaRunner {
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    /** Test provider completion policy without any real model or network. */
+    private String checkSyntheticLlmCompletion() throws Exception {
+        final String answer = "A fully synthetic response [1].";
+        if (!answer.equals(KnowledgeLlmClient.validatedAnswer(answer, "stop"))
+                || !answer.equals(KnowledgeLlmClient.validatedAnswer(answer, ""))) {
+            throw new SyntheticMismatch("verdict=COMPLETE_ANSWER_REJECTED");
+        }
+        int refused = 0;
+        for (final String reason : Arrays.asList("length", "content_filter",
+                "tool_calls", "function_call", "aborted")) {
+            try {
+                KnowledgeLlmClient.validatedAnswer(answer, reason);
+            } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+                refused++;
+            }
+        }
+        final char[] oversized = new char[12_001];
+        Arrays.fill(oversized, 'x');
+        try {
+            KnowledgeLlmClient.validatedAnswer(new String(oversized), "stop");
+        } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+            refused++;
+        }
+        if (refused != 6) {
+            throw new SyntheticMismatch("verdict=INCOMPLETE_RESPONSE_PRESENTED");
+        }
+        return "syntheticCases=8, explicitIncompleteRefused=5, oversizedRefused=true, "
+                + "completeAccepted=true; no network or user data";
     }
 
     /** Pure, count-only quote attribution fixture; no network or user vault. */

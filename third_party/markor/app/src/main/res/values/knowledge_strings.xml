@@ -466,6 +466,7 @@
     <string name="knowledge_llm_retrieving">Finding local source excerpts for your question…</string>
     <string name="knowledge_llm_no_sources">No matching accessible notes. No network request was made.</string>
     <string name="knowledge_llm_failed">LLM request or retrieval failed. No note or approved knowledge was changed.</string>
+    <string name="knowledge_llm_incomplete_response">Incomplete LLM output: the provider stopped generation early or the answer exceeded the display limit. The answer was not shown; no automatic retry or resend. Review the question or model and send only after new consent.</string>
     <string name="knowledge_llm_privacy">Explicit consent required: send these EXACT source excerpts to %1$s using model %2$s (%3$d notes). The recipient may store them. The API key is held only for this request and is not saved.</string>
     <string name="knowledge_llm_plaintext_warning">WARNING: Plain HTTP on a private network has no transport encryption. Other devices on this network may intercept excerpts and the API key. Use HTTPS or a trusted encrypted tunnel where possible.</string>
     <string name="knowledge_llm_consent_title">Review EXACT outgoing private text</string>
