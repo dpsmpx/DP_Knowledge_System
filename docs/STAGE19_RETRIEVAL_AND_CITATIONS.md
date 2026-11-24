@@ -223,6 +223,17 @@ even if every reference and quotation passes the checks below.
     requests or automatic consent. JVM and isolated `HYBRID-BALANCE-19`
     synthetic checks exercise modality loss and rank preservation; genuine
     semantic recall/precision and device latency/energy remain unevaluated.
+23. To make the previous claim-to-source counts actionable, the answer dialog
+    now lists up to **eight suspect model-answer spans**, each with its exact
+    numbered source and a single-line snippet capped at 140 characters.
+    Possible weak text overlap and explicit true/false disagreement are
+    distinguished; if more than eight flags exist, the hidden count is shown.
+    This is only an ephemeral, immutable audit snapshot of the model answer.
+    It does **not** copy private Markdown source text into a new report,
+    journal or log, change the original answer, automatically assert truth,
+    or send another network request. JVM and `CITE-ANCHOR-19` synthetic
+    checks cover offsets, numbering, truncation and caps. Actual accessibility
+    and readability in a long answer remain open under QA-76.
 
 ## Reproducible synthetic retrieval benchmark
 
