@@ -224,6 +224,28 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         gradle = (ROOT.parent.parent / "build.gradle").read_text()
         self.assertIn("testImplementation 'org.json:json:20240303'", gradle)
 
+    def test_m1_resumable_download_requires_digest_and_exact_http_range(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        download = (folder / "KnowledgeModelDownload.java").read_text()
+        shelf = (folder / "KnowledgeModelFiles.java").read_text()
+        ui = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        for marker in ('connection.setRequestProperty("Range", "bytes=" + checkpoint + "-")',
+                       'checkedContentRange(',
+                       'responseBytes != range[0]',
+                       'files.importResumed('):
+            self.assertIn(marker, download)
+        for marker in ('"resume-" + expectedSha256', 'digest.update(buffer, 0, count)',
+                       'expectedSha256.equals(hex(digest.digest()))',
+                       'synchronized void discardResume('):
+            self.assertIn(marker, shelf)
+        self.assertIn('beginTrustedDownload(', ui)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for label in ("knowledge_models_resume_continue",
+                          "knowledge_models_resume_restart", "knowledge_models_resume_failed"):
+                self.assertIn(label, names)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

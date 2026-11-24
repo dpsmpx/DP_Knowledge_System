@@ -769,6 +769,11 @@
     <string name="knowledge_models_download_confirm">Source: %1$s\nFile: %2$s\nExpected SHA-256: %3$s\n\nFile size is not known until the server replies. The transfer may be large and can use mobile data. Continue?</string>
     <string name="knowledge_models_sha_not_provided">Not supplied; only the calculated digest will be shown</string>
     <string name="knowledge_models_download_confirm_action">Download</string>
+    <string name="knowledge_models_resume_title">Continue verified model download?</string>
+    <string name="knowledge_models_resume_message">File: %1$s\nSaved partial: %2$s\n\nOnly downloads with a supplied expected SHA-256 can resume. The resumed bytes will be checked against the exact HTTP Content-Range and the complete SHA-256 before installation. If the server ignores Range, downloading restarts from zero. Choose Continue, Restart or Cancel.</string>
+    <string name="knowledge_models_resume_continue">Continue</string>
+    <string name="knowledge_models_resume_restart">Restart from zero</string>
+    <string name="knowledge_models_resume_failed">Could not safely inspect or discard the partial model download. Nothing was installed.</string>
     <string name="knowledge_models_download_bad_url">Invalid link or SHA-256. Use a direct public HTTPS URL ending in .gguf or .onnx, without credentials, and optionally a 64-character hex digest.</string>
     <string name="knowledge_models_download_starting">Connecting to model-file source… Tap Cancel transfer to stop. No notes are being sent.</string>
     <string name="knowledge_models_download_progress">Downloading %1$s of %2$s. Tap Cancel transfer to stop.</string>

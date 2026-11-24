@@ -769,6 +769,11 @@
     <string name="knowledge_models_download_confirm">Источник: %1$s\nФайл: %2$s\nОжидаемый SHA-256: %3$s\n\nРазмер станет известен после ответа сервера. Загрузка может быть большой и расходовать мобильный трафик. Продолжить?</string>
     <string name="knowledge_models_sha_not_provided">Не указан; будет показан только вычисленный хеш</string>
     <string name="knowledge_models_download_confirm_action">Скачать</string>
+    <string name="knowledge_models_resume_title">Продолжить проверяемую загрузку модели?</string>
+    <string name="knowledge_models_resume_message">Файл: %1$s\nСохранённая часть: %2$s\n\nПродолжение доступно только при указанном эталонном SHA-256. Приложение проверит точный HTTP Content-Range и SHA-256 полного файла до установки. Если сервер игнорирует Range, загрузка начнётся с нуля. Выберите продолжение, перезапуск или отмену.</string>
+    <string name="knowledge_models_resume_continue">Продолжить</string>
+    <string name="knowledge_models_resume_restart">С нуля</string>
+    <string name="knowledge_models_resume_failed">Не удалось безопасно проверить или удалить недокачанный файл модели. Ничего не установлено.</string>
     <string name="knowledge_models_download_bad_url">Некорректная ссылка или SHA-256. Нужна прямая публичная HTTPS-ссылка с окончанием .gguf либо .onnx, без учётных данных. Хеш — 64 шестнадцатеричных символа.</string>
     <string name="knowledge_models_download_starting">Подключение к источнику модели… Для остановки нажмите «Отменить передачу». Заметки не отправляются.</string>
     <string name="knowledge_models_download_progress">Скачано %1$s из %2$s. Нажмите «Отменить передачу» для остановки.</string>
