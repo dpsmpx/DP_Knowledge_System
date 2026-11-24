@@ -751,7 +751,13 @@
     <string name="knowledge_models_import_cancelled">Импорт отменён. Незавершённый временный файл будет удалён.</string>
     <string name="knowledge_models_store_failed">Нельзя прочитать приватное хранилище моделей. Ни одна модель не считается готовой к запуску.</string>
     <string name="knowledge_models_picker_failed">Системный выбор файла недоступен.</string>
-    <string name="knowledge_models_catalog_info">Примеры, ничего не установлено. Нажатие открывает страницу модели в браузере. Локальное исполнение ещё разрабатывается.</string>
+    <string name="knowledge_models_catalog_info">Для файлов с кнопкой скачивания указан проверяемый SHA-256 издателя: перед подтверждением изучите размер и лицензию. Другие пункты открывают страницы моделей. Ничего не устанавливается автоматически и не считается готовым к запуску. Для своих файлов используйте отдельный импорт по ссылке/через Android.</string>
+    <string name="knowledge_models_catalog_file_label">Файл для скачивания: %1$s · ~%2$d МБ</string>
+    <string name="knowledge_models_catalog_artifact_details">Файл: %1$s\nРазмер по данным источника: ~%2$d МБ (оценка)\nУказанная лицензия: %3$s\nИсточник: %4$s\nОжидаемый SHA-256: %5$s\nСвободно в хранилище приложения: %6$s\n\nСкачивайте только при доверии издателю и соблюдении лицензии. Ссылка отслеживает ветку main репозитория, но загруженные байты обязаны совпасть с указанным SHA-256. API-токен и заметки не отправляются.</string>
+    <string name="knowledge_models_catalog_provenance">Совпадение с каталогом: %1$s\nУказанная лицензия: %2$s\nИсточник: %3$s</string>
+    <string name="knowledge_models_catalog_open_source">Страница источника</string>
+    <string name="knowledge_models_space_unknown">Неизвестно</string>
+    <string name="knowledge_models_space_warning">Внимание: оценочный размер файла может превышать свободное место. Передача прервётся, если запас пространства окажется недостаточным.</string>
     <string name="knowledge_models_no_browser">Нет браузера для открытия страницы модели.</string>
     <string name="knowledge_models_personalizer_pending">Малый персональный классификатор ещё требует реализации обучения и схемы признаков. Ничего не загружено и не обучено.</string>
     <string name="knowledge_models_download_url">Скачать по HTTPS-ссылке…</string>

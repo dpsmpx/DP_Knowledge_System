@@ -166,9 +166,14 @@ final class KnowledgeModelSettingsDialog {
         final String summary = context.getString(R.string.knowledge_models_details,
                 entry.name, formatSize(entry.bytes), entry.bytes, entry.format.name(),
                 entry.sha256);
+        final KnowledgeModelCatalog.Artifact known =
+                KnowledgeModelCatalog.findInstalled(entry.role, entry.sha256);
+        final String provenance = known == null ? "" : "\n\n"
+                + context.getString(R.string.knowledge_models_catalog_provenance,
+                        known.id, known.license, known.sourcePage);
         new AlertDialog.Builder(context)
                 .setTitle(roleName(entry.role))
-                .setMessage(summary + "\n\n"
+                .setMessage(summary + provenance + "\n\n"
                         + context.getString(R.string.knowledge_models_imported_not_runnable))
                 .setPositiveButton(R.string.knowledge_models_select, (dialog, which) -> {
                     preferences.edit().putString(entry.role.name(), entry.sha256).apply();
@@ -203,18 +208,29 @@ final class KnowledgeModelSettingsDialog {
     }
 
     private void showCatalog(final KnowledgeModelPolicy.Role role) {
+        final List<KnowledgeModelCatalog.Artifact> artifacts =
+                KnowledgeModelCatalog.forRole(role);
         final List<KnowledgeModelPolicy.Candidate> candidates =
                 KnowledgeModelPolicy.candidates(role);
-        final String[] labels = new String[candidates.size()];
-        for (int i = 0; i < labels.length; i++) {
+        final String[] labels = new String[artifacts.size() + candidates.size()];
+        for (int i = 0; i < artifacts.size(); i++) {
+            final KnowledgeModelCatalog.Artifact artifact = artifacts.get(i);
+            labels[i] = context.getString(R.string.knowledge_models_catalog_file_label,
+                    artifact.title, artifact.approximateMegabytes);
+        }
+        for (int i = 0; i < candidates.size(); i++) {
             final KnowledgeModelPolicy.Candidate candidate = candidates.get(i);
-            labels[i] = candidate.label + " · " + candidate.note;
+            labels[artifacts.size() + i] = candidate.label + " · " + candidate.note;
         }
         new AlertDialog.Builder(context)
                 .setTitle(R.string.knowledge_models_catalog)
                 .setMessage(R.string.knowledge_models_catalog_info)
                 .setItems(labels, (dialog, which) -> {
-                    final String url = candidates.get(which).url;
+                    if (which < artifacts.size()) {
+                        showArtifact(artifacts.get(which));
+                        return;
+                    }
+                    final String url = candidates.get(which - artifacts.size()).url;
                     if (!url.isEmpty()) {
                         try {
                             context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -230,6 +246,39 @@ final class KnowledgeModelSettingsDialog {
                     }
                 })
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> showRole(role))
+                .show();
+    }
+
+    private void showArtifact(final KnowledgeModelCatalog.Artifact artifact) {
+        final long freeBytes = context.getFilesDir().getUsableSpace();
+        final boolean lowSpace = freeBytes > 0
+                && freeBytes < (artifact.approximateMegabytes + 16L) * 1000000L;
+        final String message = context.getString(R.string.knowledge_models_catalog_artifact_details,
+                artifact.id, artifact.approximateMegabytes, artifact.license,
+                artifact.sourcePage, artifact.expectedSha256,
+                freeBytes <= 0 ? context.getString(R.string.knowledge_models_space_unknown)
+                        : formatSize(freeBytes))
+                + (lowSpace ? "\n\n" + context.getString(R.string.knowledge_models_space_warning) : "")
+                + "\n\n" + context.getString(R.string.knowledge_models_imported_not_runnable);
+        new AlertDialog.Builder(context)
+                .setTitle(artifact.title)
+                .setMessage(message)
+                .setPositiveButton(R.string.knowledge_models_download_confirm_action,
+                        (dialog, which) -> downloader.start(artifact.role, artifact.downloadUrl,
+                                artifact.expectedSha256))
+                .setNeutralButton(R.string.knowledge_models_catalog_open_source,
+                        (dialog, which) -> {
+                            try {
+                                context.startActivity(new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse(artifact.sourcePage)));
+                            } catch (RuntimeException unavailable) {
+                                new AlertDialog.Builder(context)
+                                        .setMessage(R.string.knowledge_models_no_browser)
+                                        .setPositiveButton(android.R.string.ok, null).show();
+                            }
+                        })
+                .setNegativeButton(R.string.knowledge_models_back,
+                        (dialog, which) -> showCatalog(artifact.role))
                 .show();
     }
 
