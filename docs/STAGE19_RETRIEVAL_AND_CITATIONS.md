@@ -95,6 +95,16 @@ even if every reference and quotation passes the checks below.
     the *known dialog-delay exposure* but does not make file reads and socket
     writes an atomic filesystem transaction; final race/lifecycle behavior
     still requires physical QA.
+13. The pre-existing **20k synthetic device QA** now also checks end-to-end
+    *Android* FTS4 retrieval quality on an intentionally adversarial fixture:
+    48 earlier separate-token distractors and four late adjacent-phrase
+    sources with mutually opposing synthetic statements. After indexing it
+    asserts deterministic top-four source order within a six-hit list and
+    reports recall@6 = 4/4 and precision@6 = 4/6 as fixed-label assertions.
+    It warms the query twice, then reports microsecond p50/p95 over 21 local
+    executions, without a hard speed SLA. This is only **instrumentation**:
+    the updated 20k button has not yet run on a physical Android device.
+    No real vault, provider, model or network is involved in the fixture.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -144,7 +154,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   learned rerankers or proof. Results are still pathname-ordered **within
   each pass**, with no synonym expansion. The adversarial FTS4 fixture does not close the
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
-  semantic model behavior and Android 20k latency remain unmeasured.
+  semantic model behavior and Android 20k latency remain unmeasured until a
+  future physical run of the new synthetic lookup timing fixture.
 - Schema v4 additionally stores a **SHA-256 of the raw indexed Markdown bytes**
   in the *disposable* local index. Both lexical and hybrid LLM evidence paths
   now verify that digest against the **same bytes read for the excerpt**, as

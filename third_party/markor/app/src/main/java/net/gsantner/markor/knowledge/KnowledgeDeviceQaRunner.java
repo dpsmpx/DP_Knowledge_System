@@ -583,7 +583,18 @@ public final class KnowledgeDeviceQaRunner {
                     throw new IOException("Could not create fixture group");
                 }
                 final File note = new File(dir, String.format(Locale.ROOT, "qa-%05d.md", i));
-                writeFixture(note, FIXTURE_TEXT + "Synthetic id " + i + '\n');
+                final StringBuilder body = new StringBuilder(FIXTURE_TEXT)
+                        .append("Synthetic id ").append(i).append('\n');
+                if (stress && i < 48) {
+                    // Early, path-ordered distractors contain both words but
+                    // not the adjacent phrase used by the four late labels.
+                    body.append("Crimson is separated from the unrelated cedar token.\n");
+                } else if (stress && i >= total - 4) {
+                    body.append(i % 2 == 0
+                            ? "Crimson cedar supports a wholly synthetic claim.\n"
+                            : "Crimson cedar contradicts a wholly synthetic claim.\n");
+                }
+                writeFixture(note, body.toString());
                 if (i == 0) {
                     reference = note;
                     referenceHash = sha256(note);
@@ -608,6 +619,8 @@ public final class KnowledgeDeviceQaRunner {
                     this::isCancelled, (count, sum) -> notifyProgress("synthetic FTS", count, sum));
             final long indexMillis = SystemClock.elapsedRealtime() - indexStart;
             ensureRunning();
+            final String retrievalMetrics = stress
+                    ? benchmarkSynthetic20kRetrieval(testIndex) : "";
             final List<KnowledgeLocalIndex.Hit> hits = testIndex.search("amber", 8);
             final KnowledgeLocalIndex.SearchPage firstPage = testIndex.searchPage("", 0, 60);
             final KnowledgeLocalIndex.SearchPage lastPage = testIndex.searchPage(
@@ -672,11 +685,46 @@ public final class KnowledgeDeviceQaRunner {
             }
             return counts
                     + ", indexingMillis=" + indexMillis
+                    + retrievalMetrics
                     + (stress ? ", 20k target exercised" : ", incremental reuse verified")
                     + "; synthetic source hash unchanged; all fixtures confined to app cache";
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    /** Labels are predetermined, synthetic and intentionally adversarial.
+     * Measures Android FTS4 lookup, not learned relevance or semantic proof.
+     */
+    private String benchmarkSynthetic20kRetrieval(final KnowledgeLocalIndex testIndex)
+            throws IOException {
+        final String question = "Which crimson cedar?";
+        final long[] microseconds = new long[21];
+        for (int attempt = -2; attempt < microseconds.length; attempt++) {
+            ensureRunning();
+            final long started = SystemClock.elapsedRealtimeNanos();
+            final List<KnowledgeLocalIndex.Hit> ranked = testIndex.evidenceSearch(question, 6);
+            final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+            if (ranked.size() != 6) {
+                throw new SyntheticMismatch("verdict=STRESS_RETRIEVAL_RESULT_COUNT");
+            }
+            for (int label = 0; label < 4; label++) {
+                final int i = STRESS_NOTES - 4 + label;
+                final String expected = String.format(Locale.ROOT,
+                        "group-%03d/qa-%05d.md", i / 200, i);
+                if (!expected.equals(ranked.get(label).relativePath)) {
+                    throw new SyntheticMismatch("verdict=STRESS_PHRASE_RECALL_OR_ORDER");
+                }
+            }
+            if (attempt >= 0) {
+                microseconds[attempt] = Math.max(0, elapsed / 1_000L);
+            }
+        }
+        Arrays.sort(microseconds);
+        return ", phraseRecallAt6=4/4, phrasePrecisionAt6=4/6"
+                + ", retrievalTrials=21, retrievalP50us=" + microseconds[10]
+                + ", retrievalP95us=" + microseconds[19]
+                + ", fixture=adversarial-two-token-only, noSemanticTruthClaim=true";
     }
 
     /** Synthetic rename, complete/partial scan and cancellation regression. */
