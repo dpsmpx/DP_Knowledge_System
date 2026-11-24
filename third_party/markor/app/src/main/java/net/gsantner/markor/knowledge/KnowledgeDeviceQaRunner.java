@@ -969,19 +969,32 @@ public final class KnowledgeDeviceQaRunner {
                 russian, "Расскажи, что известно про память синтез?");
         final String multiExcerpt = KnowledgeLlmEvidence.excerpt(
                 multiTerm, "amber violet cobalt willow citrine");
+        final String deceptiveGap = "Amber"
+                + new String(new char[1100]).replace('\0', '-') + "violet is too far.\n"
+                + padding + "\nAMBER, violet are close together.";
+        final String boundedExcerpt = KnowledgeLlmEvidence.excerpt(deceptiveGap, "amber violet");
+        final KnowledgeLlmEvidence.TermCoverage missing = KnowledgeLlmEvidence.termCoverage(
+                "amber violet cobalt", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("amber.md", "Chamber is unrelated."),
+                        new KnowledgeLlmEvidence.Item("violet.md", "VIOLET and cobalt are here.")));
         if (!enExcerpt.contains("AMBER, violet supports")
                 || enExcerpt.contains("Amber appears alone")
                 || !ruExcerpt.contains("ПАМЯТЬЮ — синтезом объясняется")
                 || ruExcerpt.contains("Память упомянута отдельно")
                 || !multiExcerpt.contains("Violet cobalt willow citrine")
                 || multiExcerpt.contains("Amber appears alone")
+                || !boundedExcerpt.contains("AMBER, violet are close together")
+                || boundedExcerpt.contains("violet is too far")
+                || missing.total != 3 || missing.matched != 2 || !missing.isIncomplete()
                 || enExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
                 || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
-                || multiExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
+                || multiExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || boundedExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
             throw new SyntheticMismatch("verdict=EXCERPT_PHRASE_PRIORITY_LOST");
         }
-        return "syntheticQuestions=3, enRuPhraseAligned=true, "
+        return "syntheticQuestions=4, enRuPhraseAligned=true, "
                 + "multiTermCoverageAligned=true, bounded=true, "
+                + "longPunctuationGapRejected=true, lexicalCoverageWarning=true, "
                 + "sourceReadOnly=true, noProviderCall=true; in-memory text only";
     }
 
