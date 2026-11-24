@@ -67,5 +67,21 @@ public class KnowledgeMarkdownMetadataTest {
                 "alpha bravo charlie delta echo"));
         assertEquals("\"drop* table*\"",
                 KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("DROP; TABLE"));
+        assertEquals("\"amber* violet*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Tell me about amber violet"));
+        assertEquals("\"cobalt* willow*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("What do we know about cobalt willow?"));
+        assertEquals("\"citrine* juniper*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Please explain citrine juniper"));
+        assertEquals("\"saffron* otter*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("Describe saffron otter"));
+        assertEquals("\"память* синтез*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(
+                        "Расскажи, что известно про память синтез?"));
+        assertEquals("\"information* theory*\"",
+                KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery("information theory"));
+        // Do not invent evidence for a question containing only filler terms.
+        assertEquals("\"tell*\" OR \"about*\"",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery("tell about"));
     }
 }

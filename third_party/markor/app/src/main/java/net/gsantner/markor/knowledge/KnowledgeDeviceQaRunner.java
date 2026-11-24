@@ -910,24 +910,40 @@ public final class KnowledgeDeviceQaRunner {
             for (int i = 0; i < 30; i++) {
                 writeFixture(new File(vault, String.format(Locale.ROOT, "a-%02d.md", i)),
                         "# Decoy\nAmber synthetic-distance violet.\n");
+                writeFixture(new File(vault, String.format(Locale.ROOT, "r-%02d.md", i)),
+                        "# Ложное совпадение\nПамять synthetic-distance синтез.\n");
             }
             final byte[] unchanged = sha256(reference);
             writeFixture(new File(vault, "z-support.md"),
                     "# Evidence\nAmber violet supports an artificial statement.\n");
             writeFixture(new File(vault, "z-refute.md"),
                     "# Evidence\nAmber violet refutes an artificial statement.\n");
+            writeFixture(new File(vault, "z-r-support.md"),
+                    "# Доказательство\nПамять синтез поддерживает вымышленное утверждение.\n");
+            writeFixture(new File(vault, "z-r-refute.md"),
+                    "# Доказательство\nПамять синтез опровергает вымышленное утверждение.\n");
             final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
                     new File(sandbox, "qa-phrase.sqlite"));
-            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 50,
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 80,
                     this::isCancelled), this::isCancelled);
             final List<KnowledgeLocalIndex.Hit> ranked =
                     testIndex.evidenceSearch("Which amber violet?", 6);
+            final List<KnowledgeLocalIndex.Hit> naturalEnglish =
+                    testIndex.evidenceSearch("Tell me about amber violet", 6);
+            final List<KnowledgeLocalIndex.Hit> naturalRussian =
+                    testIndex.evidenceSearch("Расскажи, что известно про память синтез?", 6);
             if (ranked.size() != 6 || !"z-refute.md".equals(ranked.get(0).relativePath)
                     || !"z-support.md".equals(ranked.get(1).relativePath)
+                    || naturalEnglish.size() != 6
+                    || !"z-refute.md".equals(naturalEnglish.get(0).relativePath)
+                    || !"z-support.md".equals(naturalEnglish.get(1).relativePath)
+                    || naturalRussian.size() != 6
+                    || !"z-r-refute.md".equals(naturalRussian.get(0).relativePath)
+                    || !"z-r-support.md".equals(naturalRussian.get(1).relativePath)
                     || !Arrays.equals(unchanged, sha256(reference))) {
                 throw new SyntheticMismatch("verdict=PHRASE_PRIORITY_OR_CONFLICT_LOSS");
             }
-            return "syntheticNotes=32, exactPhraseTop2=true, "
+            return "syntheticNotes=64, exactPhraseTop2=true, enRuQuestionFraming=true, "
                     + "opposingSourcesPreserved=true, noSemanticProof=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {

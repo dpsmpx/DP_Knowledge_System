@@ -1,9 +1,12 @@
 """Contract regression for the entirely synthetic Stage 19 lexical baseline."""
 
+from pathlib import Path
+import re
 import sqlite3
 import unittest
 
 from scripts.benchmark_stage19_retrieval import (
+    QUESTION_FILLERS,
     benchmark,
     fts_evidence_phrase,
     fts_evidence_query,
@@ -14,6 +17,13 @@ from scripts.benchmark_stage19_retrieval import (
 
 
 class Stage19RetrievalBenchmarkTests(unittest.TestCase):
+    def test_python_mirror_tracks_production_question_fillers(self):
+        java = (Path(__file__).resolve().parents[1] / 'third_party/markor/app/src/main/'
+                'java/net/gsantner/markor/knowledge/KnowledgeMarkdownMetadata.java').read_text()
+        method = java.split('private static boolean isQuestionFiller(', 1)[1]
+        method = method.split('private static void addTarget(', 1)[0]
+        self.assertEqual(QUESTION_FILLERS, frozenset(re.findall(r'case "([^"]+)":', method)))
+
     def test_only_bounded_queries_and_no_raw_fts_syntax(self):
         self.assertEqual('"amber*" OR "violet*"',
                          fts_evidence_query('amber, violet; amber'))
@@ -24,12 +34,18 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual('"синтез* память*"', fts_evidence_phrase('Какие синтез память?'))
         self.assertEqual('"which*"', fts_evidence_query('Which?'))
         self.assertEqual('', fts_evidence_phrase('alpha bravo charlie delta echo'))
+        self.assertEqual('"amber* violet*"',
+                         fts_evidence_phrase('Tell me about amber violet'))
+        self.assertEqual('"память* синтез*"',
+                         fts_evidence_phrase('Расскажи, что известно про память синтез?'))
+        self.assertEqual('"tell*" OR "about*"', fts_evidence_query('tell about'))
 
     def test_measures_current_sql_shortlist_and_known_ground_truth(self):
         result = benchmark(notes=2048, repeats=2)
         self.assertEqual(2048, result['synthetic_notes'])
         self.assertIn('not_android_or_hybrid', result['mode'])
-        self.assertEqual(4, len(result['queries']))
+        self.assertEqual(5, len(result['queries']))
+        self.assertEqual(5, len(result['natural_question_cases']))
         self.assertTrue(all(q['known_relevant'] == 4 for q in result['queries']))
         for row in result['queries']:
             self.assertEqual(24, row['retrieved_24'])
@@ -39,6 +55,11 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(row['recall_at_24'], row['recall_at_6'])
             self.assertLessEqual(row['recall_at_24'], 1)
             self.assertNotIn('group-', str(row))  # no synthetic source path in report
+        for row in result['natural_question_cases']:
+            self.assertTrue(row['same_shortlist_as_bare_terms'])
+            self.assertEqual(1, row['recall_at_6'])
+            self.assertEqual(round(4 / 6, 4), row['precision_at_6'])
+            self.assertEqual(1, row['recall_at_24'])
 
     def test_rejects_unbounded_workloads_before_allocating(self):
         for count, repeats in ((0, 1), (511, 1), (20_001, 1), (512, 0), (512, 31)):
