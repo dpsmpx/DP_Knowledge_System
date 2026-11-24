@@ -15,6 +15,16 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_stress_20k_runs_android_retrieval_quality_and_timing_fixture(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("benchmarkSynthetic20kRetrieval(testIndex)", qa)
+        for marker in ("i < 48", "i >= total - 4",
+                       "Crimson cedar supports a wholly synthetic claim",
+                       "Crimson cedar contradicts a wholly synthetic claim",
+                       "STRESS_PHRASE_RECALL_OR_ORDER", "phraseRecallAt6=4/4",
+                       "retrievalP50us=", "retrievalP95us=", "retrievalTrials=21"):
+            self.assertIn(marker, qa)
+
     def test_llm_quote_attribution_uses_nearby_citations_with_visible_warnings(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
