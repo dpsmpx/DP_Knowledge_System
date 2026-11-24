@@ -85,14 +85,35 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         index = (folder / "KnowledgeLocalIndex.java").read_text()
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
-        # Two LLM paths and the separately consented embedding upload path.
-        self.assertEqual(3, hub.count("index.matchesIndexedEvidenceSource("))
+        # Two retrieval paths, embedding upload, and post-consent send gate.
+        self.assertEqual(4, hub.count("index.matchesIndexedEvidenceSource("))
         self.assertEqual(3, hub.count("final SelectedSource source = readSelectedSource("))
         self.assertIn("currentBytes.length != size", index)
         self.assertIn("KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)", index)
         self.assertIn("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB", index)
         self.assertIn("matchesStoredBody(db, existingId,", index)
         self.assertIn("V3_SOURCE_SEAL_MIGRATION_MISMATCH", qa)
+
+    def test_llm_post_consent_source_revision_is_checked_before_network_send(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertEqual(2, hub.count("new KnowledgeLlmEvidence.ConsentSeal("))
+        guard = hub.index("if (!consentEvidenceStillCurrent(seals, generation))")
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)", guard)
+        self.assertLess(guard, network)
+        for marker in ("scanGeneration.get() != consentGeneration",
+                       "seal.matchesCurrentBytes(current.bytes)",
+                       "index.matchesIndexedEvidenceSource(seal.relativePath,"):
+            self.assertIn(marker, hub)
+        self.assertIn("rawDigest = rawSha256(approvedBytes)", evidence)
+        self.assertIn('step("CITE-SEND-19",', qa)
+        self.assertIn("SAME_METADATA_EDIT_NOT_REJECTED", qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_sources_changed_before_send", names)
 
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()

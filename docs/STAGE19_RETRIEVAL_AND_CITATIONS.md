@@ -82,6 +82,19 @@ even if every reference and quotation passes the checks below.
     skip headings/uncertainty, flag disclaimers and cannot establish that a
     cited sentence is actually entailed by its source. It does not block or
     modify the displayed model response or any journal decision.
+12. Exact chat consent now binds the **original previewed source bytes** of
+    every lexical or hybrid excerpt to an ephemeral in-memory SHA-256 seal,
+    indexed mtime/size and scan generation. Immediately before the approved
+    network chat request, all selected files are re-read and compared with
+    both those original seals and the disposable index's raw-byte provenance.
+    A changed, missing, oversized or unverified source cancels the request
+    with a localized "not sent" message; the app never silently substitutes
+    new excerpts or reuses the old consent. Synthetic `CITE-SEND-19` device QA
+    exercises a same-byte-count rewrite with restored mtime, and JVM tests
+    verify that the original approval seal rejects the new bytes. This closes
+    the *known dialog-delay exposure* but does not make file reads and socket
+    writes an atomic filesystem transaction; final race/lifecycle behavior
+    still requires physical QA.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -109,6 +122,7 @@ grounding. Device and broader human-labeled benchmarks remain open.
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
+  post-consent raw-byte source revision and missing approval seals;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
   quotation, clause-local attribution, mixed valid/invalid source labels,
   uncited prose spans and fake citation markers in code/links/quoted text;
@@ -168,7 +182,9 @@ grounding. Device and broader human-labeled benchmarks remain open.
   substantive-span citation warning is not a sentence classifier: it may miss
   unsupported claims or flag harmless explanatory text.
 - No automatic rejection of the answer, fact promotion or journal change;
-  users retain final judgment. Real provider, network/privacy, rotation,
+  users retain final judgment. A detected **post-consent source change** does
+  reject the pending *network request* before any model call, with a prompt to
+  review the new excerpt. Real provider, network/privacy, rotation,
   TalkBack and OEM/lifecycle QA remain unverified on physical devices.
 
 Stage 19 is **partial**. The broader `RET-15` and `LLM-16` debts are not closed

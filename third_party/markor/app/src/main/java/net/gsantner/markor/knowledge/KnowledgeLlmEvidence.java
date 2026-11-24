@@ -29,6 +29,33 @@ public final class KnowledgeLlmEvidence {
         }
     }
 
+    /** Ephemeral copy of what the user actually approved for this one LLM
+     * request. Never persisted, logged, or derived from a different scan.
+     */
+    public static final class ConsentSeal {
+        public final String relativePath;
+        public final long modifiedAtMillis;
+        public final long sizeBytes;
+        private final byte[] rawDigest;
+
+        public ConsentSeal(final String path, final long modified, final long size,
+                           final byte[] approvedBytes) {
+            if (path == null || path.isEmpty() || modified <= 0 || size < 0
+                    || approvedBytes == null || approvedBytes.length != size) {
+                throw new IllegalArgumentException("Unverified LLM consent source");
+            }
+            relativePath = path;
+            modifiedAtMillis = modified;
+            sizeBytes = size;
+            rawDigest = rawSha256(approvedBytes);
+        }
+
+        /** Distinguishes same-size, same-mtime rewrites after preview. */
+        public boolean matchesCurrentBytes(final byte[] currentBytes) {
+            return matchesIndexedBytes(rawDigest, currentBytes);
+        }
+    }
+
     private KnowledgeLlmEvidence() {
     }
 
