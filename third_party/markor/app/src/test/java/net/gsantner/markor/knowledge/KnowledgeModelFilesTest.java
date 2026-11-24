@@ -136,6 +136,14 @@ public class KnowledgeModelFilesTest {
         } finally { cleanup(root); }
     }
 
+    @Test public void importedModelNamesCannotInjectUnicodeLineSeparators() {
+        final String normalized = KnowledgeModelFiles.safeName(
+                "safe\u2028[forged model]\u2029\u202E.gguf");
+        assertFalse(normalized.contains("\u2028"));
+        assertFalse(normalized.contains("\u2029"));
+        assertFalse(normalized.contains("\u202E"));
+    }
+
     private static String repeat(final char ch, final int length) {
         final char[] chars = new char[length];
         Arrays.fill(chars, ch);
