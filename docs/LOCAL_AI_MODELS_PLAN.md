@@ -67,6 +67,15 @@ redirect и длины HTTP-ответа. [PR #134](https://github.com/dpsmpx/DP
 продолжения. Это не докачка многокомпонентных комплектов и не
 автоматическая авторизация в gated-репозиториях. Подробности —
 [`MODEL_M1_DOWNLOAD_RESUME.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_DOWNLOAD_RESUME.md).
+[PR #143](https://github.com/dpsmpx/DP_Knowledge_System/pull/143)
+добавил **первый контракт комплектности v1**: карточка модели отличает
+известный вес по SHA/роли/формату от стороннего файла, показывает
+заявленную лицензию, предполагаемый (НЕ ПРОВЕРЕННЫЙ) движок и отдельные
+недостающие требования для эмбеддингов, LLM, реранкера и персонализации.
+Каждый вес по-прежнему `runnable=false`; контракт **не** является
+реальным импортом tokenizer/config, архитектурной проверкой или готовым
+пакетом. Подробности —
+[`MODEL_M1_PACKAGE_CONTRACT.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_PACKAGE_CONTRACT.md).
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
