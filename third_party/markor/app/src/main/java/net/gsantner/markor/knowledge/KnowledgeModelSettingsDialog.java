@@ -5,6 +5,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.text.InputType;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -22,18 +25,23 @@ import java.util.Locale;
  */
 final class KnowledgeModelSettingsDialog {
     interface ImportRequest { void pick(KnowledgeModelPolicy.Role role); }
+    interface DownloadRequest {
+        void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
+    }
 
     private static final String PREFS = "dpks_local_model_choices_v1";
     private final Context context;
     private final KnowledgeModelFiles files;
     private final ImportRequest importer;
+    private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
     KnowledgeModelSettingsDialog(final Context activity, final KnowledgeModelFiles modelFiles,
-                                 final ImportRequest request) {
+                                 final ImportRequest request, final DownloadRequest download) {
         context = activity;
         files = modelFiles;
         importer = request;
+        downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
@@ -73,7 +81,7 @@ final class KnowledgeModelSettingsDialog {
             return;
         }
         final String selected = preferences.getString(role.name(), "");
-        final String[] labels = new String[entries.size() + 1];
+        final String[] labels = new String[entries.size() + 2];
         labels[0] = (selected.isEmpty() ? "✓ " : "")
                 + context.getString(R.string.knowledge_models_disabled);
         for (int i = 0; i < entries.size(); i++) {
@@ -81,6 +89,7 @@ final class KnowledgeModelSettingsDialog {
             labels[i + 1] = (selected.equals(model.sha256) ? "✓ " : "")
                     + model.name + " · " + formatSize(model.bytes);
         }
+        labels[labels.length - 1] = context.getString(R.string.knowledge_models_download_url);
         new AlertDialog.Builder(context)
                 .setTitle(roleName(role))
                 .setMessage(R.string.knowledge_models_imported_not_runnable)
@@ -88,6 +97,8 @@ final class KnowledgeModelSettingsDialog {
                     if (which == 0) {
                         preferences.edit().remove(role.name()).apply();
                         showRole(role);
+                    } else if (which == labels.length - 1) {
+                        showDownloadPrompt(role);
                     } else {
                         showDetails(entries.get(which - 1));
                     }
@@ -97,6 +108,57 @@ final class KnowledgeModelSettingsDialog {
                 .setNeutralButton(R.string.knowledge_models_catalog, (dialog, which) ->
                         showCatalog(role))
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> show())
+                .show();
+    }
+
+    private void showDownloadPrompt(final KnowledgeModelPolicy.Role role) {
+        final LinearLayout fields = new LinearLayout(context);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int pad = (int) (20 * context.getResources().getDisplayMetrics().density);
+        fields.setPadding(pad, 0, pad, 0);
+        final EditText link = new EditText(context);
+        link.setSingleLine(true);
+        link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        link.setHint(R.string.knowledge_models_download_url_hint);
+        fields.addView(link);
+        final EditText hash = new EditText(context);
+        hash.setSingleLine(true);
+        hash.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        hash.setHint(R.string.knowledge_models_download_sha_hint);
+        fields.addView(hash);
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_download_url)
+                .setMessage(R.string.knowledge_models_download_url_info)
+                .setView(fields)
+                .setPositiveButton(R.string.knowledge_models_download_review, (dialog, which) -> {
+                    final String url = link.getText().toString().trim();
+                    final String digest = hash.getText().toString().trim().toLowerCase(Locale.ROOT);
+                    try {
+                        final KnowledgeModelDownload.Source source = KnowledgeModelDownload.parseSource(url);
+                        if (!digest.isEmpty() && !digest.matches("[0-9a-f]{64}")) {
+                            throw new IOException("Invalid checksum");
+                        }
+                        new AlertDialog.Builder(context)
+                                .setTitle(R.string.knowledge_models_download_review)
+                                .setMessage(context.getString(R.string.knowledge_models_download_confirm,
+                                        source.uri.getHost(), source.filename,
+                                        digest.isEmpty()
+                                                ? context.getString(R.string.knowledge_models_sha_not_provided)
+                                                : digest))
+                                .setPositiveButton(R.string.knowledge_models_download_confirm_action,
+                                        (confirm, button) -> downloader.start(role, url, digest))
+                                .setNegativeButton(android.R.string.cancel, (confirm, button) ->
+                                        showRole(role))
+                                .show();
+                    } catch (IOException invalid) {
+                        new AlertDialog.Builder(context)
+                                .setMessage(R.string.knowledge_models_download_bad_url)
+                                .setPositiveButton(android.R.string.ok, (error, button) ->
+                                        showDownloadPrompt(role))
+                                .show();
+                    }
+                })
+                .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> showRole(role))
                 .show();
     }
 

@@ -754,4 +754,19 @@
     <string name="knowledge_models_catalog_info">Примеры, ничего не установлено. Нажатие открывает страницу модели в браузере. Локальное исполнение ещё разрабатывается.</string>
     <string name="knowledge_models_no_browser">Нет браузера для открытия страницы модели.</string>
     <string name="knowledge_models_personalizer_pending">Малый персональный классификатор ещё требует реализации обучения и схемы признаков. Ничего не загружено и не обучено.</string>
+    <string name="knowledge_models_download_url">Скачать по HTTPS-ссылке…</string>
+    <string name="knowledge_models_download_url_hint">Прямая ссылка на .gguf или .onnx</string>
+    <string name="knowledge_models_download_sha_hint">Ожидаемый SHA-256 (необязательно, 64 символа)</string>
+    <string name="knowledge_models_download_url_info">Вставьте прямую публичную HTTPS-ссылку на один файл весов GGUF/ONNX, не страницу модели. API-ключ не используется. Запрашиваются только байты модели, заметки не передаются. DPKS не ограничивает размер файла — проверьте свободное место. Файл ещё не означает совместимость с движком.</string>
+    <string name="knowledge_models_download_review">Проверить загрузку</string>
+    <string name="knowledge_models_download_confirm">Источник: %1$s\nФайл: %2$s\nОжидаемый SHA-256: %3$s\n\nРазмер станет известен после ответа сервера. Загрузка может быть большой и расходовать мобильный трафик. Продолжить?</string>
+    <string name="knowledge_models_sha_not_provided">Не указан; будет показан только вычисленный хеш</string>
+    <string name="knowledge_models_download_confirm_action">Скачать</string>
+    <string name="knowledge_models_download_bad_url">Некорректная ссылка или SHA-256. Нужна прямая публичная HTTPS-ссылка с окончанием .gguf либо .onnx, без учётных данных. Хеш — 64 шестнадцатеричных символа.</string>
+    <string name="knowledge_models_download_starting">Подключение к источнику модели… Для остановки нажмите «Отменить передачу». Заметки не отправляются.</string>
+    <string name="knowledge_models_download_progress">Скачано %1$s из %2$s. Нажмите «Отменить передачу» для остановки.</string>
+    <string name="knowledge_models_download_progress_unknown">Скачано %1$s (сервер не сообщил полный размер). Для остановки нажмите «Отменить передачу».</string>
+    <string name="knowledge_models_download_done">Скачано: %1$s (%2$s), сохранено приватно с SHA-256. Модель не запускалась.</string>
+    <string name="knowledge_models_download_failed">Ошибка загрузки: проверьте прямую HTTPS-ссылку, сеть, формат файла, свободное место и SHA-256. Модель не зарегистрирована, заметки не изменены.</string>
+    <string name="knowledge_models_cancel_transfer">Отменить передачу</string>
 </resources>
