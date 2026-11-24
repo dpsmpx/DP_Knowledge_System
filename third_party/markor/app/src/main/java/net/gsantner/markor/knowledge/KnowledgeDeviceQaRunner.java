@@ -147,6 +147,8 @@ public final class KnowledgeDeviceQaRunner {
                 step("CITE-EXCERPT-19", this::checkSyntheticExcerptSelection);
                 step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
                 step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
+                step("CITE-ANCHOR-19", this::checkSyntheticClaimAnchors);
+                step("HYBRID-BALANCE-19", this::checkSyntheticHybridBalance);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -1078,6 +1080,43 @@ public final class KnowledgeDeviceQaRunner {
         return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
                 + "codeFenceCitationsExcluded=true, heuristicNotSemanticProof=true; "
                 + "no network or selected vault access";
+    }
+
+    /** A numbered reference is not enough: inspect local lexical anchors and
+     * explicit opposing synthetic source labels, without calling a model. */
+    private String checkSyntheticClaimAnchors() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review correct = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Amber violet is false [2].", sources);
+        final KnowledgeLlmCitationAudit.Review wrong = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [2]. A fabricated unrelated conclusion is certain [1].",
+                sources);
+        if (correct.weakTextAttributions != 0 || correct.polarityMismatchedCitations != 0
+                || correct.potentiallyOpposingSources != 1
+                || wrong.weakTextAttributions != 1
+                || wrong.polarityMismatchedCitations != 1
+                || wrong.potentiallyOpposingSources != 1) {
+            throw new SyntheticMismatch("verdict=CLAIM_SOURCE_ANCHOR_WARNING_LOST");
+        }
+        return "syntheticOpposingSources=2, weakAttributionFlagged=true, "
+                + "explicitBooleanMismatchFlagged=true, sourceConflictFlagged=true, "
+                + "notSemanticProof=true, noNetwork=true, selectedVaultUntouched=true";
+    }
+
+    /** The hybrid shortlist should not silently lose its second modality. */
+    private String checkSyntheticHybridBalance() {
+        final List<Integer> selected = KnowledgeHybridRanking.selectBalancedIndices(
+                Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md", "semantic.md"),
+                Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md"),
+                Arrays.asList("semantic.md"), 3);
+        if (!selected.equals(Arrays.asList(0, 1, 3))) {
+            throw new SyntheticMismatch("verdict=HYBRID_MODALITY_DISCARDED");
+        }
+        return "syntheticCandidates=4, originalTopTwoPreserved=true, "
+                + "semanticRepresentativeIncluded=true, boundedAndReadOnly=true, "
+                + "noModelCall=true, selectedVaultUntouched=true";
     }
 
     /** Synthetic cache-only post-approval mutation; no LLM call is made. */

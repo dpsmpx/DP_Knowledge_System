@@ -482,6 +482,9 @@
     <string name="knowledge_llm_unverified_quotes">Warning: %1$d quoted passages have no verbatim support in nearby cited excerpts. Do not rely on these quotations.</string>
     <string name="knowledge_llm_mismatched_quote_citations">Warning: %1$d nearby quote citations point to excerpts that do not contain the quoted words. Check each reference.</string>
     <string name="knowledge_llm_uncited_prose_spans">Warning: %1$d substantive text spans have no valid source citation in the same sentence or line. This is a formatting heuristic, not a factuality check; inspect the entire answer.</string>
+    <string name="knowledge_llm_weak_text_attributions">Warning: %1$d cited text spans share fewer than two substantial words with their referenced excerpts. This lexical warning cannot rule out valid paraphrases or prove factual accuracy.</string>
+    <string name="knowledge_llm_polarity_mismatch">Warning: %1$d cited statements conflict with a source on an explicit true/false label. Verify the exact wording and context; this is not general contradiction detection.</string>
+    <string name="knowledge_llm_possible_source_conflicts">Warning: %1$d pairs of selected excerpts contain opposing explicit true/false labels on overlapping terms. Review both sources; neither is automatically accepted as fact.</string>
     <string name="knowledge_llm_sources_changed_before_send">Request NOT sent: at least one approved source changed or became unavailable after preview. Reopen the question and review the exact excerpts again.</string>
     <string name="knowledge_llm_sources_changed_after_reply">Warning: one or more approved sources changed or became unavailable while the model was answering. Citations refer only to the excerpts sent earlier, not necessarily to the current notes. Recheck the sources before relying on this answer.</string>
     <string name="knowledge_llm_sources">Local source paths used (open notes to verify):</string>

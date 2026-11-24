@@ -47,4 +47,41 @@ public class KnowledgeHybridRankingTest {
             // Expected.
         }
     }
+
+    @Test
+    public void balancedPreviewIncludesVerifiedSemanticSourceWithoutLosingTopTwo() {
+        final List<String> verified = Arrays.asList(
+                "lex-one.md", "lex-opposite.md", "lex-three.md",
+                "semantic-only.md", "lex-four.md");
+        assertEquals(Arrays.asList(0, 1, 3), KnowledgeHybridRanking.selectBalancedIndices(
+                verified, Arrays.asList("lex-one.md", "lex-opposite.md", "lex-three.md", "lex-four.md"),
+                Collections.singletonList("semantic-only.md"), 3));
+        assertEquals(Arrays.asList(0, 1, 2), KnowledgeHybridRanking.selectBalancedIndices(
+                Arrays.asList("shared.md", "lex-one.md", "semantic-only.md"),
+                Arrays.asList("shared.md", "lex-one.md"),
+                Arrays.asList("shared.md", "semantic-only.md"), 3));
+        assertEquals(Arrays.asList(0, 1, 3), KnowledgeHybridRanking.selectBalancedIndices(
+                Arrays.asList("sem-one.md", "sem-two.md", "sem-three.md", "lexical-only.md"),
+                Collections.singletonList("lexical-only.md"),
+                Arrays.asList("sem-one.md", "sem-two.md", "sem-three.md"), 3));
+    }
+
+    @Test
+    public void balancedPreviewKeepsFusedRankWhenOneChannelMissingAndCapsReads() {
+        assertEquals(Arrays.asList(0, 1, 2), KnowledgeHybridRanking.selectBalancedIndices(
+                Arrays.asList("a.md", "b.md", "c.md"),
+                Arrays.asList("a.md", "b.md", "c.md"), Collections.emptyList(), 3));
+        final java.util.List<String> verified = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) verified.add("rank" + i + ".md");
+        verified.add("outside.md");
+        assertEquals(Arrays.asList(0, 1, 2), KnowledgeHybridRanking.selectBalancedIndices(
+                verified, verified, Collections.singletonList("outside.md"), 3));
+        try {
+            KnowledgeHybridRanking.selectBalancedIndices(verified, verified,
+                    Collections.emptyList(), 25);
+            fail("Unbounded request must fail");
+        } catch (IllegalArgumentException expected) {
+            // Bounded by API contract.
+        }
+    }
 }

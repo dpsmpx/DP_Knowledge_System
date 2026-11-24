@@ -5,7 +5,9 @@
 package net.gsantner.markor.knowledge;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,6 +19,7 @@ public final class KnowledgeLlmCitationAudit {
     private static final Pattern BRACKETS = Pattern.compile("\\[([^\\]\\r\\n]{1,24})\\]");
     private static final Pattern NUMBER = Pattern.compile("[1-9][0-9]?");
     private static final Pattern QUOTE = Pattern.compile("«([^»\\r\\n]{4,240})»|“([^”\\r\\n]{4,240})”");
+    private static final Pattern NEGATED_BOOLEAN = Pattern.compile("(?i)\\bnot\\s+(?:true|false)\\b");
     private static final int MAX_LOCAL_CITATION_GAP = 180;
     private static final int MIN_PROSE_LETTERS = 16;
     private static final int MIN_PROSE_WORDS = 3;
@@ -55,15 +58,25 @@ public final class KnowledgeLlmCitationAudit {
         public final int mismatchedQuoteCitations;
         /** Formatting heuristic only; these spans are not factuality judgments. */
         public final int uncitedProseSpans;
+        /** Cited spans with no two shared content words in the cited excerpt. */
+        public final int weakTextAttributions;
+        /** Explicit true/false disagreement between a span and its cited text. */
+        public final int polarityMismatchedCitations;
+        /** Pairs of supplied excerpts with opposing explicit true/false labels. */
+        public final int potentiallyOpposingSources;
 
         Review(final int count, final int invalid, final int quotes, final int unsupported,
-               final int mismatched, final int uncited) {
+               final int mismatched, final int uncited, final int weak,
+               final int polarity, final int opposing) {
             referenceCount = count;
             invalidReferences = invalid;
             quotedPassages = quotes;
             unverifiedQuotes = unsupported;
             mismatchedQuoteCitations = mismatched;
             uncitedProseSpans = uncited;
+            weakTextAttributions = weak;
+            polarityMismatchedCitations = polarity;
+            potentiallyOpposingSources = opposing;
         }
 
         public boolean hasValidReferences() {
@@ -152,8 +165,10 @@ public final class KnowledgeLlmCitationAudit {
             }
             if (!found) unsupported++;
         }
+        final int[] attribution = inspectCitedTextAnchors(visible, markers, sources);
         return new Review(count, invalid, quotes.size(), unsupported, mismatched,
-                countUncitedProseSpans(visible, markers));
+                countUncitedProseSpans(visible, markers), attribution[0], attribution[1],
+                countOpposingSourcePairs(sources));
     }
 
     /** Markdown code is not the model's cited prose. Mask without changing
@@ -273,6 +288,10 @@ public final class KnowledgeLlmCitationAudit {
         for (final Citation marker : markers) {
             if (marker.start >= from && marker.end <= to && marker.source >= 0) return false;
         }
+        return substantiveSpan(visible, from, to);
+    }
+
+    private static boolean substantiveSpan(final String visible, final int from, final int to) {
         int letters = 0;
         int words = 0;
         boolean inWord = false;
@@ -286,6 +305,121 @@ public final class KnowledgeLlmCitationAudit {
             }
         }
         return letters >= MIN_PROSE_LETTERS && words >= MIN_PROSE_WORDS;
+    }
+
+    /** Check only the text immediately attributed to an individual source.
+     * No shared words is a useful warning, but synonyms, paraphrases and
+     * inference make this a weak diagnostic, never semantic verification.
+     * A narrow explicit true/false mismatch gets its own warning. Neither
+     * check changes the answer or any authoritative journal state.
+     */
+    private static int[] inspectCitedTextAnchors(final String visible,
+                                                 final List<Citation> markers,
+                                                 final List<KnowledgeLlmEvidence.Item> sources) {
+        final int[] result = new int[2];
+        for (int lineStart = 0; lineStart < visible.length();) {
+            int lineEnd = visible.indexOf('\n', lineStart);
+            if (lineEnd < 0) lineEnd = visible.length();
+            final String trimmed = visible.substring(lineStart, lineEnd).trim();
+            if (!trimmed.startsWith("# ") && !trimmed.startsWith("## ")
+                    && !trimmed.startsWith("### ")) {
+                int start = lineStart;
+                for (int i = lineStart; i < lineEnd; i++) {
+                    if (!isSentenceTerminator(visible.charAt(i))) continue;
+                    int next = i + 1;
+                    while (next < lineEnd && Character.isWhitespace(visible.charAt(next))) next++;
+                    if ((next == lineEnd || next > i + 1)
+                            && (next == lineEnd || visible.charAt(next) != '[')) {
+                        inspectOneAttributedSpan(visible, start, i + 1, markers, sources, result);
+                        start = i + 1;
+                    }
+                }
+                inspectOneAttributedSpan(visible, start, lineEnd, markers, sources, result);
+            }
+            lineStart = lineEnd + 1;
+        }
+        return result;
+    }
+
+    private static void inspectOneAttributedSpan(final String visible, final int from,
+                                                 final int to, final List<Citation> markers,
+                                                 final List<KnowledgeLlmEvidence.Item> sources,
+                                                 final int[] counts) {
+        if (!substantiveSpan(visible, from, to)) return;
+        final String statement = visible.substring(from, to);
+        final Set<String> terms = contentWords(statement);
+        if (terms.size() < 2) return;
+        final int statementPolarity = explicitBooleanPolarity(statement, terms);
+        final Set<Integer> checked = new HashSet<>();
+        for (final Citation marker : markers) {
+            if (marker.source < 0 || marker.start < from || marker.end > to
+                    || !checked.add(marker.source)) continue;
+            final KnowledgeLlmEvidence.Item source = sources.get(marker.source);
+            final String excerpt = source == null ? null : source.excerpt;
+            final Set<String> sourceTerms = contentWords(excerpt);
+            int overlap = 0;
+            for (final String term : terms) {
+                if (sourceTerms.contains(term)) overlap++;
+            }
+            if (overlap < 2) counts[0]++;
+            final int sourcePolarity = explicitBooleanPolarity(excerpt, sourceTerms);
+            if (statementPolarity != 0 && sourcePolarity == -statementPolarity) {
+                counts[1]++;
+            }
+        }
+    }
+
+    /** Identify ONLY simple explicit true/false opposition in otherwise
+     * related excerpts. Never infer general contradiction or source truth.
+     */
+    private static int countOpposingSourcePairs(final List<KnowledgeLlmEvidence.Item> sources) {
+        final List<Set<String>> words = new ArrayList<>();
+        final int[] polarity = new int[sources.size()];
+        for (int i = 0; i < sources.size(); i++) {
+            final KnowledgeLlmEvidence.Item source = sources.get(i);
+            final String excerpt = source == null ? null : source.excerpt;
+            final Set<String> terms = contentWords(excerpt);
+            words.add(terms);
+            polarity[i] = explicitBooleanPolarity(excerpt, terms);
+        }
+        int opposing = 0;
+        for (int i = 0; i < sources.size(); i++) {
+            if (polarity[i] == 0) continue;
+            for (int j = i + 1; j < sources.size(); j++) {
+                if (polarity[j] != -polarity[i]) continue;
+                int shared = 0;
+                for (final String term : words.get(i)) {
+                    if (!"true".equals(term) && !"false".equals(term)
+                            && words.get(j).contains(term)) shared++;
+                }
+                if (shared >= 2) opposing++;
+            }
+        }
+        return opposing;
+    }
+
+    private static int explicitBooleanPolarity(final String text, final Set<String> words) {
+        if (text == null || NEGATED_BOOLEAN.matcher(text).find()) return 0;
+        final boolean positive = words.contains("true");
+        final boolean negative = words.contains("false");
+        if (positive == negative) return 0;
+        return positive ? 1 : -1;
+    }
+
+    private static Set<String> contentWords(final String text) {
+        final Set<String> result = new HashSet<>();
+        if (text == null) return result;
+        final StringBuilder token = new StringBuilder();
+        for (int i = 0; i <= text.length(); i++) {
+            final char ch = i < text.length() ? Character.toLowerCase(text.charAt(i)) : ' ';
+            if (Character.isLetterOrDigit(ch)) {
+                token.append(ch);
+            } else if (token.length() > 0) {
+                if (token.length() >= 4) result.add(token.toString());
+                token.setLength(0);
+            }
+        }
+        return result;
     }
 
     /** Prefer the citation cluster after a quote in the same clause. Fall back
