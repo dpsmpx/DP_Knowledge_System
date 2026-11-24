@@ -3650,13 +3650,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         worker.submit(() -> {
             try {
                 final List<KnowledgeLocalIndex.Hit> matches = index.evidenceSearch(question, 24);
-                final List<KnowledgeLlmEvidence.Item> excerpts = new ArrayList<>();
-                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.Item> candidates = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> candidateSeals = new ArrayList<>();
                 for (final KnowledgeLocalIndex.Hit match : matches) {
                     if (Thread.currentThread().isInterrupted() || scanGeneration.get() != generation) {
                         return;
                     }
-                    if (excerpts.size() >= KnowledgeLlmClient.MAX_EVIDENCE) {
+                    if (candidates.size() >= KnowledgeLlmEvidence.MAX_LEXICAL_CANDIDATES) {
                         break;
                     }
                     try {
@@ -3675,8 +3675,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         final String content = source.text;
                         final String excerpt = KnowledgeLlmEvidence.excerpt(content, question);
                         if (!excerpt.trim().isEmpty()) {
-                            excerpts.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
-                            seals.add(new KnowledgeLlmEvidence.ConsentSeal(
+                            candidates.add(new KnowledgeLlmEvidence.Item(match.relativePath, excerpt));
+                            candidateSeals.add(new KnowledgeLlmEvidence.ConsentSeal(
                                     match.relativePath, match.modifiedAtMillis,
                                     match.sizeBytes, source.bytes));
                         }
@@ -3684,13 +3684,23 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         // An inaccessible or stale indexed note must not be sent.
                     }
                 }
-                if (excerpts.isEmpty()) {
+                if (candidates.isEmpty()) {
                     runOnUiThread(() -> {
                         if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
                             status.setText(R.string.knowledge_llm_no_sources);
                         }
                     });
                     return;
+                }
+                // Select only byte-verified candidates. Keep the two strongest
+                // lexical hits and use remaining slots for additional visible
+                // question terms, without altering any source or journal.
+                final List<KnowledgeLlmEvidence.Item> excerpts = new ArrayList<>();
+                final List<KnowledgeLlmEvidence.ConsentSeal> seals = new ArrayList<>();
+                for (final int selected : KnowledgeLlmEvidence.selectLexicalIndices(
+                        question, candidates, KnowledgeLlmClient.MAX_EVIDENCE)) {
+                    excerpts.add(candidates.get(selected));
+                    seals.add(candidateSeals.get(selected));
                 }
                 final String exactPreview = KnowledgeLlmClient.requestPreview(question, excerpts);
                 runOnUiThread(() -> {

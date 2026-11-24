@@ -242,6 +242,46 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void lexicalCandidateSelectionPreservesTopTwoAndCoversMissingQuestionTerms() {
+        final java.util.List<KnowledgeLlmEvidence.Item> ranked = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("first.md", "Amber is supported."),
+                new KnowledgeLlmEvidence.Item("opposing.md", "Amber is not supported."),
+                new KnowledgeLlmEvidence.Item("duplicate-a.md", "Amber is mentioned again."),
+                new KnowledgeLlmEvidence.Item("duplicate-b.md", "Amber appears here too."),
+                new KnowledgeLlmEvidence.Item("violet.md", "Violet is visible."),
+                new KnowledgeLlmEvidence.Item("cobalt.md", "Cobalt is visible."),
+                new KnowledgeLlmEvidence.Item("joint.md", "Violet and cobalt are together."));
+        final java.util.List<Integer> picks = KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber violet cobalt", ranked, 3);
+        assertEquals(Arrays.asList(0, 1, 6), picks);
+        final java.util.List<KnowledgeLlmEvidence.Item> selected = Arrays.asList(
+                ranked.get(picks.get(0)), ranked.get(picks.get(1)), ranked.get(picks.get(2)));
+        assertEquals(3, KnowledgeLlmEvidence.termCoverage(
+                "amber violet cobalt", selected).matched);
+        assertEquals(Arrays.asList(0, 1, 2, 3), KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber", ranked, 4));
+        assertEquals(Collections.emptyList(), KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber", ranked, 0));
+    }
+
+    @Test
+    public void lexicalCandidateSelectionIsBoundedAndMaintainsOriginalRankOrder() {
+        final java.util.List<KnowledgeLlmEvidence.Item> ranked =
+                new java.util.ArrayList<>();
+        for (int i = 0; i < KnowledgeLlmEvidence.MAX_LEXICAL_CANDIDATES; i++) {
+            ranked.add(new KnowledgeLlmEvidence.Item("rank-" + i + ".md",
+                    i == 9 ? "Violet cobalt" : "Amber"));
+        }
+        ranked.add(new KnowledgeLlmEvidence.Item("out-of-pool.md", "Violet cobalt"));
+        assertEquals(Arrays.asList(0, 1, 2, 3, 4, 9),
+                KnowledgeLlmEvidence.selectLexicalIndices(
+                        "amber violet cobalt", ranked, 6));
+        // The long-tail source is not read and cannot influence selection.
+        assertFalse(KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber violet cobalt", ranked, 6).contains(12));
+    }
+
+    @Test
     public void excerptDoesNotCountTwoQueryPrefixesFromOneSourceToken() {
         final String source = "Amberlight alone is not two distinct words.\n"
                 + new String(new char[1400]).replace('\0', 'x')

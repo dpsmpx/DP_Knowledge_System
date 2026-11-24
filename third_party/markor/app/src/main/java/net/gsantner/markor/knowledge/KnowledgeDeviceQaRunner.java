@@ -977,6 +977,12 @@ public final class KnowledgeDeviceQaRunner {
                 "amber violet cobalt", Arrays.asList(
                         new KnowledgeLlmEvidence.Item("amber.md", "Chamber is unrelated."),
                         new KnowledgeLlmEvidence.Item("violet.md", "VIOLET and cobalt are here.")));
+        final List<Integer> diverse = KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber violet cobalt", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("first.md", "Amber is supported."),
+                        new KnowledgeLlmEvidence.Item("opposite.md", "Amber is not supported."),
+                        new KnowledgeLlmEvidence.Item("repeat.md", "Amber again."),
+                        new KnowledgeLlmEvidence.Item("complement.md", "Violet cobalt here.")), 3);
         if (!enExcerpt.contains("AMBER, violet supports")
                 || enExcerpt.contains("Amber appears alone")
                 || !ruExcerpt.contains("ПАМЯТЬЮ — синтезом объясняется")
@@ -986,6 +992,7 @@ public final class KnowledgeDeviceQaRunner {
                 || !boundedExcerpt.contains("AMBER, violet are close together")
                 || boundedExcerpt.contains("violet is too far")
                 || missing.total != 3 || missing.matched != 2 || !missing.isIncomplete()
+                || !diverse.equals(Arrays.asList(0, 1, 3))
                 || enExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
                 || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
                 || multiExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
@@ -995,6 +1002,7 @@ public final class KnowledgeDeviceQaRunner {
         return "syntheticQuestions=4, enRuPhraseAligned=true, "
                 + "multiTermCoverageAligned=true, bounded=true, "
                 + "longPunctuationGapRejected=true, lexicalCoverageWarning=true, "
+                + "rankedTopTwoPreserved=true, complementarySourceSelected=true, "
                 + "sourceReadOnly=true, noProviderCall=true; in-memory text only";
     }
 

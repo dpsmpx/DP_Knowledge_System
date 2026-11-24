@@ -183,6 +183,21 @@ even if every reference and quotation passes the checks below.
     recall, source trust, contradiction handling or logical entailment.
     EN/RU UI text, JVM tests and synthetic `CITE-EXCERPT-19` assertions cover
     the change; physical acceptance remains outstanding.
+20. The **lexical-only LLM evidence** path can inspect up to twelve already
+    ranked, hash-verified local excerpts before choosing the six to display
+    for exact user consent. It keeps the top two ranked notes (including
+    contradictory phrase matches), then greedily favors additional DISTINCT
+    question terms with original retrieval rank breaking ties. The selected
+    excerpts are shown in their original ranked order, and only their original
+    matched raw-byte consent seals proceed to the network gate. Hybrid RRF
+    ordering is deliberately unchanged: semantic similarity cannot be
+    fairly represented by literal term counts. This doubles the worst-case
+    local source reads during lexical preview preparation (6 to 12); no
+    extra network calls, automatic consent, note writes or journal promotion
+    are introduced. Tests use synthetic opposing/duplicate/complementary
+    excerpts, not real vault data. The heuristic may still miss a relevant
+    source outside the bounded candidate pool and does not establish
+    entailment, accuracy, or representative recall/precision.
 
 ## Reproducible synthetic retrieval benchmark
 
