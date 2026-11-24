@@ -28,7 +28,7 @@ Android-приложение; большой [PR #7](https://github.com/dpsmpx/D
 | Stage 19 | [PR #81](https://github.com/dpsmpx/DP_Knowledge_System/pull/81) влит в draft-ветку Stage 18: гибридный поиск, проверка метаданных источников и предупреждения о ложных цитатах. Python/Android CI зелёный. | Измеренный benchmark recall/precision/latency, полноценная проверка grounding и реальные провайдеры остаются открыты |
 | Stage 21 | [Draft PR #74](https://github.com/dpsmpx/DP_Knowledge_System/pull/74) содержит изолированную реализацию переносимого бэкапа/restore/секретов/ручного sync, **не влитую** в продуктовую ветку. | Реальное восстановление, SAF/Keystore, offline-конфликты и устройство; его собственный completion gate не разрешает слияние |
 | Stage 22 | [PR #72](https://github.com/dpsmpx/DP_Knowledge_System/pull/72) влит в интеграционную ветку: завершён кодовый пакет 14–20 срезов. | Физические QA-59–75, TalkBack, большие шрифты, lifecycle, самостоятельный движок редактора |
-| CI-02 | [PR #82](https://github.com/dpsmpx/DP_Knowledge_System/pull/82) добавил установку и холодный запуск **подписанного** APK на чистом Android 15 эмуляторе перед публикацией. | Первый фактический signed workflow с PASS; эмулятор не заменяет физический QA |
+| CI-02 | [PR #82](https://github.com/dpsmpx/DP_Knowledge_System/pull/82), диагностика #84 и исправление AVD #86: signed workflow [#45398332895](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45398332895) **PASS** по `apksigner`/SHA, установке и холодному запуску APK на Android 15 эмуляторе; после этого опубликован [Preview #31](https://github.com/dpsmpx/DP_Knowledge_System/releases/tag/knowledge-stage18-31-67a9fdf269). | Автоматическая часть **закрыта**; эмулятор не заменяет физический QA, restore и SAF |
 
 Отчёт владельца по Preview #28, Android 15/API 35 (21.11): **23 PASS,
 2 WARN, 0 FAIL, 4 SKIP** (quick). Два WARN — SQLite read-only
@@ -49,8 +49,9 @@ Android-приложение; большой [PR #7](https://github.com/dpsmpx/D
 SHA-256 исходной загрузки на телефоне отличался от опубликованного файла.
 После повторной загрузки **через Termux** владелец подтвердил успешную
 установку и работу части функций без API. Первопричина различия скачанных
-байтов не доказана; автоматический install smoke-test в CI и полный
-аппаратный приёмочный протокол всё ещё нужны. Не считать частичный
+байтов не доказана; автоматический signed-APK install smoke-test **прошёл
+24.11 на чистом эмуляторе API 35** (см. CI-02 выше), но полный
+аппаратный приёмочный протокол всё ещё нужен. Не считать частичный
 пользовательский тест закрытием Stage 15.
 
 **Аппаратный отчёт 19.11.2026 (Android 15/API 35):** быстрый прогон
