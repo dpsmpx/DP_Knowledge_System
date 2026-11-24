@@ -141,6 +141,19 @@ even if every reference and quotation passes the checks below.
     `LEX-PHRASE-19` device QA fixture now includes *both* language variants
     with opposing synthetic claims. The updated device fixture has not yet
     been run on a physical phone.
+17. The **excerpt** cut from a long lexical source now uses the *same* bounded
+    question terms as FTS4. For 2–4 informative terms it prefers their
+    adjacent token sequence (including ordinary punctuation and prefix
+    suffixes) before falling back to the earliest individual token. A long
+    note mentioning one query word near the beginning no longer hides its
+    later complete matching phrase outside the 900-character consent preview.
+    Token boundaries also prevent a substring within an unrelated word from
+    moving the preview window. This applies to the lexical side of hybrid
+    retrieval; semantic results still use their indexed chunk offsets. New
+    English/Russian JVM regressions and cache-free `CITE-EXCERPT-19` device
+    QA use artificial long notes; the new device step is not yet physically
+    verified. The excerpt is still a heuristic, not proof that the complete
+    note supports the model's answer, and user consent remains mandatory.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -180,7 +193,9 @@ grounding. Device and broader human-labeled benchmarks remain open.
   partial-match pathname, correct indexed text, same-length changed text
   rejection, and exclusion of unverified source content. New JVM token/phrase
   syntax checks, Python label-based opposing-statement and synonym-negative
-  tests, and Android synthetic `LEX-PHRASE-19` are included.
+  tests, and Android synthetic `LEX-PHRASE-19` are included. Phrase-aligned
+  lexical excerpt selection has separate English/Russian JVM and
+  `CITE-EXCERPT-19` synthetic device regressions.
 - Python suite: `python -m unittest discover -s tests -q`.
 - Android CI: Java tests, standalone `com.dpsmpx.dpks` APK compilation and
   embedded core checks. No external LLM credentials, personal vault content,

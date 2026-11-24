@@ -8,9 +8,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Small deterministic previews from user-selected local Markdown sources.
@@ -121,13 +119,24 @@ public final class KnowledgeLlmEvidence {
             return "";
         }
         final String text = source.replace("\r\n", "\n");
-        final String folded = text.toLowerCase(Locale.ROOT);
-        final List<String> terms = queryTerms(question);
-        int firstMatch = -1;
-        for (final String term : terms) {
-            final int position = folded.indexOf(term);
-            if (position >= 0 && (firstMatch < 0 || position < firstMatch)) {
-                firstMatch = position;
+        // Character-wise lowercase preserves UTF-16 offsets into the original
+        // text, including uncommon characters whose full case-fold expands.
+        final char[] foldedChars = text.toCharArray();
+        for (int i = 0; i < foldedChars.length; i++) {
+            foldedChars[i] = Character.toLowerCase(foldedChars[i]);
+        }
+        final String folded = new String(foldedChars);
+        final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
+        // FTS4 ranks a contiguous 2-4-term phrase ahead of isolated terms.
+        // Keep the actual excerpt aligned to that phrase, even if a decoy
+        // occurrence of one term appears far earlier in the same long note.
+        int firstMatch = adjacentPhraseStart(folded, terms);
+        if (firstMatch < 0) {
+            for (final String term : terms) {
+                final int position = firstTokenPrefixStart(folded, term, 0);
+                if (position >= 0 && (firstMatch < 0 || position < firstMatch)) {
+                    firstMatch = position;
+                }
             }
         }
         final int leading = firstMatch < 0 ? 0 : Math.max(0, firstMatch - 180);
@@ -138,28 +147,57 @@ public final class KnowledgeLlmEvidence {
                 + (end < text.length() ? "\n…" : "");
     }
 
-    private static List<String> queryTerms(final String question) {
-        final List<String> result = new ArrayList<>();
-        if (question == null) {
-            return result;
-        }
-        final StringBuilder word = new StringBuilder();
-        final String folded = question.toLowerCase(Locale.ROOT);
-        for (int i = 0; i <= folded.length(); i++) {
-            final char c = i < folded.length() ? folded.charAt(i) : ' ';
-            if (Character.isLetterOrDigit(c)) {
-                word.append(c);
-            } else if (word.length() > 0) {
-                final String term = word.toString();
-                if (term.length() >= 4 && !"which".equals(term)
-                        && !"what".equals(term) && !"where".equals(term)
-                        && !"когда".equals(term) && !"какие".equals(term)
-                        && !"почему".equals(term) && !"зачем".equals(term)) {
-                    result.add(term);
-                }
-                word.setLength(0);
+    /** Prefix hits begin at token boundaries, not inside unrelated words. */
+    private static int firstTokenPrefixStart(final String text, final String term,
+                                            final int from) {
+        for (int at = text.indexOf(term, from); at >= 0;
+             at = text.indexOf(term, at + 1)) {
+            if (at == 0 || !Character.isLetterOrDigit(text.charAt(at - 1))) {
+                return at;
             }
         }
-        return result;
+        return -1;
+    }
+
+    /** A lightweight in-text mirror of the FTS4 2-4-token phrase priority.
+     * Word punctuation/whitespace may separate tokens, and each token may
+     * have a suffix because the indexed query uses the `prefix*` operator.
+     * This only selects a preview window; it does not certify a quotation.
+     */
+    private static int adjacentPhraseStart(final String text, final List<String> terms) {
+        if (terms.size() < 2 || terms.size() > 4) {
+            return -1;
+        }
+        final String first = terms.get(0);
+        for (int start = firstTokenPrefixStart(text, first, 0); start >= 0;
+             start = firstTokenPrefixStart(text, first, start + 1)) {
+            int at = start;
+            boolean matches = true;
+            for (int i = 0; i < terms.size(); i++) {
+                if (!text.startsWith(terms.get(i), at)) {
+                    matches = false;
+                    break;
+                }
+                int end = at + terms.get(i).length();
+                while (end < text.length() && Character.isLetterOrDigit(text.charAt(end))) {
+                    end++;
+                }
+                if (i + 1 < terms.size()) {
+                    int next = end;
+                    while (next < text.length() && !Character.isLetterOrDigit(text.charAt(next))) {
+                        next++;
+                    }
+                    if (next == end || next == text.length()) {
+                        matches = false;
+                        break;
+                    }
+                    at = next;
+                }
+            }
+            if (matches) {
+                return start;
+            }
+        }
+        return -1;
     }
 }

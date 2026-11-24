@@ -144,6 +144,7 @@ public final class KnowledgeDeviceQaRunner {
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
                 step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
+                step("CITE-EXCERPT-19", this::checkSyntheticExcerptSelection);
                 step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
                 step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
@@ -949,6 +950,31 @@ public final class KnowledgeDeviceQaRunner {
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    /** Confirm that a long note's approved excerpt follows the phrase-ranked
+     * evidence, not an unrelated first token. All text is artificial, in RAM.
+     */
+    private String checkSyntheticExcerptSelection() {
+        final String padding = new String(new char[1400]).replace('\0', 'x');
+        final String english = "Amber appears alone at the beginning.\n" + padding
+                + "\nAMBER, violet supports an artificial example.";
+        final String russian = "Память упомянута отдельно.\n" + padding
+                + "\nПАМЯТЬЮ — синтезом объясняется вымышленный пример.";
+        final String enExcerpt = KnowledgeLlmEvidence.excerpt(
+                english, "Tell me about amber violet");
+        final String ruExcerpt = KnowledgeLlmEvidence.excerpt(
+                russian, "Расскажи, что известно про память синтез?");
+        if (!enExcerpt.contains("AMBER, violet supports")
+                || enExcerpt.contains("Amber appears alone")
+                || !ruExcerpt.contains("ПАМЯТЬЮ — синтезом объясняется")
+                || ruExcerpt.contains("Память упомянута отдельно")
+                || enExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
+            throw new SyntheticMismatch("verdict=EXCERPT_PHRASE_PRIORITY_LOST");
+        }
+        return "syntheticQuestions=2, enRuPhraseAligned=true, bounded=true, "
+                + "sourceReadOnly=true, noProviderCall=true; in-memory text only";
     }
 
     /** Test provider completion policy without any real model or network. */

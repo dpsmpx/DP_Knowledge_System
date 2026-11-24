@@ -145,8 +145,25 @@ public final class KnowledgeMarkdownMetadata {
 
     /** Bounded recall-first OR query for local LLM evidence, never a raw FTS expression. */
     public static String ftsEvidenceQuery(final String question) {
+        final List<String> selected = ftsEvidenceTerms(question);
+        final StringBuilder query = new StringBuilder();
+        for (final String part : selected) {
+            if (query.length() > 0) {
+                query.append(" OR ");
+            }
+            // In FTS4 OR expressions, '*' must be inside each quoted term.
+            // The "term"* OR "other"* form can silently return no rows.
+            query.append('"').append(part).append('*').append('"');
+        }
+        return query.toString();
+    }
+
+    /** Share the same bounded, normalized terms with the excerpt selector.
+     * The original question is never sent anywhere by this helper.
+     */
+    static List<String> ftsEvidenceTerms(final String question) {
         if (question == null || question.isEmpty()) {
-            return "";
+            return Collections.emptyList();
         }
         final StringBuilder word = new StringBuilder();
         final List<String> terms = new ArrayList<>();
@@ -172,16 +189,7 @@ public final class KnowledgeMarkdownMetadata {
             }
         }
         final List<String> selected = informative.isEmpty() ? terms : informative;
-        final StringBuilder query = new StringBuilder();
-        for (final String part : selected.subList(0, Math.min(selected.size(), 8))) {
-            if (query.length() > 0) {
-                query.append(" OR ");
-            }
-            // In FTS4 OR expressions, '*' must be inside each quoted term.
-            // The "term"* OR "other"* form can silently return no rows.
-            query.append('"').append(part).append('*').append('"');
-        }
-        return query.toString();
+        return new ArrayList<>(selected.subList(0, Math.min(selected.size(), 8)));
     }
 
     /** Boost an adjacent 2–4-term phrase; the ordinary ALL/OR passes remain.
