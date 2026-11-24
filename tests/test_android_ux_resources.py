@@ -15,6 +15,24 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_llm_refuses_explicit_incomplete_provider_response(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        client = (folder / "KnowledgeLlmClient.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for token in ("IncompleteResponseException", "validatedAnswer(",
+                      "finish_reason", "MAX_ANSWER_CHARS"):
+            self.assertIn(token, client)
+        self.assertNotIn("answer.substring(0, 12_000)", client)
+        self.assertLess(hub.index("consentEvidenceStillCurrent(seals, generation)"),
+                        hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey, exactPreview)"))
+        self.assertIn("R.string.knowledge_llm_incomplete_response", hub)
+        self.assertIn('step("CITE-RESPONSE-19",', qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_incomplete_response", names)
+
     def test_stress_20k_runs_android_retrieval_quality_and_timing_fixture(self):
         qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
         self.assertIn("benchmarkSynthetic20kRetrieval(testIndex)", qa)

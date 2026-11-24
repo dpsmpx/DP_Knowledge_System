@@ -3823,6 +3823,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                     }
                 });
+            } catch (KnowledgeLlmClient.IncompleteResponseException incomplete) {
+                // Do not display a possibly missing conclusion or citations;
+                // never retry or resend private excerpts automatically.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && scanGeneration.get() == generation) {
+                        status.setText(R.string.knowledge_llm_incomplete_response);
+                    }
+                });
             } catch (Exception ignored) {
                 // No question, excerpts, response bodies or API keys in logcat.
                 runOnUiThread(() -> {

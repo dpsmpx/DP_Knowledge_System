@@ -28,6 +28,14 @@ public final class KnowledgeLlmClient {
     public static final int MAX_EVIDENCE = 6;
     private static final int MAX_REQUEST_BYTES = 18_000;
     private static final int MAX_RESPONSE_BYTES = 160_000;
+    private static final int MAX_ANSWER_CHARS = 12_000;
+
+    /** Explicit provider truncation is not a complete, source-auditable answer. */
+    public static final class IncompleteResponseException extends IOException {
+        IncompleteResponseException() {
+            super("LLM generation stopped without a complete answer");
+        }
+    }
 
     private KnowledgeLlmClient() {
     }
@@ -172,6 +180,25 @@ public final class KnowledgeLlmClient {
                 .put("temperature", 0).put("max_tokens", 768).put("messages", messages);
     }
 
+    /** Pure, offline completion gate; OpenAI-compatible services may omit
+     * finish_reason, but an explicit non-stop result must never be presented
+     * as a complete cited answer. An oversized answer is not silently cut.
+     */
+    static String validatedAnswer(final String answer, final String finishReason)
+            throws IOException {
+        if (finishReason != null && !finishReason.isEmpty()
+                && !"stop".equals(finishReason)) {
+            throw new IncompleteResponseException();
+        }
+        if (answer == null || answer.trim().isEmpty()) {
+            throw new IOException("No plain-text LLM response");
+        }
+        if (answer.length() > MAX_ANSWER_CHARS) {
+            throw new IncompleteResponseException();
+        }
+        return answer;
+    }
+
     public static String ask(final URL endpoint, final String model,
                              final String apiKey, final String exactPreview) throws IOException {
         final byte[] request;
@@ -212,11 +239,10 @@ public final class KnowledgeLlmClient {
             final JSONArray choices = response.optJSONArray("choices");
             final JSONObject first = choices == null ? null : choices.optJSONObject(0);
             final JSONObject message = first == null ? null : first.optJSONObject("message");
-            final String answer = message == null ? "" : message.optString("content");
-            if (answer.trim().isEmpty()) {
-                throw new IOException("No plain-text LLM response");
-            }
-            return answer.length() > 12_000 ? answer.substring(0, 12_000) : answer;
+            final String finishReason = first == null || first.isNull("finish_reason")
+                    ? "" : first.optString("finish_reason", "");
+            return validatedAnswer(message == null ? null : message.optString("content"),
+                    finishReason);
         } catch (JSONException e) {
             throw new IOException("Unexpected LLM response format");
         } finally {
