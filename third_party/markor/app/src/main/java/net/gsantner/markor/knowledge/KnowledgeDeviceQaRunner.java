@@ -618,6 +618,12 @@ public final class KnowledgeDeviceQaRunner {
                     || testIndex.possibleBacklinks("beta.md", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=INITIAL_RECONCILIATION_MISMATCH");
             }
+            final List<KnowledgeLocalIndex.Hit> rankedEvidence =
+                    testIndex.evidenceSearch("synthetic violet", 10);
+            if (rankedEvidence.size() != 2
+                    || !"beta.md".equals(rankedEvidence.get(0).relativePath)) {
+                throw new SyntheticMismatch("verdict=ALL_TERM_RANKING_MISMATCH");
+            }
             if (!oldName.renameTo(newName)) {
                 throw new IOException("Synthetic rename failed");
             }
