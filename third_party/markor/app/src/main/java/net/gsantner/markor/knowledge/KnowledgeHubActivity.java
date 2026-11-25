@@ -180,6 +180,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView modelStatus;
     private KnowledgeModelFiles modelFiles;
     private KnowledgeModelPackageStore modelPackages;
+    private KnowledgeOnnxIsolatedClient onnxSmokeClient;
     private KnowledgeModelPolicy.Role pendingModelImportRole;
     private String pendingModelPackageKey;
     private boolean modelImportActive;
@@ -283,6 +284,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         modelPackages = new KnowledgeModelPackageStore(
                 new File(getFilesDir(), "dpks-models-v1"), modelFiles);
         modelStatus = findViewById(R.id.knowledge_models_status);
+        onnxSmokeClient = new KnowledgeOnnxIsolatedClient(this);
         findViewById(R.id.knowledge_models_open).setOnClickListener(view -> {
             if (modelImportActive) {
                 cancelModelImport();
@@ -740,39 +742,38 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
-    /** One manually approved, synthetic CPU inference. No installed model/vault is opened. */
+    /** One manually approved, synthetic CPU run in a separate isolated UID. */
     private void runOnnxCpuSmoke() {
-        if (modelImportActive || !KnowledgeOnnxCpuBackend.available()) return;
+        if (modelImportActive || !KnowledgeOnnxCpuBackend.available()
+                || onnxSmokeClient == null) return;
         modelImportActive = true;
         ((Button) findViewById(R.id.knowledge_models_open))
                 .setText(R.string.knowledge_models_cancel_transfer);
         final int operation = modelGeneration.incrementAndGet();
         modelStatus.setText(R.string.knowledge_models_onnx_smoke_running);
-        runningModelImport = modelWorker.submit(() -> {
-            try {
-                final KnowledgeOnnxSmoke.Report report = KnowledgeOnnxCpuBackend.smoke();
-                runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed()
-                            && modelGeneration.get() == operation) {
-                        modelImportActive = false;
-                        restoreModelButton();
-                        modelStatus.setText(getString(R.string.knowledge_models_onnx_smoke_passed,
-                                report.runtimeVersion, report.sessionInitMillis,
-                                report.inferenceMicros, report.nativeHeapDeltaBytes));
-                    }
-                });
-            } catch (Exception | LinkageError failure) {
-                // No raw native diagnostics, file paths or model text in the UI/logs.
-                runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed()
-                            && modelGeneration.get() == operation) {
-                        modelImportActive = false;
-                        restoreModelButton();
-                        modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
-                    }
-                });
+        if (!onnxSmokeClient.start(new KnowledgeOnnxIsolatedClient.Callback() {
+            @Override public void success(final KnowledgeOnnxSmoke.Report report) {
+                if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                    modelImportActive = false;
+                    restoreModelButton();
+                    modelStatus.setText(getString(R.string.knowledge_models_onnx_smoke_passed,
+                            report.runtimeVersion, report.sessionInitMillis,
+                            report.inferenceMicros, report.nativeHeapDeltaBytes));
+                }
             }
-        });
+
+            @Override public void failure() {
+                if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                    modelImportActive = false;
+                    restoreModelButton();
+                    modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
+                }
+            }
+        })) {
+            modelImportActive = false;
+            restoreModelButton();
+            modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
+        }
     }
 
     /** Manual, bounded ONNX session creation. No user-model inference occurs. */
@@ -1027,6 +1028,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     private void cancelModelImport() {
         modelGeneration.incrementAndGet();
+        if (onnxSmokeClient != null) onnxSmokeClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         modelImportActive = false;
         restoreModelButton();
@@ -5141,6 +5143,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     @Override
     protected void onDestroy() {
         modelGeneration.incrementAndGet();
+        if (onnxSmokeClient != null) onnxSmokeClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
