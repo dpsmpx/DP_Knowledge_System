@@ -138,6 +138,11 @@ dependencies {
     // framework classes are stubs in local unit tests. Test-only, not in APK.
     testImplementation 'org.json:json:20240303'
 
+    // DPKS-only local CPU backend. No model weights are bundled. Upstream
+    // Markor flavors stay free of the native ONNX Runtime dependency.
+    // Pinned stable Maven Central release; never use latest.release in CI.
+    flavorAtestImplementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.1'
+
     // Android standard libs
     implementation 'androidx.appcompat:appcompat:1.7.1'          // 1.8+    -> minSdk23
     implementation 'com.google.android.material:material:1.13.0' // 1.14.0+ -> minSdk23
