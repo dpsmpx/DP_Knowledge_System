@@ -45,6 +45,8 @@ final class KnowledgeModelContainerProbe {
     private static final int MAX_ONNX_LOCAL_FUNCTIONS = 128;
     private static final long MAX_ONNX_FUNCTION_IMPORTS = 2048;
     private static final int MAX_ONNX_FUNCTION_OPERATOR_KINDS = 128;
+    private static final long MAX_ONNX_DENSE_INITIALIZERS = 20_000;
+    private static final long MAX_ONNX_EXTERNAL_ENTRIES = 2048;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -84,6 +86,15 @@ final class KnowledgeModelContainerProbe {
         long localFunctionOperatorKinds;
         long undecodedLocalFunctionOperatorNodes;
         long localFunctionCustomNodesMissingImport;
+        long denseInitializersScanned;
+        long sparseInitializersSkipped;
+        long externalDataEntriesScanned;
+        long externalDataTensorsDeclared;
+        long externalDataRelativeLocations;
+        long externalDataMissingLocations;
+        long externalDataUntrustedLocations;
+        long externalDataDuplicateLocations;
+        long invalidExternalDataLocationEnums;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
@@ -96,6 +107,11 @@ final class KnowledgeModelContainerProbe {
     private static final class OpsetImport {
         String domain = ""; // Empty is the standard, implicitly available ONNX domain.
         long version;
+    }
+
+    private static final class ExternalDataEntry {
+        String key;
+        String value;
     }
 
     private static final class OperatorKey {
@@ -194,6 +210,15 @@ final class KnowledgeModelContainerProbe {
         final long localFunctionOperatorKinds;
         final long undecodedLocalFunctionOperatorNodes;
         final long localFunctionCustomNodesMissingImport;
+        final long denseInitializersScanned;
+        final long sparseInitializersSkipped;
+        final long externalDataEntriesScanned;
+        final long externalDataTensorsDeclared;
+        final long externalDataRelativeLocations;
+        final long externalDataMissingLocations;
+        final long externalDataUntrustedLocations;
+        final long externalDataDuplicateLocations;
+        final long invalidExternalDataLocationEnums;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
@@ -249,6 +274,15 @@ final class KnowledgeModelContainerProbe {
             localFunctionOperatorKinds = details.localFunctionOperatorKinds;
             undecodedLocalFunctionOperatorNodes = details.undecodedLocalFunctionOperatorNodes;
             localFunctionCustomNodesMissingImport = details.localFunctionCustomNodesMissingImport;
+            denseInitializersScanned = details.denseInitializersScanned;
+            sparseInitializersSkipped = details.sparseInitializersSkipped;
+            externalDataEntriesScanned = details.externalDataEntriesScanned;
+            externalDataTensorsDeclared = details.externalDataTensorsDeclared;
+            externalDataRelativeLocations = details.externalDataRelativeLocations;
+            externalDataMissingLocations = details.externalDataMissingLocations;
+            externalDataUntrustedLocations = details.externalDataUntrustedLocations;
+            externalDataDuplicateLocations = details.externalDataDuplicateLocations;
+            invalidExternalDataLocationEnums = details.invalidExternalDataLocationEnums;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
@@ -572,7 +606,11 @@ final class KnowledgeModelContainerProbe {
                     || details.duplicateLocalFunctionImportDomains > 0
                     || details.invalidLocalFunctionImportVersions > 0
                     || details.undecodedLocalFunctionOperatorNodes > 0
-                    || details.localFunctionCustomNodesMissingImport > 0) {
+                    || details.localFunctionCustomNodesMissingImport > 0
+                    || details.externalDataMissingLocations > 0
+                    || details.externalDataUntrustedLocations > 0
+                    || details.externalDataDuplicateLocations > 0
+                    || details.invalidExternalDataLocationEnums > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -593,9 +631,9 @@ final class KnowledgeModelContainerProbe {
     }
 
     /**
-     * Walks only the direct fields of GraphProto, skipping huge TensorProto
-     * initializers via bounded seeks. Input/output types and dimensions are
-     * declaration hints, not validation against an inference backend.
+     * Walks only the direct fields of GraphProto. Huge TensorProto payloads
+     * are skipped; only bounded external-data metadata is inspected.
+     * Input/output declarations are not validation against an inference backend.
      */
     private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
                                          final Details details,
@@ -619,6 +657,15 @@ final class KnowledgeModelContainerProbe {
                 if (++details.nodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
                 inspectOnnxNode(data, length, details, examples,
                         referencedDomains, operatorInventory, graphFunctionCalls);
+            } else if (wire == 2 && field == 5) { // GraphProto.initializer (dense)
+                final long length = readVarint(data);
+                if (++details.denseInitializersScanned > MAX_ONNX_DENSE_INITIALIZERS) {
+                    throw new ScanLimit();
+                }
+                inspectOnnxInitializerExternalData(data, length, end, details);
+            } else if (wire == 2 && field == 15) { // sparse_initializer not inspected
+                details.sparseInitializersSkipped++;
+                skipExact(data, readVarint(data));
             } else if (wire == 2 && (field == 11 || field == 12)) {
                 final long length = readVarint(data);
                 if (field == 11) details.inputs++;
@@ -641,6 +688,116 @@ final class KnowledgeModelContainerProbe {
             if (data.getFilePointer() > end) throw new BadContainer();
         }
         details.state = DetailState.DECLARATIONS_READ;
+    }
+
+    /** Only checks TensorProto.external_data/data_location; never follows any path. */
+    private static void inspectOnnxInitializerExternalData(final RandomAccessFile data,
+                                                           final long bytes,
+                                                           final long parentEnd,
+                                                           final Details details)
+            throws IOException {
+        if (bytes < 0 || bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        final long end = data.getFilePointer() + bytes;
+        long fields = 0;
+        long dataLocation = 0; // TensorProto.DEFAULT when absent.
+        String location = null;
+        long locationEntries = 0;
+        while (data.getFilePointer() < end) {
+            checkInterrupted();
+            if (++fields > 1024) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 14 && wire == 0) { // TensorProto.data_location
+                dataLocation = readVarint(data);
+            } else if (field == 13 && wire == 2) { // TensorProto.external_data
+                if (++details.externalDataEntriesScanned > MAX_ONNX_EXTERNAL_ENTRIES) {
+                    throw new ScanLimit();
+                }
+                final ExternalDataEntry entry = readOnnxExternalDataEntry(data,
+                        readVarint(data), end);
+                if ("location".equals(entry.key)) {
+                    locationEntries++;
+                    location = entry.value;
+                }
+            } else {
+                skipWire(data, wire); // raw_data, dimensions, typed arrays, etc.
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        if (dataLocation > 1) details.invalidExternalDataLocationEnums++;
+        if (locationEntries > 1) details.externalDataDuplicateLocations++;
+        if (dataLocation == 1) { // EXTERNAL
+            details.externalDataTensorsDeclared++;
+            if (locationEntries == 0) details.externalDataMissingLocations++;
+            else if (!isLexicallyRelativeExternalPath(location) || locationEntries > 1) {
+                details.externalDataUntrustedLocations++;
+            } else {
+                // Lexical syntax only: file availability, symlinks, hardlinks,
+                // provenance and permissions are deliberately NOT checked.
+                details.externalDataRelativeLocations++;
+            }
+        }
+    }
+
+    /** StringStringEntryProto key/value are each a bounded UTF-8 field. */
+    private static ExternalDataEntry readOnnxExternalDataEntry(final RandomAccessFile data,
+                                                               final long bytes,
+                                                               final long parentEnd)
+            throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
+        final ExternalDataEntry entry = new ExternalDataEntry();
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > 64) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 1 && wire == 2) entry.key = readOnnxExternalString(data,
+                    readVarint(data), end);
+            else if (field == 2 && wire == 2) entry.value = readOnnxExternalString(data,
+                    readVarint(data), end);
+            else skipWire(data, wire);
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return entry;
+    }
+
+    private static String readOnnxExternalString(final RandomAccessFile data,
+                                                 final long bytes, final long parentEnd)
+            throws IOException {
+        if (bytes < 0 || bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        if (bytes > 512) {
+            skipExact(data, bytes);
+            return null;
+        }
+        final byte[] raw = new byte[(int) bytes];
+        data.readFully(raw);
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw)).toString();
+        } catch (CharacterCodingException invalid) {
+            throw new BadContainer();
+        }
+    }
+
+    /** Never use this lexical check to authorize opening external files. */
+    private static boolean isLexicallyRelativeExternalPath(final String location) {
+        if (location == null || location.isEmpty() || location.startsWith("/")
+                || location.indexOf('\\') >= 0 || location.indexOf(':') >= 0) return false;
+        for (int i = 0; i < location.length(); i++) {
+            final char c = location.charAt(i);
+            if (c < 32 || c == 127) return false;
+        }
+        final String[] components = location.split("/", -1);
+        for (final String part : components) {
+            if (part.isEmpty() || part.equals(".") || part.equals("..")) return false;
+        }
+        return true;
     }
 
     /** Reads bounded ValueInfoProto.name and tensor-only TypeProto declarations. */
