@@ -20,14 +20,15 @@ import java.util.Locale;
 
 /**
  * First MODEL-M1/M2 UI slice: local file shelf and declared model choices.
- * It deliberately does NOT start inference or claim compatibility from a
- * GGUF header/ONNX filename; that requires the later runtime integration.
+ * Installed GGUF/ONNX weights are not executed or declared compatible.
+ * The separate, explicitly approved CPU smoke only runs a synthetic graph.
  */
 final class KnowledgeModelSettingsDialog {
     interface ImportRequest { void pick(KnowledgeModelPolicy.Role role); }
     interface PackageRequest { void pick(KnowledgeModelFiles.Entry entry); }
     interface AuditRequest { void verify(KnowledgeModelFiles.Entry entry); }
     interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
+    interface SmokeRequest { void run(); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -40,6 +41,7 @@ final class KnowledgeModelSettingsDialog {
     private final PackageRequest packageImporter;
     private final AuditRequest auditor;
     private final PrepareRequest preparer;
+    private final SmokeRequest smokeTester;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
@@ -47,7 +49,7 @@ final class KnowledgeModelSettingsDialog {
                                  final KnowledgeModelPackageStore modelPackages,
                                  final ImportRequest request, final PackageRequest packageRequest,
                                  final DownloadRequest download, final AuditRequest audit,
-                                 final PrepareRequest prepare) {
+                                 final PrepareRequest prepare, final SmokeRequest smoke) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
@@ -55,6 +57,7 @@ final class KnowledgeModelSettingsDialog {
         packageImporter = packageRequest;
         auditor = audit;
         preparer = prepare;
+        smokeTester = smoke;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -75,12 +78,16 @@ final class KnowledgeModelSettingsDialog {
         for (int i = 0; i < titles.length; i++) {
             titles[i] = roleName(roles[i]);
         }
-        new AlertDialog.Builder(context)
+        final AlertDialog.Builder builder = new AlertDialog.Builder(context)
                 .setTitle(R.string.knowledge_models_title)
                 .setMessage(R.string.knowledge_models_four_optional)
                 .setItems(titles, (dialog, which) -> showRole(roles[which]))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                .setNegativeButton(android.R.string.cancel, null);
+        if (KnowledgeOnnxCpuBackend.available()) {
+            builder.setNeutralButton(R.string.knowledge_models_onnx_smoke,
+                    (dialog, which) -> confirmOnnxSmoke());
+        }
+        builder.show();
     }
 
     void showRole(final KnowledgeModelPolicy.Role role) {
@@ -292,6 +299,16 @@ final class KnowledgeModelSettingsDialog {
                                         showPackageActions(entry)).show())
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
+                .show();
+    }
+
+    private void confirmOnnxSmoke() {
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_onnx_smoke)
+                .setMessage(R.string.knowledge_models_onnx_smoke_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_onnx_smoke,
+                        (dialog, which) -> smokeTester.run())
                 .show();
     }
 

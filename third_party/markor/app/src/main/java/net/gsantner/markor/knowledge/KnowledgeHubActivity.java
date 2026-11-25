@@ -289,7 +289,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 new KnowledgeModelSettingsDialog(this, modelFiles, modelPackages,
                         this::pickModelFile, this::pickModelPackage,
                         this::downloadModel, this::auditModelPackage,
-                        this::prepareOnnxFiles).show();
+                        this::prepareOnnxFiles, this::runOnnxCpuSmoke).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -735,6 +735,41 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     modelStatus.setText(R.string.knowledge_models_onnx_prepare_success);
                 }
             });
+        });
+    }
+
+    /** One manually approved, synthetic CPU inference. No installed model/vault is opened. */
+    private void runOnnxCpuSmoke() {
+        if (modelImportActive || !KnowledgeOnnxCpuBackend.available()) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_onnx_smoke_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final KnowledgeOnnxSmoke.Report report = KnowledgeOnnxCpuBackend.smoke();
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(getString(R.string.knowledge_models_onnx_smoke_passed,
+                                report.runtimeVersion, report.sessionInitMillis,
+                                report.inferenceMicros, report.nativeHeapDeltaBytes));
+                    }
+                });
+            } catch (Exception | LinkageError failure) {
+                // No raw native diagnostics, file paths or model text in the UI/logs.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
+                    }
+                });
+            }
         });
     }
 
