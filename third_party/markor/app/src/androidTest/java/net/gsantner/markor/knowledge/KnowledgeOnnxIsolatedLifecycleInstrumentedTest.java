@@ -118,6 +118,51 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void simultaneousFdRequestIsRefusedWithoutBreakingActiveSession()
+            throws Exception {
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(context);
+        final byte[] first = KnowledgeOnnxSmoke.identityModel();
+        final byte[] second = KnowledgeOnnxSmoke.identityModel();
+        final String digest = KnowledgeOnnxSessionPipe.sha256Hex(first);
+        final CountDownLatch complete = new CountDownLatch(1);
+        final AtomicReference<KnowledgeOnnxSessionGate.Report> report = new AtomicReference<>();
+        final AtomicInteger callbacks = new AtomicInteger();
+        final AtomicBoolean firstAccepted = new AtomicBoolean();
+        final AtomicBoolean secondAccepted = new AtomicBoolean(true);
+        try {
+            instrumentation.runOnMainSync(() -> {
+                firstAccepted.set(client.start(first, digest,
+                        new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                    @Override public void success(final KnowledgeOnnxSessionGate.Report result) {
+                        report.set(result);
+                        callbacks.incrementAndGet();
+                        complete.countDown();
+                    }
+                    @Override public void failure() {
+                        callbacks.incrementAndGet();
+                        complete.countDown();
+                    }
+                }));
+                secondAccepted.set(client.start(second, digest,
+                        new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                    @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
+                        callbacks.incrementAndGet();
+                    }
+                    @Override public void failure() { callbacks.incrementAndGet(); }
+                }));
+            });
+            assertTrue("First session must bind", firstAccepted.get());
+            assertFalse("Parallel session unexpectedly bound", secondAccepted.get());
+            for (final byte wiped : second) assertEquals("Rejected weights not wiped", 0, wiped);
+            assertTrue("Active session timed out", complete.await(40, TimeUnit.SECONDS));
+            assertNotNull("Parallel refusal interfered with first session", report.get());
+            assertEquals("A rejected request must never invoke a callback", 1, callbacks.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     @Test public void cancellingPendingBindSilencesCallbacks() throws Exception {
         final KnowledgeOnnxIsolatedSessionClient client =
                 new KnowledgeOnnxIsolatedSessionClient(context);

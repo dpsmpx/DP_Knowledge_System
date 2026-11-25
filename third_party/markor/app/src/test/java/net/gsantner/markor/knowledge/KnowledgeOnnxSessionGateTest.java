@@ -20,6 +20,22 @@ public final class KnowledgeOnnxSessionGateTest {
     private static final byte[] CONFIG = "{\"hidden_size\":1}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] TOKENIZER = "{\"vocab\":{}}".getBytes(StandardCharsets.UTF_8);
 
+    @Test public void availableMemoryGateRefusesLowMemoryAndUnknownSnapshots() throws Exception {
+        final long threshold = KnowledgeOnnxSessionGate.MIN_AVAILABLE_RAM_BYTES;
+        KnowledgeOnnxSessionGate.requireAvailableMemory(threshold, false);
+        KnowledgeOnnxSessionGate.requireAvailableMemory(Long.MAX_VALUE, false);
+        for (final long insufficient : new long[]{-1, 0, threshold - 1}) {
+            try {
+                KnowledgeOnnxSessionGate.requireAvailableMemory(insufficient, false);
+                fail("Insufficient system RAM was accepted");
+            } catch (IOException expected) { }
+        }
+        try {
+            KnowledgeOnnxSessionGate.requireAvailableMemory(threshold * 2, true);
+            fail("OS low-memory flag was ignored");
+        } catch (IOException expected) { }
+    }
+
     @Test public void boundedSyntheticPackageIsRehashedIntoPrivateInMemoryBytes()
             throws Exception {
         final File directory = Files.createTempDirectory("dpks-session-gate-").toFile();

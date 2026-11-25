@@ -98,6 +98,18 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
                     "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
         self.assertIn("Manual retry after cancel failed to bind", emulator)
         self.assertIn("Late cancelled request invoked a callback", emulator)
+        self.assertIn("Parallel session unexpectedly bound", emulator)
+        self.assertIn("Rejected weights not wiped", emulator)
+
+    def test_live_ram_gate_is_rechecked_after_model_sha_audit(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        gate = (APP / "main" / base / "KnowledgeOnnxSessionGate.java").read_text()
+        # Declaration + check before file reading + check immediately before Binder/FD.
+        self.assertEqual(3, activity.count("requireAvailableOnnxMemory()"))
+        self.assertIn("KnowledgeOnnxSessionGate.requireAvailableMemory(", activity)
+        self.assertIn("if (lowMemory || availableBytes < MIN_AVAILABLE_RAM_BYTES)", gate)
+        self.assertIn("Arrays.fill(bytes, (byte) 0);\n                        modelImportActive = false;", activity)
 
     def test_manual_fd_smoke_reuses_generated_graph_and_never_selects_user_model(self):
         base = "java/net/gsantner/markor/knowledge/"

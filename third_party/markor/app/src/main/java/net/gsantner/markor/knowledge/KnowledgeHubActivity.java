@@ -829,6 +829,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
+    /** Fail closed on an unavailable/low OS RAM snapshot; this reserves no memory. */
+    private void requireAvailableOnnxMemory() throws IOException {
+        // Read a current system-wide snapshot. Neither this nor the isolated
+        // process guarantees that a later native allocation will succeed.
+        try {
+            final ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (am == null) throw new IOException("No Android memory info");
+            final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+            am.getMemoryInfo(memory);
+            KnowledgeOnnxSessionGate.requireAvailableMemory(memory.availMem, memory.lowMemory);
+        } catch (RuntimeException unavailable) {
+            throw new IOException("Cannot confirm available RAM for optional CPU check", unavailable);
+        }
+    }
+
     /** Audit model bytes in the app, then create a bounded session in an isolated UID. */
     private void inspectOnnxCpuSession(final KnowledgeModelFiles.Entry entry) {
         if (modelImportActive || entry == null || !KnowledgeOnnxCpuBackend.available()
@@ -841,20 +856,22 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         modelStatus.setText(R.string.knowledge_models_onnx_session_running);
         runningModelImport = modelWorker.submit(() -> {
             try {
-                // OS-wide available RAM is an additional stop condition, never
-                // a promise that native allocations will fit in this process.
-                final ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-                if (am == null) throw new IOException("No Android memory info");
-                final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
-                am.getMemoryInfo(memory);
-                if (memory.lowMemory
-                        || memory.availMem < KnowledgeOnnxSessionGate.MIN_AVAILABLE_RAM_BYTES) {
-                    throw new IOException("Not enough available RAM for optional CPU check");
-                }
+                requireAvailableOnnxMemory();
                 final byte[] bytes = modelPackages.readForCpuSession(entry);
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || modelGeneration.get() != operation) {
                         Arrays.fill(bytes, (byte) 0);
+                        return;
+                    }
+                    // SHA audit/file IO may take time: do not send the now
+                    // resident bytes if Android reports new memory pressure.
+                    try {
+                        requireAvailableOnnxMemory();
+                    } catch (IOException unavailable) {
+                        Arrays.fill(bytes, (byte) 0);
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_onnx_session_failed);
                         return;
                     }
                     if (!onnxSessionClient.start(bytes, entry.sha256,

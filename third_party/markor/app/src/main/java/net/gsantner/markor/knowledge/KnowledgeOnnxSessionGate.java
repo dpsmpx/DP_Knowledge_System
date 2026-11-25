@@ -31,6 +31,14 @@ final class KnowledgeOnnxSessionGate {
 
     private KnowledgeOnnxSessionGate() { }
 
+    /** A fresh OS-wide snapshot gate, not a reservation or native peak-RAM guarantee. */
+    static void requireAvailableMemory(final long availableBytes, final boolean lowMemory)
+            throws IOException {
+        if (lowMemory || availableBytes < MIN_AVAILABLE_RAM_BYTES) {
+            throw new IOException("Not enough available RAM for optional CPU check");
+        }
+    }
+
     static void requireEligible(final KnowledgeModelFiles.Entry entry,
                                 final KnowledgeModelContainerProbe.Result container)
             throws IOException {
