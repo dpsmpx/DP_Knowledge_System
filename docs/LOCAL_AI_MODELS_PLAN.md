@@ -67,6 +67,21 @@ redirect и длины HTTP-ответа. [PR #134](https://github.com/dpsmpx/DP
 продолжения. Это не докачка многокомпонентных комплектов и не
 автоматическая авторизация в gated-репозиториях. Подробности —
 [`MODEL_M1_DOWNLOAD_RESUME.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_DOWNLOAD_RESUME.md).
+**Следующий частичный MODEL-M1:**
+[PR #143](https://github.com/dpsmpx/DP_Knowledge_System/pull/143)
+ввёл диагностический `KnowledgeModelPackageContract` v1, который
+для каждой роли показывает недостающие tokenizer/config, шаблоны,
+контракт признаков, ревизию, лицензию и Android backend; все веса
+остаются `runnable=false`.
+[PR #145](https://github.com/dpsmpx/DP_Knowledge_System/pull/145)
+добавил **ручной импорт комплекта сопутствующих файлов** по
+`dpks-model-package.json` с ограниченным и строгим JSON-контрактом,
+множественным выбором SAF, проверкой SHA-256 уже установленных весов
+и каждого файла, атомарной приватной фиксацией, отказом при
+несовпадении и явным удалением. Это **не** готовый runtime и не
+автоматическая установка tokenizer: пользователь выбирает все
+компоненты сам. Описание формата —
+[`MODEL_M1_PACKAGE_MANIFEST.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_PACKAGE_MANIFEST.md).
 [PR #143](https://github.com/dpsmpx/DP_Knowledge_System/pull/143)
 добавил **первый контракт комплектности v1**: карточка модели отличает
 известный вес по SHA/роли/формату от стороннего файла, показывает
@@ -96,8 +111,10 @@ PC/Tailscale/cloud-подключений на Android. Проверки Android
 отмены на телефоне. MODEL-M0 **остаётся незакрытым** до аппаратного QA
 PC/LAN/Tailscale/cloud/offline-отказов; подробности — в
 [`MODEL_M0_NETWORK_CONSENT.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M0_NETWORK_CONSENT.md).
-Не реализованы полноценные package manifest и возобновление загрузок без
-эталонного хеша, валидация модель/tokenizer/engine, оценки RAM,
+Не реализованы криптографическая проверка происхождения ревизий,
+автоматическая поставка полных комплектов и gated-авторизация,
+возобновление загрузок без эталонного хеша, валидация model/tokenizer/engine,
+оценки RAM,
 исполнение и четыре benchmark; пользовательское тестирование на Redmi Note 13
 не проводилось. Отсутствие модели/API не блокирует offline-ядро.
 
@@ -280,9 +297,11 @@ RAM маркировать как предварительную до перво
 следующих этапов допускаются раньше, но не выдаются за готовую функцию.
 **Текущая очередь:** завершить оставшиеся проверки `M0` (согласие на
 off-device контекст и отказ каждого типа провайдера); затем закончить
-начатый `M1` — полный package manifest (модель + tokenizer/config),
-ревизии/лицензии, проверка совместимости, возобновление ручной загрузки
-и gated-случаи без скрытой авторизации. Затем закрыть `M2`
+начатый `M1` — проверить реальную совместимость импортированных
+манифестов, tokenizer/config и архитектур, подтверждение ревизий/лицензий,
+физический QA и gated-случаи без скрытой авторизации. Ручная докачка
+весов с эталонным SHA и атомарный импорт сопутствующих файлов уже
+добавлены, но нуждаются в проверке на устройстве. Затем закрыть `M2`
 (четыре раздела с состояниями, ресурсами и измерениями),
 после чего переходить к on-device embeddings `M3`.
 `MODEL-M3` — первый приоритетный **AI-runtime** после `M0–M2` (контракта,
