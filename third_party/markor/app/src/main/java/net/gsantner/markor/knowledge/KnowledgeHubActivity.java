@@ -126,7 +126,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_IMPORT_JOURNAL = 40022;
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
     private static final int REQUEST_IMPORT_MODEL = 40024;
+    private static final int REQUEST_IMPORT_MODEL_PACKAGE = 40025;
     private static final String STATE_PENDING_MODEL_IMPORT = "dpks_pending_model_import";
+    private static final String STATE_PENDING_MODEL_PACKAGE = "dpks_pending_model_package";
     private static final String[] AUDIT_CATEGORIES = {
             "authoritative_conflicts", "source_conflicts", "ambiguous",
             "unresolved", "unparsed", "source_problems", "knowledge_gaps"
@@ -176,7 +178,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private TextView embeddingStatus;
     private TextView modelStatus;
     private KnowledgeModelFiles modelFiles;
+    private KnowledgeModelPackageStore modelPackages;
     private KnowledgeModelPolicy.Role pendingModelImportRole;
+    private String pendingModelPackageKey;
     private boolean modelImportActive;
     private Button analysisButton;
     private Button auditButton;
@@ -240,6 +244,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             if (Arrays.asList(DECISION_CATEGORIES).contains(previous)) decisionCategory = previous;
             libraryOffset = Math.max(0, savedInstanceState.getInt(STATE_LIBRARY_OFFSET, 0));
             final String pending = savedInstanceState.getString(STATE_PENDING_MODEL_IMPORT, "");
+            pendingModelPackageKey = savedInstanceState.getString(STATE_PENDING_MODEL_PACKAGE, "");
             try {
                 if (!pending.isEmpty()) {
                     pendingModelImportRole = KnowledgeModelPolicy.Role.valueOf(pending);
@@ -274,12 +279,15 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         notebook = _appSettings.getNotebookDirectory();
         index = new KnowledgeLocalIndex(this);
         modelFiles = new KnowledgeModelFiles(new File(getFilesDir(), "dpks-models-v1"));
+        modelPackages = new KnowledgeModelPackageStore(
+                new File(getFilesDir(), "dpks-models-v1"), modelFiles);
         modelStatus = findViewById(R.id.knowledge_models_status);
         findViewById(R.id.knowledge_models_open).setOnClickListener(view -> {
             if (modelImportActive) {
                 cancelModelImport();
             } else {
-                new KnowledgeModelSettingsDialog(this, modelFiles, this::pickModelFile,
+                new KnowledgeModelSettingsDialog(this, modelFiles, modelPackages,
+                        this::pickModelFile, this::pickModelPackage,
                         this::downloadModel).show();
             }
         });
@@ -503,6 +511,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         if (pendingModelImportRole != null) {
             outState.putString(STATE_PENDING_MODEL_IMPORT, pendingModelImportRole.name());
         }
+        if (pendingModelPackageKey != null) {
+            outState.putString(STATE_PENDING_MODEL_PACKAGE, pendingModelPackageKey);
+        }
         super.onSaveInstanceState(outState);
     }
 
@@ -519,6 +530,97 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             pendingModelImportRole = null;
             modelStatus.setText(R.string.knowledge_models_picker_failed);
         }
+    }
+
+    /** A package picker contains only an already-installed weight's sidecars and manifest. */
+    private void pickModelPackage(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null) return;
+        pendingModelPackageKey = entry.role.name() + ":" + entry.sha256;
+        final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_MODEL_PACKAGE);
+        } catch (RuntimeException unavailable) {
+            pendingModelPackageKey = null;
+            modelStatus.setText(R.string.knowledge_models_picker_failed);
+        }
+    }
+
+    private void importModelPackageFromPicker(final Intent picker,
+                                              final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null) return;
+        final List<Uri> chosen = new ArrayList<>();
+        final ClipData clip = picker.getClipData();
+        if (clip != null) {
+            if (clip.getItemCount() > 17) {
+                modelStatus.setText(R.string.knowledge_models_package_failed);
+                return;
+            }
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                chosen.add(clip.getItemAt(i).getUri());
+            }
+        } else if (picker.getData() != null) {
+            chosen.add(picker.getData());
+        }
+        if (chosen.size() < 2 || chosen.size() > 17) {
+            modelStatus.setText(R.string.knowledge_models_package_failed);
+            return;
+        }
+        Uri manifestUri = null;
+        final List<KnowledgeModelPackageStore.Source> sidecars = new ArrayList<>();
+        for (final Uri source : chosen) {
+            if (source == null || !"content".equals(source.getScheme())) {
+                modelStatus.setText(R.string.knowledge_models_package_failed);
+                return;
+            }
+            final String name = modelDisplayName(source);
+            if (KnowledgeModelPackageManifest.FILENAME.equals(name)) {
+                if (manifestUri != null) {
+                    modelStatus.setText(R.string.knowledge_models_package_failed);
+                    return;
+                }
+                manifestUri = source;
+            } else {
+                final Uri selectedUri = source;
+                sidecars.add(new KnowledgeModelPackageStore.Source(name,
+                        () -> getContentResolver().openInputStream(selectedUri)));
+            }
+        }
+        if (manifestUri == null) {
+            modelStatus.setText(R.string.knowledge_models_package_failed);
+            return;
+        }
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_package_importing);
+        final Uri selectedManifest = manifestUri;
+        runningModelImport = modelWorker.submit(() -> {
+            try (InputStream input = getContentResolver().openInputStream(selectedManifest)) {
+                final byte[] json = KnowledgeModelPackageManifest.readBounded(input);
+                final KnowledgeModelPackageManifest result =
+                        modelPackages.install(json, sidecars, entry);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(getString(R.string.knowledge_models_package_imported,
+                                result.components.size() - 1));
+                    }
+                });
+            } catch (IOException | RuntimeException failure) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_package_failed);
+                    }
+                });
+            }
+        });
     }
 
     private String modelDisplayName(final Uri uri) {
@@ -4551,6 +4653,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             if (role != null && resultCode == RESULT_OK && data != null
                     && data.getData() != null) {
                 importModelFromUri(data.getData(), role);
+            }
+        } else if (requestCode == REQUEST_IMPORT_MODEL_PACKAGE) {
+            final String key = pendingModelPackageKey;
+            pendingModelPackageKey = null;
+            if (key != null && resultCode == RESULT_OK && data != null) {
+                try {
+                    for (final KnowledgeModelFiles.Entry entry : modelFiles.installed()) {
+                        if (key.equals(entry.role.name() + ":" + entry.sha256)) {
+                            importModelPackageFromPicker(data, entry);
+                            break;
+                        }
+                    }
+                } catch (IOException unavailable) {
+                    modelStatus.setText(R.string.knowledge_models_package_failed);
+                }
             }
         } else if (requestCode == REQUEST_EXPORT_JOURNAL) {
             final byte[] envelope = pendingExportEnvelope;

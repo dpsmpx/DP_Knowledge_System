@@ -266,6 +266,33 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                          "knowledge_models_req_features"):
                 self.assertIn(item, names)
 
+    def test_m1_package_import_is_manual_atomic_and_never_starts_inference(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        manifest = (folder / "KnowledgeModelPackageManifest.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        for snippet in ("Intent.EXTRA_ALLOW_MULTIPLE", "KnowledgeModelPackageManifest.readBounded",
+                        "modelPackages.install(json, sidecars, entry)",
+                        "REQUEST_IMPORT_MODEL_PACKAGE", "modelPackages ="):
+            self.assertIn(snippet, hub)
+        self.assertIn("packageImporter.pick(entry)", dialog)
+        self.assertIn("packages.forget(entry)", dialog)
+        for snippet in ("MAX_MANIFEST_BYTES", "MAX_SIDECAR_BYTES", "exactKeys(",
+                        'name.contains("..")', "requireWeight("):
+            self.assertIn(snippet, manifest)
+        for snippet in ("registeredWeightMatches(entry)", "copyExact(",
+                        "staging.renameTo(destination)", "removeKnownFiles(staging)"):
+            self.assertIn(snippet, store)
+        self.assertIn("return false;", (folder / "KnowledgeModelPackageContract.java").read_text())
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_package_import", "knowledge_models_package_remove",
+                        "knowledge_models_package_importing", "knowledge_models_package_failed",
+                        "knowledge_models_package_present"):
+                self.assertIn(key, names)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
