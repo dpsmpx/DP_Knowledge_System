@@ -29,6 +29,7 @@ NATURAL_QUESTIONS = (
     "Расскажи, что известно про память синтез?",
 )
 GENERATION = "synthetic-stage19"
+MAX_EVIDENCE_QUESTION_CHARS = 1200
 QUESTION_FILLERS = frozenset((
     'what', 'which', 'where', 'when', 'whose', 'please', 'could', 'would', 'should',
     'tell', 'about', 'know', 'explain', 'describe',
@@ -40,6 +41,8 @@ QUESTION_FILLERS = frozenset((
 
 def fts_evidence_query(question: str) -> str:
     """ASCII/Cyrillic fixture equivalent of KnowledgeMarkdownMetadata.ftsEvidenceQuery."""
+    if not question or len(question) > MAX_EVIDENCE_QUESTION_CHARS:
+        return ""
     terms = []
     word = ""
     for char in question + " ":

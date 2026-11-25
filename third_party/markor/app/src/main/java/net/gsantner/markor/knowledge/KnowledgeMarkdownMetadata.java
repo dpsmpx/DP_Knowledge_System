@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
  * The original Markdown remains authoritative; links are only candidates.
  */
 public final class KnowledgeMarkdownMetadata {
+    /** Matches the explicit chat-question gate; no unbounded FTS work. */
+    public static final int MAX_EVIDENCE_QUESTION_CHARS = 1200;
     private static final Pattern WIKI_LINK = Pattern.compile(
             "!?\\[\\[([^\\]|#^]+)(?:[#^][^\\]|]*)?(?:\\|[^\\]]*)?\\]\\]");
     private static final Pattern MARKDOWN_LINK = Pattern.compile(
@@ -162,7 +164,8 @@ public final class KnowledgeMarkdownMetadata {
      * The original question is never sent anywhere by this helper.
      */
     static List<String> ftsEvidenceTerms(final String question) {
-        if (question == null || question.isEmpty()) {
+        if (question == null || question.isEmpty()
+                || question.length() > MAX_EVIDENCE_QUESTION_CHARS) {
             return Collections.emptyList();
         }
         final StringBuilder word = new StringBuilder();
