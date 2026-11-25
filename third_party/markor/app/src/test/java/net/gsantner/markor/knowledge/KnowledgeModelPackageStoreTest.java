@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -276,6 +277,101 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void onnxExternalBytesAreMatchedToPrivateHashedCompanionsNotPaths()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-external-ok").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4, 5, 6, 7, 8};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("tensors.data", 2, 5)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertEquals(1, audit.externalReferencesMatched);
+            assertEquals(0, audit.externalReferencesUnresolved);
+            assertEquals(0, audit.externalRangesOutOfBounds);
+            assertEquals(0, audit.externalComponentsUnused);
+            assertTrue(audit.externalDataPreflightPassed());
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+
+            // Identical length, different bytes: next explicit audit must fail.
+            final File bundle = new File(directory, "package-" + entry.sha256 + "-EMBEDDING");
+            final File stored = new File(bundle, sha256(shard) + ".sidecar");
+            Files.write(stored.toPath(), new byte[]{9, 2, 3, 4, 5, 6, 7, 8});
+            try {
+                packages.audit(entry, null);
+                fail("An external tensor shard changed without detection");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void missingOrOutOfBoundsOnnxExternalDataNeverBecomesReady() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-external-unresolved").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("other.data", 0, 4)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final KnowledgeModelPackageStore.Audit unresolved = packages.audit(entry, null);
+            assertEquals(0, unresolved.externalReferencesMatched);
+            assertEquals(1, unresolved.externalReferencesUnresolved);
+            assertEquals(1, unresolved.externalComponentsUnused);
+            assertFalse(unresolved.externalDataPreflightPassed());
+            assertTrue(packages.forget(entry));
+
+            final KnowledgeModelFiles.Entry outside = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("tensors.data", 3, 2)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            packages.install(externalManifest(outside, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), outside);
+            final KnowledgeModelPackageStore.Audit invalidRange = packages.audit(outside, null);
+            assertEquals(1, invalidRange.externalRangesOutOfBounds);
+            assertEquals(0, invalidRange.externalReferencesUnresolved);
+            assertFalse(invalidRange.externalDataPreflightPassed());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void packageRejectsSymlinkedShardAndExternalDataInV1() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-external-symlink").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("tensors.data", 0, 4)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final JSONObject versionOne = new JSONObject(new String(
+                    externalManifest(entry, "tensors.data", shard), StandardCharsets.UTF_8));
+            versionOne.put("schema_version", 1);
+            reject(versionOne);
+            versionOne.put("schema_version", 2);
+            versionOne.getJSONArray("files").getJSONObject(3)
+                    .put("bytes", KnowledgeModelPackageManifest.MAX_TOTAL_EXTERNAL_BYTES + 1);
+            reject(versionOne);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final File bundle = new File(directory, "package-" + entry.sha256 + "-EMBEDDING");
+            final File sidecar = new File(bundle, sha256(shard) + ".sidecar");
+            final File outside = new File(directory, "unrelated.data");
+            Files.write(outside.toPath(), shard);
+            assertTrue(sidecar.delete());
+            Files.createSymbolicLink(sidecar.toPath(), outside.toPath());
+            try {
+                packages.audit(entry, null);
+                fail("Symlinked external shard was followed");
+            } catch (IOException expected) { }
+            assertArrayEquals(shard, Files.readAllBytes(outside.toPath()));
+        } finally { removeTree(directory); }
+    }
+
     private static void reject(final JSONObject json) throws Exception {
         try {
             KnowledgeModelPackageManifest.parse(json.toString().getBytes(StandardCharsets.UTF_8));
@@ -294,6 +390,71 @@ public final class KnowledgeModelPackageStoreTest {
         return Arrays.asList(
                 new KnowledgeModelPackageStore.Source(firstName, () -> new ByteArrayInputStream(first)),
                 new KnowledgeModelPackageStore.Source(secondName, () -> new ByteArrayInputStream(second)));
+    }
+
+    private static List<KnowledgeModelPackageStore.Source> externalCompanions(
+            final String name, final byte[] external) {
+        return Arrays.asList(
+                new KnowledgeModelPackageStore.Source("tokenizer.json",
+                        () -> new ByteArrayInputStream(TOKENIZER)),
+                new KnowledgeModelPackageStore.Source("config.json",
+                        () -> new ByteArrayInputStream(CONFIG)),
+                new KnowledgeModelPackageStore.Source(name,
+                        () -> new ByteArrayInputStream(external)));
+    }
+
+    private static byte[] externalManifest(final KnowledgeModelFiles.Entry weight,
+                                           final String name, final byte[] shard) throws Exception {
+        final JSONObject root = new JSONObject(new String(manifest(weight,
+                "tokenizer.json", TOKENIZER, "config.json", CONFIG), StandardCharsets.UTF_8));
+        root.put("schema_version", 2);
+        root.getJSONArray("files").put(component("ONNX_EXTERNAL_DATA", name,
+                sha256(shard), shard.length));
+        return root.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static byte[] onnxExternal(final String name, final int offset, final int length) {
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        pbVarint(tensor, 112); // data_location EXTERNAL
+        pbVarint(tensor, 1);
+        pbExternal(tensor, "location", name);
+        pbExternal(tensor, "offset", Integer.toString(offset));
+        pbExternal(tensor, "length", Integer.toString(length));
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        pbVarint(graph, 42); // GraphProto.initializer
+        pbBytes(graph, tensor.toByteArray());
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        pbVarint(model, 8); // ModelProto.ir_version = 9
+        pbVarint(model, 9);
+        pbVarint(model, 58); // ModelProto.graph
+        pbBytes(model, graph.toByteArray());
+        pbVarint(model, 66); // ModelProto.opset_import
+        pbBytes(model, new byte[]{16, 17});
+        return model.toByteArray();
+    }
+
+    private static void pbExternal(final ByteArrayOutputStream tensor,
+                                   final String key, final String value) {
+        final ByteArrayOutputStream entry = new ByteArrayOutputStream();
+        pbVarint(entry, 10);
+        pbBytes(entry, key.getBytes(StandardCharsets.UTF_8));
+        pbVarint(entry, 18);
+        pbBytes(entry, value.getBytes(StandardCharsets.UTF_8));
+        pbVarint(tensor, 106);
+        pbBytes(tensor, entry.toByteArray());
+    }
+
+    private static void pbBytes(final ByteArrayOutputStream destination, final byte[] bytes) {
+        pbVarint(destination, bytes.length);
+        destination.write(bytes, 0, bytes.length);
+    }
+
+    private static void pbVarint(final ByteArrayOutputStream destination, long number) {
+        while ((number & ~127L) != 0) {
+            destination.write((int) (number & 127) | 128);
+            number >>>= 7;
+        }
+        destination.write((int) number);
     }
 
     private static byte[] manifest(final KnowledgeModelFiles.Entry weight,

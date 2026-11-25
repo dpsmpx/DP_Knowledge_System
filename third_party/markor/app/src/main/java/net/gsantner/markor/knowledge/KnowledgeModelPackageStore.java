@@ -18,8 +18,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * User-triggered, offline package assembly for a weight already on our private
@@ -41,10 +43,16 @@ final class KnowledgeModelPackageStore {
         final int jsonNotInspected;
         final int jsonInvalid;
         final KnowledgeModelContainerProbe.Result container;
+        final int externalReferencesMatched;
+        final int externalReferencesUnresolved;
+        final int externalRangesOutOfBounds;
+        final int externalComponentsUnused;
 
         Audit(final long bytes, final long millis, final int companionCount,
               final int checked, final int skipped, final int invalid,
-              final KnowledgeModelContainerProbe.Result preflight) {
+              final KnowledgeModelContainerProbe.Result preflight,
+              final int matched, final int unresolved, final int outOfBounds,
+              final int unused) {
             verifiedBytes = bytes;
             elapsedMillis = millis;
             companionFiles = companionCount;
@@ -52,10 +60,19 @@ final class KnowledgeModelPackageStore {
             jsonNotInspected = skipped;
             jsonInvalid = invalid;
             container = preflight;
+            externalReferencesMatched = matched;
+            externalReferencesUnresolved = unresolved;
+            externalRangesOutOfBounds = outOfBounds;
+            externalComponentsUnused = unused;
         }
 
         boolean integrityPassed() { return true; } // Otherwise audit throws.
         boolean jsonPreflightPassed() { return jsonInvalid == 0; }
+        boolean externalDataPreflightPassed() {
+            return container.detailState == KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ
+                    && externalReferencesUnresolved == 0 && externalRangesOutOfBounds == 0
+                    && externalComponentsUnused == 0;
+        }
     }
 
     static final class Source {
@@ -80,9 +97,15 @@ final class KnowledgeModelPackageStore {
     synchronized KnowledgeModelPackageManifest installed(final KnowledgeModelFiles.Entry entry)
             throws IOException {
         final File bundle = bundle(entry);
-        if (!bundle.isDirectory()) return null;
+        if (!bundle.exists()) return null;
+        if (!safeChild(directory, bundle) || !bundle.isDirectory()) {
+            throw new IOException("Unsafe model package directory");
+        }
         final File manifestFile = new File(bundle, KnowledgeModelPackageManifest.FILENAME);
-        if (!manifestFile.isFile()) return null;
+        if (!manifestFile.exists()) return null;
+        if (!safeChild(bundle, manifestFile) || !manifestFile.isFile()) {
+            throw new IOException("Unsafe model package manifest");
+        }
         final KnowledgeModelPackageManifest manifest;
         try (InputStream input = new FileInputStream(manifestFile)) {
             manifest = KnowledgeModelPackageManifest.parse(
@@ -92,7 +115,8 @@ final class KnowledgeModelPackageStore {
         for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
             if (component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
             final File sidecar = new File(bundle, component.sha256 + ".sidecar");
-            if (!sidecar.isFile() || sidecar.length() != component.bytes) {
+            if (!safeChild(bundle, sidecar) || !sidecar.isFile()
+                    || sidecar.length() != component.bytes) {
                 throw new IOException("Installed companion file is unavailable");
             }
         }
@@ -111,6 +135,7 @@ final class KnowledgeModelPackageStore {
         if (manifest == null) throw new IOException("No complete package to audit");
         if (!registered(entry)) throw new IOException("Weight registration changed");
         final File weight = weightFile(entry);
+        if (!safeChild(directory, weight)) throw new IOException("Unsafe model weight file");
         long total = entry.bytes;
         for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
             if (component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
@@ -135,10 +160,12 @@ final class KnowledgeModelPackageStore {
         for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
             if (component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
             final File part = new File(packageDirectory, component.sha256 + ".sidecar");
-            if (!part.isFile() || part.length() != component.bytes) {
+            if (!safeChild(packageDirectory, part) || !part.isFile()
+                    || part.length() != component.bytes) {
                 throw new IOException("Companion missing or changed size");
             }
-            final boolean isJson = component.name.endsWith(".json");
+            final boolean isJson = component.kind != KnowledgeModelPackageManifest.Kind.ONNX_EXTERNAL_DATA
+                    && component.name.endsWith(".json");
             final boolean inspect = isJson && component.bytes <= MAX_JSON_PREFLIGHT_BYTES;
             final ByteArrayOutputStream json = inspect
                     ? new ByteArrayOutputStream((int) component.bytes) : null;
@@ -162,8 +189,31 @@ final class KnowledgeModelPackageStore {
         }
         final KnowledgeModelContainerProbe.Result container =
                 KnowledgeModelContainerProbe.inspect(weight, entry.format);
+        final Map<String, Long> externalFiles = new HashMap<>();
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (component.kind == KnowledgeModelPackageManifest.Kind.ONNX_EXTERNAL_DATA) {
+                externalFiles.put(component.name, component.bytes);
+            }
+        }
+        final Set<String> usedExternal = new HashSet<>();
+        int matched = 0, outOfBounds = 0;
+        for (final KnowledgeModelContainerProbe.ExternalReference reference :
+                container.externalReferences) {
+            final Long size = externalFiles.get(reference.location);
+            if (size == null) continue; // Never resolve the ONNX location as a path.
+            usedExternal.add(reference.location);
+            if (reference.offset >= size || (reference.length >= 0
+                    && reference.length > size - reference.offset)) {
+                outOfBounds++;
+            } else {
+                matched++; // Bytes were rehashed above via the *manifest* identity.
+            }
+        }
+        final int unresolved = (int) Math.max(0L,
+                container.externalDataTensorsDeclared - matched - outOfBounds);
         return new Audit(verified, Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
-                manifest.components.size() - 1, checked, skipped, invalid, container);
+                manifest.components.size() - 1, checked, skipped, invalid, container,
+                matched, unresolved, outOfBounds, externalFiles.size() - usedExternal.size());
     }
 
     synchronized KnowledgeModelPackageManifest install(final byte[] manifestBytes,
@@ -244,6 +294,7 @@ final class KnowledgeModelPackageStore {
     synchronized boolean forget(final KnowledgeModelFiles.Entry entry) throws IOException {
         final File stored = bundle(entry);
         if (!stored.exists()) return false;
+        if (!safeChild(directory, stored)) throw new IOException("Unsafe package directory");
         removeKnownFiles(stored);
         if (stored.exists()) throw new IOException("Could not remove model package");
         return true;
@@ -261,6 +312,7 @@ final class KnowledgeModelPackageStore {
             throws IOException {
         if (!registered(entry)) return false;
         final File weight = weightFile(entry);
+        if (!safeChild(directory, weight)) return false;
         try (InputStream source = new FileInputStream(weight)) {
             return entry.sha256.equals(digest(source, entry.bytes));
         }
@@ -271,7 +323,8 @@ final class KnowledgeModelPackageStore {
             if (candidate.role == entry.role && candidate.format == entry.format
                     && candidate.sha256.equals(entry.sha256) && candidate.bytes == entry.bytes) {
                 final File weight = weightFile(entry);
-                return weight.isFile() && weight.length() == entry.bytes;
+                return safeChild(directory, weight) && weight.isFile()
+                        && weight.length() == entry.bytes;
             }
         }
         return false;
@@ -280,6 +333,12 @@ final class KnowledgeModelPackageStore {
     private File weightFile(final KnowledgeModelFiles.Entry entry) {
         return new File(directory, entry.sha256
                 + (entry.format == KnowledgeModelFiles.Format.GGUF ? ".gguf" : ".onnx"));
+    }
+
+    /** Reject a symlink at the child boundary, even on Android API 24 (without java.nio.file). */
+    private static boolean safeChild(final File trustedParent, final File child) throws IOException {
+        return child.getCanonicalFile().equals(
+                new File(trustedParent.getCanonicalFile(), child.getName()).getAbsoluteFile());
     }
 
     private static void copyExact(final InputStream source, final File destination,
@@ -393,6 +452,9 @@ final class KnowledgeModelPackageStore {
     }
 
     private static void removeKnownFiles(final File folder) throws IOException {
+        if (!safeChild(folder.getParentFile(), folder)) {
+            throw new IOException("Refusing to remove symlinked package directory");
+        }
         if (!folder.isDirectory()) return;
         final File[] files = folder.listFiles();
         if (files == null) throw new IOException("Could not inspect package contents");
