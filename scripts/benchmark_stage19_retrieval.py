@@ -2,7 +2,7 @@
 """Offline, synthetic 20k FTS4 evidence-search benchmark for Stage 19.
 
 Compares the original path-ordered OR shortlist with the bounded two-pass
-all-term-first/OR-fallback shortlist and three-pass phrase/all-term/OR search.
+all-term-first/OR-fallback shortlist and title-aware three-pass search.
 Not an Android, model, embedding, RRF, or semantic-grounding benchmark.
 No user files, secrets, network or disk DB.
 """
@@ -39,10 +39,10 @@ QUESTION_FILLERS = frozenset((
 ))
 
 
-def fts_evidence_query(question: str) -> str:
-    """ASCII/Cyrillic fixture equivalent of KnowledgeMarkdownMetadata.ftsEvidenceQuery."""
+def fts_evidence_terms(question: str) -> list[str]:
+    """ASCII/Cyrillic fixture equivalent of KnowledgeMarkdownMetadata.ftsEvidenceTerms."""
     if not question or len(question) > MAX_EVIDENCE_QUESTION_CHARS:
-        return ""
+        return []
     terms = []
     word = ""
     for char in question + " ":
@@ -54,7 +54,12 @@ def fts_evidence_query(question: str) -> str:
             word = ""
     informative = [term for term in terms if term not in QUESTION_FILLERS]
     chosen = informative if informative else terms
-    return " OR ".join(f'"{term}*"' for term in chosen[:8])
+    return chosen[:8]
+
+
+def fts_evidence_query(question: str) -> str:
+    """Bounded escaped-prefix OR query equivalent to the production Java helper."""
+    return " OR ".join(f'"{term}*"' for term in fts_evidence_terms(question))
 
 
 def fts_evidence_phrase(question: str) -> str:
@@ -63,6 +68,28 @@ def fts_evidence_phrase(question: str) -> str:
     if not 2 <= len(terms) <= 4:
         return ''
     return '"' + ' '.join(term[1:-1] for term in terms) + '"'
+
+
+def title_evidence_term_matches(title: str, terms: list[str]) -> int:
+    """Distinct query prefixes at complete title-word boundaries, capped at 256 chars."""
+    if not title or not terms:
+        return 0
+    seen = set()
+    word = ''
+    end = min(len(title), 256)
+    for offset in range(end + 1):
+        char = title[offset] if offset < end else ' '
+        if offset < end and char.isalnum():
+            word += char.lower()
+        elif word:
+            if offset < end or end == len(title) or not title[end].isalnum():
+                matches = (term for term in terms if term not in seen and
+                           word.startswith(term))
+                best = max(matches, key=len, default=None)
+                if best is not None:
+                    seen.add(best)
+            word = ''
+    return len(seen)
 
 
 def build_synthetic_index(connection: sqlite3.Connection, notes: int) -> list[set[str]]:
@@ -122,6 +149,21 @@ def _fts4_paths(connection: sqlite3.Connection, query: str, limit: int) -> list[
         """, (query, GENERATION, limit))]
 
 
+def _fts4_title_ranked_paths(
+    connection: sqlite3.Connection, query: str, limit: int, terms: list[str]
+) -> list[str]:
+    """Bounded metadata-only rerank, stable SQL path order for equal scores."""
+    rows = list(connection.execute("""
+        SELECT notes.path, notes.title FROM documents_fts
+        JOIN notes ON notes.id=documents_fts.docid
+        WHERE documents_fts MATCH ? AND notes.oversized=0
+        AND notes.generation=?
+        ORDER BY notes.path COLLATE NOCASE, notes.path COLLATE BINARY LIMIT ?
+        """, (query, GENERATION, limit)))
+    rows.sort(key=lambda row: -title_evidence_term_matches(row[1], terms))
+    return [path for path, _ in rows]
+
+
 def search_path_order_or_baseline(
     connection: sqlite3.Connection, question: str, limit: int
 ) -> list[str]:
@@ -153,28 +195,66 @@ def search_two_pass_baseline(
 def search_production_lexical_mirror(
     connection: sqlite3.Connection, question: str, limit: int
 ) -> list[str]:
-    """Three bounded FTS4 passes, same ordering and deduplication as Java."""
+    """Three bounded FTS4 passes with within-pass title rerank and dedup."""
     safe = fts_evidence_query(question)
     if not safe:
         return []
     phrase = fts_evidence_phrase(question)
-    first = _fts4_paths(connection, phrase, limit) if phrase else []
+    terms = fts_evidence_terms(question)
+    first = _fts4_title_ranked_paths(connection, phrase, limit * 2, terms)[:limit] if phrase else []
     seen = set(first)
     if len(first) < limit:
-        for path in _fts4_paths(connection, safe.replace(' OR ', ' '), limit * 2):
+        for path in _fts4_title_ranked_paths(
+                connection, safe.replace(' OR ', ' '), limit * 2, terms):
             if path not in seen:
                 first.append(path)
                 seen.add(path)
                 if len(first) == limit:
                     break
     if len(first) < limit and ' OR ' in safe:
-        for path in _fts4_paths(connection, safe, limit * 2):
+        for path in _fts4_title_ranked_paths(connection, safe, limit * 2, terms):
             if path not in seen:
                 first.append(path)
                 seen.add(path)
                 if len(first) == limit:
                     break
     return first
+
+
+def synthetic_title_promotion_probe() -> dict:
+    """Small adversarial fixture with a title-relevant hit inside the scan cap."""
+    with sqlite3.connect(':memory:') as connection:
+        connection.executescript("""
+            CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT, title TEXT,
+                                generation TEXT, oversized INTEGER);
+            CREATE VIRTUAL TABLE documents_fts USING fts4(
+                path,title,body,tokenize=unicode61);
+        """)
+        for number in range(8):
+            path = f'a-{number:02d}.md'
+            title = 'Parcel notes on neon' if number == 7 else 'Generic'
+            body = 'neon synthetic-distance parcel'
+            connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                               (number + 1, path, title, GENERATION))
+            connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                               ' VALUES (?,?,?,?)', (number + 1, path, title, body))
+        for ident, path, body in (
+                (9, 'y-support.md', 'neon parcel supports a synthetic claim'),
+                (10, 'z-refute.md', 'neon parcel refutes a synthetic claim')):
+            connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                               (ident, path, 'Generic', GENERATION))
+            connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                               ' VALUES (?,?,?,?)', (ident, path, 'Generic', body))
+        original = search_two_pass_baseline(connection, 'neon parcel', 4)
+        updated = search_production_lexical_mirror(connection, 'neon parcel', 4)
+        return {
+            'notes': 10,
+            'candidate_scan_cap_per_pass': 8,
+            'previous_two_pass_missed_titled_source': 'a-07.md' not in original,
+            'title_promoted_to_rank_3': updated[2] == 'a-07.md',
+            'opposing_phrase_sources_still_first': updated[:2] == [
+                'y-support.md', 'z-refute.md'],
+        }
 
 
 def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
@@ -198,7 +278,7 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
                 latency_ms.append((time.perf_counter() - start) * 1000)
                 runs.append(rows)
             if any(rows != runs[0] for rows in runs[1:]):
-                raise AssertionError("Non-deterministic two-pass FTS4 search")
+                raise AssertionError("Non-deterministic three-pass FTS4 search")
             shortlist = runs[0]
             relevant = expected[topic]
             top_six = shortlist[:6]
@@ -230,13 +310,14 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
         timings = sorted(latency_ms)
         p95 = timings[max(0, (95 * len(timings) + 99) // 100 - 1)]
         return {
-            "mode": "synthetic_fts4_three_pass_vs_path_baselines_not_android_or_hybrid",
+            "mode": "synthetic_fts4_title_ranked_three_pass_not_android_or_hybrid",
             "sqlite_version": sqlite3.sqlite_version,
             "synthetic_notes": notes,
             "repetitions_per_query": repeats,
             "index_build_ms": round(index_ms, 2),
             "query_p50_ms": round(statistics.median(timings), 3),
             "query_p95_ms": round(p95, 3),
+            "title_promotion_probe": synthetic_title_promotion_probe(),
             "queries": queries,
             "natural_question_cases": framed_queries,
             "limitations": [
@@ -245,6 +326,7 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
                 "synthetic opposing claims are retrieved, not semantically reconciled",
                 "no synonym expansion or natural-language entailment",
                 "SQLite FTS4 SQL mirror, not device or app I/O",
+                "metadata title tie-break only inside a bounded path-first window",
                 "no embeddings, semantic model, RRF, physical RAM or battery measurement",
                 "no proof of LLM citation grounding or safety",
             ],

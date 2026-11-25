@@ -195,6 +195,45 @@ public final class KnowledgeMarkdownMetadata {
         return new ArrayList<>(selected.subList(0, Math.min(selected.size(), 8)));
     }
 
+    /** Count distinct query-token prefixes at title word boundaries (not substrings).
+     * Inspect at most 256 UTF-16 units of title metadata, never source bodies.
+     * One complete title word can satisfy at most one query term.
+     */
+    static int titleEvidenceTermMatches(final String title, final List<String> terms) {
+        if (title == null || title.isEmpty() || terms == null || terms.isEmpty()) {
+            return 0;
+        }
+        final boolean[] matched = new boolean[terms.size()];
+        final int end = Math.min(title.length(), 256);
+        final StringBuilder word = new StringBuilder();
+        int score = 0;
+        for (int i = 0; i <= end; i++) {
+            final boolean atEnd = i == end;
+            final char ch = atEnd ? ' ' : title.charAt(i);
+            if (!atEnd && Character.isLetterOrDigit(ch)) {
+                word.append(Character.toLowerCase(ch));
+            } else if (word.length() > 0) {
+                // Do not award credit for a word truncated at the 256-char cap.
+                if (!atEnd || end == title.length()
+                        || !Character.isLetterOrDigit(title.charAt(end))) {
+                    int best = -1;
+                    for (int j = 0; j < terms.size(); j++) {
+                        if (!matched[j] && word.indexOf(terms.get(j)) == 0
+                                && (best < 0 || terms.get(j).length() > terms.get(best).length())) {
+                            best = j;
+                        }
+                    }
+                    if (best >= 0) {
+                        matched[best] = true;
+                        score++;
+                    }
+                }
+                word.setLength(0);
+            }
+        }
+        return score;
+    }
+
     /** Boost an adjacent 2–4-term phrase; the ordinary ALL/OR passes remain.
      * Only sanitized FTS4 tokens are concatenated, never raw query syntax.
      */

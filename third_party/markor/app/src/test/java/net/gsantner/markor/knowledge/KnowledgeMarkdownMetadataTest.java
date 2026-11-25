@@ -97,4 +97,27 @@ public class KnowledgeMarkdownMetadataTest {
         assertEquals("\"tell*\" OR \"about*\"",
                 KnowledgeMarkdownMetadata.ftsEvidenceQuery("tell about"));
     }
+
+    @Test
+    public void titleEvidenceMatchesOnlyDistinctCompletePrefixWords() {
+        final java.util.List<String> en = KnowledgeMarkdownMetadata.ftsEvidenceTerms(
+                "Tell me about amber violet");
+        assertEquals(2, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                "Violets related to amberlight", en));
+        assertEquals(0, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                "chamber and ultraviolet", en));
+        assertEquals(1, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                "Amber amber amber", en));
+        assertEquals(2, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                "ПАМЯТЬ и СИНТЕЗ", KnowledgeMarkdownMetadata.ftsEvidenceTerms(
+                        "Расскажи про память синтез")));
+        assertEquals(0, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(null, en));
+        assertEquals(0, KnowledgeMarkdownMetadata.titleEvidenceTermMatches("amber", null));
+        assertEquals(0, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                new String(new char[255]).replace('\0', 'x') + "ambermore", en));
+        assertEquals(1, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                new String(new char[250]).replace('\0', ' ') + "amber!", en));
+        assertEquals(1, KnowledgeMarkdownMetadata.titleEvidenceTermMatches(
+                "amberlight", Arrays.asList("amber", "amberl")));
+    }
 }

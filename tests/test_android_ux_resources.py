@@ -148,7 +148,12 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'private static boolean isQuestionFiller('):
             self.assertIn(marker, parser)
         self.assertIn('step("LEX-PHRASE-19",', qa)
-        self.assertIn('PHRASE_PRIORITY_OR_CONFLICT_LOSS', qa)
+        self.assertIn('PHRASE_OR_TITLE_PRIORITY_OR_CONFLICT_LOSS', qa)
+        self.assertIn('titlePriorityWithinAllPass=true', qa)
+        self.assertIn('titleEvidenceTermMatches(title, titleTerms)', index)
+        self.assertIn('limit * 2, limit,', index)
+        self.assertIn('Collections.sort(candidates,', index)
+        self.assertIn('static int titleEvidenceTermMatches(', parser)
 
     def test_bounded_evidence_query_and_verified_source_diversity_tie_break(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
