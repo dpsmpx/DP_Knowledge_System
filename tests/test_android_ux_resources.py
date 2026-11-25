@@ -388,6 +388,24 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_models_container_gguf_extents", labels)
 
+    def test_onnx_opset_domain_linkage_is_bounded_advisory_only(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_DOMAINS", "readOnnxDomain(",
+                       "safeOnnxDomainHint(", "customNodesMissingImport",
+                       "duplicateOpsetDomains", "referencedDomains",
+                       "importedDomains"):
+            self.assertIn(marker, probe)
+        for marker in ("result.opsetHints", "result.customDomainNodes",
+                       "result.customNodesMissingImport", "result.duplicateOpsetDomains",
+                       "knowledge_models_container_onnx_opset_domains"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_opset_domains", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

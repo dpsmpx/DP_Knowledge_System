@@ -10,7 +10,9 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,6 +37,7 @@ final class KnowledgeModelContainerProbe {
     private static final long MAX_ONNX_VALUE_INFO_BYTES = 16L * 1024L;
     private static final long MAX_ONNX_NESTED_FIELDS = 128L;
     private static final int MAX_ONNX_SHAPE_DIMS = 16;
+    private static final int MAX_ONNX_DOMAINS = 128;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -49,8 +52,17 @@ final class KnowledgeModelContainerProbe {
         long outputs;
         long typedInputs;
         long typedOutputs;
+        long customDomainNodes;
+        long customNodesMissingImport;
+        long duplicateOpsetDomains;
         String operatorHints = "";
         String signatureHints = "";
+        String opsetHints = "";
+    }
+
+    private static final class OpsetImport {
+        String domain = ""; // Empty is the standard, implicitly available ONNX domain.
+        long version;
     }
 
     static final class Result {
@@ -72,8 +84,12 @@ final class KnowledgeModelContainerProbe {
         final long graphOutputs;
         final long typedInputs;
         final long typedOutputs;
+        final long customDomainNodes;
+        final long customNodesMissingImport;
+        final long duplicateOpsetDomains;
         final String operatorHints;
         final String signatureHints;
+        final String opsetHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -97,8 +113,12 @@ final class KnowledgeModelContainerProbe {
             graphOutputs = details.outputs;
             typedInputs = details.typedInputs;
             typedOutputs = details.typedOutputs;
+            customDomainNodes = details.customDomainNodes;
+            customNodesMissingImport = details.customNodesMissingImport;
+            duplicateOpsetDomains = details.duplicateOpsetDomains;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
+            opsetHints = details.opsetHints;
         }
     }
 
@@ -270,6 +290,8 @@ final class KnowledgeModelContainerProbe {
         int opsets = 0;
         boolean graph = false;
         final Details details = new Details();
+        final Map<String, Long> importedDomains = new HashMap<>();
+        final Map<String, Long> referencedDomains = new HashMap<>();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -285,14 +307,41 @@ final class KnowledgeModelContainerProbe {
                     final long size = readVarint(data);
                     if (size <= 0) throw new BadContainer();
                     graph = true;
-                    inspectOnnxGraph(data, size, details);
+                    inspectOnnxGraph(data, size, details, referencedDomains);
                 } else if (field == 8 && wire == 2) {
                     final long size = readVarint(data);
                     if (size < 2) throw new BadContainer();
-                    if (readOpsetDeclaration(data, size)) opsets++;
+                    final OpsetImport imported = readOpsetDeclaration(data, size);
+                    if (imported.version > 0) {
+                        opsets++;
+                        if (importedDomains.size() >= MAX_ONNX_DOMAINS
+                                && !importedDomains.containsKey(imported.domain)) {
+                            throw new ScanLimit();
+                        }
+                        if (importedDomains.containsKey(imported.domain)) {
+                            details.duplicateOpsetDomains++;
+                        } else {
+                            importedDomains.put(imported.domain, imported.version);
+                            if (importedDomains.size() <= 4) {
+                                final String safe = safeOnnxDomainHint(imported.domain);
+                                details.opsetHints += (details.opsetHints.isEmpty() ? "" : ", ")
+                                        + safe + "@" + imported.version;
+                            }
+                        }
+                    }
                 } else {
                     skipWire(data, wire);
                 }
+            }
+            // The default ONNX domain is implicit. Missing *custom* domain
+            // imports and duplicate imports are warnings, not backend verdicts.
+            for (final Map.Entry<String, Long> domain : referencedDomains.entrySet()) {
+                if (!importedDomains.containsKey(domain.getKey())) {
+                    details.customNodesMissingImport += domain.getValue();
+                }
+            }
+            if (details.customNodesMissingImport > 0 || details.duplicateOpsetDomains > 0) {
+                details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
                     ? State.METADATA_HINTS : State.INVALID, ir, opsets, graph, details);
@@ -317,7 +366,9 @@ final class KnowledgeModelContainerProbe {
      * declaration hints, not validation against an inference backend.
      */
     private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
-                                         final Details details) throws IOException {
+                                         final Details details,
+                                         final Map<String, Long> referencedDomains)
+            throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
         long fields = 0;
@@ -332,7 +383,7 @@ final class KnowledgeModelContainerProbe {
             if (wire == 2 && field == 1) {
                 final long length = readVarint(data);
                 if (++details.nodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
-                inspectOnnxNode(data, length, details, examples);
+                inspectOnnxNode(data, length, details, examples, referencedDomains);
             } else if (wire == 2 && (field == 11 || field == 12)) {
                 final long length = readVarint(data);
                 if (field == 11) details.inputs++;
@@ -512,11 +563,13 @@ final class KnowledgeModelContainerProbe {
     }
 
     private static void inspectOnnxNode(final RandomAccessFile data, final long bytes,
-                                        final Details details, final Set<String> examples)
+                                        final Details details, final Set<String> examples,
+                                        final Map<String, Long> referencedDomains)
             throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
         long fields = 0;
+        String domain = "";
         while (data.getFilePointer() < end) {
             if (++fields > 1000) throw new ScanLimit();
             final long tag = readVarint(data);
@@ -541,10 +594,19 @@ final class KnowledgeModelContainerProbe {
                         details.operatorHints += (details.operatorHints.isEmpty() ? "" : ", ") + safe;
                     }
                 }
+            } else if ((tag >>> 3) == 7 && (tag & 7) == 2) {
+                domain = readOnnxDomain(data, readVarint(data), end);
             } else {
                 skipWire(data, (int) (tag & 7));
             }
             if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        if (!domain.isEmpty()) {
+            details.customDomainNodes++;
+            if (referencedDomains.size() >= MAX_ONNX_DOMAINS
+                    && !referencedDomains.containsKey(domain)) throw new ScanLimit();
+            final Long count = referencedDomains.get(domain);
+            referencedDomains.put(domain, count == null ? 1 : count + 1);
         }
     }
 
@@ -556,25 +618,50 @@ final class KnowledgeModelContainerProbe {
         else throw new BadContainer(); // Groups are not used in ONNX ModelProto.
     }
 
-    /** OperatorSetIdProto.version is field 2 (varint), domain is optional. */
-    private static boolean readOpsetDeclaration(final RandomAccessFile data, final long size)
+    /** OperatorSetIdProto.domain=1 and version=2; this is not schema support. */
+    private static OpsetImport readOpsetDeclaration(final RandomAccessFile data, final long size)
             throws IOException {
         if (size > 4096) throw new ScanLimit();
         final long start = data.getFilePointer();
         if (size > data.length() - start) throw new BadContainer();
         final long end = start + size;
-        boolean versionPresent = false;
+        final OpsetImport imported = new OpsetImport();
+        long fields = 0;
         while (data.getFilePointer() < end) {
+            if (++fields > MAX_ONNX_NESTED_FIELDS) throw new ScanLimit();
             final long tag = readVarint(data);
             if (tag == 0) throw new BadContainer();
-            if ((tag >>> 3) == 2 && (tag & 7) == 0) {
-                versionPresent = readVarint(data) > 0;
+            if ((tag >>> 3) == 1 && (tag & 7) == 2) {
+                imported.domain = readOnnxDomain(data, readVarint(data), end);
+            } else if ((tag >>> 3) == 2 && (tag & 7) == 0) {
+                imported.version = readVarint(data);
             } else {
                 skipWire(data, (int) (tag & 7));
             }
             if (data.getFilePointer() > end) throw new BadContainer();
         }
-        return versionPresent;
+        return imported;
+    }
+
+    private static String readOnnxDomain(final RandomAccessFile data, final long bytes,
+                                         final long parentEnd) throws IOException {
+        if (bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        if (bytes > 128) throw new ScanLimit();
+        final byte[] raw = new byte[(int) bytes];
+        data.readFully(raw);
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw)).toString();
+        } catch (CharacterCodingException invalid) {
+            throw new BadContainer();
+        }
+    }
+
+    private static String safeOnnxDomainHint(final String domain) {
+        if (domain.isEmpty()) return "default";
+        return domain.matches("[a-zA-Z0-9_.-]{1,48}") ? domain : "custom";
     }
 
     private static long readVarint(final RandomAccessFile data) throws IOException {

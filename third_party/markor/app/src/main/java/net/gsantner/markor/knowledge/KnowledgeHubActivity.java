@@ -729,7 +729,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         result.typedInputs, result.typedOutputs,
                         result.signatureHints.isEmpty()
                                 ? getString(R.string.knowledge_models_container_unknown)
-                                : result.signatureHints);
+                                : result.signatureHints) + "\n"
+                + getString(R.string.knowledge_models_container_onnx_opset_domains,
+                        result.opsetHints.isEmpty()
+                                ? getString(R.string.knowledge_models_container_unknown)
+                                : result.opsetHints, result.customDomainNodes,
+                        result.customNodesMissingImport, result.duplicateOpsetDomains);
     }
 
     private String modelDisplayName(final Uri uri) {
