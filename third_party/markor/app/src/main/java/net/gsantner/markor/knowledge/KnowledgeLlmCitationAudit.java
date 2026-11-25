@@ -17,13 +17,17 @@ import java.util.regex.Pattern;
  * A matching marker or quotation is NOT proof of a factual claim.
  */
 public final class KnowledgeLlmCitationAudit {
-    private static final Pattern BRACKETS = Pattern.compile("\\[([^\\]\\r\\n]{1,24})\\]");
+    private static final Pattern BRACKETS = Pattern.compile(
+            "\\[([^\\]\\r\\n\\x{85}\\x{2028}\\x{2029}]{1,24})\\]");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
-            "(?m)^ {0,3}\\[[^\\]\\r\\n]{1,24}\\]:[^\\r\\n]*");
+            "(?m)^ {0,3}\\[[^\\]\\r\\n\\x{85}\\x{2028}\\x{2029}]{1,24}\\]:[^\\r\\n\\x{85}\\x{2028}\\x{2029}]*");
     private static final Pattern AUTOLINK = Pattern.compile(
-            "<(?:https?://|mailto:)[^<>\\s]{1,2048}>", Pattern.CASE_INSENSITIVE);
+            "<(?:https?://|mailto:)[^<>\\s\\x{85}\\x{2028}\\x{2029}]{1,2048}>",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern NUMBER = Pattern.compile("[1-9][0-9]?");
-    private static final Pattern QUOTE = Pattern.compile("«([^»\\r\\n]{4,240})»|“([^”\\r\\n]{4,240})”");
+    private static final Pattern QUOTE = Pattern.compile(
+            "«([^»\\r\\n\\x{85}\\x{2028}\\x{2029}]{4,240})»|"
+                    + "“([^”\\r\\n\\x{85}\\x{2028}\\x{2029}]{4,240})”");
     private static final Pattern NEGATED_BOOLEAN = Pattern.compile("(?i)\\bnot\\s+(?:true|false)\\b");
     private static final int MAX_LOCAL_CITATION_GAP = 180;
     private static final int MIN_PROSE_LETTERS = 16;
@@ -254,7 +258,8 @@ public final class KnowledgeLlmCitationAudit {
                 || (start > 0 && text.charAt(start - 1) == '[')
                 || (end < text.length() && text.charAt(end) == ']')) return true;
         if (end < text.length() && text.charAt(end) == ':') {
-            final int lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            int lineStart = start;
+            while (lineStart > 0 && !isLineBreak(text.charAt(lineStart - 1))) lineStart--;
             if (start - lineStart <= 3) {
                 boolean definition = true;
                 for (int i = lineStart; i < start; i++) {
@@ -322,12 +327,30 @@ public final class KnowledgeLlmCitationAudit {
         int depth = 1;
         for (int at = opening + 1; at < text.length(); at++) {
             final char ch = text.charAt(at);
-            if (ch == '\n' || ch == '\r') return -1;
+            if (isLineBreak(ch)) return -1;
             if (isEscapedAt(text, at)) continue;
             if (ch == '(') depth++;
             else if (ch == ')' && --depth == 0) return at + 1;
         }
         return -1;
+    }
+
+    private static boolean isLineBreak(final char ch) {
+        return ch == '\n' || ch == '\r' || ch == 0x0085
+                || ch == 0x2028 || ch == 0x2029;
+    }
+
+    private static int lineEnd(final String text, final int from) {
+        for (int i = from; i < text.length(); i++) {
+            if (isLineBreak(text.charAt(i))) return i;
+        }
+        return text.length();
+    }
+
+    private static int nextLineStart(final String text, final int end) {
+        if (end >= text.length()) return text.length();
+        return end + (text.charAt(end) == '\r' && end + 1 < text.length()
+                && text.charAt(end + 1) == '\n' ? 2 : 1);
     }
 
     /** Markdown code is not the model's cited prose. Mask without changing
@@ -339,8 +362,7 @@ public final class KnowledgeLlmCitationAudit {
         char fenceChar = 0;
         int fenceLength = 0;
         for (int lineStart = 0; lineStart < answer.length();) {
-            int lineEnd = answer.indexOf('\n', lineStart);
-            if (lineEnd < 0) lineEnd = answer.length();
+            final int lineEnd = lineEnd(answer, lineStart);
             // Markdown indented code (four columns, including mixed spaces
             // and tabs) is not answer prose. Be conservative about list context.
             int indentColumns = 0;
@@ -352,7 +374,7 @@ public final class KnowledgeLlmCitationAudit {
             }
             if (fenceChar == 0 && indentColumns >= 4) {
                 maskRange(visible, lineStart, lineEnd);
-                lineStart = lineEnd + 1;
+                lineStart = nextLineStart(answer, lineEnd);
                 continue;
             }
             int first = lineStart;
@@ -373,7 +395,7 @@ public final class KnowledgeLlmCitationAudit {
                 fenceChar = 0;
                 fenceLength = 0;
                 maskRange(visible, lineStart, lineEnd);
-                lineStart = lineEnd + 1;
+                lineStart = nextLineStart(answer, lineEnd);
                 continue;
             }
             if (fenceChar != 0) {
@@ -405,14 +427,14 @@ public final class KnowledgeLlmCitationAudit {
                     at = Math.min(end, lineEnd);
                 }
             }
-            lineStart = lineEnd + 1;
+            lineStart = nextLineStart(answer, lineEnd);
         }
         return visible.toString();
     }
 
     private static void maskRange(final StringBuilder text, final int from, final int to) {
         for (int i = from; i < to; i++) {
-            if (text.charAt(i) != '\r' && text.charAt(i) != '\n') text.setCharAt(i, ' ');
+            if (!isLineBreak(text.charAt(i))) text.setCharAt(i, ' ');
         }
     }
 
@@ -425,28 +447,23 @@ public final class KnowledgeLlmCitationAudit {
                                              final List<Citation> markers) {
         int uncited = 0;
         for (int lineStart = 0; lineStart < visible.length();) {
-            int lineEnd = visible.indexOf('\n', lineStart);
-            if (lineEnd < 0) lineEnd = visible.length();
+            final int lineEnd = lineEnd(visible, lineStart);
             final String trimmed = visible.substring(lineStart, lineEnd).trim();
-            if (!trimmed.startsWith("# ") && !trimmed.startsWith("## ")
-                    && !trimmed.startsWith("### ")) {
+            if (!isMarkdownAtxHeading(trimmed)) {
                 int spanStart = lineStart;
                 for (int i = lineStart; i < lineEnd; i++) {
                     if (isSentenceTerminator(visible.charAt(i))) {
-                        int next = i + 1;
-                        while (next < lineEnd && Character.isWhitespace(visible.charAt(next))) next++;
-                        if ((next == lineEnd || next > i + 1)
-                                && (next == lineEnd || visible.charAt(next) != '[')) {
-                            if (uncitedSubstantiveSpan(visible, spanStart, i + 1, markers)) {
-                                uncited++;
-                            }
-                            spanStart = i + 1;
+                        final int end = sentenceBoundaryEnd(visible, i, lineEnd, markers);
+                        if (end > i) {
+                            if (uncitedSubstantiveSpan(visible, spanStart, end, markers)) uncited++;
+                            spanStart = end;
+                            i = end - 1;
                         }
                     }
                 }
                 if (uncitedSubstantiveSpan(visible, spanStart, lineEnd, markers)) uncited++;
             }
-            lineStart = lineEnd + 1;
+            lineStart = nextLineStart(visible, lineEnd);
         }
         return uncited;
     }
@@ -454,6 +471,60 @@ public final class KnowledgeLlmCitationAudit {
     private static boolean isSentenceTerminator(final char ch) {
         return ch == '.' || ch == '!' || ch == '?' || ch == ';'
                 || ch == '。' || ch == '！' || ch == '？' || ch == '；';
+    }
+
+    /** Only # through ###### followed by whitespace are ATX headings. Seven
+     * hashes are plain Markdown text and must retain coverage warnings.
+     */
+    private static boolean isMarkdownAtxHeading(final String trimmed) {
+        int count = 0;
+        while (count < trimmed.length() && trimmed.charAt(count) == '#') count++;
+        return count >= 1 && count <= 6 && (count == trimmed.length()
+                || Character.isWhitespace(trimmed.charAt(count)));
+    }
+
+    /** Keep trailing citation clusters attached to the sentence BEFORE them.
+     * In "Claim. [1] Next claim", [1] must never cover the next claim.
+     * Return -1 for punctuation without a sentence boundary.
+     */
+    private static int sentenceBoundaryEnd(final String text, final int punctuation,
+                                           final int lineEnd, final List<Citation> markers) {
+        int next = punctuation + 1;
+        while (next < lineEnd && Character.isWhitespace(text.charAt(next))) next++;
+        if (next == lineEnd) return punctuation + 1;
+        final Citation first = citationStartingAt(markers, next);
+        if (first == null) return next > punctuation + 1 ? punctuation + 1 : -1;
+        int lastEnd = first.end;
+        while (true) {
+            int candidate = lastEnd;
+            while (candidate < lineEnd && Character.isWhitespace(text.charAt(candidate))) {
+                candidate++;
+            }
+            if (candidate < lineEnd && text.charAt(candidate) == ',') {
+                candidate++;
+                while (candidate < lineEnd && Character.isWhitespace(text.charAt(candidate))) {
+                    candidate++;
+                }
+            }
+            final Citation more = citationStartingAt(markers, candidate);
+            if (more == null) break;
+            lastEnd = more.end;
+        }
+        return lastEnd;
+    }
+
+    /** Citation markers are already sorted by regex offset. */
+    private static Citation citationStartingAt(final List<Citation> markers, final int start) {
+        int low = 0;
+        int high = markers.size() - 1;
+        while (low <= high) {
+            final int middle = low + (high - low) / 2;
+            final Citation marker = markers.get(middle);
+            if (marker.start == start) return marker;
+            if (marker.start < start) low = middle + 1;
+            else high = middle - 1;
+        }
+        return null;
     }
 
     private static boolean uncitedSubstantiveSpan(final String visible, final int from,
@@ -491,25 +562,22 @@ public final class KnowledgeLlmCitationAudit {
                                                       final List<SourceLexicon> sources) {
         final ClaimAudit result = new ClaimAudit();
         for (int lineStart = 0; lineStart < visible.length();) {
-            int lineEnd = visible.indexOf('\n', lineStart);
-            if (lineEnd < 0) lineEnd = visible.length();
+            final int lineEnd = lineEnd(visible, lineStart);
             final String trimmed = visible.substring(lineStart, lineEnd).trim();
-            if (!trimmed.startsWith("# ") && !trimmed.startsWith("## ")
-                    && !trimmed.startsWith("### ")) {
+            if (!isMarkdownAtxHeading(trimmed)) {
                 int start = lineStart;
                 for (int i = lineStart; i < lineEnd; i++) {
                     if (!isSentenceTerminator(visible.charAt(i))) continue;
-                    int next = i + 1;
-                    while (next < lineEnd && Character.isWhitespace(visible.charAt(next))) next++;
-                    if ((next == lineEnd || next > i + 1)
-                            && (next == lineEnd || visible.charAt(next) != '[')) {
-                        inspectOneAttributedSpan(visible, start, i + 1, markers, sources, result);
-                        start = i + 1;
+                    final int end = sentenceBoundaryEnd(visible, i, lineEnd, markers);
+                    if (end > i) {
+                        inspectOneAttributedSpan(visible, start, end, markers, sources, result);
+                        start = end;
+                        i = end - 1;
                     }
                 }
                 inspectOneAttributedSpan(visible, start, lineEnd, markers, sources, result);
             }
-            lineStart = lineEnd + 1;
+            lineStart = nextLineStart(visible, lineEnd);
         }
         return result;
     }
@@ -673,7 +741,8 @@ public final class KnowledgeLlmCitationAudit {
         for (int i = from; i < to; i++) {
             switch (text.charAt(i)) {
                 case '.': case '!': case '?': case ';': case '\r': case '\n':
-                case '。': case '！': case '？': case '；': case 0x2028: case 0x2029:
+                case '。': case '！': case '？': case '；': case 0x0085:
+                case 0x2028: case 0x2029:
                     return true;
                 default:
                     break;
@@ -687,7 +756,7 @@ public final class KnowledgeLlmCitationAudit {
         for (int i = from; i < to; i++) {
             final char c = text.charAt(i);
             if ((!Character.isWhitespace(c) && c != ',' && c != '،')
-                    || c == '\r' || c == '\n' || c == 0x2028 || c == 0x2029) {
+                    || isLineBreak(c)) {
                 return false;
             }
         }

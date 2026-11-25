@@ -670,6 +670,84 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void trailingCitationClusterCannotCoverTheFollowingSentence() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."),
+                new KnowledgeLlmEvidence.Item("two.md", "The observed result was 42."));
+        for (final String answer : Arrays.asList(
+                "The observed result was 42. [1] The later unsupported claim is fabricated.",
+                "The observed result was 42。[1] The later unsupported claim is fabricated.",
+                "The observed result was 42. [1][2] The later unsupported claim is fabricated.",
+                "The observed result was 42. [1], [2] The later unsupported claim is fabricated.")) {
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, answer.contains("[2]") ? 2 : 1, review.referenceCount);
+            assertEquals(answer, 1, review.uncitedProseSpans);
+            assertEquals(answer, 0, review.weakTextAttributions);
+        }
+        final String claim = "The observed result was 42. [1] "
+                + "The fabricated outcome was 43 [1].";
+        final KnowledgeLlmCitationAudit.Review attributed =
+                KnowledgeLlmCitationAudit.inspect(claim, sources);
+        assertEquals(2, attributed.referenceCount);
+        assertEquals(0, attributed.uncitedProseSpans);
+        assertEquals(1, attributed.weakTextAttributions);
+        assertEquals(1, attributed.flaggedSpans.size());
+        assertTrue(KnowledgeLlmCitationAudit.flaggedAnswerSnippet(
+                claim, attributed.flaggedSpans.get(0)).startsWith("The fabricated outcome"));
+    }
+
+    @Test
+    public void allAtxHeadingLevelsAreExcludedFromClaimWarnings() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final String headings = "#### Unsupported heading describes the synthetic result.\n"
+                + "##### Another unsupported heading describes the synthetic result.\n"
+                + "###### Final unsupported heading describes the synthetic result.\n"
+                + "####### This ordinary text is not a valid Markdown heading.";
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(headings, sources);
+        assertEquals(1, review.uncitedProseSpans);
+        assertEquals(0, review.referenceCount);
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "####NoSpace This line is not a Markdown heading.", sources).uncitedProseSpans);
+    }
+
+    @Test
+    public void unicodeAndCrLineSeparatorsCannotLaunderReferencesOrQuotes() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String separator : Arrays.asList("\r", "\r\n", "\u2028", "\u2029", "\u0085")) {
+            final String answer = "The observed result was 42 [1]" + separator
+                    + "The following unsupported claim is invented.";
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(separator, 1, review.referenceCount);
+            assertEquals(separator, 1, review.uncitedProseSpans);
+            assertEquals(separator, 0, review.weakTextAttributions);
+
+            final KnowledgeLlmCitationAudit.Review fenced = KnowledgeLlmCitationAudit.inspect(
+                    "```" + separator + "The invented quote is «Unverified text» [2]"
+                            + separator + "```" + separator
+                            + "The unreferenced conclusion remains visible.", sources);
+            assertEquals(separator, 0, fenced.referenceCount);
+            assertEquals(separator, 0, fenced.invalidReferences);
+            assertEquals(separator, 0, fenced.quotedPassages);
+            assertEquals(separator, 1, fenced.uncitedProseSpans);
+
+            final KnowledgeLlmCitationAudit.Review definition =
+                    KnowledgeLlmCitationAudit.inspect(
+                            "[reference]: https://invalid.example/[2]" + separator
+                                    + "The observed result was 42 [1].", sources);
+            assertEquals(separator, 1, definition.referenceCount);
+            assertEquals(separator, 0, definition.invalidReferences);
+            assertEquals(separator, 0, definition.uncitedProseSpans);
+        }
+        assertEquals(0, KnowledgeLlmCitationAudit.inspect(
+                "«A separated quote\u2028is not a single quotation»", sources).quotedPassages);
+    }
+
+    @Test
     public void repeatedLongAnswerAuditIsBoundedAndRefusesOverlongSource() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
