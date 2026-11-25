@@ -234,6 +234,18 @@ even if every reference and quotation passes the checks below.
     or send another network request. JVM and `CITE-ANCHOR-19` synthetic
     checks cover offsets, numbering, truncation and caps. Actual accessibility
     and readability in a long answer remain open under QA-76.
+24. The citation syntax audit now excludes escaped `\[1]` markers, Markdown
+    reference-style links (`[1][label]` and `[1][]`), link definitions
+    (`[1]: URL`), footnote labels and tab/four-column-indented code (including
+    mixed whitespace). This
+    preserves the supported adjacent numeric source format `[1][2]` and
+    avoids treating sample Markdown as evidence. The audit also rejects source
+    excerpts above the existing **900-character** evidence cap and tokenizes
+    each bounded source only once for repeated claim-overlap and boolean
+    polarity checks; answers retain the existing **12,000-character** limit.
+    Synthetic JVM tests cover these syntax boundaries, 340 repeated citations
+    and oversized source rejection. No semantic truth check, journal write,
+    provider call or real-device latency measurement is implied.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -267,6 +279,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   valid, fabricated, malformed and missing citation numbers; exact vs invented
   quotation, clause-local attribution, mixed valid/invalid source labels,
   uncited prose spans and fake citation markers in code/links/quoted text;
+  escaped/reference-style Markdown and indented-code masking, repeated
+  citation source-lexicon reuse and oversized source rejection;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

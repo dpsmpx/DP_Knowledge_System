@@ -554,6 +554,75 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void escapedAndReferenceStyleMarkdownCannotSpoofSourceCitations() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String answer : Arrays.asList(
+                "The fabricated claim contains an escaped \\[1] example.",
+                "The fabricated claim uses [1][bibliography] as a Markdown link.",
+                "The fabricated claim uses a collapsed [1][] reference link.",
+                "[1]: https://example.org/not-a-citation\n"
+                        + "The fabricated claim has no source citation.",
+                "The fabricated claim has a footnote [^1] but no source citation.")) {
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 0, review.referenceCount);
+            assertEquals(answer, 0, review.invalidReferences);
+            assertFalse(answer, review.hasValidReferences());
+            assertTrue(answer, review.uncitedProseSpans >= 1);
+        }
+        // Two literal backslashes leave the bracket unescaped. The established
+        // adjacent-numeric source citation convention must also keep working.
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 \\\\[1].", sources).referenceCount);
+        assertEquals(2, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1][1].", sources).referenceCount);
+    }
+
+    @Test
+    public void indentedMarkdownCodeCannotDonateCitationsOrQuotes() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final KnowledgeLlmCitationAudit.Review review = KnowledgeLlmCitationAudit.inspect(
+                "    The example says «The observed result was 42.» [1]\n"
+                        + "\tThe model says the same result [1].\n"
+                        + "  \tThe mixed-indent example repeats [1].\n"
+                        + "The separate unsupported conclusion is definitely true.", sources);
+        assertEquals(0, review.referenceCount);
+        assertEquals(0, review.quotedPassages);
+        assertEquals(1, review.uncitedProseSpans);
+    }
+
+    @Test
+    public void repeatedLongAnswerAuditIsBoundedAndRefusesOverlongSource() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final StringBuilder answer = new StringBuilder();
+        for (int i = 0; i < 340; i++) {
+            answer.append("The observed result was 42 [1].\n");
+        }
+        assertTrue(answer.length() <= 12_000);
+        final KnowledgeLlmCitationAudit.Review review = KnowledgeLlmCitationAudit.inspect(
+                answer.toString(), sources);
+        assertEquals(340, review.referenceCount);
+        assertEquals(0, review.invalidReferences);
+        assertEquals(0, review.uncitedProseSpans);
+        assertEquals(0, review.weakTextAttributions);
+        assertEquals(0, review.polarityMismatchedCitations);
+
+        final char[] overlong = new char[KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 1];
+        Arrays.fill(overlong, 'x');
+        try {
+            KnowledgeLlmCitationAudit.inspect("A supposed answer [1].",
+                    Collections.singletonList(new KnowledgeLlmEvidence.Item(
+                            "bad.md", new String(overlong))));
+            fail("Oversized source text must not be tokenized without a bound");
+        } catch (IllegalArgumentException expected) {
+            // Source excerpts are limited before constructing the cached lexicon.
+        }
+    }
+
+    @Test
     public void incompleteProviderOutputIsRefusedInsteadOfBeingSilentlyTruncated()
             throws Exception {
         final String complete = "The synthetic answer is supported [1].";
