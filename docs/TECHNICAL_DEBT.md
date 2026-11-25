@@ -772,6 +772,22 @@ ARM64, RAM/нагрев, реальный inference и MODEL-M1/M8 остают�
 физический ARM64 (Redmi Note 13/Poco X7 Pro). Автоповтора/инференса нет,
 `runnable=false`; MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: непроверенный большой JSON не считается пройденным preflight —
+[PR #201](https://github.com/dpsmpx/DP_Knowledge_System/pull/201).**
+Вручную установленный `tokenizer.json` или `config.json` больше 512 КиБ
+по-прежнему проверяется по точному размеру и SHA-256, но его структура
+не читается ограниченным JSON-аудитом. Прежде такой пропуск мог дать
+ложный положительный `jsonPreflightPassed()` при отсутствии других ошибок.
+Теперь любой непроверенный JSON означает **неполный preflight**:
+диалог показывает предупреждение, а ручная подготовка ONNX-layout
+отклоняется до создания временных файлов. JVM-тесты покрывают
+большой синтаксически корректный JSON и синтетический ONNX-пакет
+с `external_data`, чтобы целостность весов не подменяла проверку метаданных.
+[Python CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45615243529)
+и [Android integration CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45615243496)
+зелёные. Поддержка реального tokenizer/config, ONNX runtime, аппаратный
+ARM64, API 24–26 и MODEL-M1/M8 остаются открытыми; `runnable=false`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
