@@ -768,7 +768,8 @@
     <string name="knowledge_models_container_gguf">GGUF container: %1$s\nVersion: %2$d, declared tensors: %3$d, metadata pairs: %4$d\nDeclared architecture: %5$s\nDeclared tokenizer: %6$s\nThe actual tensors, model semantics, Android support and performance were NOT verified.</string>
     <string name="knowledge_models_container_onnx">ONNX container: %1$s\nIR version: %2$d, declared opsets: %3$d, graph field present: %4$s\nGraph nodes, operators, inputs/outputs, external data and Android runtime were NOT verified.</string>
     <string name="knowledge_models_container_detail_read">Bounded declarations scanned (NOT runtime-validated)</string>
-    <string name="knowledge_models_container_gguf_descriptors">GGUF tensor descriptors: %1$s; inspected: %2$d. Names, dimensions and aligned offsets were checked; tensor byte lengths, quantized data and ABI were NOT verified.</string>
+    <string name="knowledge_models_container_gguf_descriptors">GGUF tensor descriptors: %1$s; inspected: %2$d. Names, dimensions and aligned offsets checked. Actual tensor bytes and ABI were NOT validated.</string>
+    <string name="knowledge_models_container_gguf_extents">GGUF declared storage fits within file for %1$d tensors using selected known ggml formats; unknown/unverified formats: %2$d. This is NOT proof that any inference backend can load or run them.</string>
     <string name="knowledge_models_container_onnx_graph">ONNX graph declarations: %1$s; nodes: %2$d, inputs: %3$d, outputs: %4$d; sample op names: %5$s. Operator support and external tensors were NOT verified.</string>
     <string name="knowledge_models_container_onnx_signatures">Bounded tensor declarations: inputs %1$d, outputs %2$d; samples: %3$s. These are only TypeProto hints, NOT verified inference signatures or supported operators.</string>
     <string name="knowledge_models_package_remove">Remove package companions</string>

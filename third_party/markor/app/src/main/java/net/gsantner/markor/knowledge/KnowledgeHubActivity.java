@@ -712,7 +712,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             ? getString(R.string.knowledge_models_container_unknown)
                             : result.tokenizer) + "\n"
                     + getString(R.string.knowledge_models_container_gguf_descriptors,
-                            detailStatus, result.tensorDescriptors);
+                            detailStatus, result.tensorDescriptors) + "\n"
+                    + getString(R.string.knowledge_models_container_gguf_extents,
+                            result.tensorExtentsChecked, result.tensorExtentsUnknown);
         }
         return getString(R.string.knowledge_models_container_onnx, status,
                 result.version, result.opsetDeclarations,

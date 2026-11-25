@@ -21,9 +21,9 @@ public final class KnowledgeModelContainerProbeTest {
         ggufString(data, "tokenizer.ggml.model");
         u32(data, 8);
         ggufString(data, "gpt2");
-        ggufTensorInfo(data, "blk.0.attn", new long[]{16, 16}, 2, 0);
-        ggufTensorInfo(data, "output", new long[]{128}, 2, 32);
-        ggufTensorBytes(data, 32, 64);
+        ggufTensorInfo(data, "blk.0.attn", new long[]{16, 16}, 1, 0);
+        ggufTensorInfo(data, "output", new long[]{128}, 1, 512);
+        ggufTensorBytes(data, 32, 768);
         final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
                 KnowledgeModelFiles.Format.GGUF);
         assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
@@ -35,6 +35,8 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
                 result.detailState);
         assertEquals(2, result.tensorDescriptors);
+        assertEquals(2, result.tensorExtentsChecked);
+        assertEquals(0, result.tensorExtentsUnknown);
     }
 
     @Test public void ggufMalformedAndUnboundedArrayNeverReachRuntimeValidation() throws Exception {
@@ -174,19 +176,60 @@ public final class KnowledgeModelContainerProbeTest {
 
     @Test public void ggufRejectsMisalignedOrDuplicateTensorDescriptor() throws Exception {
         final ByteArrayOutputStream misaligned = newGguf(3, 1, 0);
-        ggufTensorInfo(misaligned, "weight", new long[]{12}, 2, 3);
+        ggufTensorInfo(misaligned, "weight", new long[]{12}, 1, 3);
         ggufTensorBytes(misaligned, 32, 64);
         final KnowledgeModelContainerProbe.Result badOffset = probe(misaligned.toByteArray(),
                 KnowledgeModelFiles.Format.GGUF);
         assertEquals(KnowledgeModelContainerProbe.State.INVALID, badOffset.state);
 
         final ByteArrayOutputStream duplicate = newGguf(3, 2, 0);
-        ggufTensorInfo(duplicate, "weight", new long[]{12}, 2, 0);
-        ggufTensorInfo(duplicate, "weight", new long[]{12}, 2, 32);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 1, 0);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 1, 32);
         ggufTensorBytes(duplicate, 32, 64);
         final KnowledgeModelContainerProbe.Result badNames = probe(duplicate.toByteArray(),
                 KnowledgeModelFiles.Format.GGUF);
         assertEquals(KnowledgeModelContainerProbe.State.INVALID, badNames.state);
+    }
+
+    @Test public void ggufChecksKnownQuantizedBlockStorageAndTruncation() throws Exception {
+        final ByteArrayOutputStream q4k = newGguf(3, 1, 0);
+        ggufTensorInfo(q4k, "weight", new long[]{256}, 12, 0); // Q4_K: 144 bytes / 256 vals.
+        ggufTensorBytes(q4k, 32, 144);
+        final KnowledgeModelContainerProbe.Result valid = probe(q4k.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, valid.state);
+        assertEquals(1, valid.tensorExtentsChecked);
+        assertEquals(0, valid.tensorExtentsUnknown);
+
+        final ByteArrayOutputStream shortQ4k = newGguf(3, 1, 0);
+        ggufTensorInfo(shortQ4k, "weight", new long[]{256}, 12, 0);
+        ggufTensorBytes(shortQ4k, 32, 128); // Entire aligned data region is too short.
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                shortQ4k.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
+
+        final ByteArrayOutputStream badRow = newGguf(3, 1, 0);
+        ggufTensorInfo(badRow, "weight", new long[]{31}, 2, 0); // Q4_0 requires 32.
+        ggufTensorBytes(badRow, 32, 64);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                badRow.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
+    }
+
+    @Test public void ggufFutureQuantizationStaysPartialAndOverflowIsRejected() throws Exception {
+        final ByteArrayOutputStream unknown = newGguf(3, 1, 0);
+        ggufTensorInfo(unknown, "future", new long[]{8}, 200, 0);
+        ggufTensorBytes(unknown, 32, 64);
+        final KnowledgeModelContainerProbe.Result partial = probe(unknown.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, partial.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, partial.detailState);
+        assertEquals(0, partial.tensorExtentsChecked);
+        assertEquals(1, partial.tensorExtentsUnknown);
+
+        final ByteArrayOutputStream overflow = newGguf(3, 1, 0);
+        ggufTensorInfo(overflow, "overflow", new long[]{Long.MAX_VALUE, 4}, 0, 0);
+        ggufTensorBytes(overflow, 32, 64);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                overflow.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
     }
 
     @Test public void truncatedOnnxGraphFieldCannotReportDeclarationsRead() throws Exception {
