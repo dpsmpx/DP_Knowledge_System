@@ -121,6 +121,9 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(1, result.distinctOperatorKinds);
         assertEquals(0, result.undecodedOperatorNodes);
         assertEquals("default/MatMul@opset17 x1", result.operatorInventoryHints);
+        assertEquals(1, result.schemaMatchedKinds);
+        assertEquals(0, result.schemaUnlistedKinds);
+        assertEquals("default/MatMul=revision13", result.schemaSnapshotHints);
     }
 
     @Test public void onnxMatchesCustomNodeDomainsToDeclaredOpsets() throws Exception {
@@ -147,6 +150,8 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals("com.example.custom/MyOp@opset3 x1; "
                         + "com.example.custom/AnotherOp@opset3 x1",
                 result.operatorInventoryHints);
+        assertEquals(2, result.schemaUnlistedKinds);
+        assertEquals(0, result.schemaMatchedKinds);
     }
 
     @Test public void onnxMissingOrDuplicateCustomOpsetIsAWarningNotRuntimeVerdict()
@@ -197,6 +202,7 @@ public final class KnowledgeModelContainerProbeTest {
                 repeated.detailState);
         assertEquals(1, repeated.distinctOperatorKinds);
         assertEquals("default/MatMul@opset17 x2", repeated.operatorInventoryHints);
+        assertEquals(1, repeated.schemaMatchedKinds); // Kinds, not total node occurrences.
 
         final ByteArrayOutputStream untrustedGraph = new ByteArrayOutputStream();
         varint(untrustedGraph, 10);
@@ -208,6 +214,7 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, untrusted.detailState);
         assertEquals(1, untrusted.undecodedOperatorNodes);
         assertEquals("", untrusted.operatorInventoryHints);
+        assertEquals(0, untrusted.schemaMatchedKinds);
 
         final ByteArrayOutputStream excessiveGraph = new ByteArrayOutputStream();
         for (int i = 0; i < 129; i++) {
@@ -219,6 +226,39 @@ public final class KnowledgeModelContainerProbeTest {
                 KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
         assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, excessive.state);
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
+    }
+
+    @Test public void onnxPinnedSchemaSnapshotIsSmallAndConservative() {
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 13,
+                "", "MatMul", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 7,
+                "", "Add", 7, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 17,
+                "", "LayerNormalization", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 20,
+                "", "Gelu", 20, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.BEFORE_INTRODUCTION, 0,
+                "", "Gelu", 19, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNLISTED, 0,
+                "", "Squeeze", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNLISTED, 0,
+                "com.example", "MatMul", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNRESOLVED_IMPORT, 0,
+                "", "MatMul", 0, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNRESOLVED_IMPORT, 0,
+                "", "MatMul", 17, true);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.BEYOND_SNAPSHOT, 0,
+                "", "MatMul", 26, false);
+    }
+
+    private static void assertSchema(final KnowledgeOnnxSchemaCatalog.Kind kind,
+                                     final int sinceVersion, final String domain,
+                                     final String operator, final long opset,
+                                     final boolean ambiguous) {
+        final KnowledgeOnnxSchemaCatalog.Match match =
+                KnowledgeOnnxSchemaCatalog.lookup(domain, operator, opset, ambiguous);
+        assertEquals(kind, match.kind);
+        assertEquals(sinceVersion, match.sinceVersion);
     }
 
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {

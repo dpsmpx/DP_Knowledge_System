@@ -422,6 +422,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_models_container_onnx_inventory", labels)
 
+    def test_model_m1_onnx_schema_revision_snapshot_is_explicitly_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        catalog = (folder / "KnowledgeOnnxSchemaCatalog.java").read_text()
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_SNAPSHOT_OPSET = 25", '"MatMul"', '"Add"',
+                       '"LayerNormalization"', '"Gelu"', "BEYOND_SNAPSHOT",
+                       "BEFORE_INTRODUCTION", "UNRESOLVED_IMPORT"):
+            self.assertIn(marker, catalog)
+        for marker in ("schemaMatchedKinds", "schemaUnlistedKinds",
+                       "schemaBeyondSnapshotKinds", "schemaSnapshotHints",
+                       "KnowledgeOnnxSchemaCatalog.lookup"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.schemaMatchedKinds", hub)
+        self.assertIn("knowledge_models_container_onnx_schema_snapshot", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_schema_snapshot", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
