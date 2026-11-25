@@ -39,6 +39,20 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("androidTestImplementation 'androidx.test:runner:1.7.0'", gradle)
         self.assertIn("androidTestImplementation 'androidx.test.ext:junit:1.3.0'", gradle)
 
+    def test_api24_direct_boot_probe_is_bounded_and_does_not_unlock_screen(self):
+        probe = (ROOT / ".github/workflows/android-onnx-api24-direct-boot.yml").read_text()
+        self.assertIn("workflow_dispatch:", probe)
+        self.assertNotIn("pull_request:", probe)
+        self.assertIn("api24-aosp-direct-boot:", probe)
+        self.assertIn("timeout-minutes: 16", probe)
+        self.assertIn("system-images;android-24;default;x86_64", probe)
+        self.assertIn("sys.boot_completed", probe)
+        self.assertIn("pm path android", probe)
+        self.assertIn("timeout --signal=TERM --kill-after=25s 8m", probe)
+        self.assertIn("API24 boot attempt", probe)
+        self.assertIn("connectedFlavorAtestDebugAndroidTest", probe)
+        self.assertNotIn("input keyevent", probe)
+
     def test_synthetic_lifecycle_cases_do_not_open_imported_models(self):
         suite = (APP / "src/androidTest/java/net/gsantner/markor/knowledge/"
                  "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()

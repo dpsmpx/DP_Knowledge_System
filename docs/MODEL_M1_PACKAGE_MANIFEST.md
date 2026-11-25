@@ -129,10 +129,24 @@
     API 27 впервые проверяет эту fallback-ветку на Android 8.1.
     Для API 27 выбран AOSP-образ `default;x86_64`: пакет
     `google_apis;x86_64` для этой версии в Android SDK отсутствует.
-    **API 24 остаётся без инструментального подтверждения**: эмулятор на
-    Ubuntu latest и Ubuntu 22.04 переставал отвечать ADB до запуска тестов
+    **API 24 остаётся без инструментального подтверждения**. Образ
+    `google_apis;x86_64` на Ubuntu latest и Ubuntu 22.04 переставал отвечать
+    ADB до запуска тестов
     ([первый прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45574231026),
     [повторный прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45579021521)).
+    Образ `default;x86_64` AOSP на Ubuntu 22.04 однажды сообщил об успешном
+    завершении загрузки (`sys.boot_completed=1`), но действие
+    `ReactiveCircus/android-emulator-runner` зависло на автоматическом
+    `adb shell input keyevent 82` до старта тестов
+    ([прогон AOSP](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45595190827)).
+    Обход действия с прямым запуском эмулятора также не выполнил тесты:
+    [первый прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45599300022)
+    истёк по времени, а [ограниченный диагностический прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45602365767)
+    показал устройство в `adb devices -l` как `device`, но `sys.boot_completed`
+    оставался пустым во всех 60 попытках опроса (около 5 минут).
+    Отдельный workflow `android-onnx-api24-direct-boot.yml` оставлен
+    **только для ручной инфраструктурной диагностики** (`workflow_dispatch`),
+    не входит в PR-gate и не доказывает работоспособность приложения.
     Этот инфраструктурный долг не считается доказательством прохождения
     или отказа приложения на реальном Android 7.
 
