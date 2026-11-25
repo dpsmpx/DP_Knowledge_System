@@ -13,7 +13,10 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("workflow_dispatch:", action)
         self.assertIn("pull_request:", action)
         self.assertIn("reactivecircus/android-emulator-runner@v2", action)
-        self.assertIn("api-level: 35", action)
+        self.assertIn("api: [24, 28, 35]", action)
+        self.assertIn("max-parallel: 1", action)
+        self.assertIn("api-level: ${{ matrix.api }}", action)
+        self.assertIn("name: onnx-emulator-api${{ matrix.api }}-instrumented-results", action)
         self.assertIn("arch: x86_64", action)
         self.assertIn("connectedFlavorAtestDebugAndroidTest", action)
         self.assertIn("bash -lc 'cd third_party/markor && chmod +x gradlew &&", action)
@@ -62,6 +65,13 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED", suite)
         self.assertIn("connection.died.await(5, TimeUnit.SECONDS)", suite)
         self.assertNotIn("KnowledgeModelPackageStore", suite)
+
+    def test_older_android_process_identity_fallback_remains(self):
+        identity = (APP / "src/main/java/net/gsantner/markor/knowledge/"
+                    "KnowledgeOnnxProcessIdentity.java").read_text()
+        self.assertIn("Build.VERSION.SDK_INT >= 28", identity)
+        self.assertIn("Process.isIsolatedUid(Process.myUid())", identity)
+        self.assertIn('new FileInputStream("/proc/self/cmdline")', identity)
 
 
 if __name__ == "__main__":
