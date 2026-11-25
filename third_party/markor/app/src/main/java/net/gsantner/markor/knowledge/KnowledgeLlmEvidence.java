@@ -205,7 +205,8 @@ public final class KnowledgeLlmEvidence {
     /** Select at most six already verified lexical excerpts from a bounded
      * relevance-ranked candidate list. Preserve the first two hits (including
      * potentially opposing exact-phrase sources); use remaining slots for
-     * incremental distinct query-term coverage, with rank as the tie-break.
+     * incremental distinct query-term coverage, preferring a different exact
+     * excerpt over a duplicate when coverage ties, then original rank.
      * Return indices in their ORIGINAL ranking order for stable citations.
      * This cannot prove that any chosen excerpt supports the question.
      */
@@ -213,7 +214,10 @@ public final class KnowledgeLlmEvidence {
                                                       final List<Item> ranked,
                                                       final int maximum) {
         final List<Integer> selected = new ArrayList<>();
-        if (ranked == null || maximum <= 0) return selected;
+        if (ranked == null || maximum <= 0 || question == null
+                || question.length() > KnowledgeMarkdownMetadata.MAX_EVIDENCE_QUESTION_CHARS) {
+            return selected;
+        }
         final int candidates = Math.min(ranked.size(), MAX_LEXICAL_CANDIDATES);
         final int target = Math.min(candidates, maximum);
         final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
@@ -232,15 +236,19 @@ public final class KnowledgeLlmEvidence {
         while (selected.size() < target) {
             int best = -1;
             int gain = -1;
+            boolean bestDuplicate = true;
             for (int i = 0; i < candidates; i++) {
                 if (chosen[i]) continue;
                 int newlyCovered = 0;
                 for (int t = 0; t < terms.size(); t++) {
                     if (termFlags[i][t] && !covered[t]) newlyCovered++;
                 }
-                if (newlyCovered > gain) {
+                final boolean duplicate = repeatsSelectedExcerpt(ranked, selected, i);
+                if (newlyCovered > gain
+                        || (newlyCovered == gain && bestDuplicate && !duplicate)) {
                     best = i;
                     gain = newlyCovered;
+                    bestDuplicate = duplicate;
                 }
             }
             if (best < 0) break;
@@ -250,6 +258,21 @@ public final class KnowledgeLlmEvidence {
         }
         Collections.sort(selected);
         return selected;
+    }
+
+    /** Never allocate a second copy of a private excerpt or hash its content.
+     * The first two ranked source paths remain selected even when identical.
+     */
+    private static boolean repeatsSelectedExcerpt(final List<Item> ranked,
+                                                  final List<Integer> selected,
+                                                  final int candidate) {
+        final Item item = ranked.get(candidate);
+        if (item == null || item.excerpt == null || item.excerpt.isEmpty()) return false;
+        for (final int index : selected) {
+            final Item prior = ranked.get(index);
+            if (prior != null && item.excerpt.equals(prior.excerpt)) return true;
+        }
+        return false;
     }
 
     private static boolean[] presentTerms(final String excerpt, final List<String> terms) {

@@ -150,6 +150,17 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('step("LEX-PHRASE-19",', qa)
         self.assertIn('PHRASE_PRIORITY_OR_CONFLICT_LOSS', qa)
 
+    def test_bounded_evidence_query_and_verified_source_diversity_tie_break(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        selector = (folder / "KnowledgeLlmEvidence.java").read_text()
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("repeatsSelectedExcerpt(", "bestDuplicate",
+                       "Collections.sort(selected)", "MAX_LEXICAL_CANDIDATES"):
+            self.assertIn(marker, selector)
+        self.assertIn("MAX_EVIDENCE_QUESTION_CHARS = 1200", parser)
+        self.assertIn("question.length() > 1200", hub)
+
     def test_embedding_vectors_are_revision_sealed_before_api_upload_or_search(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

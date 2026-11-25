@@ -282,6 +282,29 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void lexicalSelectionPrefersNewExactExcerptsWithoutDroppingTopSources() {
+        final java.util.List<KnowledgeLlmEvidence.Item> ranked = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("top.md", "Amber violet observations."),
+                new KnowledgeLlmEvidence.Item("same-provenance.md", "Amber violet observations."),
+                new KnowledgeLlmEvidence.Item("duplicate.md", "Amber violet observations."),
+                new KnowledgeLlmEvidence.Item("alternative.md", "Amber violet analysis."),
+                new KnowledgeLlmEvidence.Item("another.md", "Amber violet comparison."));
+        for (int repeat = 0; repeat < 3; repeat++) {
+            assertEquals(Arrays.asList(0, 1, 3), KnowledgeLlmEvidence.selectLexicalIndices(
+                    "amber violet", ranked, 3));
+            assertEquals(Arrays.asList(0, 1, 3, 4),
+                    KnowledgeLlmEvidence.selectLexicalIndices(
+                            "amber violet", ranked, 4));
+        }
+        // First two distinct provenance paths remain intact, even when the
+        // excerpts are identical; if no alternative exists, fill from rank.
+        assertEquals(Arrays.asList(0, 1, 2), KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber violet", ranked.subList(0, 3), 3));
+        assertEquals(Collections.emptyList(), KnowledgeLlmEvidence.selectLexicalIndices(
+                new String(new char[1201]).replace('\0', 'x'), ranked, 3));
+    }
+
+    @Test
     public void excerptDoesNotCountTwoQueryPrefixesFromOneSourceToken() {
         final String source = "Amberlight alone is not two distinct words.\n"
                 + new String(new char[1400]).replace('\0', 'x')

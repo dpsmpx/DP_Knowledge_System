@@ -288,6 +288,20 @@ even if every reference and quotation passes the checks below.
     units, dates and number formatting can lead to false positives or missed
     warnings. They do not verify semantic entailment, computed quantities or
     truth; all decisions stay with the user.
+28. Lexical selection now uses an **exact-excerpt diversity tie-break** after
+    preserving the top two already byte-verified sources. When two remaining
+    candidates add the same question-term coverage, prefer the one whose
+    excerpt is not text-identical to any chosen source; preserve the original
+    rank on further ties, sort final source indices back into their original
+    order, and fill from duplicates if no alternatives remain. This does not
+    treat paraphrases as identical or change SHA-256 consent seals, the 12-note
+    local read cap, network consent or authoritative knowledge. A public
+    evidence query above the existing **1,200-character UI limit** now fails
+    closed before tokenization; the offline SQLite benchmark mirror enforces
+    the same bound. JVM/host regressions cover exact duplicates, preservation
+    of the top two, stable numbering, the duplicate-only fallback and both
+    sides of the question-length boundary. Ranking within each FTS4 pass is
+    still path-ordered; broad relevance and device latency remain unmeasured.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -330,6 +344,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   CR/CRLF/Unicode line separator isolation from following uncited claims;
   distinctive-term overlap, low fractional overlap in long claims, generic-
   word-only false source conflicts and optional numeric-disagreement warnings;
+  exact-excerpt diversity tie-breaking with stable top-two provenance and
+  fail-closed overlong evidence questions, mirrored in the offline benchmark;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

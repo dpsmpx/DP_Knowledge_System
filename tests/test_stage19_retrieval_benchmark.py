@@ -6,6 +6,7 @@ import sqlite3
 import unittest
 
 from scripts.benchmark_stage19_retrieval import (
+    MAX_EVIDENCE_QUESTION_CHARS,
     QUESTION_FILLERS,
     benchmark,
     fts_evidence_phrase,
@@ -23,6 +24,8 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         method = java.split('private static boolean isQuestionFiller(', 1)[1]
         method = method.split('private static void addTarget(', 1)[0]
         self.assertEqual(QUESTION_FILLERS, frozenset(re.findall(r'case "([^"]+)":', method)))
+        self.assertIn('MAX_EVIDENCE_QUESTION_CHARS = 1200', java)
+        self.assertEqual(1200, MAX_EVIDENCE_QUESTION_CHARS)
 
     def test_only_bounded_queries_and_no_raw_fts_syntax(self):
         self.assertEqual('"amber*" OR "violet*"',
@@ -39,6 +42,10 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual('"память* синтез*"',
                          fts_evidence_phrase('Расскажи, что известно про память синтез?'))
         self.assertEqual('"tell*" OR "about*"', fts_evidence_query('tell about'))
+        boundary = 'amber' + ' ' * (MAX_EVIDENCE_QUESTION_CHARS - 5)
+        self.assertEqual('"amber*"', fts_evidence_query(boundary))
+        self.assertEqual('', fts_evidence_query(boundary + 'x'))
+        self.assertEqual('', fts_evidence_phrase(boundary + 'x'))
 
     def test_measures_current_sql_shortlist_and_known_ground_truth(self):
         result = benchmark(notes=2048, repeats=2)

@@ -52,6 +52,19 @@ public class KnowledgeMarkdownMetadataTest {
     }
 
     @Test
+    public void llmEvidenceSearchRejectsOverlongQuestionsBeforeTokenizing() {
+        final int bound = KnowledgeMarkdownMetadata.MAX_EVIDENCE_QUESTION_CHARS;
+        assertEquals(1200, bound);
+        final String accepted = "amber" + new String(new char[bound - 5]).replace('\0', ' ');
+        assertEquals("\"amber*\"",
+                KnowledgeMarkdownMetadata.ftsEvidenceQuery(accepted));
+        final String tooLong = accepted + "x";
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidenceQuery(tooLong));
+        assertEquals("", KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(tooLong));
+        assertEquals(0, KnowledgeMarkdownMetadata.ftsEvidenceTerms(tooLong).size());
+    }
+
+    @Test
     public void naturalQuestionsPreferInformativeTermsAndSafeShortPhrases() {
         assertEquals("\"amber*\" OR \"violet*\"",
                 KnowledgeMarkdownMetadata.ftsEvidenceQuery("Which amber violet?"));
