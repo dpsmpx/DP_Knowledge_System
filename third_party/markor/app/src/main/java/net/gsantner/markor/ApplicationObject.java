@@ -8,10 +8,10 @@
 package net.gsantner.markor;
 
 import android.app.Application;
-import android.app.ActivityManager;
 import android.webkit.WebView;
 
 import net.gsantner.markor.model.AppSettings;
+import net.gsantner.markor.knowledge.KnowledgeOnnxProcessIdentity;
 
 public class ApplicationObject extends Application {
     // Make resources not marked as unused
@@ -40,10 +40,7 @@ public class ApplicationObject extends Application {
         super.onCreate();
         // The DPKS-only ONNX service has a different isolated UID. It must not
         // initialize editor settings or WebView in that disposable worker.
-        final ActivityManager.RunningAppProcessInfo process =
-                new ActivityManager.RunningAppProcessInfo();
-        ActivityManager.getMyMemoryState(process);
-        if (process.processName != null && process.processName.endsWith(":dpks_onnx_cpu")) {
+        if (KnowledgeOnnxProcessIdentity.isWorker()) {
             return;
         }
         _app = this;

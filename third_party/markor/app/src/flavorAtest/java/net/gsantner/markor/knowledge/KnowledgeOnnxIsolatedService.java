@@ -1,7 +1,6 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
-import android.app.ActivityManager;
 import android.app.Service;
 import android.content.Intent;
 import android.os.Bundle;
@@ -176,10 +175,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
 
     /** Stop ONLY this named worker process, never the main DPKS process. */
     private void exitSandboxProcess() {
-        final ActivityManager.RunningAppProcessInfo self =
-                new ActivityManager.RunningAppProcessInfo();
-        ActivityManager.getMyMemoryState(self);
-        if (self.processName != null && self.processName.endsWith(":dpks_onnx_cpu")) {
+        if (KnowledgeOnnxProcessIdentity.isWorker()) {
             Process.killProcess(Process.myPid());
         } else {
             worker.shutdownNow();
