@@ -788,6 +788,23 @@ ARM64, RAM/нагрев, реальный inference и MODEL-M1/M8 остают�
 зелёные. Поддержка реального tokenizer/config, ONNX runtime, аппаратный
 ARM64, API 24–26 и MODEL-M1/M8 остаются открытыми; `runnable=false`.
 
+**MODEL-M1: повторная RAM-проверка после SHA-аудита и сериализация FD-запросов —
+[PR #203](https://github.com/dpsmpx/DP_Knowledge_System/pull/203).**
+Для ограниченной ручной CPU-сессии системный RAM-снимок проверяется
+до чтения модели и повторно перед FD-передачей. Неизвестная, низкая
+(меньше 512 МиБ) или помеченная ОС `lowMemory` доступность завершает
+операцию с очисткой уже прочитанного буфера. Синтетический тест проверяет,
+что второй одновременный FD-запрос отклоняется и обнуляет свои байты,
+не мешая завершению первого.
+[Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625292):
+**10/10 на каждом API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625492)
+и [Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625280)
+зелёные. **Открыто:** native hang/OOM, пик RAM/температура, OS scheduling,
+крупные/внешние веса, физические Redmi/Poco ARM64 и API 24–26. Снимок RAM
+не резервирует память и не оценивает потребление ONNX Runtime;
+`runnable=false`, MODEL-M1/M8 не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его

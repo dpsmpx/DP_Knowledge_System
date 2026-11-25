@@ -388,6 +388,20 @@ ONNX `external_data`, не загружая реальные модели или
 и [Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45615243496)
 прошли. Это не валидация tokenizer, совместимости backend или inference;
 `runnable=false`, MODEL-M1/M8 остаются открытыми.
+[PR #203](https://github.com/dpsmpx/DP_Knowledge_System/pull/203)
+добавил повторную проверку системной RAM **после SHA-аудита и чтения весов**,
+непосредственно перед FD-передачей изолированному ONNX worker. Если RAM
+неизвестна, Android сообщает `lowMemory` или доступно меньше 512 МиБ,
+операция отклоняется с обнулением уже загруженного Java-буфера. Ещё один
+синтетический Android-тест проверяет отказ второго одновременного FD-запроса
+с очисткой его байтов, не нарушая первый.
+[Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625292)
+подтвердил **10/10 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625492)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45616625280)
+также зелёные. Это два моментальных снимка RAM, а не её резервирование,
+измерение пика или предотвращение native OOM. Физический ARM64, API 24–26,
+реальные веса и inference остаются непроверенными; `runnable=false`.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
