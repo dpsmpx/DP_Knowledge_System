@@ -26,10 +26,13 @@ final class KnowledgeModelPackageManifest {
     static final int MAX_MANIFEST_BYTES = 64 * 1024;
     static final long MAX_SIDECAR_BYTES = 64L * 1024L * 1024L;
     static final long MAX_TOTAL_SIDECAR_BYTES = 256L * 1024L * 1024L;
+    // External tensor shards are streamed, never buffered; this is an explicit
+    // per-package import safeguard until free-space preflight is implemented.
+    static final long MAX_TOTAL_EXTERNAL_BYTES = 8L * 1024L * 1024L * 1024L;
 
     enum Kind {
         WEIGHTS, TOKENIZER, MODEL_CONFIG, CHAT_TEMPLATE, EMBEDDING_POOLING,
-        RERANKER_SCORE, FEATURE_LABEL_SCHEMA
+        RERANKER_SCORE, FEATURE_LABEL_SCHEMA, ONNX_EXTERNAL_DATA
     }
 
     static final class Component {
@@ -48,6 +51,7 @@ final class KnowledgeModelPackageManifest {
     }
 
     final KnowledgeModelPolicy.Role role;
+    final int schemaVersion;
     final KnowledgeModelFiles.Format format;
     final String weightSha256;
     final String sourceId;
@@ -55,11 +59,13 @@ final class KnowledgeModelPackageManifest {
     final String assertedLicense;
     final List<Component> components;
 
-    private KnowledgeModelPackageManifest(final KnowledgeModelPolicy.Role modelRole,
+    private KnowledgeModelPackageManifest(final int version,
+                                          final KnowledgeModelPolicy.Role modelRole,
                                           final KnowledgeModelFiles.Format modelFormat,
                                           final String weightHash, final String source,
                                           final String revision, final String license,
                                           final List<Component> files) {
+        schemaVersion = version;
         role = modelRole;
         format = modelFormat;
         weightSha256 = weightHash;
@@ -96,9 +102,11 @@ final class KnowledgeModelPackageManifest {
             exactKeys(root, "schema_version", "role", "format", "weight_sha256",
                     "source_id", "revision", "license", "files");
             final Object version = root.get("schema_version");
-            if (!(version instanceof Number) || !"1".equals(version.toString())) {
+            if (!(version instanceof Number)
+                    || !("1".equals(version.toString()) || "2".equals(version.toString()))) {
                 throw new IOException("Unsupported package schema version");
             }
+            final int schemaVersion = Integer.parseInt(version.toString());
             final KnowledgeModelPolicy.Role role =
                     KnowledgeModelPolicy.Role.valueOf(string(root, "role"));
             final KnowledgeModelFiles.Format format =
@@ -124,6 +132,7 @@ final class KnowledgeModelPackageManifest {
             final Set<String> names = new HashSet<>();
             int weightCount = 0;
             long sidecarBytes = 0;
+            long externalBytes = 0;
             for (int i = 0; i < listed.length(); i++) {
                 final JSONObject item = listed.getJSONObject(i);
                 exactKeys(item, "kind", "name", "sha256", "bytes");
@@ -149,19 +158,32 @@ final class KnowledgeModelPackageManifest {
                         throw new IOException("Weight identity does not match manifest");
                     }
                 } else {
-                    if (length == 0 || length > MAX_SIDECAR_BYTES
+                    if (kind == Kind.ONNX_EXTERNAL_DATA
+                            && (schemaVersion != 2
+                            || format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED)) {
+                        throw new IOException("ONNX external files require schema v2 and ONNX weights");
+                    }
+                    if (length == 0 || (kind == Kind.ONNX_EXTERNAL_DATA
+                            ? length > MAX_TOTAL_EXTERNAL_BYTES : length > MAX_SIDECAR_BYTES)
                             || !allowedSidecar(kind, name)) {
                         throw new IOException("Unsupported companion file type/size");
                     }
-                    sidecarBytes += length;
-                    if (sidecarBytes > MAX_TOTAL_SIDECAR_BYTES) {
-                        throw new IOException("Package companions exceed size limit");
+                    if (kind == Kind.ONNX_EXTERNAL_DATA) {
+                        if (length > MAX_TOTAL_EXTERNAL_BYTES - externalBytes) {
+                            throw new IOException("ONNX external files exceed package limit");
+                        }
+                        externalBytes += length;
+                    } else {
+                        sidecarBytes += length;
+                        if (sidecarBytes > MAX_TOTAL_SIDECAR_BYTES) {
+                            throw new IOException("Package companions exceed size limit");
+                        }
                     }
                 }
                 components.add(new Component(kind, name, digest, length));
             }
             if (weightCount != 1) throw new IOException("Package requires exactly one weight");
-            return new KnowledgeModelPackageManifest(role, format, weightSha, source,
+            return new KnowledgeModelPackageManifest(schemaVersion, role, format, weightSha, source,
                     revision, license, components);
         } catch (JSONException | IllegalArgumentException invalid) {
             throw new IOException("Invalid package manifest structure", invalid);
@@ -186,6 +208,7 @@ final class KnowledgeModelPackageManifest {
     }
 
     private static boolean allowedSidecar(final Kind kind, final String name) {
+        if (kind == Kind.ONNX_EXTERNAL_DATA) return true;
         if (kind != Kind.TOKENIZER) return name.endsWith(".json");
         return name.endsWith(".json") || name.endsWith(".model")
                 || name.endsWith(".txt") || name.endsWith(".vocab")

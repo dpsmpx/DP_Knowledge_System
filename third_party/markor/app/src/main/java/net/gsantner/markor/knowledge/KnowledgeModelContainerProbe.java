@@ -11,6 +11,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -47,6 +48,7 @@ final class KnowledgeModelContainerProbe {
     private static final int MAX_ONNX_FUNCTION_OPERATOR_KINDS = 128;
     private static final long MAX_ONNX_DENSE_INITIALIZERS = 20_000;
     private static final long MAX_ONNX_EXTERNAL_ENTRIES = 2048;
+    private static final int MAX_ONNX_EXTERNAL_REFERENCES = 1024;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -95,6 +97,8 @@ final class KnowledgeModelContainerProbe {
         long externalDataUntrustedLocations;
         long externalDataDuplicateLocations;
         long invalidExternalDataLocationEnums;
+        long invalidExternalDataRanges;
+        final List<ExternalReference> externalReferences = new ArrayList<>();
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
@@ -112,6 +116,19 @@ final class KnowledgeModelContainerProbe {
     private static final class ExternalDataEntry {
         String key;
         String value;
+    }
+
+    /** An untrusted ONNX declaration, NEVER a filesystem path to open. */
+    static final class ExternalReference {
+        final String location;
+        final long offset;
+        final long length; // -1 means the rest of the file.
+
+        ExternalReference(final String name, final long start, final long bytes) {
+            location = name;
+            offset = start;
+            length = bytes;
+        }
     }
 
     private static final class OperatorKey {
@@ -219,6 +236,8 @@ final class KnowledgeModelContainerProbe {
         final long externalDataUntrustedLocations;
         final long externalDataDuplicateLocations;
         final long invalidExternalDataLocationEnums;
+        final long invalidExternalDataRanges;
+        final List<ExternalReference> externalReferences;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
@@ -283,6 +302,9 @@ final class KnowledgeModelContainerProbe {
             externalDataUntrustedLocations = details.externalDataUntrustedLocations;
             externalDataDuplicateLocations = details.externalDataDuplicateLocations;
             invalidExternalDataLocationEnums = details.invalidExternalDataLocationEnums;
+            invalidExternalDataRanges = details.invalidExternalDataRanges;
+            externalReferences = Collections.unmodifiableList(
+                    new ArrayList<>(details.externalReferences));
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
@@ -610,7 +632,8 @@ final class KnowledgeModelContainerProbe {
                     || details.externalDataMissingLocations > 0
                     || details.externalDataUntrustedLocations > 0
                     || details.externalDataDuplicateLocations > 0
-                    || details.invalidExternalDataLocationEnums > 0) {
+                    || details.invalidExternalDataLocationEnums > 0
+                    || details.invalidExternalDataRanges > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -702,6 +725,8 @@ final class KnowledgeModelContainerProbe {
         long dataLocation = 0; // TensorProto.DEFAULT when absent.
         String location = null;
         long locationEntries = 0;
+        String offsetText = null, lengthText = null;
+        long offsetEntries = 0, lengthEntries = 0;
         while (data.getFilePointer() < end) {
             checkInterrupted();
             if (++fields > 1024) throw new ScanLimit();
@@ -720,6 +745,12 @@ final class KnowledgeModelContainerProbe {
                 if ("location".equals(entry.key)) {
                     locationEntries++;
                     location = entry.value;
+                } else if ("offset".equals(entry.key)) {
+                    offsetEntries++;
+                    offsetText = entry.value;
+                } else if ("length".equals(entry.key)) {
+                    lengthEntries++;
+                    lengthText = entry.value;
                 }
             } else {
                 skipWire(data, wire); // raw_data, dimensions, typed arrays, etc.
@@ -734,10 +765,33 @@ final class KnowledgeModelContainerProbe {
             else if (!isLexicallyRelativeExternalPath(location) || locationEntries > 1) {
                 details.externalDataUntrustedLocations++;
             } else {
-                // Lexical syntax only: file availability, symlinks, hardlinks,
-                // provenance and permissions are deliberately NOT checked.
                 details.externalDataRelativeLocations++;
+                if (details.externalReferences.size() >= MAX_ONNX_EXTERNAL_REFERENCES) {
+                    throw new ScanLimit();
+                }
+                final long offset = externalDecimal(offsetText, 0);
+                final long length = externalDecimal(lengthText, -1);
+                if (offsetEntries > 1 || lengthEntries > 1
+                        || (offsetEntries > 0 && offsetText == null)
+                        || (lengthEntries > 0 && lengthText == null) || offset < 0
+                        || length == 0 || length < -1) {
+                    details.invalidExternalDataRanges++;
+                } else {
+                    // A declaration only. No untrusted ONNX location is resolved/opened.
+                    details.externalReferences.add(new ExternalReference(location, offset, length));
+                }
             }
+        }
+    }
+
+    /** Returns -2 for malformed or overflowing nonnegative decimal values. */
+    private static long externalDecimal(final String value, final long missingValue) {
+        if (value == null) return missingValue;
+        if (!value.matches("[0-9]{1,19}")) return -2;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException invalid) {
+            return -2;
         }
     }
 

@@ -535,6 +535,30 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(0, unknown.externalDataRelativeLocations);
     }
 
+    @Test public void onnxExternalOffsetAndLengthAreBoundedDeclarationsOnly() throws Exception {
+        final KnowledgeModelContainerProbe.Result bounded = probe(
+                onnxWithExternalRange("weights.data", "4", "10"),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, bounded.externalReferences.size());
+        assertEquals("weights.data", bounded.externalReferences.get(0).location);
+        assertEquals(4, bounded.externalReferences.get(0).offset);
+        assertEquals(10, bounded.externalReferences.get(0).length);
+        assertEquals(0, bounded.invalidExternalDataRanges);
+        for (final String bad : new String[]{"-1", "99999999999999999999", "1e3", ""}) {
+            final KnowledgeModelContainerProbe.Result malformed = probe(
+                    onnxWithExternalRange("weights.data", bad, "10"),
+                    KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(0, malformed.externalReferences.size());
+            assertEquals(1, malformed.invalidExternalDataRanges);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                    malformed.detailState);
+        }
+        final KnowledgeModelContainerProbe.Result zeroLength = probe(
+                onnxWithExternalRange("weights.data", "0", "0"),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, zeroLength.invalidExternalDataRanges);
+    }
+
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         varint(graph, 90);
@@ -825,6 +849,20 @@ public final class KnowledgeModelContainerProbeTest {
             varint(graph, 122); // GraphProto.sparse_initializer, field 15
             protobufBytes(graph, new byte[]{8, 1});
         }
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static byte[] onnxWithExternalRange(final String location, final String offset,
+                                                final String length) {
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 112); // EXTERNAL
+        varint(tensor, 1);
+        appendOnnxExternalEntry(tensor, "location", location);
+        appendOnnxExternalEntry(tensor, "offset", offset);
+        appendOnnxExternalEntry(tensor, "length", length);
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 42); // GraphProto.initializer
+        protobufBytes(graph, tensor.toByteArray());
         return onnxWithGraph(graph.toByteArray());
     }
 

@@ -659,6 +659,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 ? R.string.knowledge_models_container_invalid
                                 : !result.jsonPreflightPassed()
                                         ? R.string.knowledge_models_package_audit_json_warning
+                                        : result.container.externalDataTensorsDeclared > 0
+                                                && !result.externalDataPreflightPassed()
+                                                ? R.string.knowledge_models_package_audit_external_warning
                                         : result.container.state
                                                 == KnowledgeModelContainerProbe.State.PARTIAL
                                                 ? R.string.knowledge_models_container_partial
@@ -670,6 +673,13 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         result.elapsedMillis, result.companionFiles,
                                         result.jsonObjectsChecked, result.jsonInvalid,
                                         result.jsonNotInspected) + "\n\n"
+                                        + getString(R.string.knowledge_models_package_audit_external_report,
+                                                result.externalReferencesMatched,
+                                                result.externalReferencesUnresolved,
+                                                result.externalRangesOutOfBounds,
+                                                result.externalComponentsUnused,
+                                                result.container.invalidExternalDataRanges)
+                                        + "\n\n"
                                         + containerPreflightLabel(result.container))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
