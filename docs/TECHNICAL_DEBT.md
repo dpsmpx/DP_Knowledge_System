@@ -737,6 +737,25 @@ worker через `/proc/self/cmdline` на API 27, без реальных ве
 импортированные модели, native hang/OOM, пик RAM/нагрев/ABI остаются
 открытыми. `runnable=false`; MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: Android API 24 остаётся инфраструктурно непроверенным —
+[PR #197](https://github.com/dpsmpx/DP_Knowledge_System/pull/197).**
+В AOSP `default;x86_64` Android 7 эмулятор один раз дошёл до
+`sys.boot_completed=1`, но сторонний runner завис на команде
+`adb shell input keyevent 82` до инструментальных тестов
+([прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45595190827)).
+Прямой запуск без unlock сначала истёк по времени
+([прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45599300022)),
+затем [диагностика](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45602365767)
+показала статус `device` в ADB, но пустой `sys.boot_completed` при всех
+60 опросах за ~5 минут. Тесты приложения **не стартовали**; вывод
+о совместимости Android 7 невозможен. Диагностический workflow
+`android-onnx-api24-direct-boot.yml` сохранён только с ручным
+`workflow_dispatch`, не входит в PR-gate; штатные API 27/28/35 не изменены.
+[CI итогового PR](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45603742902)
+зелёный. Физические Redmi Note 13/Poco X7 Pro, native hang/OOM,
+ARM64, RAM/нагрев, реальный inference и MODEL-M1/M8 остаются открытыми;
+`runnable=false`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его

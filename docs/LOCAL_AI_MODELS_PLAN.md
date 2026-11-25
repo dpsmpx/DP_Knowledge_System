@@ -351,6 +351,18 @@ API 24–26 **не проверены**: две предыдущие попыт�
 до тестов из-за `adb offline`. Синтетика не подтверждает реальные
 модели, инференс, native hang/OOM или физический ARM64;
 `runnable=false`, MODEL-M1/M8 открыты.
+[PR #197](https://github.com/dpsmpx/DP_Knowledge_System/pull/197)
+зафиксировал повторную инфраструктурную диагностику API 24. AOSP Android 7
+однажды загрузился, но runner завис на `adb shell input keyevent 82`
+([CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45595190827));
+без runner [ограниченный запуск](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45602365767)
+показал ADB `device`, но `sys.boot_completed` оставался пустым в 60
+попытках. Ни один API24-прогон не дошёл до тестов приложения.
+Диагностический workflow оставлен только для ручного запуска,
+не входит в обязательный PR-gate; API 27/28/35 без изменений.
+Итоговый [Python/Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45603742902)
+успешен. Android 7, физические устройства, реальные веса и инференс
+по-прежнему не подтверждены; `runnable=false`.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
