@@ -12,6 +12,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -38,6 +39,7 @@ final class KnowledgeModelContainerProbe {
     private static final long MAX_ONNX_NESTED_FIELDS = 128L;
     private static final int MAX_ONNX_SHAPE_DIMS = 16;
     private static final int MAX_ONNX_DOMAINS = 128;
+    private static final int MAX_ONNX_OPERATOR_KINDS = 128;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -55,14 +57,38 @@ final class KnowledgeModelContainerProbe {
         long customDomainNodes;
         long customNodesMissingImport;
         long duplicateOpsetDomains;
+        long distinctOperatorKinds;
+        long undecodedOperatorNodes;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
+        String operatorInventoryHints = "";
     }
 
     private static final class OpsetImport {
         String domain = ""; // Empty is the standard, implicitly available ONNX domain.
         long version;
+    }
+
+    private static final class OperatorKey {
+        final String domain;
+        final String operator;
+
+        OperatorKey(final String domainName, final String operatorName) {
+            domain = domainName;
+            operator = operatorName;
+        }
+
+        @Override public boolean equals(final Object other) {
+            if (this == other) return true;
+            if (!(other instanceof OperatorKey)) return false;
+            final OperatorKey key = (OperatorKey) other;
+            return domain.equals(key.domain) && operator.equals(key.operator);
+        }
+
+        @Override public int hashCode() {
+            return 31 * domain.hashCode() + operator.hashCode();
+        }
     }
 
     static final class Result {
@@ -87,9 +113,12 @@ final class KnowledgeModelContainerProbe {
         final long customDomainNodes;
         final long customNodesMissingImport;
         final long duplicateOpsetDomains;
+        final long distinctOperatorKinds;
+        final long undecodedOperatorNodes;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
+        final String operatorInventoryHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -116,9 +145,12 @@ final class KnowledgeModelContainerProbe {
             customDomainNodes = details.customDomainNodes;
             customNodesMissingImport = details.customNodesMissingImport;
             duplicateOpsetDomains = details.duplicateOpsetDomains;
+            distinctOperatorKinds = details.distinctOperatorKinds;
+            undecodedOperatorNodes = details.undecodedOperatorNodes;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
+            operatorInventoryHints = details.operatorInventoryHints;
         }
     }
 
@@ -292,6 +324,8 @@ final class KnowledgeModelContainerProbe {
         final Details details = new Details();
         final Map<String, Long> importedDomains = new HashMap<>();
         final Map<String, Long> referencedDomains = new HashMap<>();
+        final Set<String> ambiguousDomains = new HashSet<>();
+        final Map<OperatorKey, Long> operatorInventory = new LinkedHashMap<>();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -307,7 +341,7 @@ final class KnowledgeModelContainerProbe {
                     final long size = readVarint(data);
                     if (size <= 0) throw new BadContainer();
                     graph = true;
-                    inspectOnnxGraph(data, size, details, referencedDomains);
+                    inspectOnnxGraph(data, size, details, referencedDomains, operatorInventory);
                 } else if (field == 8 && wire == 2) {
                     final long size = readVarint(data);
                     if (size < 2) throw new BadContainer();
@@ -320,6 +354,7 @@ final class KnowledgeModelContainerProbe {
                         }
                         if (importedDomains.containsKey(imported.domain)) {
                             details.duplicateOpsetDomains++;
+                            ambiguousDomains.add(imported.domain);
                         } else {
                             importedDomains.put(imported.domain, imported.version);
                             if (importedDomains.size() <= 4) {
@@ -340,7 +375,24 @@ final class KnowledgeModelContainerProbe {
                     details.customNodesMissingImport += domain.getValue();
                 }
             }
-            if (details.customNodesMissingImport > 0 || details.duplicateOpsetDomains > 0) {
+            details.distinctOperatorKinds = operatorInventory.size();
+            int shown = 0;
+            for (final Map.Entry<OperatorKey, Long> entry : operatorInventory.entrySet()) {
+                if (++shown > 6) break;
+                final OperatorKey key = entry.getKey();
+                final String version;
+                if (ambiguousDomains.contains(key.domain)) version = "?";
+                else if (importedDomains.containsKey(key.domain)) {
+                    version = Long.toString(importedDomains.get(key.domain));
+                } else if (key.domain.isEmpty()) version = "implicit";
+                else version = "?";
+                details.operatorInventoryHints +=
+                        (details.operatorInventoryHints.isEmpty() ? "" : "; ")
+                        + safeOnnxDomainHint(key.domain) + "/" + key.operator
+                        + "@opset" + version + " x" + entry.getValue();
+            }
+            if (details.customNodesMissingImport > 0 || details.duplicateOpsetDomains > 0
+                    || details.undecodedOperatorNodes > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -367,7 +419,8 @@ final class KnowledgeModelContainerProbe {
      */
     private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
                                          final Details details,
-                                         final Map<String, Long> referencedDomains)
+                                         final Map<String, Long> referencedDomains,
+                                         final Map<OperatorKey, Long> operatorInventory)
             throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
@@ -383,7 +436,8 @@ final class KnowledgeModelContainerProbe {
             if (wire == 2 && field == 1) {
                 final long length = readVarint(data);
                 if (++details.nodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
-                inspectOnnxNode(data, length, details, examples, referencedDomains);
+                inspectOnnxNode(data, length, details, examples,
+                        referencedDomains, operatorInventory);
             } else if (wire == 2 && (field == 11 || field == 12)) {
                 final long length = readVarint(data);
                 if (field == 11) details.inputs++;
@@ -564,12 +618,14 @@ final class KnowledgeModelContainerProbe {
 
     private static void inspectOnnxNode(final RandomAccessFile data, final long bytes,
                                         final Details details, final Set<String> examples,
-                                        final Map<String, Long> referencedDomains)
+                                        final Map<String, Long> referencedDomains,
+                                        final Map<OperatorKey, Long> operatorInventory)
             throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
         long fields = 0;
         String domain = "";
+        String operation = "";
         while (data.getFilePointer() < end) {
             if (++fields > 1000) throw new ScanLimit();
             final long tag = readVarint(data);
@@ -577,6 +633,7 @@ final class KnowledgeModelContainerProbe {
             if ((tag >>> 3) == 4 && (tag & 7) == 2) {
                 final long size = readVarint(data);
                 if (size > 64) {
+                    operation = ""; // Last protobuf scalar value wins; oversized is undecoded.
                     skipExact(data, size);
                 } else {
                     final byte[] dataBytes = new byte[(int) size];
@@ -589,10 +646,7 @@ final class KnowledgeModelContainerProbe {
                     } catch (CharacterCodingException invalid) {
                         throw new BadContainer();
                     }
-                    final String safe = safeHint(name);
-                    if (!safe.isEmpty() && examples.size() < 4 && examples.add(safe)) {
-                        details.operatorHints += (details.operatorHints.isEmpty() ? "" : ", ") + safe;
-                    }
+                    operation = safeHint(name);
                 }
             } else if ((tag >>> 3) == 7 && (tag & 7) == 2) {
                 domain = readOnnxDomain(data, readVarint(data), end);
@@ -607,6 +661,19 @@ final class KnowledgeModelContainerProbe {
                     && !referencedDomains.containsKey(domain)) throw new ScanLimit();
             final Long count = referencedDomains.get(domain);
             referencedDomains.put(domain, count == null ? 1 : count + 1);
+        }
+        if (operation.isEmpty()) {
+            details.undecodedOperatorNodes++;
+        } else {
+            if (examples.size() < 4 && examples.add(operation)) {
+                details.operatorHints += (details.operatorHints.isEmpty() ? "" : ", ")
+                        + operation;
+            }
+            final OperatorKey key = new OperatorKey(domain, operation);
+            if (operatorInventory.size() >= MAX_ONNX_OPERATOR_KINDS
+                    && !operatorInventory.containsKey(key)) throw new ScanLimit();
+            final Long count = operatorInventory.get(key);
+            operatorInventory.put(key, count == null ? 1 : count + 1);
         }
     }
 

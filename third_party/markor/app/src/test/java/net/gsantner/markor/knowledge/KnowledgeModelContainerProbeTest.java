@@ -118,6 +118,9 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals("default@17", result.opsetHints);
         assertEquals(0, result.customDomainNodes);
         assertEquals(0, result.customNodesMissingImport);
+        assertEquals(1, result.distinctOperatorKinds);
+        assertEquals(0, result.undecodedOperatorNodes);
+        assertEquals("default/MatMul@opset17 x1", result.operatorInventoryHints);
     }
 
     @Test public void onnxMatchesCustomNodeDomainsToDeclaredOpsets() throws Exception {
@@ -140,6 +143,10 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(0, result.customNodesMissingImport);
         assertEquals(0, result.duplicateOpsetDomains);
         assertEquals("default@17, com.example.custom@3", result.opsetHints);
+        assertEquals(2, result.distinctOperatorKinds);
+        assertEquals("com.example.custom/MyOp@opset3 x1; "
+                        + "com.example.custom/AnotherOp@opset3 x1",
+                result.operatorInventoryHints);
     }
 
     @Test public void onnxMissingOrDuplicateCustomOpsetIsAWarningNotRuntimeVerdict()
@@ -153,6 +160,7 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, missing.detailState);
         assertEquals(1, missing.customDomainNodes);
         assertEquals(1, missing.customNodesMissingImport);
+        assertEquals("example.unknown/MyOp@opset? x1", missing.operatorInventoryHints);
 
         final ByteArrayOutputStream duplicate = new ByteArrayOutputStream();
         final byte[] baseline = onnxWithGraph(graph.toByteArray());
@@ -174,6 +182,43 @@ public final class KnowledgeModelContainerProbeTest {
                 onnxWithGraph(graph.toByteArray()), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
         assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, oversized.state);
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, oversized.detailState);
+    }
+
+    @Test public void onnxOperatorInventoryCountsRepeatedNamesAndBoundsUnknown() throws Exception {
+        final ByteArrayOutputStream repeatedGraph = new ByteArrayOutputStream();
+        for (int i = 0; i < 2; i++) {
+            varint(repeatedGraph, 10);
+            protobufBytes(repeatedGraph, onnxNode("MatMul", ""));
+        }
+        final KnowledgeModelContainerProbe.Result repeated = probe(
+                onnxWithGraph(repeatedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                repeated.detailState);
+        assertEquals(1, repeated.distinctOperatorKinds);
+        assertEquals("default/MatMul@opset17 x2", repeated.operatorInventoryHints);
+
+        final ByteArrayOutputStream untrustedGraph = new ByteArrayOutputStream();
+        varint(untrustedGraph, 10);
+        protobufBytes(untrustedGraph, onnxNode("MatMul\nFALSE_PASS", ""));
+        final KnowledgeModelContainerProbe.Result untrusted = probe(
+                onnxWithGraph(untrustedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, untrusted.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, untrusted.detailState);
+        assertEquals(1, untrusted.undecodedOperatorNodes);
+        assertEquals("", untrusted.operatorInventoryHints);
+
+        final ByteArrayOutputStream excessiveGraph = new ByteArrayOutputStream();
+        for (int i = 0; i < 129; i++) {
+            varint(excessiveGraph, 10);
+            protobufBytes(excessiveGraph, onnxNode("Op" + i, ""));
+        }
+        final KnowledgeModelContainerProbe.Result excessive = probe(
+                onnxWithGraph(excessiveGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, excessive.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
     }
 
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
