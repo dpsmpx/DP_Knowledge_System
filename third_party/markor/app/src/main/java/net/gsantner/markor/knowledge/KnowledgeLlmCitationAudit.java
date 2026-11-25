@@ -18,6 +18,10 @@ import java.util.regex.Pattern;
  */
 public final class KnowledgeLlmCitationAudit {
     private static final Pattern BRACKETS = Pattern.compile("\\[([^\\]\\r\\n]{1,24})\\]");
+    private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
+            "(?m)^ {0,3}\\[[^\\]\\r\\n]{1,24}\\]:[^\\r\\n]*");
+    private static final Pattern AUTOLINK = Pattern.compile(
+            "<(?:https?://|mailto:)[^<>\\s]{1,2048}>", Pattern.CASE_INSENSITIVE);
     private static final Pattern NUMBER = Pattern.compile("[1-9][0-9]?");
     private static final Pattern QUOTE = Pattern.compile("«([^»\\r\\n]{4,240})»|“([^”\\r\\n]{4,240})”");
     private static final Pattern NEGATED_BOOLEAN = Pattern.compile("(?i)\\bnot\\s+(?:true|false)\\b");
@@ -154,7 +158,7 @@ public final class KnowledgeLlmCitationAudit {
         }
         // The model can echo fake [1] references inside a fenced example or
         // inline code. Preserve offsets while excluding those from evidence.
-        final String visible = maskMarkdownCode(answer);
+        final String visible = maskMarkdownNonProse(answer);
         final List<Quotation> quotes = new ArrayList<>();
         final Matcher quotations = QUOTE.matcher(visible);
         while (quotations.find()) {
@@ -232,8 +236,12 @@ public final class KnowledgeLlmCitationAudit {
 
     /** A single backslash escapes a visible bracket; two backslashes do not. */
     private static boolean isEscapedBracket(final String text, final int bracket) {
+        return isEscapedAt(text, bracket);
+    }
+
+    private static boolean isEscapedAt(final String text, final int position) {
         int backslashes = 0;
-        for (int i = bracket - 1; i >= 0 && text.charAt(i) == '\\'; i--) backslashes++;
+        for (int i = position - 1; i >= 0 && text.charAt(i) == '\\'; i--) backslashes++;
         return (backslashes & 1) != 0;
     }
 
@@ -265,6 +273,61 @@ public final class KnowledgeLlmCitationAudit {
             }
         }
         return false;
+    }
+
+    /** HTML comments, link destinations and autolinks are not displayed answer
+     * claims. Mask only recognizable Markdown syntax, preserving offsets and
+     * newlines before scanning citations, quotes or attributed prose.
+     */
+    private static String maskMarkdownNonProse(final String answer) {
+        final StringBuilder visible = new StringBuilder(maskMarkdownCode(answer));
+        String snapshot = visible.toString();
+        for (int from = 0; from < snapshot.length();) {
+            final int start = snapshot.indexOf("<!--", from);
+            if (start < 0) break;
+            if (isEscapedAt(snapshot, start)) {
+                from = start + 4;
+                continue;
+            }
+            final int close = snapshot.indexOf("-->", start + 4);
+            final int end = close < 0 ? snapshot.length() : close + 3;
+            maskRange(visible, start, end);
+            from = end;
+        }
+        snapshot = visible.toString();
+        final Matcher definitions = REFERENCE_DEFINITION.matcher(snapshot);
+        while (definitions.find()) maskRange(visible, definitions.start(), definitions.end());
+        snapshot = visible.toString();
+        final Matcher autolinks = AUTOLINK.matcher(snapshot);
+        while (autolinks.find()) maskRange(visible, autolinks.start(), autolinks.end());
+        snapshot = visible.toString();
+        for (int at = 0; at + 1 < snapshot.length(); at++) {
+            if (snapshot.charAt(at) != ']' || snapshot.charAt(at + 1) != '('
+                    || isEscapedAt(snapshot, at + 1)) continue;
+            final int end = markdownLinkDestinationEnd(snapshot, at + 1);
+            if (end > 0) {
+                // Preserve the opening '(' so [1](url) is still recognized
+                // as a link label, never as a standalone source citation.
+                maskRange(visible, at + 2, end);
+                at = end - 1;
+            }
+        }
+        return visible.toString();
+    }
+
+    /** Scan balanced parentheses, including escaped closing parentheses.
+     * Unclosed or multiline destinations are not masked as valid links.
+     */
+    private static int markdownLinkDestinationEnd(final String text, final int opening) {
+        int depth = 1;
+        for (int at = opening + 1; at < text.length(); at++) {
+            final char ch = text.charAt(at);
+            if (ch == '\n' || ch == '\r') return -1;
+            if (isEscapedAt(text, at)) continue;
+            if (ch == '(') depth++;
+            else if (ch == ')' && --depth == 0) return at + 1;
+        }
+        return -1;
     }
 
     /** Markdown code is not the model's cited prose. Mask without changing

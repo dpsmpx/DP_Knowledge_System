@@ -594,6 +594,82 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void linkDestinationsAndAutolinksCannotDonateCitationsOrQuotes() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String answer : Arrays.asList(
+                "The unsupported claim links to [details](https://invalid.example/a/[1]).",
+                "The unsupported claim links to [details](https://invalid.example/(a/[1])).",
+                "The unsupported claim links to [details](https://invalid.example/a\\)tail/[1]).",
+                "The unsupported claim links to <https://invalid.example/a/[1]>.",
+                "The unsupported claim links to [1](https://invalid.example/a/[2]).",
+                "The unsupported claim links to [details](https://invalid.example/«Fake quote»).")) {
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 0, review.referenceCount);
+            assertEquals(answer, 0, review.invalidReferences);
+            assertEquals(answer, 0, review.quotedPassages);
+            assertEquals(answer, 1, review.uncitedProseSpans);
+        }
+        // The destination is invisible, but a genuine adjacent source marker
+        // outside the link must retain its original character offset.
+        final String cited = "The observed result was 42 [details](https://invalid.example/[2]) [1].";
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(cited, sources);
+        assertEquals(1, review.referenceCount);
+        assertEquals(0, review.invalidReferences);
+        assertEquals(0, review.uncitedProseSpans);
+    }
+
+    @Test
+    public void htmlCommentsAndReferenceDefinitionsCannotDonateEvidence() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final String answer = "The unsupported visible claim is not sourced.\n"
+                + "<!-- hidden [1] «Invented quote»\n"
+                + "the hidden next line also cites [2] -->\n"
+                + "[reference]: https://invalid.example/[1]\n"
+                + "The separate visible conclusion remains unsupported.";
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(answer, sources);
+        assertEquals(0, review.referenceCount);
+        assertEquals(0, review.invalidReferences);
+        assertEquals(0, review.quotedPassages);
+        assertEquals(2, review.uncitedProseSpans);
+
+        final KnowledgeLlmCitationAudit.Review real = KnowledgeLlmCitationAudit.inspect(
+                "<!-- [2] --> The observed result was 42 [1].", sources);
+        assertEquals(1, real.referenceCount);
+        assertEquals(0, real.invalidReferences);
+        assertEquals(0, real.uncitedProseSpans);
+        final KnowledgeLlmCitationAudit.Review unclosed = KnowledgeLlmCitationAudit.inspect(
+                "<!-- [1] «Invented quote»\nThe hidden claim stays hidden.", sources);
+        assertEquals(0, unclosed.referenceCount);
+        assertEquals(0, unclosed.quotedPassages);
+        assertEquals(0, unclosed.uncitedProseSpans);
+    }
+
+    @Test
+    public void longMixedMarkdownAuditKeepsOnlyVisibleCitations() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final StringBuilder answer = new StringBuilder();
+        for (int i = 0; i < 90; i++) {
+            answer.append("The observed result was 42 [1]. ")
+                    .append("[help](https://invalid.example/[2])\n")
+                    .append("<!-- [2] «Fake quote» -->\n");
+        }
+        assertTrue(answer.length() <= 12_000);
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(answer.toString(), sources);
+        assertEquals(90, review.referenceCount);
+        assertEquals(0, review.invalidReferences);
+        assertEquals(0, review.quotedPassages);
+        assertEquals(0, review.weakTextAttributions);
+        assertEquals(0, review.uncitedProseSpans);
+    }
+
+    @Test
     public void repeatedLongAnswerAuditIsBoundedAndRefusesOverlongSource() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
