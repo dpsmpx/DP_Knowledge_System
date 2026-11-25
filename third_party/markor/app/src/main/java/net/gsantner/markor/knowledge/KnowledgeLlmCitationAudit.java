@@ -222,7 +222,7 @@ public final class KnowledgeLlmCitationAudit {
                     invalid++;
                     markers.add(new Citation(citations.start(), citations.end(), -1));
                 }
-            } else if (label.matches(".*[0-9].*")) {
+            } else if (containsNumericDigit(label)) {
                 // Reject malformed numeric citations, including [0], [1, 2],
                 // and numbers larger than the supplied source count.
                 invalid++;
@@ -261,6 +261,37 @@ public final class KnowledgeLlmCitationAudit {
                 attribution.numeric, countOpposingSourcePairs(lexicons), attribution.details);
     }
 
+    /** Non-ASCII decimal digits still look like source references to a reader.
+     * Reject them as malformed rather than silently ignoring the marker.
+     * Iterate code points to include supplementary-plane mathematical digits.
+     */
+    private static boolean containsNumericDigit(final String label) {
+        for (int i = 0; i < label.length();) {
+            final int point = label.codePointAt(i);
+            if (Character.isDigit(point)) return true;
+            i += Character.charCount(point);
+        }
+        return false;
+    }
+
+    /** Differentiate [1] [١] citation clusters from [1] [bibliography]
+     * reference-style Markdown links. Allow only numeric separators here;
+     * a reference identifier containing letters remains a Markdown link.
+     */
+    private static boolean isNumericCitationCluster(final String label) {
+        boolean hasDigit = false;
+        for (int i = 0; i < label.length();) {
+            final int point = label.codePointAt(i);
+            if (Character.isDigit(point)) {
+                hasDigit = true;
+            } else if (point != ' ' && point != ',' && point != ';') {
+                return false;
+            }
+            i += Character.charCount(point);
+        }
+        return hasDigit;
+    }
+
     /** A single backslash escapes a visible bracket; two backslashes do not. */
     private static boolean isEscapedBracket(final String text, final int bracket) {
         return isEscapedAt(text, bracket);
@@ -297,7 +328,10 @@ public final class KnowledgeLlmCitationAudit {
             final int close = text.indexOf(']', next + 1);
             if (close > next && close - next <= 25) {
                 final String reference = text.substring(next + 1, close);
-                if (reference.isEmpty() || !NUMBER.matcher(reference).matches()) return true;
+                // Numeric-looking bracket clusters are source markers, not
+                // reference-style Markdown links, even with Unicode digits.
+                if (reference.isEmpty() || (!NUMBER.matcher(reference).matches()
+                        && !isNumericCitationCluster(reference))) return true;
             }
         }
         return false;

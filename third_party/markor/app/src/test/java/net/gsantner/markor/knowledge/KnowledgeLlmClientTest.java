@@ -395,6 +395,38 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void unicodeDigitLookalikesAreInvalidNotSilentReferences() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "Amber violet is true."));
+        final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Fake references [１] [١] [𝟙].", sources);
+        assertEquals(1, mixed.referenceCount);
+        assertEquals(3, mixed.invalidReferences);
+        assertFalse(mixed.hasValidReferences());
+        final KnowledgeLlmCitationAudit.Review adjacent = KnowledgeLlmCitationAudit.inspect(
+                "Two Unicode source labels [１][١].", sources);
+        assertEquals(0, adjacent.referenceCount);
+        assertEquals(2, adjacent.invalidReferences);
+        final KnowledgeLlmCitationAudit.Review bibliography = KnowledgeLlmCitationAudit.inspect(
+                "[１][bibliography] [1][reference]", sources);
+        assertEquals(0, bibliography.referenceCount);
+        assertEquals(0, bibliography.invalidReferences);
+        final KnowledgeLlmCitationAudit.Review quote = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [𝟙]", sources);
+        assertEquals(0, quote.referenceCount);
+        assertEquals(1, quote.invalidReferences);
+        assertEquals(1, quote.unverifiedQuotes);
+        // Recognizable Markdown destinations, code and ordinary labels must
+        // not be counted as citations merely because they contain a digit.
+        final KnowledgeLlmCitationAudit.Review hidden = KnowledgeLlmCitationAudit.inspect(
+                "[١](https://example.invalid) `[１]` <span data-x='[𝟙]'>"
+                    + "Amber violet is true [1].</span> [label]", sources);
+        assertEquals(1, hidden.referenceCount);
+        assertEquals(0, hidden.invalidReferences);
+        assertTrue(hidden.hasValidReferences());
+    }
+
+    @Test
     public void citationAuditFlagsFabricatedVerbatimQuotesWithoutClaimingProof() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The measured result was 42."));

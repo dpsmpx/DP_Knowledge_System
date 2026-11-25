@@ -44,6 +44,28 @@ jobs:
             grep -nE 'error:|Compilation failed|FAILURE:|What went wrong|Execution failed|^> Task .*FAILED' \
               "$log" | tail -n 90 || true
             echo '::endgroup::'
+            echo '::group::Failing JVM test names (synthetic tests; no fixtures)'
+            python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          import re
+          for path in sorted(glob.glob('app/build/test-results/test*UnitTest/TEST-*.xml')):
+              try:
+                  suite = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              for case in suite.iter('testcase'):
+                  if case.find('failure') is not None or case.find('error') is not None:
+                      print(f"{case.get('classname', '?')}#{case.get('name', '?')}")
+                      issue = case.find('failure')
+                      if issue is None:
+                          issue = case.find('error')
+                      line = re.search(r'([A-Za-z0-9_]+Test\.java):(\d+)',
+                                       issue.text or '') if issue is not None else None
+                      if line is not None:
+                          print(f"  JUnit assertion at {line.group(1)}:{line.group(2)}")
+          PY
+            echo '::endgroup::'
             echo '::group::Final Gradle lines'
             tail -n 40 "$log"
             echo '::endgroup::'
