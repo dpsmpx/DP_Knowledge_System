@@ -500,6 +500,21 @@ IPC-имитация выбрасывает маленький объект ош
 и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45649780010)
 зелёные. Физический ARM64, API 24–26 и реальные модели ещё не проверены;
 `runnable=false` сохранён.
+[PR #217](https://github.com/dpsmpx/DP_Knowledge_System/pull/217)
+добавляет к сопоставлению ещё **четыре суммарных счётчика типов**:
+`float32` и `int64` отдельно для входов и выходов. Они извлекаются
+из того же ограниченного офлайн-разбора `TypeProto` и сравниваются с
+уже существующими числовыми итогами ONNX Runtime. Расхождение —
+предупреждение, а совпадение относится **только к суммарным категориям**,
+не к парным именам/типам/формам, другим enum, tokenizer или inference.
+Неизвестные типы остаются неразобранной категорией, переполнение чисел
+отклоняется до сравнения. Нового Binder-поля, выполнения модели или
+разрешения `runnable` нет; реальные модели и ARM64 по-прежнему не проверены.
+[Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164412)
+прошёл **14/14 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164528)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164352)
+успешны.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
