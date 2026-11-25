@@ -5,6 +5,10 @@ package net.gsantner.markor.knowledge;
 final class KnowledgeOnnxCpuBackend {
     private KnowledgeOnnxCpuBackend() { }
     static boolean available() { return false; }
+
+    static KnowledgeOnnxSessionGate.Report inspect(final byte[] bytes) {
+        throw new UnsupportedOperationException("ONNX runtime is only in DPKS flavor");
+    }
     static KnowledgeOnnxSmoke.Report smoke() {
         throw new UnsupportedOperationException("ONNX CPU backend not included in this flavor");
     }
