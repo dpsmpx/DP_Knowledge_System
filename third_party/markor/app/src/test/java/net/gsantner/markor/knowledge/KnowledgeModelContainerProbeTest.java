@@ -469,6 +469,72 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, bounded.detailState);
     }
 
+    @Test public void onnxExternalInitializerLocationsAreOnlyLexicalHints()
+            throws Exception {
+        final KnowledgeModelContainerProbe.Result relative = probe(
+                onnxWithExternalInitializer(1, "weights/model.data", false, true),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, relative.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                relative.detailState);
+        assertEquals(1, relative.denseInitializersScanned);
+        assertEquals(1, relative.externalDataEntriesScanned);
+        assertEquals(1, relative.externalDataTensorsDeclared);
+        assertEquals(1, relative.externalDataRelativeLocations);
+        assertEquals(0, relative.externalDataMissingLocations);
+        assertEquals(0, relative.externalDataUntrustedLocations);
+        assertEquals(1, relative.sparseInitializersSkipped);
+        // The external file is never read or resolved by this container probe.
+    }
+
+    @Test public void onnxExternalInitializerTraversalAndMissingLocationsAreWarnings()
+            throws Exception {
+        for (final String path : new String[]{"../secret", "/etc/passwd", "a/../b",
+                "C:\\weights\\x", "a//b", "a/./b", "a\u0000b"}) {
+            final KnowledgeModelContainerProbe.Result result = probe(
+                    onnxWithExternalInitializer(1, path, false, false),
+                    KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                    result.detailState);
+            assertEquals(1, result.externalDataUntrustedLocations);
+            assertEquals(0, result.externalDataRelativeLocations);
+        }
+        final KnowledgeModelContainerProbe.Result missing = probe(
+                onnxWithExternalInitializer(1, null, false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, missing.externalDataMissingLocations);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                missing.detailState);
+
+        final KnowledgeModelContainerProbe.Result duplicate = probe(
+                onnxWithExternalInitializer(1, "weights.data", true, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, duplicate.externalDataDuplicateLocations);
+        assertEquals(1, duplicate.externalDataUntrustedLocations);
+        assertEquals(2, duplicate.externalDataEntriesScanned);
+
+        final KnowledgeModelContainerProbe.Result oversized = probe(
+                onnxWithExternalInitializer(1,
+                        new String(new char[513]).replace('\0', 'a'), false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, oversized.externalDataUntrustedLocations);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                oversized.detailState);
+    }
+
+    @Test public void onnxUnknownDataLocationDoesNotPretendExternalFileIsAvailable()
+            throws Exception {
+        final KnowledgeModelContainerProbe.Result unknown = probe(
+                onnxWithExternalInitializer(9, "weights.data", false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, unknown.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, unknown.detailState);
+        assertEquals(1, unknown.invalidExternalDataLocationEnums);
+        assertEquals(0, unknown.externalDataTensorsDeclared);
+        assertEquals(0, unknown.externalDataRelativeLocations);
+    }
+
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         varint(graph, 90);
@@ -735,6 +801,42 @@ public final class KnowledgeModelContainerProbeTest {
         varint(model, 16);
         varint(model, 17);
         return model.toByteArray();
+    }
+
+    private static byte[] onnxWithExternalInitializer(final int dataLocation,
+                                                      final String location,
+                                                      final boolean duplicateLocation,
+                                                      final boolean sparseInitializer) {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10); // GraphProto.node
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 112); // TensorProto.data_location, field 14
+        varint(tensor, dataLocation);
+        if (location != null) {
+            appendOnnxExternalEntry(tensor, "location", location);
+            if (duplicateLocation) appendOnnxExternalEntry(tensor, "location", "other.data");
+        }
+        varint(tensor, 74); // TensorProto.raw_data: skip without allocating bytes
+        protobufBytes(tensor, new byte[]{1, 2, 3, 4});
+        varint(graph, 42); // GraphProto.initializer, field 5
+        protobufBytes(graph, tensor.toByteArray());
+        if (sparseInitializer) {
+            varint(graph, 122); // GraphProto.sparse_initializer, field 15
+            protobufBytes(graph, new byte[]{8, 1});
+        }
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static void appendOnnxExternalEntry(final ByteArrayOutputStream tensor,
+                                                 final String key, final String value) {
+        final ByteArrayOutputStream entry = new ByteArrayOutputStream();
+        varint(entry, 10); // StringStringEntryProto.key
+        protobufString(entry, key);
+        varint(entry, 18); // StringStringEntryProto.value
+        protobufString(entry, value);
+        varint(tensor, 106); // TensorProto.external_data, field 13
+        protobufBytes(tensor, entry.toByteArray());
     }
 
     private static byte[] onnxNode(final String operation, final String domain) {
