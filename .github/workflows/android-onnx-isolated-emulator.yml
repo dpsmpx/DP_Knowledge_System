@@ -1,0 +1,63 @@
+name: Android ONNX isolated-worker emulator QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/android-onnx-isolated-emulator.yml'
+      - 'third_party/markor/app/build.gradle'
+      - 'third_party/markor/app/src/androidTest/**'
+      - 'third_party/markor/app/src/flavorAtest/**'
+      - 'third_party/markor/app/src/main/java/net/gsantner/markor/ApplicationObject.java'
+      - 'third_party/markor/app/src/main/java/net/gsantner/markor/knowledge/KnowledgeOnnx*'
+      - 'third_party/markor/app/src/main/java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-onnx-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: android-actions/setup-android@v4
+      - name: Prepare emulator acceleration
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+      - name: Synthetic Binder/FD/isolated-process instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          GRADLE_OPTS: -Xms128m -Xmx768m
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          cores: 2
+          ram-size: 4096M
+          heap-size: 512M
+          emulator-boot-timeout: 600
+          disable-animations: true
+          script: |
+            cd third_party/markor
+            chmod +x gradlew
+            ./gradlew :app:connectedFlavorAtestDebugAndroidTest \
+              --no-daemon --no-parallel --max-workers=2 --stacktrace
+      - name: Preserve synthetic instrumentation failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-emulator-instrumented-results
+          path: |
+            third_party/markor/app/build/outputs/androidTest-results/connected/
+            third_party/markor/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 3

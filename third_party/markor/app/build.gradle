@@ -38,6 +38,7 @@ android {
         buildConfigField "String", "BUILD_DATE", "\"${getBuildDate()}\""
         buildConfigField "String", "GITHASH", "\"${getGitHash}\""
         buildConfigField "String", "GITMSG", "\"${getGitLastCommitMessage}\""
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     base {
         archivesName = "${defaultConfig.applicationId}-v${defaultConfig.versionCode}-${defaultConfig.versionName}"
@@ -137,6 +138,8 @@ dependencies {
     // JVM mock-server tests exercise request serialization: Android's org.json
     // framework classes are stubs in local unit tests. Test-only, not in APK.
     testImplementation 'org.json:json:20240303'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
 
     // DPKS-only local CPU backend. No model weights are bundled. Upstream
     // Markor flavors stay free of the native ONNX Runtime dependency.
