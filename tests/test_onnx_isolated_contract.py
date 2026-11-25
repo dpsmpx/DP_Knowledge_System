@@ -169,6 +169,31 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
                     "DYNAMIC_INPUT_AXES", "MAX_INPUT_RANK"):
             self.assertIn(key, protocol)
 
+    def test_source_native_io_count_comparison_uses_the_verified_preflight_snapshot(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        store = (APP / "main" / base / "KnowledgeModelPackageStore.java").read_text()
+        agreement = (APP / "main" / base / "KnowledgeOnnxIoAgreement.java").read_text()
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        test = (APP / "test" / base / "KnowledgeOnnxIoAgreementTest.java").read_text()
+        emulator = (APP / "androidTest" / base /
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("return readForCpuSessionWithAudit(entry).bytes;", store)
+        self.assertIn("final Audit audit = audit(entry, null)", store)
+        self.assertIn("new CpuSessionInput(bytes, audit.container)", store)
+        self.assertIn("verified = true;\n            return input;", store)
+        self.assertIn("readForCpuSessionWithAudit(entry)", activity)
+        self.assertIn("formatIoAgreement(prepared, report)", activity)
+        self.assertIn("KnowledgeOnnxIoAgreement.compare(", activity)
+        self.assertIn("COUNTS_AGREE_TYPES_PARTIAL", agreement)
+        self.assertIn("INPUT_OUTPUT_COUNTS_DIFFER", agreement)
+        self.assertIn("TENSOR_COUNTS_DIFFER", agreement)
+        self.assertIn("initializer-backed inputs", agreement.lower())
+        self.assertNotIn("getName()", agreement)
+        self.assertIn("differentInputCountIsWarningNotRejectionOfSession", test)
+        self.assertIn("incompleteTypeDeclarationsRemainUnknown", test)
+        self.assertIn("KnowledgeModelContainerProbe.inspect(", emulator)
+        self.assertIn("Offline GraphProto and native I/O counts diverged for Identity", emulator)
+
     def test_live_ram_gate_is_rechecked_after_model_sha_audit(self):
         base = "java/net/gsantner/markor/knowledge/"
         activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
