@@ -1,0 +1,35 @@
+/* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
+package net.gsantner.markor.knowledge;
+
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+
+public final class KnowledgeOnnxIoSummaryTest {
+    @Test public void generatedIdentityHasOneFloatTensorOnEachSide() {
+        final KnowledgeOnnxIoSummary identity = new KnowledgeOnnxIoSummary(
+                1, 1, 1, 1, 0, 0, 0, 0, 1, 1);
+        assertTrue(KnowledgeOnnxIoSummary.valid(identity, 1, 1));
+    }
+
+    @Test public void dynamicInt64InputAndFloatOutputAreBounded() {
+        final KnowledgeOnnxIoSummary tokens = new KnowledgeOnnxIoSummary(
+                2, 1, 0, 1, 2, 0, 2, 1, 2, 3);
+        assertTrue(KnowledgeOnnxIoSummary.valid(tokens, 2, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(tokens, 1, 1));
+    }
+
+    @Test public void invalidCountsAndExcessiveRankAreRejected() {
+        assertFalse(KnowledgeOnnxIoSummary.valid(null, 1, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(1, 1, 2, 1, 0, 0, 0, 0, 1, 1), 1, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(1, 1, 1, 1, 0, 0, 2, 0, 1, 1), 1, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(1, 1, 1, 1, 0, 0, 0, 0, 17, 1), 1, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(-1, 1, 0, 1, 0, 0, 0, 0, 1, 1), 1, 1));
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(1, 1, 1, 1, 0, 0, 0, 0, 1, 1), 33, 1));
+    }
+}

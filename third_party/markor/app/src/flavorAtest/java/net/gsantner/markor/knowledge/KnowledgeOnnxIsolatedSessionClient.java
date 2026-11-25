@@ -200,15 +200,28 @@ final class KnowledgeOnnxIsolatedSessionClient {
             final long after = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, -1);
             final long rssHighWater = data.getLong(
                     KnowledgeOnnxIsolatedProtocol.RSS_HIGH_WATER_KIB, -1L);
+            final KnowledgeOnnxIoSummary io = new KnowledgeOnnxIoSummary(
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.INPUT_TENSORS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.OUTPUT_TENSORS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.FLOAT_INPUTS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.FLOAT_OUTPUTS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.INT64_INPUTS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.INT64_OUTPUTS, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_INPUT_AXES, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_OUTPUT_AXES, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.MAX_INPUT_RANK, -1),
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK, -1));
             if (millis >= 0 && millis <= KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                     && inputs >= 1 && inputs <= 32 && outputs >= 1 && outputs <= 32
                     && KnowledgeOnnxMemoryTrace.valid(before, observed, after)
+                    && KnowledgeOnnxIoSummary.valid(io, inputs, outputs)
                     && KnowledgeOnnxRssHighWater.valid(rssHighWater)) {
                 report = new KnowledgeOnnxSessionGate.Report(
                         KnowledgeOnnxIsolatedProtocol.safeVersion(
                                 data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
                         millis, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0),
-                        inputs, outputs, new KnowledgeOnnxMemoryTrace(before, observed, after),
+                        inputs, outputs, io,
+                        new KnowledgeOnnxMemoryTrace(before, observed, after),
                         rssHighWater);
             }
         }

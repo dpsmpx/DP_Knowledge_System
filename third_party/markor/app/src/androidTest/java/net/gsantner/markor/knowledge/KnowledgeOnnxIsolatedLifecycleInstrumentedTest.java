@@ -116,6 +116,19 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertNotNull("FD session verification/native open failed", report.get());
             assertEquals(1, report.get().inputs);
             assertEquals(1, report.get().outputs);
+            final KnowledgeOnnxIoSummary io = report.get().ioSummary;
+            assertTrue("Native ONNX I/O summary failed its IPC bounds",
+                    KnowledgeOnnxIoSummary.valid(io, report.get().inputs, report.get().outputs));
+            assertEquals("Identity must expose one float32 input tensor", 1, io.floatInputs);
+            assertEquals("Identity must expose one float32 output tensor", 1, io.floatOutputs);
+            assertEquals(1, io.inputTensors);
+            assertEquals(1, io.outputTensors);
+            assertEquals(0, io.int64Inputs);
+            assertEquals(0, io.int64Outputs);
+            assertEquals(0, io.dynamicInputAxes);
+            assertEquals(0, io.dynamicOutputAxes);
+            assertEquals(1, io.maxInputRank);
+            assertEquals(1, io.maxOutputRank);
             assertTrue(report.get().sessionInitMillis >= 0);
             assertWorkerPssSnapshots(report.get().workerMemory);
             assertTrue("Worker kernel RSS high-water is not bounded",
