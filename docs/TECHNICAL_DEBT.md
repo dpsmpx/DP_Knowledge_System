@@ -701,6 +701,26 @@ JVM/debug build и Python CI зелёные. Изолированный проц
 пик RAM/нагрев/ABI, многократные отмены с настоящими импортированными
 моделями. `runnable=false`; MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: совместимость isolated worker на Android API 28/35 —
+[PR #193](https://github.com/dpsmpx/DP_Knowledge_System/pull/193).**
+[Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45584071591):
+**9/9 Android instrumented-тестов на API 28 и 9/9 на API 35**;
+Python и Android JVM/debug проверки зелёные. API 28 выявил
+`NoSuchMethodError` при вызове `Process.isIsolatedUid(int)` до
+появления метода в API 34. Рабочий isolated process теперь проверяется
+через `Process.isIsolated()` на API 28–33, через `isIsolatedUid(int)`
+на API 34+, а API 24–27 сохраняет проверку локального
+`/proc/self/cmdline`. Проверка API 24 **не состоялась**: в
+[первом запуске](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45574231026)
+и [повторе на Ubuntu 22.04](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45579021521)
+эмулятор остался `adb offline` до старта тестов. Это отдельный
+инфраструктурный долг без вывода о совместимости приложения на API 24.
+Проверки используют только синтетический `Identity`, без заметок,
+журнала, пользовательских весов и сети; реальный native hang/OOM,
+импортированные модели, физические Redmi Note 13/Poco X7 Pro, RAM,
+нагрев и ARM64 ABI не проверены. `runnable=false`; MODEL-M1/M8
+не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
