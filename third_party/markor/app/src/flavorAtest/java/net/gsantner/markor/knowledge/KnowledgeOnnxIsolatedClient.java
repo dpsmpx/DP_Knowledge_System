@@ -25,6 +25,8 @@ final class KnowledgeOnnxIsolatedClient {
     private final Messenger inbox;
     private ServiceConnection connection;
     private Messenger remote;
+    private IBinder activeBinder;
+    private IBinder.DeathRecipient binderDeath;
     private Callback callback;
     private boolean bound;
     private int nextRequestId;
@@ -46,7 +48,23 @@ final class KnowledgeOnnxIsolatedClient {
             @Override public void onServiceConnected(final ComponentName name,
                                                      final IBinder service) {
                 if (connection != this) return;
-                remote = new Messenger(service);
+                if (service == null) {
+                    notifyFailure();
+                    return;
+                }
+                final ServiceConnection requestConnection = this;
+                final IBinder.DeathRecipient died = () -> mainHandler.post(() -> {
+                    if (connection == requestConnection) notifyFailure();
+                });
+                try {
+                    service.linkToDeath(died, 0);
+                    activeBinder = service;
+                    binderDeath = died;
+                    remote = new Messenger(service);
+                } catch (RemoteException | RuntimeException dead) {
+                    notifyFailure();
+                    return;
+                }
                 final Message request = Message.obtain(null,
                         KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC);
                 request.arg1 = requestId;
@@ -59,6 +77,14 @@ final class KnowledgeOnnxIsolatedClient {
             }
 
             @Override public void onServiceDisconnected(final ComponentName name) {
+                if (connection == this) notifyFailure();
+            }
+
+            @Override public void onBindingDied(final ComponentName name) {
+                if (connection == this) notifyFailure();
+            }
+
+            @Override public void onNullBinding(final ComponentName name) {
                 if (connection == this) notifyFailure();
             }
         };
@@ -128,6 +154,11 @@ final class KnowledgeOnnxIsolatedClient {
         final Callback done = callback;
         callback = null;
         remote = null;
+        if (activeBinder != null && binderDeath != null) {
+            activeBinder.unlinkToDeath(binderDeath, 0);
+        }
+        activeBinder = null;
+        binderDeath = null;
         final ServiceConnection previous = connection;
         connection = null;
         if (previous != null && bound) {

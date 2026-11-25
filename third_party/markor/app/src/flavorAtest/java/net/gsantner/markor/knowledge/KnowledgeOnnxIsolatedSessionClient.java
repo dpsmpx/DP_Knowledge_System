@@ -30,6 +30,8 @@ final class KnowledgeOnnxIsolatedSessionClient {
     private final Messenger inbox;
     private ServiceConnection connection;
     private Messenger remote;
+    private IBinder activeBinder;
+    private IBinder.DeathRecipient binderDeath;
     private Callback callback;
     private byte[] pendingBytes;
     private ParcelFileDescriptor writePipe;
@@ -62,7 +64,23 @@ final class KnowledgeOnnxIsolatedSessionClient {
             @Override public void onServiceConnected(final ComponentName name,
                                                      final IBinder service) {
                 if (connection != this) return;
-                remote = new Messenger(service);
+                if (service == null) {
+                    notifyFailure();
+                    return;
+                }
+                final ServiceConnection requestConnection = this;
+                final IBinder.DeathRecipient died = () -> mainHandler.post(() -> {
+                    if (connection == requestConnection) notifyFailure();
+                });
+                try {
+                    service.linkToDeath(died, 0);
+                    activeBinder = service;
+                    binderDeath = died;
+                    remote = new Messenger(service);
+                } catch (RemoteException | RuntimeException dead) {
+                    notifyFailure();
+                    return;
+                }
                 ParcelFileDescriptor readPipe = null;
                 try {
                     final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
@@ -93,6 +111,14 @@ final class KnowledgeOnnxIsolatedSessionClient {
             }
 
             @Override public void onServiceDisconnected(final ComponentName name) {
+                if (connection == this) notifyFailure();
+            }
+
+            @Override public void onBindingDied(final ComponentName name) {
+                if (connection == this) notifyFailure();
+            }
+
+            @Override public void onNullBinding(final ComponentName name) {
                 if (connection == this) notifyFailure();
             }
         };
@@ -192,6 +218,11 @@ final class KnowledgeOnnxIsolatedSessionClient {
         final Callback done = callback;
         callback = null;
         remote = null;
+        if (activeBinder != null && binderDeath != null) {
+            activeBinder.unlinkToDeath(binderDeath, 0);
+        }
+        activeBinder = null;
+        binderDeath = null;
         final ServiceConnection old = connection;
         connection = null;
         closePipe(writePipe);

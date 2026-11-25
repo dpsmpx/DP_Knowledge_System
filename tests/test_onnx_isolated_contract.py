@@ -83,6 +83,22 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
             shim = (APP / flavor / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
             self.assertIn("return false;", shim)
 
+    def test_worker_death_and_failed_binding_fail_closed_without_stale_callbacks(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        for client_name in ("KnowledgeOnnxIsolatedClient.java",
+                            "KnowledgeOnnxIsolatedSessionClient.java"):
+            client = (APP / "flavorAtest" / base / client_name).read_text()
+            self.assertIn("service.linkToDeath(died, 0)", client)
+            self.assertIn("activeBinder.unlinkToDeath(binderDeath, 0)", client)
+            self.assertIn("if (connection == requestConnection) notifyFailure()", client)
+            self.assertIn("onBindingDied(final ComponentName name)", client)
+            self.assertIn("onNullBinding(final ComponentName name)", client)
+            self.assertIn("if (connection == this) notifyFailure()", client)
+        emulator = (APP / "androidTest/java/net/gsantner/markor/knowledge/"
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("Manual retry after cancel failed to bind", emulator)
+        self.assertIn("Late cancelled request invoked a callback", emulator)
+
     def test_manual_fd_smoke_reuses_generated_graph_and_never_selects_user_model(self):
         base = "java/net/gsantner/markor/knowledge/"
         dialog = (APP / "main" / base / "KnowledgeModelSettingsDialog.java").read_text()
