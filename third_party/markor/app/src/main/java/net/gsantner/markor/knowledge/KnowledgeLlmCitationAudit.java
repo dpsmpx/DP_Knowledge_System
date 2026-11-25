@@ -303,8 +303,8 @@ public final class KnowledgeLlmCitationAudit {
         return false;
     }
 
-    /** HTML comments, link destinations and autolinks are not displayed answer
-     * claims. Mask only recognizable Markdown syntax, preserving offsets and
+    /** HTML comments/tags, non-rendered raw blocks, link destinations and
+     * autolinks are not displayed answer claims. Preserve offsets and
      * newlines before scanning citations, quotes or attributed prose.
      */
     private static String maskMarkdownNonProse(final String answer) {
@@ -340,7 +340,88 @@ public final class KnowledgeLlmCitationAudit {
                 at = end - 1;
             }
         }
+        maskHtmlTagsAndRawSections(visible);
         return visible.toString();
+    }
+
+    /** HTML attributes, script/style bodies and template content must not
+     * donate fake citations or quotations. Keep ordinary inline tag *text*:
+     * <span>[1]</span> still has a visible source marker between its tags.
+     * The answer is capped at 12k; an individual tag scan is capped at 1024.
+     */
+    private static void maskHtmlTagsAndRawSections(final StringBuilder visible) {
+        final String text = visible.toString();
+        for (int at = 0; at < text.length(); at++) {
+            if (text.charAt(at) != '<' || isEscapedAt(text, at)) continue;
+            final int tagEnd = htmlTagEnd(text, at);
+            if (tagEnd < 0) continue;
+            int nameStart = at + 1;
+            final boolean closing = text.charAt(nameStart) == '/';
+            if (closing) nameStart++;
+            int nameEnd = nameStart;
+            while (nameEnd < tagEnd && isHtmlTagNameChar(text.charAt(nameEnd))) nameEnd++;
+            final String name = text.substring(nameStart, nameEnd);
+            int last = tagEnd - 2;
+            while (last > nameEnd && Character.isWhitespace(text.charAt(last))) last--;
+            final boolean raw = !closing && text.charAt(last) != '/'
+                    && ("script".equalsIgnoreCase(name) || "style".equalsIgnoreCase(name)
+                    || "template".equalsIgnoreCase(name));
+            int end = tagEnd;
+            if (raw) {
+                final int closingEnd = htmlRawClosingEnd(text, tagEnd, name);
+                end = closingEnd < 0 ? text.length() : closingEnd;
+            }
+            maskRange(visible, at, end);
+            at = end - 1;
+        }
+    }
+
+    private static boolean isHtmlTagNameChar(final char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+                || (ch >= '0' && ch <= '9') || ch == '-' || ch == ':' || ch == '_';
+    }
+
+    private static boolean isAsciiHtmlLetter(final char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+    }
+
+    /** Return the exclusive closing '>' offset only for plausible HTML tags.
+     * A '>' inside a quoted attribute must not prematurely end the tag.
+     */
+    private static int htmlTagEnd(final String text, final int opening) {
+        int at = opening + 1;
+        if (at < text.length() && text.charAt(at) == '/') at++;
+        if (at >= text.length() || !isAsciiHtmlLetter(text.charAt(at))) return -1;
+        while (at < text.length() && isHtmlTagNameChar(text.charAt(at))) at++;
+        if (at >= text.length() || !(Character.isWhitespace(text.charAt(at))
+                || text.charAt(at) == '>' || text.charAt(at) == '/')) return -1;
+        char quote = 0;
+        for (int end = at; end < text.length() && end - opening <= 1024; end++) {
+            final char ch = text.charAt(end);
+            if (quote != 0) {
+                if (ch == quote) quote = 0;
+            } else if (ch == '\'' || ch == '"') {
+                quote = ch;
+            } else if (ch == '>') {
+                return end + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static int htmlRawClosingEnd(final String text, final int from,
+                                         final String name) {
+        for (int at = text.indexOf("</", from); at >= 0; at = text.indexOf("</", at + 2)) {
+            final int nameStart = at + 2;
+            final int afterName = nameStart + name.length();
+            if (afterName >= text.length() || !text.regionMatches(true,
+                    nameStart, name, 0, name.length())
+                    || !(Character.isWhitespace(text.charAt(afterName))
+                    || text.charAt(afterName) == '>')) continue;
+            final int end = htmlTagEnd(text, at);
+            if (end > 0) return end;
+        }
+        return -1;
     }
 
     /** Scan balanced parentheses, including escaped closing parentheses.
