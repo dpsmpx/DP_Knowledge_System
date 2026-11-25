@@ -722,7 +722,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         detailStatus, result.graphNodes, result.graphInputs,
                         result.graphOutputs, result.operatorHints.isEmpty()
                                 ? getString(R.string.knowledge_models_container_unknown)
-                                : result.operatorHints);
+                                : result.operatorHints) + "\n"
+                + getString(R.string.knowledge_models_container_onnx_signatures,
+                        result.typedInputs, result.typedOutputs,
+                        result.signatureHints.isEmpty()
+                                ? getString(R.string.knowledge_models_container_unknown)
+                                : result.signatureHints);
     }
 
     private String modelDisplayName(final Uri uri) {

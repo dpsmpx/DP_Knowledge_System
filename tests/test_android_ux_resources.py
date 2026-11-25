@@ -357,6 +357,21 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_models_container_detail_read"):
                 self.assertIn(key, labels)
 
+    def test_onnx_typeproto_preflight_remains_bounded_and_diagnostic_only(self):
+        probe = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeModelContainerProbe.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_TYPED_VALUES", "MAX_ONNX_VALUE_INFO_BYTES",
+                       "MAX_ONNX_SHAPE_DIMS", "inspectOnnxValueInfo(",
+                       "inspectOnnxType(", "inspectOnnxShape(", "boundedOnnxEnd("):
+            self.assertIn(marker, probe)
+        for marker in ("result.typedInputs", "result.typedOutputs",
+                       "result.signatureHints", "knowledge_models_container_onnx_signatures"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_signatures", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

@@ -87,16 +87,10 @@ public final class KnowledgeModelContainerProbeTest {
         protobufString(node, "MatMul");
         varint(graph, 10); // GraphProto.node, field 1
         protobufBytes(graph, node.toByteArray());
-        final ByteArrayOutputStream input = new ByteArrayOutputStream();
-        varint(input, 10); // ValueInfoProto.name, field 1
-        protobufString(input, "input_ids");
         varint(graph, 90); // GraphProto.input, field 11
-        protobufBytes(graph, input.toByteArray());
-        final ByteArrayOutputStream output = new ByteArrayOutputStream();
-        varint(output, 10);
-        protobufString(output, "output");
+        protobufBytes(graph, onnxTensorValueInfo("input_ids", 7, -1, 384));
         varint(graph, 98); // GraphProto.output, field 12
-        protobufBytes(graph, output.toByteArray());
+        protobufBytes(graph, onnxTensorValueInfo("output", 1, 1, 384));
         protobufBytes(data, graph.toByteArray());
         varint(data, 66); // ModelProto.opset_import, field 8
         varint(data, 2);
@@ -115,6 +109,67 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(1, result.graphInputs);
         assertEquals(1, result.graphOutputs);
         assertEquals("MatMul", result.operatorHints);
+        assertEquals(1, result.typedInputs);
+        assertEquals(1, result.typedOutputs);
+        assertEquals("in:input_ids:int64[?,384]; out:output:float32[1,384]",
+                result.signatureHints);
+    }
+
+    @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 90);
+        protobufBytes(graph, onnxTensorValueInfo("tensor_future", 29));
+        final ByteArrayOutputStream sequence = new ByteArrayOutputStream();
+        varint(sequence, 10);
+        protobufString(sequence, "sequence_value");
+        final ByteArrayOutputStream other = new ByteArrayOutputStream();
+        varint(other, 34); // TypeProto.sequence_type, field 4
+        protobufBytes(other, new byte[0]);
+        varint(sequence, 18); // ValueInfoProto.type, field 2
+        protobufBytes(sequence, other.toByteArray());
+        varint(graph, 98);
+        protobufBytes(graph, sequence.toByteArray());
+        final KnowledgeModelContainerProbe.Result result = probe(onnxWithGraph(graph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.typedInputs);
+        assertEquals(0, result.typedOutputs);
+        assertEquals("in:tensor_future:type#29?", result.signatureHints);
+    }
+
+    @Test public void onnxNestedSignatureLengthsAndLimitsAreBounded() throws Exception {
+        final ByteArrayOutputStream badValue = new ByteArrayOutputStream();
+        varint(badValue, 18); // ValueInfoProto.type, field 2
+        varint(badValue, 8); // Claims eight bytes, but only two exist.
+        badValue.write(10);
+        badValue.write(0);
+        final ByteArrayOutputStream malformedGraph = new ByteArrayOutputStream();
+        varint(malformedGraph, 90);
+        protobufBytes(malformedGraph, badValue.toByteArray());
+        final KnowledgeModelContainerProbe.Result invalid = probe(
+                onnxWithGraph(malformedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, invalid.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, invalid.detailState);
+
+        final ByteArrayOutputStream oversizedGraph = new ByteArrayOutputStream();
+        varint(oversizedGraph, 90);
+        protobufBytes(oversizedGraph, new byte[17_000]);
+        final KnowledgeModelContainerProbe.Result partial = probe(
+                onnxWithGraph(oversizedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, partial.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, partial.detailState);
+
+        final ByteArrayOutputStream undefinedGraph = new ByteArrayOutputStream();
+        varint(undefinedGraph, 90);
+        protobufBytes(undefinedGraph, onnxTensorValueInfo("bad_type", 0, 8));
+        final KnowledgeModelContainerProbe.Result undefined = probe(
+                onnxWithGraph(undefinedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, undefined.state);
     }
 
     @Test public void ggufRejectsMisalignedOrDuplicateTensorDescriptor() throws Exception {
@@ -239,6 +294,52 @@ public final class KnowledgeModelContainerProbeTest {
 
     private static void protobufString(final ByteArrayOutputStream data, final String value) {
         protobufBytes(data, value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] onnxTensorValueInfo(final String name, final int elementType,
+                                               final long... dimensions) {
+        final ByteArrayOutputStream value = new ByteArrayOutputStream();
+        varint(value, 10); // ValueInfoProto.name
+        protobufString(value, name);
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 8); // TypeProto.Tensor.elem_type
+        varint(tensor, elementType);
+        if (dimensions.length > 0) {
+            final ByteArrayOutputStream shape = new ByteArrayOutputStream();
+            for (final long dimension : dimensions) {
+                final ByteArrayOutputStream dim = new ByteArrayOutputStream();
+                if (dimension < 0) {
+                    varint(dim, 18); // Symbolic TensorShapeProto.Dimension.dim_param
+                    protobufString(dim, "batch");
+                } else {
+                    varint(dim, 8); // TensorShapeProto.Dimension.dim_value
+                    varint(dim, dimension);
+                }
+                varint(shape, 10); // TensorShapeProto.dim
+                protobufBytes(shape, dim.toByteArray());
+            }
+            varint(tensor, 18); // TypeProto.Tensor.shape
+            protobufBytes(tensor, shape.toByteArray());
+        }
+        final ByteArrayOutputStream type = new ByteArrayOutputStream();
+        varint(type, 10); // TypeProto.tensor_type
+        protobufBytes(type, tensor.toByteArray());
+        varint(value, 18); // ValueInfoProto.type
+        protobufBytes(value, type.toByteArray());
+        return value.toByteArray();
+    }
+
+    private static byte[] onnxWithGraph(final byte[] graph) {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        varint(model, 8); // ModelProto.ir_version
+        varint(model, 9);
+        varint(model, 58); // ModelProto.graph
+        protobufBytes(model, graph);
+        varint(model, 66); // ModelProto.opset_import
+        varint(model, 2);
+        varint(model, 16);
+        varint(model, 17);
+        return model.toByteArray();
     }
 
     private static void u32(final ByteArrayOutputStream data, final long value) {
