@@ -202,6 +202,50 @@ public final class KnowledgeLlmEvidence {
         return new TermCoverage(count, terms.size());
     }
 
+    /** Choose the shown passage when the same byte-verified source appeared
+     * in BOTH lexical and vector retrieval. The vector chunk remains the
+     * default; replace it only when the lexical excerpt exposes more distinct
+     * question terms, or an adjacent phrase on an otherwise equal score.
+     * Both excerpts are already bounded and cut from the SAME source bytes.
+     * This is visibility of literal evidence, not semantic entailment.
+     */
+    public static String chooseHybridExcerpt(final String question,
+                                             final String lexicalExcerpt,
+                                             final String semanticExcerpt) {
+        if (question == null || question.length() > KnowledgeMarkdownMetadata.MAX_EVIDENCE_QUESTION_CHARS
+                || (lexicalExcerpt != null && lexicalExcerpt.length() > MAX_EXCERPT_CHARS + 4)
+                || (semanticExcerpt != null && semanticExcerpt.length() > MAX_EXCERPT_CHARS + 4)) {
+            return "";
+        }
+        if (semanticExcerpt == null || semanticExcerpt.trim().isEmpty()) {
+            return lexicalExcerpt == null ? "" : lexicalExcerpt;
+        }
+        if (lexicalExcerpt == null || lexicalExcerpt.trim().isEmpty()) {
+            return semanticExcerpt;
+        }
+        final List<String> terms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
+        if (terms.isEmpty()) {
+            return semanticExcerpt;
+        }
+        final boolean[] lexical = presentTerms(lexicalExcerpt, terms);
+        final boolean[] semantic = presentTerms(semanticExcerpt, terms);
+        int lexicalMatches = 0;
+        int semanticMatches = 0;
+        for (int i = 0; i < terms.size(); i++) {
+            if (lexical[i]) lexicalMatches++;
+            if (semantic[i]) semanticMatches++;
+        }
+        if (lexicalMatches != semanticMatches) {
+            return lexicalMatches > semanticMatches ? lexicalExcerpt : semanticExcerpt;
+        }
+        if (terms.size() >= 2 && terms.size() <= 4
+                && adjacentPhraseStart(foldForOffsets(lexicalExcerpt), terms) >= 0
+                && adjacentPhraseStart(foldForOffsets(semanticExcerpt), terms) < 0) {
+            return lexicalExcerpt;
+        }
+        return semanticExcerpt;
+    }
+
     /** Select at most six already verified lexical excerpts from a bounded
      * relevance-ranked candidate list. Preserve the first two hits (including
      * potentially opposing exact-phrase sources); use remaining slots for

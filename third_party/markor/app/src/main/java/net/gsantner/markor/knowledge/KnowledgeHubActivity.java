@@ -4362,10 +4362,17 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             continue;
                         }
                         final String content = source.text;
-                        final String excerpt = vector == null
-                                ? KnowledgeLlmEvidence.excerpt(content, question)
-                                : KnowledgeEmbeddingChunks.atOffset(
-                                        content, vector.excerptStart, vector.excerptLength);
+                        final String excerpt;
+                        if (vector == null) {
+                            excerpt = KnowledgeLlmEvidence.excerpt(content, question);
+                        } else {
+                            final String vectorExcerpt = KnowledgeEmbeddingChunks.atOffset(
+                                    content, vector.excerptStart, vector.excerptLength);
+                            excerpt = text == null ? vectorExcerpt
+                                    : KnowledgeLlmEvidence.chooseHybridExcerpt(question,
+                                            KnowledgeLlmEvidence.excerpt(content, question),
+                                            vectorExcerpt);
+                        }
                         if (!excerpt.trim().isEmpty()) {
                             candidates.add(new KnowledgeLlmEvidence.Item(relativePath, excerpt));
                             candidateSeals.add(new KnowledgeLlmEvidence.ConsentSeal(

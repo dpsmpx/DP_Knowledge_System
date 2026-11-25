@@ -347,6 +347,22 @@ even if every reference and quotation passes the checks below.
     and cache-only `CITE-LOCAL-19` synthetic Android QA assert both the
     warning counts and nonverification of quotes attributed only to such
     markers. This enforces source *label syntax*, not factual grounding.
+32. The hybrid chat preview now **chooses an evidence excerpt for sources
+    returned by both lexical and semantic retrieval**, instead of always
+    showing the vector chunk. It compares the two already bounded excerpts
+    cut from the **same byte-verified note**: use the lexical excerpt when
+    it visibly contains more distinct sanitized question terms, or when both
+    contain the same number but only the lexical one displays the adjacent
+    2–4-term phrase. Otherwise keep the vector passage and its ranking.
+    Semantic-only sources are unchanged. Source ordering, the 12-note read
+    cap, six-source chat cap, original raw-byte consent seals and pre-/post-
+    source verification stay intact; no second file read or model call occurs.
+    An invalid/oversized question or excerpt is refused by the bounded
+    selector. JVM regressions exercise both preference directions, equal
+    scores, Cyrillic morphology, overlapping query prefixes and length
+    gates; cache-only `HYBRID-BALANCE-19` Android QA exercises two passage
+    candidates from one artificial Markdown note. This is a local visibility
+    heuristic, not a learned cross-encoder or semantic support proof.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -410,6 +426,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   bodies and long mixed HTML without allowing hidden source references;
   full-width, Arabic-Indic and supplementary Unicode digit lookalikes in
   malformed citations, while preserving ordinary Markdown labels;
+  hybrid shared-note excerpt choice with stronger lexical word coverage,
+  compact phrases, semantic tie retention and bounded EN/RU regressions;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
