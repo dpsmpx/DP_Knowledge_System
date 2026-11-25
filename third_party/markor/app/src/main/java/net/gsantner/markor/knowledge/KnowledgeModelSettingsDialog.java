@@ -31,6 +31,7 @@ final class KnowledgeModelSettingsDialog {
     interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
     interface SessionRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
+    interface FdSmokeRequest { void run(); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -45,6 +46,7 @@ final class KnowledgeModelSettingsDialog {
     private final PrepareRequest preparer;
     private final SessionRequest sessionInspector;
     private final SmokeRequest smokeTester;
+    private final FdSmokeRequest fdSmokeTester;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
@@ -53,6 +55,7 @@ final class KnowledgeModelSettingsDialog {
                                  final ImportRequest request, final PackageRequest packageRequest,
                                  final DownloadRequest download, final AuditRequest audit,
                                  final PrepareRequest prepare, final SmokeRequest smoke,
+                                 final FdSmokeRequest fdSmoke,
                                  final SessionRequest sessionInspect) {
         context = activity;
         files = modelFiles;
@@ -63,6 +66,7 @@ final class KnowledgeModelSettingsDialog {
         preparer = prepare;
         sessionInspector = sessionInspect;
         smokeTester = smoke;
+        fdSmokeTester = fdSmoke;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -89,10 +93,34 @@ final class KnowledgeModelSettingsDialog {
                 .setItems(titles, (dialog, which) -> showRole(roles[which]))
                 .setNegativeButton(android.R.string.cancel, null);
         if (KnowledgeOnnxCpuBackend.available()) {
-            builder.setNeutralButton(R.string.knowledge_models_onnx_smoke,
-                    (dialog, which) -> confirmOnnxSmoke());
+            builder.setNeutralButton(R.string.knowledge_models_onnx_diagnostics,
+                    (dialog, which) -> showOnnxDiagnostics());
         }
         builder.show();
+    }
+
+    private void showOnnxDiagnostics() {
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_onnx_diagnostics)
+                .setItems(new String[]{
+                        context.getString(R.string.knowledge_models_onnx_smoke),
+                        context.getString(R.string.knowledge_models_onnx_fd_smoke)
+                }, (dialog, which) -> {
+                    if (which == 0) confirmOnnxSmoke();
+                    else if (which == 1) confirmOnnxFdSmoke();
+                })
+                .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> show())
+                .show();
+    }
+
+    private void confirmOnnxFdSmoke() {
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_onnx_fd_smoke)
+                .setMessage(R.string.knowledge_models_onnx_fd_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_onnx_fd_smoke,
+                        (dialog, which) -> fdSmokeTester.run())
+                .show();
     }
 
     void showRole(final KnowledgeModelPolicy.Role role) {

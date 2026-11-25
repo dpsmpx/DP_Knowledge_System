@@ -26,6 +26,15 @@ public final class KnowledgeOnnxSessionPipeTest {
                 new ByteArrayInputStream(bytes), bytes.length, hash(bytes)));
     }
 
+    @Test public void generatedIdentityUsesTheSameFdChecksumContract() throws Exception {
+        final byte[] fixture = KnowledgeOnnxSmoke.identityModel();
+        assertTrue(fixture.length >= 16);
+        assertEquals(hash(fixture), KnowledgeOnnxSessionPipe.sha256Hex(fixture));
+        assertArrayEquals(fixture, KnowledgeOnnxSessionPipe.readVerified(
+                new ByteArrayInputStream(fixture), fixture.length,
+                KnowledgeOnnxSessionPipe.sha256Hex(fixture)));
+    }
+
     @Test public void rejectsTruncatedExtendedOrChangedModel() throws Exception {
         final byte[] bytes = new byte[64];
         Arrays.fill(bytes, (byte) 7);
