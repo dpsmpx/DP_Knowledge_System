@@ -32,6 +32,11 @@ jobs:
           # Older emulator images can hang on newer hosted runner images.
           - api: 28
             runner: ubuntu-22.04
+          # Probe the pre-28 /proc/self/cmdline worker-identity fallback.
+          # API 24 could not boot reliably in hosted CI; this is not a substitute
+          # for verifying API 24 itself.
+          - api: 27
+            runner: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
