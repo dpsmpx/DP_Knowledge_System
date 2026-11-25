@@ -17,8 +17,21 @@ permissions:
 
 jobs:
   isolated-onnx-emulator:
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
+    name: isolated-onnx-api${{ matrix.api }}
+    runs-on: ${{ matrix.runner }}
+    # Cold legacy images may hang during preparation: never block CI for an hour.
+    timeout-minutes: 23
+    strategy:
+      # One emulator at a time; keep old-API failures independent of API 35.
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - api: 35
+            runner: ubuntu-latest
+          # Older emulator images can hang on newer hosted runner images.
+          - api: 28
+            runner: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -38,7 +51,7 @@ jobs:
         env:
           GRADLE_OPTS: -Xms128m -Xmx768m
         with:
-          api-level: 35
+          api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
           cores: 2
@@ -52,7 +65,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: onnx-emulator-instrumented-results
+          name: onnx-emulator-api${{ matrix.api }}-instrumented-results
           path: |
             third_party/markor/app/build/outputs/androidTest-results/connected/
             third_party/markor/app/build/reports/androidTests/connected/
