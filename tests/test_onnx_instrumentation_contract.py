@@ -16,7 +16,7 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("api: 35", action)
         self.assertIn("api: 28", action)
         self.assertIn("api: 27", action)
-        self.assertNotIn("api: 24", action)
+        self.assertIn("api: 24", action)
         self.assertIn("runner: ubuntu-latest", action)
         self.assertIn("runner: ubuntu-22.04", action)
         self.assertIn("runs-on: ${{ matrix.runner }}", action)
