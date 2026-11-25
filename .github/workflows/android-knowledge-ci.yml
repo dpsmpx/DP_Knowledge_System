@@ -60,10 +60,10 @@ jobs:
                       issue = case.find('failure')
                       if issue is None:
                           issue = case.find('error')
-                      line = re.search(r'KnowledgeLlmClientTest\.java:(\d+)',
+                      line = re.search(r'([A-Za-z0-9_]+Test\.java):(\d+)',
                                        issue.text or '') if issue is not None else None
                       if line is not None:
-                          print(f"  JUnit assertion at line {line.group(1)}")
+                          print(f"  JUnit assertion at {line.group(1)}:{line.group(2)}")
           PY
             echo '::endgroup::'
             echo '::group::Final Gradle lines'

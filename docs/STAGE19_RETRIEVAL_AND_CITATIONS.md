@@ -340,8 +340,10 @@ even if every reference and quotation passes the checks below.
     source set; examples `[１]` (full-width), `[١]` (Arabic-Indic) and `[𝟙]`
     (supplementary mathematical digit) generate the existing invalid-citation
     warning. The bounded scanner iterates Unicode code points, so surrogate
-    pairs cannot evade the check. Markdown link labels, inline code and
-    masked HTML attributes still cannot create false references. JVM tests
+    pairs cannot evade the check. Adjacent or space-separated numeric
+    clusters are distinguished from genuine Markdown reference links such
+    as `[1][bibliography]`. Markdown link labels, inline code and masked
+    HTML attributes still cannot create false references. JVM tests
     and cache-only `CITE-LOCAL-19` synthetic Android QA assert both the
     warning counts and nonverification of quotes attributed only to such
     markers. This enforces source *label syntax*, not factual grounding.

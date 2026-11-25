@@ -403,6 +403,14 @@ public class KnowledgeLlmClientTest {
         assertEquals(1, mixed.referenceCount);
         assertEquals(3, mixed.invalidReferences);
         assertFalse(mixed.hasValidReferences());
+        final KnowledgeLlmCitationAudit.Review adjacent = KnowledgeLlmCitationAudit.inspect(
+                "Two Unicode source labels [１][١].", sources);
+        assertEquals(0, adjacent.referenceCount);
+        assertEquals(2, adjacent.invalidReferences);
+        final KnowledgeLlmCitationAudit.Review bibliography = KnowledgeLlmCitationAudit.inspect(
+                "[１][bibliography] [1][reference]", sources);
+        assertEquals(0, bibliography.referenceCount);
+        assertEquals(0, bibliography.invalidReferences);
         final KnowledgeLlmCitationAudit.Review quote = KnowledgeLlmCitationAudit.inspect(
                 "«Amber violet is true.» [𝟙]", sources);
         assertEquals(0, quote.referenceCount);

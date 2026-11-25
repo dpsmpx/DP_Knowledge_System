@@ -114,6 +114,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('htmlVisibleTextPreserved=true', qa)
         self.assertIn("containsNumericDigit(label)", audit)
         self.assertIn("Character.isDigit(point)", audit)
+        self.assertIn("isNumericCitationCluster(reference)", audit)
         self.assertIn("unicodeDigitSpoofRejected=true", qa)
         for locale in ("values", "values-ru"):
             names = {element.get("name") for element in ET.parse(
