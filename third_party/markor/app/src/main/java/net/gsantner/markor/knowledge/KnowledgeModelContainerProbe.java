@@ -18,7 +18,7 @@ import java.util.Set;
 
 /**
  * A bounded, read-only GGUF/ONNX container probe. It identifies metadata
- * candidates; it DOES NOT load an inference engine, verify ONNX operators,
+ * candidates; it DOES NOT load an inference engine, validate ONNX operators,
  * tensor data, tokenizer semantics or target ABI. All content is untrusted.
  *
  * Format references:
@@ -59,10 +59,16 @@ final class KnowledgeModelContainerProbe {
         long duplicateOpsetDomains;
         long distinctOperatorKinds;
         long undecodedOperatorNodes;
+        long schemaMatchedKinds;
+        long schemaBeforeIntroductionKinds;
+        long schemaUnlistedKinds;
+        long schemaUnresolvedKinds;
+        long schemaBeyondSnapshotKinds;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
         String operatorInventoryHints = "";
+        String schemaSnapshotHints = "";
     }
 
     private static final class OpsetImport {
@@ -115,10 +121,16 @@ final class KnowledgeModelContainerProbe {
         final long duplicateOpsetDomains;
         final long distinctOperatorKinds;
         final long undecodedOperatorNodes;
+        final long schemaMatchedKinds;
+        final long schemaBeforeIntroductionKinds;
+        final long schemaUnlistedKinds;
+        final long schemaUnresolvedKinds;
+        final long schemaBeyondSnapshotKinds;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
         final String operatorInventoryHints;
+        final String schemaSnapshotHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -147,10 +159,16 @@ final class KnowledgeModelContainerProbe {
             duplicateOpsetDomains = details.duplicateOpsetDomains;
             distinctOperatorKinds = details.distinctOperatorKinds;
             undecodedOperatorNodes = details.undecodedOperatorNodes;
+            schemaMatchedKinds = details.schemaMatchedKinds;
+            schemaBeforeIntroductionKinds = details.schemaBeforeIntroductionKinds;
+            schemaUnlistedKinds = details.schemaUnlistedKinds;
+            schemaUnresolvedKinds = details.schemaUnresolvedKinds;
+            schemaBeyondSnapshotKinds = details.schemaBeyondSnapshotKinds;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
             operatorInventoryHints = details.operatorInventoryHints;
+            schemaSnapshotHints = details.schemaSnapshotHints;
         }
     }
 
@@ -378,8 +396,20 @@ final class KnowledgeModelContainerProbe {
             details.distinctOperatorKinds = operatorInventory.size();
             int shown = 0;
             for (final Map.Entry<OperatorKey, Long> entry : operatorInventory.entrySet()) {
-                if (++shown > 6) break;
                 final OperatorKey key = entry.getKey();
+                final Long imported = importedDomains.get(key.domain);
+                final KnowledgeOnnxSchemaCatalog.Match schema =
+                        KnowledgeOnnxSchemaCatalog.lookup(key.domain, key.operator,
+                                imported == null ? 0 : imported,
+                                ambiguousDomains.contains(key.domain));
+                switch (schema.kind) {
+                    case SNAPSHOT_REVISION: details.schemaMatchedKinds++; break;
+                    case BEFORE_INTRODUCTION: details.schemaBeforeIntroductionKinds++; break;
+                    case UNLISTED: details.schemaUnlistedKinds++; break;
+                    case UNRESOLVED_IMPORT: details.schemaUnresolvedKinds++; break;
+                    case BEYOND_SNAPSHOT: details.schemaBeyondSnapshotKinds++; break;
+                }
+                if (++shown > 6) continue;
                 final String version;
                 if (ambiguousDomains.contains(key.domain)) version = "?";
                 else if (importedDomains.containsKey(key.domain)) {
@@ -390,6 +420,11 @@ final class KnowledgeModelContainerProbe {
                         (details.operatorInventoryHints.isEmpty() ? "" : "; ")
                         + safeOnnxDomainHint(key.domain) + "/" + key.operator
                         + "@opset" + version + " x" + entry.getValue();
+                final String revision = schema.kind == KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION
+                        ? "revision" + schema.sinceVersion : schema.kind.name();
+                details.schemaSnapshotHints +=
+                        (details.schemaSnapshotHints.isEmpty() ? "" : "; ")
+                        + safeOnnxDomainHint(key.domain) + "/" + key.operator + "=" + revision;
             }
             if (details.customNodesMissingImport > 0 || details.duplicateOpsetDomains > 0
                     || details.undecodedOperatorNodes > 0) {
