@@ -59,7 +59,7 @@ final class KnowledgeOnnxCpuBackend {
         memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB());
         return new KnowledgeOnnxSessionGate.Report(environment.getVersion(), elapsed,
                 Debug.getNativeHeapAllocatedSize() - nativeBefore, inputs, outputs,
-                memory.result());
+                memory.result(), KnowledgeOnnxRssHighWater.readSelf());
     }
 
     static KnowledgeOnnxSmoke.Report smoke(final KnowledgeOnnxMemoryTrace.Recorder memory)
@@ -118,6 +118,7 @@ final class KnowledgeOnnxCpuBackend {
         final long nativeDelta = Debug.getNativeHeapAllocatedSize() - nativeBefore;
         memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB());
         return new KnowledgeOnnxSmoke.Report(environment.getVersion(),
-                initMillis, runMicros, nativeDelta, memory.result());
+                initMillis, runMicros, nativeDelta, memory.result(),
+                KnowledgeOnnxRssHighWater.readSelf());
     }
 }

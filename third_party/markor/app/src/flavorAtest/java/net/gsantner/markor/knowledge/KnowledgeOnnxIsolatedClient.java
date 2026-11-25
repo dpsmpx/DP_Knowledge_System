@@ -147,12 +147,15 @@ final class KnowledgeOnnxIsolatedClient {
                 final long before = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, -1L);
                 final long observed = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, -1L);
                 final long after = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, -1L);
-                if (KnowledgeOnnxMemoryTrace.valid(before, observed, after)) {
+                final long rssHighWater = data.getLong(
+                        KnowledgeOnnxIsolatedProtocol.RSS_HIGH_WATER_KIB, -1L);
+                if (KnowledgeOnnxMemoryTrace.valid(before, observed, after)
+                        && KnowledgeOnnxRssHighWater.valid(rssHighWater)) {
                     report = new KnowledgeOnnxSmoke.Report(
                             KnowledgeOnnxIsolatedProtocol.safeVersion(
                                     data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
                             init, run, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0L),
-                            new KnowledgeOnnxMemoryTrace(before, observed, after));
+                            new KnowledgeOnnxMemoryTrace(before, observed, after), rssHighWater);
                 }
             }
         }

@@ -149,10 +149,25 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Arrays.fill(model, (byte) 0)", service)
         self.assertIn("memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB())", backend)
         self.assertIn("memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB())", backend)
-        self.assertIn("putMemory(data, result.workerMemory)", service)
+        self.assertIn("putMemory(data, result.workerMemory, result.workerRssHighWaterKiB)", service)
         self.assertIn("verifiedFdIsRefusedByDebugWorkerLowRamGate", emulator)
         self.assertIn("assertWorkerPssSnapshots", emulator)
         self.assertIn('PSS_OBSERVED_KIB = "pss_observed_kib"', protocol)
+        rss = (APP / "main" / base / "KnowledgeOnnxRssHighWater.java").read_text()
+        client = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedClient.java").read_text()
+        fd_client = (APP / "flavorAtest" / base /
+                     "KnowledgeOnnxIsolatedSessionClient.java").read_text()
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        self.assertIn('new FileReader("/proc/self/status")', rss)
+        self.assertIn('line.startsWith("VmHWM:")', rss)
+        self.assertIn("catch (IOException | RuntimeException unavailable)", rss)
+        self.assertIn("KnowledgeOnnxRssHighWater.readSelf()", backend)
+        self.assertIn('RSS_HIGH_WATER_KIB = "rss_hwm_kib"', protocol)
+        self.assertIn("KnowledgeOnnxRssHighWater.valid(rssHighWater)", client)
+        self.assertIn("KnowledgeOnnxRssHighWater.valid(rssHighWater)", fd_client)
+        self.assertIn("formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)",
+                      activity)
+        self.assertIn("Worker kernel RSS high-water is not bounded", emulator)
 
     def test_manual_fd_smoke_reuses_generated_graph_and_never_selects_user_model(self):
         base = "java/net/gsantner/markor/knowledge/"

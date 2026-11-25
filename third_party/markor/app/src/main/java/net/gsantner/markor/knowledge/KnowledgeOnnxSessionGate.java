@@ -19,16 +19,18 @@ final class KnowledgeOnnxSessionGate {
         final long inputs;
         final long outputs;
         final KnowledgeOnnxMemoryTrace workerMemory;
+        final long workerRssHighWaterKiB;
 
         Report(final String version, final long millis, final long delta,
                final long inputCount, final long outputCount,
-               final KnowledgeOnnxMemoryTrace memory) {
+               final KnowledgeOnnxMemoryTrace memory, final long rssHighWaterKiB) {
             runtimeVersion = version;
             sessionInitMillis = millis;
             nativeHeapDeltaBytes = delta;
             inputs = inputCount;
             outputs = outputCount;
             workerMemory = memory;
+            workerRssHighWaterKiB = rssHighWaterKiB;
         }
     }
 
