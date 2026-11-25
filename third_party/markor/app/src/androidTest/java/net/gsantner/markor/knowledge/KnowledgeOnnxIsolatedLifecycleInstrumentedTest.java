@@ -349,6 +349,51 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void simulatedWorkerOomKillsBinderAndFreshManualRunSucceeds()
+            throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        try {
+            connection.simulateOom();
+            assertTrue("Simulated OOM did not kill isolated Binder promptly",
+                    connection.died.await(5, TimeUnit.SECONDS));
+            assertEquals("Fatal OOM unexpectedly sent an ONNX result", 1L,
+                    connection.responded.getCount());
+            assertFalse("Fatal OOM killed the owning process",
+                    KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            unbindWorker(connection);
+        }
+
+        // A new explicit start must bind a new worker. The failure itself has
+        // no retry and never uses installed models, weights, or user notes.
+        Thread.sleep(1000);
+        final KnowledgeOnnxIsolatedClient client = new KnowledgeOnnxIsolatedClient(context);
+        final CountDownLatch finished = new CountDownLatch(1);
+        final AtomicReference<KnowledgeOnnxSmoke.Report> recovered = new AtomicReference<>();
+        final AtomicInteger callbacks = new AtomicInteger();
+        final AtomicBoolean bound = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.start(
+                    new KnowledgeOnnxIsolatedClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSmoke.Report report) {
+                    recovered.set(report);
+                    callbacks.incrementAndGet();
+                    finished.countDown();
+                }
+                @Override public void failure() {
+                    callbacks.incrementAndGet();
+                    finished.countDown();
+                }
+            })));
+            assertTrue("Manual start after OOM failed to bind", bound.get());
+            assertTrue("New worker did not respond", finished.await(40, TimeUnit.SECONDS));
+            assertNotNull("Fresh generated Identity failed after simulated OOM", recovered.get());
+            assertEquals("Fresh manual run invoked multiple callbacks", 1, callbacks.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     @Test public void fdSessionRejectsWrongShaBeforeNativeOpen() throws Exception {
         final byte[] graph = KnowledgeOnnxSmoke.identityModel();
         final String originalSha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
@@ -504,7 +549,9 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         final Messenger reply = new Messenger(new Handler(Looper.getMainLooper(), message -> {
             if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED) {
                 started.countDown();
-            } else if (message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
+            } else if (message.what == KnowledgeOnnxIsolatedProtocol.RESULT_PASSED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_FAILED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED) {
                 responseCode.set(message.what);
@@ -530,6 +577,13 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
 
         void startStall() throws RemoteException {
             final Message request = Message.obtain(null, KnowledgeOnnxIsolatedProtocol.DEBUG_STALL);
+            request.replyTo = reply;
+            messenger.send(request);
+        }
+
+        void simulateOom() throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_SIMULATE_OOM);
             request.replyTo = reply;
             messenger.send(request);
         }

@@ -121,6 +121,24 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Timed-out weights not wiped", emulator)
         self.assertIn("Expired FD callback ran again", emulator)
 
+    def test_debug_simulated_oom_exits_only_worker_without_reply_or_large_allocation(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        protocol = (APP / "main" / base / "KnowledgeOnnxIsolatedProtocol.java").read_text()
+        service = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedService.java").read_text()
+        emulator = (APP / "androidTest" / base /
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("DEBUG_SIMULATE_OOM = 11", protocol)
+        self.assertIn("debugOom && !BuildConfig.DEBUG", service)
+        self.assertIn('throw new OutOfMemoryError("debug-only simulated worker OOM")', service)
+        self.assertIn("catch (OutOfMemoryError exhausted)", service)
+        self.assertIn("fatalMemory = true;\n                exitSandboxProcess();", service)
+        self.assertIn("if (!fatalMemory) {", service)
+        self.assertIn("simulatedWorkerOomKillsBinderAndFreshManualRunSucceeds", emulator)
+        self.assertIn("connection.died.await(5, TimeUnit.SECONDS)", emulator)
+        self.assertIn("Fatal OOM unexpectedly sent an ONNX result", emulator)
+        self.assertIn("Fresh manual run invoked multiple callbacks", emulator)
+        self.assertNotIn("new byte[", emulator)
+
     def test_live_ram_gate_is_rechecked_after_model_sha_audit(self):
         base = "java/net/gsantner/markor/knowledge/"
         activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
