@@ -13,9 +13,12 @@ import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.os.RemoteException;
 
+import net.gsantner.markor.BuildConfig;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,6 +48,26 @@ public final class KnowledgeOnnxIsolatedService extends Service {
     private boolean handleMessage(final Message message) {
         if (message.what == KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT) {
             exitSandboxProcess();
+            return true;
+        }
+        if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL) {
+            // Instrumentation-only. A synthetic Java wait exercises Binder death,
+            // cancellation and the process watchdog, never the native ONNX engine.
+            if (!BuildConfig.DEBUG || message.replyTo == null
+                    || !running.compareAndSet(false, true)) return true;
+            final Messenger reply = message.replyTo;
+            handler.postDelayed(deadline, KnowledgeOnnxIsolatedProtocol.DEBUG_WATCHDOG_MILLIS);
+            worker.execute(() -> {
+                try {
+                    reply.send(Message.obtain(null,
+                            KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED));
+                } catch (RemoteException ignored) { }
+                try {
+                    new CountDownLatch(1).await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
             return true;
         }
         final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION;

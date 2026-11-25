@@ -32,11 +32,24 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         for case in ("manifestWorkerIsPrivateAndIsolated",
                      "generatedIdentitySmokeCanRunTwiceAcrossWorkerLifecycle",
                      "syntheticFdSessionUsesWorkerAndVerifiesOneInputOutput",
-                     "cancellingPendingBindSilencesCallbacks"):
+                     "cancellingPendingBindSilencesCallbacks",
+                     "debugStallWatchdogKillsOnlyWorker",
+                     "cancellingDebugStallKillsWorkerBeforeWatchdog"):
             self.assertIn(case, suite)
         self.assertIn("KnowledgeOnnxSmoke.identityModel()", suite)
         self.assertNotIn("readForCpuSession", suite)
         self.assertNotIn("modelPackages", suite)
+
+    def test_synthetic_stall_is_debug_only_and_binder_observed(self):
+        service = (APP / "src/flavorAtest/java/net/gsantner/markor/knowledge/"
+                   "KnowledgeOnnxIsolatedService.java").read_text()
+        suite = (APP / "src/androidTest/java/net/gsantner/markor/knowledge/"
+                 "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("if (!BuildConfig.DEBUG || message.replyTo == null", service)
+        self.assertIn("DEBUG_WATCHDOG_MILLIS", service)
+        self.assertIn("new CountDownLatch(1).await()", service)
+        self.assertIn("binder.linkToDeath", suite)
+        self.assertIn("KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT", suite)
 
 
 if __name__ == "__main__":
