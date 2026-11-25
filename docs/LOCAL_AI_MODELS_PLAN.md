@@ -72,7 +72,8 @@ redirect и длины HTTP-ответа. [PR #134](https://github.com/dpsmpx/DP
 ввёл диагностический `KnowledgeModelPackageContract` v1, который
 для каждой роли показывает недостающие tokenizer/config, шаблоны,
 контракт признаков, ревизию, лицензию и Android backend; все веса
-остаются `runnable=false`.
+остаются `runnable=false`. Подробности —
+[`MODEL_M1_PACKAGE_CONTRACT.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_PACKAGE_CONTRACT.md).
 [PR #145](https://github.com/dpsmpx/DP_Knowledge_System/pull/145)
 добавил **ручной импорт комплекта сопутствующих файлов** по
 `dpks-model-package.json` с ограниченным и строгим JSON-контрактом,
@@ -82,15 +83,14 @@ redirect и длины HTTP-ответа. [PR #134](https://github.com/dpsmpx/DP
 автоматическая установка tokenizer: пользователь выбирает все
 компоненты сам. Описание формата —
 [`MODEL_M1_PACKAGE_MANIFEST.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_PACKAGE_MANIFEST.md).
-[PR #143](https://github.com/dpsmpx/DP_Knowledge_System/pull/143)
-добавил **первый контракт комплектности v1**: карточка модели отличает
-известный вес по SHA/роли/формату от стороннего файла, показывает
-заявленную лицензию, предполагаемый (НЕ ПРОВЕРЕННЫЙ) движок и отдельные
-недостающие требования для эмбеддингов, LLM, реранкера и персонализации.
-Каждый вес по-прежнему `runnable=false`; контракт **не** является
-реальным импортом tokenizer/config, архитектурной проверкой или готовым
-пакетом. Подробности —
-[`MODEL_M1_PACKAGE_CONTRACT.md`](https://github.com/dpsmpx/DP_Knowledge_System/blob/feature/stage18-context-temporal-relations/docs/MODEL_M1_PACKAGE_CONTRACT.md).
+[PR #147](https://github.com/dpsmpx/DP_Knowledge_System/pull/147)
+добавил **отдельную ручную повторную проверку SHA-256 всего комплекта**:
+веса и сопутствующие файлы читаются заново в отменяемом worker, поэтому
+обнаруживается изменение байтов даже при прежнем размере. Для JSON до
+512 КиБ выполняется только ограниченная проверка UTF-8 и структуры
+корневого объекта; большие JSON и бинарные токенизаторы помечаются как
+непроверенные структурно. Время чтения и объём данных **не** являются
+замерами скорости inference. Модель всё ещё `runnable=false`.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
