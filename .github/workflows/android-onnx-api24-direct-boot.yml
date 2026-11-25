@@ -1,11 +1,9 @@
+# Experimental infrastructure probe only: the AOSP API24 emulator has not
+# completed a full CI boot. It must not gate pull requests or claim Android 7 QA.
 name: Android ONNX API24 direct-boot probe
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/android-onnx-api24-direct-boot.yml'
-      - 'tests/test_onnx_instrumentation_contract.py'
 
 permissions:
   contents: read

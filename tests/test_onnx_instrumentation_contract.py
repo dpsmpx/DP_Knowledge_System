@@ -41,6 +41,8 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
 
     def test_api24_direct_boot_probe_is_bounded_and_does_not_unlock_screen(self):
         probe = (ROOT / ".github/workflows/android-onnx-api24-direct-boot.yml").read_text()
+        self.assertIn("workflow_dispatch:", probe)
+        self.assertNotIn("pull_request:", probe)
         self.assertIn("api24-aosp-direct-boot:", probe)
         self.assertIn("timeout-minutes: 16", probe)
         self.assertIn("system-images;android-24;default;x86_64", probe)
