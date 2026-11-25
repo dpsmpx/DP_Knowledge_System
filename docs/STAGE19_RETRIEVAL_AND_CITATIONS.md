@@ -246,15 +246,27 @@ even if every reference and quotation passes the checks below.
     Synthetic JVM tests cover these syntax boundaries, 340 repeated citations
     and oversized source rejection. No semantic truth check, journal write,
     provider call or real-device latency measurement is implied.
+25. Hidden Markdown surfaces can no longer supply citation numbers or verbatim
+    quotations: multi-line HTML comments (including an unclosed comment),
+    reference-link definition targets, `<https://...>` autolinks, and
+    parenthesized inline-link destinations (including nested or escaped
+    parentheses) are masked without changing answer offsets. The visible
+    `[1](url)` label remains a link, while an independent `[1]` outside the
+    link remains a real source marker. Regressions cover misleading `[2]`
+    inside a link with only one approved source, quote-looking URL components,
+    and 90 repeated mixed lines under the existing 12k answer bound. This
+    improves **syntax** and false-positive resistance only; source truth,
+    paraphrase entailment and real device behavior remain unverified.
 
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
 The script creates **only an in-memory SQLite FTS4 database** with generated
 text and known synthetic relevance labels. It reads no vault, uses no network,
-and prints aggregate metrics, not source paths. Eight regression tests cover
+and prints aggregate metrics, not source paths. Eleven regression tests cover
 FTS4 query syntax, phrase/strict/OR ordering, bounds, labeled recall,
-opposing synthetic claims and the absence of unproven synonym expansion.
+opposing synthetic claims, exclusion of oversized/stale index rows, stable
+casefold tie-breaking, and the absence of unproven synonym expansion.
 
 Updated Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
 artificial notes, five adversarial two-word queries (including one Cyrillic
@@ -281,6 +293,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   uncited prose spans and fake citation markers in code/links/quoted text;
   escaped/reference-style Markdown and indented-code masking, repeated
   citation source-lexicon reuse and oversized source rejection;
+  non-prose HTML comments, link targets and autolinks, including quoted URL
+  text and a repeated-citation mixed Markdown answer;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

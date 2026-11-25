@@ -81,6 +81,43 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
             self.assertEqual([], search_production_lexical_mirror(
                 connection, 'cobalt willow', 24))
 
+    def test_current_generation_and_oversized_notes_never_occupy_evidence_slots(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            for ident, path, generation, oversized in (
+                    (1, 'a-stale.md', 'old-generation', 0),
+                    (2, 'b-oversized.md', 'synthetic-stage19', 1),
+                    (3, 'z-valid.md', 'synthetic-stage19', 0)):
+                connection.execute('INSERT INTO notes VALUES (?,?,?,?,?)',
+                                   (ident, path, 'test', generation, oversized))
+                connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                                   ' VALUES (?,?,?,?)',
+                                   (ident, path, 'test', 'amber violet'))
+            self.assertEqual(['z-valid.md'], search_production_lexical_mirror(
+                connection, 'amber violet', 24))
+            self.assertEqual(['z-valid.md'], search_path_order_or_baseline(
+                connection, 'amber violet', 24))
+
+    def test_equal_casefold_paths_keep_a_stable_binary_tiebreaker(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            for ident, path in ((1, 'a.md'), (2, 'B.md'), (3, 'A.md')):
+                connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                                   (ident, path, 'test', 'synthetic-stage19'))
+                connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                                   ' VALUES (?,?,?,?)',
+                                   (ident, path, 'test', 'amber violet'))
+            for _ in range(3):
+                self.assertEqual(['A.md', 'a.md', 'B.md'],
+                                 search_production_lexical_mirror(
+                                     connection, 'amber violet', 24))
+
     def test_partial_or_fallback_retains_matches_without_inventing_evidence(self):
         with sqlite3.connect(':memory:') as connection:
             connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
