@@ -452,6 +452,20 @@ IPC-границе; сырые данные `/proc` не передаются.
 HTTP 429 от Maven). Доступность `VmHWM` на каждом OEM не гарантируется;
 настоящий LMK/native OOM, реальные веса, физический ARM64 и API 24–26
 по-прежнему открыты; `runnable=false`.
+[PR #211](https://github.com/dpsmpx/DP_Knowledge_System/pull/211)
+защитил isolated worker от Java `OutOfMemoryError` в ONNX-операции:
+рабочий процесс завершается без успешного IPC-ответа, а клиент видит смерть
+Binder и завершает ручной запрос с ошибкой. Новый запуск только по отдельной
+команде пользователя — автоматического повтора весов нет. Debug-only
+IPC-имитация выбрасывает маленький объект ошибки без искусственного
+исчерпания RAM и не принимается в release; инструментальный тест проверяет
+смерть Binder, отсутствие результата и новую успешную сессию на сгенерированном
+`Identity`-графе. [Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045832)
+подтвердили **14/14 на API 27/28/35**; [Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045700)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045734)
+также зелёные. Тест не моделирует реальный native OOM или LMK и не
+подтверждает физический ARM64; API 24–26 и реальные веса/инференс открыты.
+`runnable=false` сохраняется.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического

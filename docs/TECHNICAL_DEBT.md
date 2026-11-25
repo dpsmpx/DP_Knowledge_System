@@ -859,6 +859,21 @@ OOM. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/a
 LMK/native OOM, реальные веса/инференс, API 24–26 и гарантии против
 пиковых аллокаций. `runnable=false` сохраняется.
 
+**MODEL-M1: аварийное завершение isolated worker при Java OOM и ручное восстановление —
+[PR #211](https://github.com/dpsmpx/DP_Knowledge_System/pull/211).**
+В ONNX worker перехватывается `OutOfMemoryError`: процесс
+завершается без ответа, оба клиента уже умеют обрабатывать смерть Binder,
+автоматический повтор не выполняется. Debug-only IPC-тест вызывает
+синтетическое исключение без больших аллокаций; в release команда недоступна.
+Android instrumentation проверяет смерть рабочего Binder до watchdog,
+отсутствие ответа и новую явно запущенную сгенерированную `Identity`-сессию
+с одним callback. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045832):
+**14/14 тестов на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045700)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45635045734)
+зелёные. **Открыто:** настоящий native OOM, Android LMK, физический
+ARM64/OEM, API 24–26, реальные веса и inference. `runnable=false`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
