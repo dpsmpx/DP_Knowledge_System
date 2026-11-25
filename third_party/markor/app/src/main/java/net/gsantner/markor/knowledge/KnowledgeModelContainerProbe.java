@@ -31,6 +31,10 @@ final class KnowledgeModelContainerProbe {
     private static final long MAX_ONNX_GRAPH_FIELDS = 100_000L;
     private static final long MAX_GGUF_DESCRIPTOR_SCAN = 32L * 1024L * 1024L;
     private static final long MAX_ONNX_GRAPH_NODES = 50_000L;
+    private static final long MAX_ONNX_TYPED_VALUES = 32L;
+    private static final long MAX_ONNX_VALUE_INFO_BYTES = 16L * 1024L;
+    private static final long MAX_ONNX_NESTED_FIELDS = 128L;
+    private static final int MAX_ONNX_SHAPE_DIMS = 16;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -41,7 +45,10 @@ final class KnowledgeModelContainerProbe {
         long nodes;
         long inputs;
         long outputs;
+        long typedInputs;
+        long typedOutputs;
         String operatorHints = "";
+        String signatureHints = "";
     }
 
     static final class Result {
@@ -59,7 +66,10 @@ final class KnowledgeModelContainerProbe {
         final long graphNodes;
         final long graphInputs;
         final long graphOutputs;
+        final long typedInputs;
+        final long typedOutputs;
         final String operatorHints;
+        final String signatureHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -79,7 +89,10 @@ final class KnowledgeModelContainerProbe {
             graphNodes = details.nodes;
             graphInputs = details.inputs;
             graphOutputs = details.outputs;
+            typedInputs = details.typedInputs;
+            typedOutputs = details.typedOutputs;
             operatorHints = details.operatorHints;
+            signatureHints = details.signatureHints;
         }
     }
 
@@ -242,8 +255,8 @@ final class KnowledgeModelContainerProbe {
 
     /**
      * Walks only the direct fields of GraphProto, skipping huge TensorProto
-     * initializers via bounded seeks. Input/output counts are declarations,
-     * not validated TypeProto signatures or validated operator support.
+     * initializers via bounded seeks. Input/output types and dimensions are
+     * declaration hints, not validation against an inference backend.
      */
     private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
                                          final Details details) throws IOException {
@@ -266,13 +279,178 @@ final class KnowledgeModelContainerProbe {
                 final long length = readVarint(data);
                 if (field == 11) details.inputs++;
                 else details.outputs++;
-                skipExact(data, length);
+                if (details.inputs + details.outputs > MAX_ONNX_TYPED_VALUES) {
+                    throw new ScanLimit();
+                }
+                final String signature = inspectOnnxValueInfo(data, length, end);
+                if (!signature.isEmpty()) {
+                    if (field == 11) details.typedInputs++;
+                    else details.typedOutputs++;
+                    if (details.typedInputs + details.typedOutputs <= 4) {
+                        details.signatureHints += (details.signatureHints.isEmpty() ? "" : "; ")
+                                + (field == 11 ? "in:" : "out:") + signature;
+                    }
+                }
             } else {
                 skipWire(data, wire);
             }
             if (data.getFilePointer() > end) throw new BadContainer();
         }
         details.state = DetailState.DECLARATIONS_READ;
+    }
+
+    /** Reads bounded ValueInfoProto.name and tensor-only TypeProto declarations. */
+    private static String inspectOnnxValueInfo(final RandomAccessFile data, final long bytes,
+                                               final long parentEnd) throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, MAX_ONNX_VALUE_INFO_BYTES);
+        String name = "", type = "";
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            checkInterrupted();
+            if (++fields > MAX_ONNX_NESTED_FIELDS) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 1 && wire == 2) {
+                final long size = readVarint(data);
+                if (size > end - data.getFilePointer()) throw new BadContainer();
+                if (size <= 64) {
+                    final byte[] raw = new byte[(int) size];
+                    data.readFully(raw);
+                    try {
+                        name = safeHint(StandardCharsets.UTF_8.newDecoder()
+                                .onMalformedInput(CodingErrorAction.REPORT)
+                                .decode(ByteBuffer.wrap(raw)).toString());
+                    } catch (CharacterCodingException invalid) {
+                        throw new BadContainer();
+                    }
+                } else {
+                    skipExact(data, size);
+                }
+            } else if (field == 2 && wire == 2) {
+                final long size = readVarint(data);
+                type = inspectOnnxType(data, size, end);
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return type.isEmpty() ? "" : (name.isEmpty() ? "tensor:" : name + ":") + type;
+    }
+
+    /** Non-tensor and future ONNX type variants are left undecided, not rejected. */
+    private static String inspectOnnxType(final RandomAccessFile data, final long bytes,
+                                          final long parentEnd) throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
+        String tensorType = "";
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > MAX_ONNX_NESTED_FIELDS) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 1 && wire == 2) {
+                tensorType = inspectOnnxTensorType(data, readVarint(data), end);
+            } else if ((field == 4 || field == 5 || field == 7 || field == 8
+                    || field == 9) && wire == 2) {
+                tensorType = ""; // TypeProto oneof: sequences/maps/etc are not decoded.
+                skipExact(data, readVarint(data));
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return tensorType;
+    }
+
+    private static String inspectOnnxTensorType(final RandomAccessFile data, final long bytes,
+                                                final long parentEnd) throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
+        long elementType = 0;
+        String shape = "?"; // Absent shape is unknown rank; [] is a scalar.
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > MAX_ONNX_NESTED_FIELDS) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 1 && wire == 0) {
+                elementType = readVarint(data);
+            } else if (field == 2 && wire == 2) {
+                shape = inspectOnnxShape(data, readVarint(data), end);
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        if (elementType == 0) throw new BadContainer(); // TensorProto.UNDEFINED is not legal here.
+        return onnxElementTypeHint(elementType) + shape;
+    }
+
+    private static String inspectOnnxShape(final RandomAccessFile data, final long bytes,
+                                           final long parentEnd) throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
+        final StringBuilder dims = new StringBuilder("[");
+        long fields = 0;
+        int count = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > MAX_ONNX_NESTED_FIELDS) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            if ((tag >>> 3) == 1 && (tag & 7) == 2) {
+                if (++count > MAX_ONNX_SHAPE_DIMS) throw new ScanLimit();
+                if (count > 1) dims.append(',');
+                dims.append(inspectOnnxDimension(data, readVarint(data), end));
+            } else {
+                skipWire(data, (int) (tag & 7));
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return dims.append(']').toString();
+    }
+
+    private static String inspectOnnxDimension(final RandomAccessFile data, final long bytes,
+                                               final long parentEnd) throws IOException {
+        final long end = boundedOnnxEnd(data, bytes, parentEnd, 256);
+        String dimension = "?";
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > 16) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            if ((tag >>> 3) == 1 && (tag & 7) == 0) {
+                final long value = readVarint(data);
+                dimension = value <= 1_000_000_000L ? Long.toString(value) : "large";
+            } else if ((tag >>> 3) == 2 && (tag & 7) == 2) {
+                skipExact(data, readVarint(data));
+                dimension = "?"; // Symbolic dimension is intentionally not echoed.
+            } else {
+                skipWire(data, (int) (tag & 7));
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return dimension;
+    }
+
+    private static long boundedOnnxEnd(final RandomAccessFile data, final long bytes,
+                                       final long parentEnd, final long maxBytes)
+            throws IOException {
+        if (bytes < 0 || bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        if (bytes > maxBytes) throw new ScanLimit();
+        return data.getFilePointer() + bytes;
+    }
+
+    private static String onnxElementTypeHint(final long type) {
+        if (type == 1) return "float32";
+        if (type == 6) return "int32";
+        if (type == 7) return "int64";
+        if (type == 10) return "float16";
+        if (type == 11) return "float64";
+        if (type == 16) return "bfloat16";
+        return "type#" + type; // Unknown and future enum values are not incompatible.
     }
 
     private static void inspectOnnxNode(final RandomAccessFile data, final long bytes,
