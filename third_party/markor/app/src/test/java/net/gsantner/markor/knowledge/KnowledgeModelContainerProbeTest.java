@@ -115,6 +115,65 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(1, result.typedOutputs);
         assertEquals("in:input_ids:int64[?,384]; out:output:float32[1,384]",
                 result.signatureHints);
+        assertEquals("default@17", result.opsetHints);
+        assertEquals(0, result.customDomainNodes);
+        assertEquals(0, result.customNodesMissingImport);
+    }
+
+    @Test public void onnxMatchesCustomNodeDomainsToDeclaredOpsets() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10); // GraphProto.node
+        protobufBytes(graph, onnxNode("MyOp", "com.example.custom"));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("AnotherOp", "com.example.custom"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length); // Includes default @17 import.
+        appendOnnxOpset(model, "com.example.custom", 3);
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(2, result.opsetDeclarations);
+        assertEquals(2, result.customDomainNodes);
+        assertEquals(0, result.customNodesMissingImport);
+        assertEquals(0, result.duplicateOpsetDomains);
+        assertEquals("default@17, com.example.custom@3", result.opsetHints);
+    }
+
+    @Test public void onnxMissingOrDuplicateCustomOpsetIsAWarningNotRuntimeVerdict()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MyOp", "example.unknown"));
+        final KnowledgeModelContainerProbe.Result missing = probe(
+                onnxWithGraph(graph.toByteArray()), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, missing.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, missing.detailState);
+        assertEquals(1, missing.customDomainNodes);
+        assertEquals(1, missing.customNodesMissingImport);
+
+        final ByteArrayOutputStream duplicate = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        duplicate.write(baseline, 0, baseline.length);
+        appendOnnxOpset(duplicate, "", 18); // Default domain already imported at 17.
+        final KnowledgeModelContainerProbe.Result ambiguity = probe(duplicate.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, ambiguity.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, ambiguity.detailState);
+        assertEquals(1, ambiguity.duplicateOpsetDomains);
+        assertEquals("default@17", ambiguity.opsetHints);
+    }
+
+    @Test public void onnxUntrustedDomainIsBoundedWithoutModelExecution() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("Op", new String(new char[129]).replace('\0', 'x')));
+        final KnowledgeModelContainerProbe.Result oversized = probe(
+                onnxWithGraph(graph.toByteArray()), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, oversized.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, oversized.detailState);
     }
 
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
@@ -383,6 +442,28 @@ public final class KnowledgeModelContainerProbeTest {
         varint(model, 16);
         varint(model, 17);
         return model.toByteArray();
+    }
+
+    private static byte[] onnxNode(final String operation, final String domain) {
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        varint(node, 34); // NodeProto.op_type, field 4
+        protobufString(node, operation);
+        varint(node, 58); // NodeProto.domain, field 7
+        protobufString(node, domain);
+        return node.toByteArray();
+    }
+
+    private static void appendOnnxOpset(final ByteArrayOutputStream model,
+                                         final String domain, final int version) {
+        final ByteArrayOutputStream declaration = new ByteArrayOutputStream();
+        if (!domain.isEmpty()) {
+            varint(declaration, 10); // OperatorSetIdProto.domain, field 1
+            protobufString(declaration, domain);
+        }
+        varint(declaration, 16); // OperatorSetIdProto.version, field 2
+        varint(declaration, version);
+        varint(model, 66); // ModelProto.opset_import, field 8
+        protobufBytes(model, declaration.toByteArray());
     }
 
     private static void u32(final ByteArrayOutputStream data, final long value) {
