@@ -328,6 +328,80 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
     }
 
+    @Test public void onnxFunctionOpsetImportsAreReviewHintsNotCompatibilityVerdicts()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        appendOnnxFunctionWithImports(model, "UseOtherOpset", "", "",
+                new String[]{"", "com.example"}, new int[]{13, 3});
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length); // Function may precede model imports.
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.localFunctionBodyNodes);
+        assertEquals(2, result.localFunctionImportDeclarations);
+        assertEquals(1, result.localFunctionImportVersionDifferences);
+        assertEquals(1, result.localFunctionImportMissingModel);
+        assertEquals(0, result.localFunctionImportAmbiguousModel);
+        assertEquals(0, result.duplicateLocalFunctionImportDomains);
+    }
+
+    @Test public void onnxFunctionImportDuplicatesAndInvalidVersionsAreWarnings()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithImports(model, "Dupe", "", "",
+                new String[]{"", "", "com.example"}, new int[]{17, 18, 0});
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(3, result.localFunctionImportDeclarations);
+        assertEquals(1, result.duplicateLocalFunctionImportDomains);
+        assertEquals(1, result.invalidLocalFunctionImportVersions);
+        assertEquals(0, result.localFunctionImportVersionDifferences);
+
+        final ByteArrayOutputStream ambiguous = new ByteArrayOutputStream();
+        ambiguous.write(model.toByteArray(), 0, model.size());
+        appendOnnxOpset(ambiguous, "", 18);
+        final KnowledgeModelContainerProbe.Result ambiguousResult = probe(
+                ambiguous.toByteArray(), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, ambiguousResult.localFunctionImportAmbiguousModel);
+        assertEquals(0, ambiguousResult.localFunctionImportVersionDifferences);
+    }
+
+    @Test public void onnxFunctionImportsHaveACombinedScanLimit() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        model.write(baseline, 0, baseline.length);
+        final String[] domains = new String[17];
+        final int[] versions = new int[17];
+        for (int i = 0; i < domains.length; i++) {
+            domains[i] = "";
+            versions[i] = 17;
+        }
+        for (int i = 0; i < 121; i++) {
+            appendOnnxFunctionWithImports(model, "F" + i, "", "", domains, versions);
+        }
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(2049, result.localFunctionImportDeclarations);
+    }
+
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         varint(graph, 90);
@@ -628,6 +702,37 @@ public final class KnowledgeModelContainerProbeTest {
             protobufString(function, overload);
         }
         varint(function, 58); // FunctionProto.node, field 7: skip body
+        protobufBytes(function, onnxNode("Add", ""));
+        varint(model, 202); // ModelProto.functions, field 25
+        protobufBytes(model, function.toByteArray());
+    }
+
+    private static void appendOnnxFunctionWithImports(final ByteArrayOutputStream model,
+                                                       final String name, final String domain,
+                                                       final String overload,
+                                                       final String[] importedDomains,
+                                                       final int[] versions) {
+        final ByteArrayOutputStream function = new ByteArrayOutputStream();
+        varint(function, 10); // FunctionProto.name
+        protobufString(function, name);
+        varint(function, 82); // FunctionProto.domain
+        protobufString(function, domain);
+        if (!overload.isEmpty()) {
+            varint(function, 106); // FunctionProto.overload
+            protobufString(function, overload);
+        }
+        for (int i = 0; i < importedDomains.length; i++) {
+            final ByteArrayOutputStream imported = new ByteArrayOutputStream();
+            if (!importedDomains[i].isEmpty()) {
+                varint(imported, 10); // OperatorSetIdProto.domain
+                protobufString(imported, importedDomains[i]);
+            }
+            varint(imported, 16); // OperatorSetIdProto.version
+            varint(imported, versions[i]);
+            varint(function, 74); // FunctionProto.opset_import, field 9
+            protobufBytes(function, imported.toByteArray());
+        }
+        varint(function, 58); // FunctionProto.node, field 7
         protobufBytes(function, onnxNode("Add", ""));
         varint(model, 202); // ModelProto.functions, field 25
         protobufBytes(model, function.toByteArray());
