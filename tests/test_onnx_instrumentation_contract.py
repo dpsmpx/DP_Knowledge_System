@@ -16,6 +16,7 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("api-level: 35", action)
         self.assertIn("arch: x86_64", action)
         self.assertIn("connectedFlavorAtestDebugAndroidTest", action)
+        self.assertIn("bash -lc 'cd third_party/markor && chmod +x gradlew &&", action)
         self.assertNotIn("connectedFlavorDefaultDebugAndroidTest", action)
 
     def test_app_runner_is_only_test_dependency(self):

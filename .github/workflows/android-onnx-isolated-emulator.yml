@@ -47,10 +47,7 @@ jobs:
           emulator-boot-timeout: 600
           disable-animations: true
           script: |
-            cd third_party/markor
-            chmod +x gradlew
-            ./gradlew :app:connectedFlavorAtestDebugAndroidTest \
-              --no-daemon --no-parallel --max-workers=2 --stacktrace
+            bash -lc 'cd third_party/markor && chmod +x gradlew && ./gradlew :app:connectedFlavorAtestDebugAndroidTest --no-daemon --no-parallel --max-workers=2 --stacktrace'
       - name: Preserve synthetic instrumentation failures
         if: failure()
         uses: actions/upload-artifact@v4
