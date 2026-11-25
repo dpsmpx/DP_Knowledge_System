@@ -316,6 +316,27 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_models_package_audit_json_warning"):
                 self.assertIn(key, labels)
 
+    def test_m1_container_probe_is_bounded_and_cannot_mark_runtime_ready(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        code = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_GGUF_METADATA_SCAN", "MAX_GGUF_KEYS",
+                       "MAX_ARRAY_MEMBERS", "MAX_ONNX_FIELDS", "readVarint(",
+                       '"general.architecture"', '"tokenizer.ggml.model"',
+                       "readOpsetDeclaration(", "checkInterrupted("):
+            self.assertIn(marker, code)
+        self.assertIn("KnowledgeModelContainerProbe.inspect(weight, entry.format)", store)
+        self.assertIn("containerPreflightLabel(result.container)", hub)
+        self.assertIn("KnowledgeModelContainerProbe.State.INVALID", hub)
+        self.assertIn("return false;", (folder / "KnowledgeModelPackageContract.java").read_text())
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_container_gguf", "knowledge_models_container_onnx",
+                        "knowledge_models_container_invalid", "knowledge_models_container_partial"):
+                self.assertIn(key, labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

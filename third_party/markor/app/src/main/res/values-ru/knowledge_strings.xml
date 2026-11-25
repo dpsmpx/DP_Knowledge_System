@@ -757,6 +757,16 @@
     <string name="knowledge_models_package_audit_json_warning">Контрольные суммы совпали, но некоторые небольшие JSON-файлы имеют неверную структуру. Модель НЕ готова к запуску.</string>
     <string name="knowledge_models_package_audit_failed">Проверка комплекта НЕ ПРОЙДЕНА: файл отсутствует, изменён, недоступен или проверка отменена. ИИ не запускался. При необходимости переимпортируйте комплект.</string>
     <string name="knowledge_models_package_audit_report">Повторная проверка SHA-256: PASS для весов и компонентов\nПрочитано: %1$s за %2$d мс (проверка хранилища, НЕ скорость нейросети)\nСопутствующих файлов: %3$d\nБазовая структура JSON: %4$d корректных, %5$d некорректных, %6$d пропущено (большие JSON не разбираются)\n\nЭто не проверка работы токенизатора, архитектуры, совместимости ONNX/GGUF, лицензии, качества или скорости модели. Нейросетевая обработка пока отключена.</string>
+    <string name="knowledge_models_container_metadata">Метаданные распознаны (движком не проверены)</string>
+    <string name="knowledge_models_container_partial_label">Частичные метаданные: достигнут лимит или неизвестная структура</string>
+    <string name="knowledge_models_container_invalid_label">Нераспознанная или повреждённая структура контейнера</string>
+    <string name="knowledge_models_container_invalid">SHA-256 совпал с манифестом, но структура контейнера ONNX/GGUF не распознана или повреждена. Модель НЕ готова к запуску.</string>
+    <string name="knowledge_models_container_partial">SHA-256 совпал, но ограниченная проверка контейнера остановилась по лимиту. Совместимость НЕИЗВЕСТНА.</string>
+    <string name="knowledge_models_container_unknown">неизвестно</string>
+    <string name="knowledge_models_container_yes">да (содержимое не проверено)</string>
+    <string name="knowledge_models_container_no">нет</string>
+    <string name="knowledge_models_container_gguf">Контейнер GGUF: %1$s\nВерсия: %2$d, заявлено тензоров: %3$d, метаданных: %4$d\nЗаявленная архитектура: %5$s\nЗаявленный токенизатор: %6$s\nСами тензоры, семантика модели, поддержка Android и производительность НЕ проверены.</string>
+    <string name="knowledge_models_container_onnx">Контейнер ONNX: %1$s\nВерсия IR: %2$d, объявлений opset: %3$d, поле графа присутствует: %4$s\nУзлы графа, операторы, входы/выходы, внешние данные и Android-движок НЕ проверены.</string>
     <string name="knowledge_models_package_remove">Удалить сопутствующие файлы</string>
     <string name="knowledge_models_package_import_help">Выберите dpks-model-package.json и все сопутствующие файлы вместе через системный множественный выбор Android. Веса .gguf/.onnx уже должны быть установлены для этой роли. Проверяются размер и SHA-256 каждого файла. Интернет и ИИ не запускаются. Формат описан в docs/MODEL_M1_PACKAGE_MANIFEST.md.</string>
     <string name="knowledge_models_package_remove_warning">Удалить манифест и сопутствующие файлы из приватного хранилища? Веса модели, заметки и журнал сохранятся. Для восстановления потребуется повторный импорт комплекта.</string>

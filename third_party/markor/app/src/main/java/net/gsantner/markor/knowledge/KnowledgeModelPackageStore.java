@@ -40,15 +40,18 @@ final class KnowledgeModelPackageStore {
         final int jsonObjectsChecked;
         final int jsonNotInspected;
         final int jsonInvalid;
+        final KnowledgeModelContainerProbe.Result container;
 
         Audit(final long bytes, final long millis, final int companionCount,
-              final int checked, final int skipped, final int invalid) {
+              final int checked, final int skipped, final int invalid,
+              final KnowledgeModelContainerProbe.Result preflight) {
             verifiedBytes = bytes;
             elapsedMillis = millis;
             companionFiles = companionCount;
             jsonObjectsChecked = checked;
             jsonNotInspected = skipped;
             jsonInvalid = invalid;
+            container = preflight;
         }
 
         boolean integrityPassed() { return true; } // Otherwise audit throws.
@@ -157,8 +160,10 @@ final class KnowledgeModelPackageStore {
                 }
             }
         }
+        final KnowledgeModelContainerProbe.Result container =
+                KnowledgeModelContainerProbe.inspect(weight, entry.format);
         return new Audit(verified, Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
-                manifest.components.size() - 1, checked, skipped, invalid);
+                manifest.components.size() - 1, checked, skipped, invalid, container);
     }
 
     synchronized KnowledgeModelPackageManifest install(final byte[] manifestBytes,
