@@ -748,7 +748,15 @@
     <string name="knowledge_models_details">%1$s\nSize: %2$s (%3$d bytes)\nFormat: %4$s (not runtime validated)\nSHA-256: %5$s</string>
     <string name="knowledge_models_package_report">Package contract v%1$d\nProvenance: %2$s\nDeclared license: %3$s\nPossible runtime: %4$s (NOT VERIFIED)\nMissing before local execution:%5$s</string>
     <string name="knowledge_models_package_manage">Package files</string>
+    <string name="knowledge_models_package_help">How to import</string>
     <string name="knowledge_models_package_import">Import manifest + companions</string>
+    <string name="knowledge_models_package_audit">Verify package SHA-256</string>
+    <string name="knowledge_models_package_audit_starting">Reading installed model and companions to recheck their SHA-256. Tap Manage to cancel. No inference or network request.</string>
+    <string name="knowledge_models_package_audit_progress">Verifying bytes: %1$s / %2$s (local file reading only)</string>
+    <string name="knowledge_models_package_audit_passed">Package file digests match. This does NOT mean the model is runnable.</string>
+    <string name="knowledge_models_package_audit_json_warning">File digests match, but some small JSON companions are structurally invalid. The model is NOT runnable.</string>
+    <string name="knowledge_models_package_audit_failed">Package audit FAILED: missing, modified or unreadable file, or verification cancelled. No AI model was started. Reimport the package if necessary.</string>
+    <string name="knowledge_models_package_audit_report">SHA-256 recheck: PASS for weights and companions\nRead: %1$s in %2$d ms (storage integrity scan, NOT AI tokens/sec)\nCompanion files: %3$d\nBasic JSON object checks: %4$d passed, %5$d invalid, %6$d skipped (large JSON files are not parsed)\n\nThis does not validate tokenizer behavior, model architecture, ONNX/GGUF runtime compatibility, license, quality or speed. All AI inference remains disabled.</string>
     <string name="knowledge_models_package_remove">Remove package companions</string>
     <string name="knowledge_models_package_import_help">Choose dpks-model-package.json and all companion files together using Android’s multiple-file picker. The .gguf/.onnx weight must already be installed for this role. Every file is checked against its declared SHA-256 and size. No network request or inference is started. See docs/MODEL_M1_PACKAGE_MANIFEST.md for the JSON format.</string>
     <string name="knowledge_models_package_remove_warning">Remove the manifest and all companions from private app storage? The weight file, notes, and journal remain untouched. This cannot be undone without importing the package again.</string>

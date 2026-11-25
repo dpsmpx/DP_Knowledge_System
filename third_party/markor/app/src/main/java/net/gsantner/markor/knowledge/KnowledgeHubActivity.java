@@ -288,7 +288,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             } else {
                 new KnowledgeModelSettingsDialog(this, modelFiles, modelPackages,
                         this::pickModelFile, this::pickModelPackage,
-                        this::downloadModel).show();
+                        this::downloadModel, this::auditModelPackage).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -617,6 +617,64 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         modelImportActive = false;
                         restoreModelButton();
                         modelStatus.setText(R.string.knowledge_models_package_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Explicit integrity/JSON-shape check. NOT an AI speed/quality benchmark. */
+    private void auditModelPackage(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        final AtomicLong lastReport = new AtomicLong();
+        modelStatus.setText(R.string.knowledge_models_package_audit_starting);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final KnowledgeModelPackageStore.Audit result = modelPackages.audit(
+                        entry, (verified, total) -> {
+                            final long now = SystemClock.elapsedRealtime();
+                            final long last = lastReport.get();
+                            if (now - last < 500 || !lastReport.compareAndSet(last, now)) return;
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()
+                                        && modelGeneration.get() == operation) {
+                                    modelStatus.setText(getString(
+                                            R.string.knowledge_models_package_audit_progress,
+                                            KnowledgeModelSettingsDialog.formatSize(verified),
+                                            KnowledgeModelSettingsDialog.formatSize(total)));
+                                }
+                            });
+                        });
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(result.jsonPreflightPassed()
+                                ? R.string.knowledge_models_package_audit_passed
+                                : R.string.knowledge_models_package_audit_json_warning);
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_models_package_audit)
+                                .setMessage(getString(R.string.knowledge_models_package_audit_report,
+                                        KnowledgeModelSettingsDialog.formatSize(result.verifiedBytes),
+                                        result.elapsedMillis, result.companionFiles,
+                                        result.jsonObjectsChecked, result.jsonInvalid,
+                                        result.jsonNotInspected))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (IOException | RuntimeException invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_package_audit_failed);
                     }
                 });
             }

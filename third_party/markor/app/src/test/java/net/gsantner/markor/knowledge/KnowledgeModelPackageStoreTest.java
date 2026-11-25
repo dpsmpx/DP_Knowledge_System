@@ -173,6 +173,109 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void manualAuditRehashesAllBytesWithoutClaimingModelSpeed() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-audit-ok").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(manifest(entry, "tokenizer.json", TOKENIZER, "config.json", CONFIG),
+                    companions("tokenizer.json", TOKENIZER, "config.json", CONFIG), entry);
+            final long[] last = {-1, -1};
+            final KnowledgeModelPackageStore.Audit result = packages.audit(entry, (done, total) -> {
+                assertTrue("Progress must be monotonic", done >= last[0]);
+                assertTrue("Progress exceeded exact total", done <= total);
+                last[0] = done;
+                last[1] = total;
+            });
+            final long expectedBytes = WEIGHT.length + TOKENIZER.length + CONFIG.length;
+            assertEquals(expectedBytes, result.verifiedBytes);
+            assertEquals(expectedBytes, last[0]);
+            assertEquals(expectedBytes, last[1]);
+            assertEquals(2, result.companionFiles);
+            assertEquals(2, result.jsonObjectsChecked);
+            assertEquals(0, result.jsonNotInspected);
+            assertEquals(0, result.jsonInvalid);
+            assertTrue(result.integrityPassed());
+            assertTrue(result.jsonPreflightPassed());
+            assertTrue(result.elapsedMillis >= 0);
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void sameSizePostInstallDamageIsDetectedByExplicitAudit() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-audit-damage").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(manifest(entry, "tokenizer.json", TOKENIZER, "config.json", CONFIG),
+                    companions("tokenizer.json", TOKENIZER, "config.json", CONFIG), entry);
+            final File bundle = new File(directory, "package-" + entry.sha256 + "-EMBEDDING");
+            final File tokenizer = new File(bundle, sha256(TOKENIZER) + ".sidecar");
+            final byte[] corrupted = Arrays.copyOf(TOKENIZER, TOKENIZER.length);
+            corrupted[0] ^= 1;
+            Files.write(tokenizer.toPath(), corrupted);
+            assertNotNull("Size-only presence cannot detect same-size corruption",
+                    packages.installed(entry));
+            try {
+                packages.audit(entry, null);
+                fail("Audit accepted modified tokenizer with the same file length");
+            } catch (IOException expected) { }
+            Files.write(tokenizer.toPath(), TOKENIZER);
+            final File weight = new File(directory, entry.sha256 + ".onnx");
+            final byte[] wrongWeight = Arrays.copyOf(WEIGHT, WEIGHT.length);
+            wrongWeight[3] = 72;
+            Files.write(weight.toPath(), wrongWeight);
+            try {
+                packages.audit(entry, null);
+                fail("Audit accepted modified weight with the same file length");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void jsonShapeWarningAndOversizedJsonSkipAreNotFalseCompatibilityPasses()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-json-preflight").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] invalid = "[]".getBytes(StandardCharsets.UTF_8);
+            final byte[] large = new byte[512 * 1024 + 1];
+            Arrays.fill(large, (byte) 32);
+            packages.install(manifest(entry, "tokenizer.json", invalid, "config.json", large),
+                    companions("tokenizer.json", invalid, "config.json", large), entry);
+            final KnowledgeModelPackageStore.Audit result = packages.audit(entry, null);
+            assertTrue("Hashes still match exactly", result.integrityPassed());
+            assertFalse("Array is not a JSON object", result.jsonPreflightPassed());
+            assertEquals(1, result.jsonInvalid);
+            assertEquals(1, result.jsonNotInspected);
+            assertEquals(0, result.jsonObjectsChecked);
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void auditCancellationMustNeverReturnSuccess() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-audit-cancel").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(manifest(entry, "tokenizer.json", TOKENIZER, "config.json", CONFIG),
+                    companions("tokenizer.json", TOKENIZER, "config.json", CONFIG), entry);
+            Thread.currentThread().interrupt();
+            try {
+                packages.audit(entry, null);
+                fail("Cancelled verification returned PASS");
+            } catch (InterruptedIOException expected) { }
+            finally { Thread.interrupted(); }
+            assertNotNull("Cancel is read-only; installed package remains", packages.installed(entry));
+        } finally { removeTree(directory); }
+    }
+
     private static void reject(final JSONObject json) throws Exception {
         try {
             KnowledgeModelPackageManifest.parse(json.toString().getBytes(StandardCharsets.UTF_8));

@@ -293,6 +293,29 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_models_package_present"):
                 self.assertIn(key, names)
 
+    def test_m1_package_audit_is_explicit_read_only_and_cancelable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        for marker in ("this::auditModelPackage", "modelPackages.audit(",
+                       "modelGeneration.get() == operation", "cancelModelImport()"):
+            self.assertIn(marker, hub)
+        self.assertIn("auditor.verify(entry)", dialog)
+        self.assertIn("knowledge_models_package_audit", dialog)
+        for marker in ("synchronized Audit audit(", "entry.sha256.equals(weightHash)",
+                       "component.sha256.equals(actual)", "basicJsonObject(",
+                       "MAX_JSON_PREFLIGHT_BYTES", "MAX_JSON_DEPTH"):
+            self.assertIn(marker, store)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_package_audit", "knowledge_models_package_audit_report",
+                        "knowledge_models_package_audit_progress",
+                        "knowledge_models_package_audit_failed",
+                        "knowledge_models_package_audit_json_warning"):
+                self.assertIn(key, labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
