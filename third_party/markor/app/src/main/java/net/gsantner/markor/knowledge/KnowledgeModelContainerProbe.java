@@ -10,9 +10,11 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,6 +43,7 @@ final class KnowledgeModelContainerProbe {
     private static final int MAX_ONNX_DOMAINS = 128;
     private static final int MAX_ONNX_OPERATOR_KINDS = 128;
     private static final int MAX_ONNX_LOCAL_FUNCTIONS = 128;
+    private static final long MAX_ONNX_FUNCTION_IMPORTS = 2048;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -70,6 +73,13 @@ final class KnowledgeModelContainerProbe {
         long duplicateLocalFunctions;
         long matchedGraphFunctionNodes;
         long undecodedFunctionOverloads;
+        long localFunctionBodyNodes;
+        long localFunctionImportDeclarations;
+        long localFunctionImportVersionDifferences;
+        long localFunctionImportMissingModel;
+        long localFunctionImportAmbiguousModel;
+        long duplicateLocalFunctionImportDomains;
+        long invalidLocalFunctionImportVersions;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
@@ -129,6 +139,11 @@ final class KnowledgeModelContainerProbe {
         }
     }
 
+    private static final class FunctionMetadata {
+        FunctionKey identity;
+        final Map<String, Long> importedVersions = new HashMap<>();
+    }
+
     static final class Result {
         final KnowledgeModelFiles.Format format;
         final State state;
@@ -163,6 +178,13 @@ final class KnowledgeModelContainerProbe {
         final long duplicateLocalFunctions;
         final long matchedGraphFunctionNodes;
         final long undecodedFunctionOverloads;
+        final long localFunctionBodyNodes;
+        final long localFunctionImportDeclarations;
+        final long localFunctionImportVersionDifferences;
+        final long localFunctionImportMissingModel;
+        final long localFunctionImportAmbiguousModel;
+        final long duplicateLocalFunctionImportDomains;
+        final long invalidLocalFunctionImportVersions;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
@@ -207,6 +229,13 @@ final class KnowledgeModelContainerProbe {
             duplicateLocalFunctions = details.duplicateLocalFunctions;
             matchedGraphFunctionNodes = details.matchedGraphFunctionNodes;
             undecodedFunctionOverloads = details.undecodedFunctionOverloads;
+            localFunctionBodyNodes = details.localFunctionBodyNodes;
+            localFunctionImportDeclarations = details.localFunctionImportDeclarations;
+            localFunctionImportVersionDifferences = details.localFunctionImportVersionDifferences;
+            localFunctionImportMissingModel = details.localFunctionImportMissingModel;
+            localFunctionImportAmbiguousModel = details.localFunctionImportAmbiguousModel;
+            duplicateLocalFunctionImportDomains = details.duplicateLocalFunctionImportDomains;
+            invalidLocalFunctionImportVersions = details.invalidLocalFunctionImportVersions;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
@@ -390,6 +419,7 @@ final class KnowledgeModelContainerProbe {
         final Map<OperatorKey, Long> operatorInventory = new LinkedHashMap<>();
         final Map<FunctionKey, Long> graphFunctionCalls = new HashMap<>();
         final Set<FunctionKey> localFunctions = new HashSet<>();
+        final List<FunctionMetadata> functionMetadata = new ArrayList<>();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -434,7 +464,9 @@ final class KnowledgeModelContainerProbe {
                     if (++details.localFunctionDeclarations > MAX_ONNX_LOCAL_FUNCTIONS) {
                         throw new ScanLimit();
                     }
-                    final FunctionKey key = inspectOnnxLocalFunction(data, size);
+                    final FunctionMetadata metadata = inspectOnnxLocalFunction(data, size, details);
+                    functionMetadata.add(metadata);
+                    final FunctionKey key = metadata.identity;
                     if (key == null) {
                         details.undecodedLocalFunctions++;
                     } else {
@@ -460,6 +492,20 @@ final class KnowledgeModelContainerProbe {
             for (final Map.Entry<FunctionKey, Long> call : graphFunctionCalls.entrySet()) {
                 if (localFunctions.contains(call.getKey())) {
                     details.matchedGraphFunctionNodes += call.getValue();
+                }
+            }
+            for (final FunctionMetadata function : functionMetadata) {
+                for (final Map.Entry<String, Long> entry : function.importedVersions.entrySet()) {
+                    final String domain = entry.getKey();
+                    if (ambiguousDomains.contains(domain)) {
+                        details.localFunctionImportAmbiguousModel++;
+                    } else if (!importedDomains.containsKey(domain)) {
+                        details.localFunctionImportMissingModel++;
+                    } else if (!importedDomains.get(domain).equals(entry.getValue())) {
+                        // Different opset imports may still select an identical operator
+                        // schema. This is ONLY a review hint, never incompatibility.
+                        details.localFunctionImportVersionDifferences++;
+                    }
                 }
             }
             details.distinctOperatorKinds = operatorInventory.size();
@@ -499,7 +545,9 @@ final class KnowledgeModelContainerProbe {
                     || details.undecodedOperatorNodes > 0
                     || details.undecodedLocalFunctions > 0
                     || details.duplicateLocalFunctions > 0
-                    || details.undecodedFunctionOverloads > 0) {
+                    || details.undecodedFunctionOverloads > 0
+                    || details.duplicateLocalFunctionImportDomains > 0
+                    || details.invalidLocalFunctionImportVersions > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -801,15 +849,18 @@ final class KnowledgeModelContainerProbe {
         }
     }
 
-    /** Inspect only a FunctionProto's top-level identity fields; skip its entire body. */
-    private static FunctionKey inspectOnnxLocalFunction(final RandomAccessFile data,
-                                                        final long size) throws IOException {
+    /** Inspect only direct FunctionProto declarations; skip nested nodes/attributes. */
+    private static FunctionMetadata inspectOnnxLocalFunction(final RandomAccessFile data,
+                                                             final long size,
+                                                             final Details details)
+            throws IOException {
         if (size < 0 || size > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + size;
         String name = "";
         String domain = "";
         String overload = "";
         boolean decoded = true;
+        final FunctionMetadata metadata = new FunctionMetadata();
         long fields = 0;
         while (data.getFilePointer() < end) {
             checkInterrupted();
@@ -826,13 +877,33 @@ final class KnowledgeModelContainerProbe {
             } else if (field == 13 && wire == 2) {
                 overload = readOnnxSafeIdentifier(data, readVarint(data), end);
                 if (overload == null) decoded = false;
+            } else if (field == 7 && wire == 2) { // FunctionProto.node
+                if (++details.localFunctionBodyNodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
+                skipExact(data, readVarint(data));
+            } else if (field == 9 && wire == 2) { // FunctionProto.opset_import
+                if (++details.localFunctionImportDeclarations > MAX_ONNX_FUNCTION_IMPORTS) {
+                    throw new ScanLimit();
+                }
+                final OpsetImport imported = readOpsetDeclaration(data, readVarint(data));
+                if (imported.version <= 0) {
+                    details.invalidLocalFunctionImportVersions++;
+                } else if (metadata.importedVersions.containsKey(imported.domain)) {
+                    details.duplicateLocalFunctionImportDomains++;
+                } else {
+                    if (metadata.importedVersions.size() >= MAX_ONNX_DOMAINS) {
+                        throw new ScanLimit();
+                    }
+                    metadata.importedVersions.put(imported.domain, imported.version);
+                }
             } else {
                 skipWire(data, wire);
             }
             if (data.getFilePointer() > end) throw new BadContainer();
         }
-        return !decoded || name == null || name.isEmpty() || overload == null
-                ? null : new FunctionKey(domain, name, overload);
+        if (decoded && name != null && !name.isEmpty() && overload != null) {
+            metadata.identity = new FunctionKey(domain, name, overload);
+        }
+        return metadata;
     }
 
     /** A short, display-safe identifier. A long/unsafe string never becomes a key. */

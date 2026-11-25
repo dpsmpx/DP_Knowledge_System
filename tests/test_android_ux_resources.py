@@ -458,6 +458,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_models_container_onnx_local_functions", labels)
 
+    def test_model_m1_onnx_function_imports_are_bounded_review_hints(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_FUNCTION_IMPORTS = 2048",
+                       "localFunctionBodyNodes", "localFunctionImportDeclarations",
+                       "localFunctionImportVersionDifferences",
+                       "localFunctionImportMissingModel",
+                       "localFunctionImportAmbiguousModel",
+                       "duplicateLocalFunctionImportDomains",
+                       "invalidLocalFunctionImportVersions",
+                       "FunctionProto.opset_import"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.localFunctionImportVersionDifferences", hub)
+        self.assertIn("knowledge_models_container_onnx_function_imports", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_function_imports", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
