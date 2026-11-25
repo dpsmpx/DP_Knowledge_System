@@ -34,7 +34,10 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
                      "syntheticFdSessionUsesWorkerAndVerifiesOneInputOutput",
                      "cancellingPendingBindSilencesCallbacks",
                      "debugStallWatchdogKillsOnlyWorker",
-                     "cancellingDebugStallKillsWorkerBeforeWatchdog"):
+                     "cancellingDebugStallKillsWorkerBeforeWatchdog",
+                     "fdSessionRejectsWrongShaBeforeNativeOpen",
+                     "fdSessionRejectsTruncatedAndTrailingBytes",
+                     "cancellingBlockedFdReadKillsOnlyWorker"):
             self.assertIn(case, suite)
         self.assertIn("KnowledgeOnnxSmoke.identityModel()", suite)
         self.assertNotIn("readForCpuSession", suite)
@@ -50,6 +53,15 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("new CountDownLatch(1).await()", service)
         self.assertIn("binder.linkToDeath", suite)
         self.assertIn("KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT", suite)
+
+    def test_fd_failure_cases_use_generated_bytes_not_imported_files(self):
+        suite = (APP / "src/androidTest/java/net/gsantner/markor/knowledge/"
+                 "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("ParcelFileDescriptor.createPipe()", suite)
+        self.assertIn("KnowledgeOnnxSessionPipe.sha256Hex(graph)", suite)
+        self.assertIn("KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED", suite)
+        self.assertIn("connection.died.await(5, TimeUnit.SECONDS)", suite)
+        self.assertNotIn("KnowledgeModelPackageStore", suite)
 
 
 if __name__ == "__main__":

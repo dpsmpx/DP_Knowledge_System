@@ -8,11 +8,13 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
+import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -21,6 +23,9 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -137,7 +142,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
     }
 
     @Test public void debugStallWatchdogKillsOnlyWorker() throws Exception {
-        final DebugWorkerConnection connection = bindDebugWorker();
+        final IsolatedWorkerConnection connection = bindWorker();
         try {
             connection.startStall();
             assertTrue("Debug-only stall did not begin", connection.started.await(5, TimeUnit.SECONDS));
@@ -145,12 +150,12 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     connection.died.await(15, TimeUnit.SECONDS));
             assertFalse("Watchdog killed the DPKS app process", KnowledgeOnnxProcessIdentity.isWorker());
         } finally {
-            unbindDebugWorker(connection);
+            unbindWorker(connection);
         }
     }
 
     @Test public void cancellingDebugStallKillsWorkerBeforeWatchdog() throws Exception {
-        final DebugWorkerConnection connection = bindDebugWorker();
+        final IsolatedWorkerConnection connection = bindWorker();
         try {
             connection.startStall();
             assertTrue("Debug-only stall did not begin", connection.started.await(5, TimeUnit.SECONDS));
@@ -161,35 +166,109 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     connection.died.await(5, TimeUnit.SECONDS));
             assertFalse("Cancel killed the DPKS app process", KnowledgeOnnxProcessIdentity.isWorker());
         } finally {
-            unbindDebugWorker(connection);
+            unbindWorker(connection);
         }
     }
 
-    private DebugWorkerConnection bindDebugWorker() throws Exception {
-        final DebugWorkerConnection connection = new DebugWorkerConnection();
+    @Test public void fdSessionRejectsWrongShaBeforeNativeOpen() throws Exception {
+        final byte[] graph = KnowledgeOnnxSmoke.identityModel();
+        final String originalSha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
+        graph[graph.length / 2] ^= 1;
+        assertRejectedSession(graph, graph.length, originalSha);
+    }
+
+    @Test public void fdSessionRejectsTruncatedAndTrailingBytes() throws Exception {
+        final byte[] graph = KnowledgeOnnxSmoke.identityModel();
+        final String sha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
+        assertRejectedSession(Arrays.copyOf(graph, graph.length - 1), graph.length, sha);
+        assertRejectedSession(Arrays.copyOf(graph, graph.length + 1), graph.length, sha);
+    }
+
+    @Test public void cancellingBlockedFdReadKillsOnlyWorker() throws Exception {
+        final byte[] graph = KnowledgeOnnxSmoke.identityModel();
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendSession(pipe[0], graph.length, KnowledgeOnnxSessionPipe.sha256Hex(graph));
+            closePipe(pipe[0]);
+            // The receiver knows the complete length, but this writer stays open
+            // with only a prefix. The worker must wait for the rest of the pipe.
+            try (OutputStream sender = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                sender.write(graph, 0, 16);
+                sender.flush();
+                assertFalse("Partial FD unexpectedly produced a final session reply",
+                        connection.responded.await(800, TimeUnit.MILLISECONDS));
+                connection.messenger.send(Message.obtain(null,
+                        KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT));
+                assertTrue("Cancel failed to kill blocked FD worker",
+                        connection.died.await(5, TimeUnit.SECONDS));
+            }
+            assertFalse("Cancel killed the DPKS app process", KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    private void assertRejectedSession(final byte[] transmitted, final int advertisedLength,
+                                       final String expectedSha) throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendSession(pipe[0], advertisedLength, expectedSha);
+            closePipe(pipe[0]);
+            try (OutputStream sender = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                sender.write(transmitted);
+            }
+            assertTrue("Invalid FD did not produce a response",
+                    connection.responded.await(15, TimeUnit.SECONDS));
+            assertEquals("Invalid FD reached a successful native session",
+                    KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED, connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    private IsolatedWorkerConnection bindWorker() throws Exception {
+        final IsolatedWorkerConnection connection = new IsolatedWorkerConnection();
         final AtomicBoolean bound = new AtomicBoolean();
         instrumentation.runOnMainSync(() -> bound.set(context.bindService(
                 new Intent(context, KnowledgeOnnxIsolatedService.class), connection,
                 Context.BIND_AUTO_CREATE)));
-        assertTrue("Debug worker bind failed", bound.get());
+        assertTrue("Isolated worker bind failed", bound.get());
         if (!connection.connected.await(10, TimeUnit.SECONDS)) {
-            unbindDebugWorker(connection);
-            fail("Debug worker service never connected");
+            unbindWorker(connection);
+            fail("Isolated worker service never connected");
         }
         return connection;
     }
 
-    private void unbindDebugWorker(final DebugWorkerConnection connection) {
+    private void unbindWorker(final IsolatedWorkerConnection connection) {
         instrumentation.runOnMainSync(() -> context.unbindService(connection));
     }
 
-    private static final class DebugWorkerConnection implements ServiceConnection {
+    private static void closePipe(final ParcelFileDescriptor descriptor) {
+        try {
+            descriptor.close();
+        } catch (IOException ignored) { }
+    }
+
+    private static final class IsolatedWorkerConnection implements ServiceConnection {
         final CountDownLatch connected = new CountDownLatch(1);
         final CountDownLatch started = new CountDownLatch(1);
         final CountDownLatch died = new CountDownLatch(1);
+        final CountDownLatch responded = new CountDownLatch(1);
+        final AtomicInteger responseCode = new AtomicInteger();
         final Messenger reply = new Messenger(new Handler(Looper.getMainLooper(), message -> {
             if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED) {
                 started.countDown();
+            } else if (message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED) {
+                responseCode.set(message.what);
+                responded.countDown();
             }
             return true;
         }));
@@ -212,6 +291,20 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         void startStall() throws RemoteException {
             final Message request = Message.obtain(null, KnowledgeOnnxIsolatedProtocol.DEBUG_STALL);
             request.replyTo = reply;
+            messenger.send(request);
+        }
+
+        void sendSession(final ParcelFileDescriptor readPipe, final int length,
+                         final String expectedSha) throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION);
+            request.arg1 = 1;
+            request.arg2 = length;
+            request.replyTo = reply;
+            final Bundle data = new Bundle();
+            data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
+            data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            request.setData(data);
             messenger.send(request);
         }
     }
