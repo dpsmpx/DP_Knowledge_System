@@ -26,6 +26,7 @@ import java.util.Locale;
 final class KnowledgeModelSettingsDialog {
     interface ImportRequest { void pick(KnowledgeModelPolicy.Role role); }
     interface PackageRequest { void pick(KnowledgeModelFiles.Entry entry); }
+    interface AuditRequest { void verify(KnowledgeModelFiles.Entry entry); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -36,18 +37,20 @@ final class KnowledgeModelSettingsDialog {
     private final KnowledgeModelPackageStore packages;
     private final ImportRequest importer;
     private final PackageRequest packageImporter;
+    private final AuditRequest auditor;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
     KnowledgeModelSettingsDialog(final Context activity, final KnowledgeModelFiles modelFiles,
                                  final KnowledgeModelPackageStore modelPackages,
                                  final ImportRequest request, final PackageRequest packageRequest,
-                                 final DownloadRequest download) {
+                                 final DownloadRequest download, final AuditRequest audit) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
         importer = request;
         packageImporter = packageRequest;
+        auditor = audit;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -263,17 +266,23 @@ final class KnowledgeModelSettingsDialog {
     private void showPackageActions(final KnowledgeModelFiles.Entry entry) {
         final String[] actions = {
                 context.getString(R.string.knowledge_models_package_import),
+                context.getString(R.string.knowledge_models_package_audit),
                 context.getString(R.string.knowledge_models_package_remove),
                 context.getString(R.string.knowledge_models_delete)
         };
         new AlertDialog.Builder(context)
                 .setTitle(R.string.knowledge_models_package_manage)
-                .setMessage(R.string.knowledge_models_package_import_help)
                 .setItems(actions, (dialog, which) -> {
                     if (which == 0) packageImporter.pick(entry);
-                    else if (which == 1) confirmRemovePackage(entry);
+                    else if (which == 1) auditor.verify(entry);
+                    else if (which == 2) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
+                .setNeutralButton(R.string.knowledge_models_package_help, (dialog, which) ->
+                        new AlertDialog.Builder(context)
+                                .setMessage(R.string.knowledge_models_package_import_help)
+                                .setPositiveButton(android.R.string.ok, (help, close) ->
+                                        showPackageActions(entry)).show())
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
                 .show();

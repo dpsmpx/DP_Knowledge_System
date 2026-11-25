@@ -748,7 +748,15 @@
     <string name="knowledge_models_details">%1$s\nРазмер: %2$s (%3$d байт)\nФормат: %4$s (движком не проверен)\nSHA-256: %5$s</string>
     <string name="knowledge_models_package_report">Контракт комплекта v%1$d\nПроисхождение: %2$s\nЗаявленная лицензия: %3$s\nПредполагаемый движок: %4$s (НЕ ПРОВЕРЕН)\nНедостаёт для локального запуска:%5$s</string>
     <string name="knowledge_models_package_manage">Файлы комплекта</string>
+    <string name="knowledge_models_package_help">Как импортировать</string>
     <string name="knowledge_models_package_import">Импортировать манифест и файлы</string>
+    <string name="knowledge_models_package_audit">Проверить SHA-256 комплекта</string>
+    <string name="knowledge_models_package_audit_starting">Повторная проверка SHA-256 весов и сопутствующих файлов. Нажмите управление ещё раз для отмены. ИИ и сеть не используются.</string>
+    <string name="knowledge_models_package_audit_progress">Проверено: %1$s / %2$s (только чтение файлов)</string>
+    <string name="knowledge_models_package_audit_passed">Контрольные суммы файлов совпали. Это НЕ означает готовность модели к запуску.</string>
+    <string name="knowledge_models_package_audit_json_warning">Контрольные суммы совпали, но некоторые небольшие JSON-файлы имеют неверную структуру. Модель НЕ готова к запуску.</string>
+    <string name="knowledge_models_package_audit_failed">Проверка комплекта НЕ ПРОЙДЕНА: файл отсутствует, изменён, недоступен или проверка отменена. ИИ не запускался. При необходимости переимпортируйте комплект.</string>
+    <string name="knowledge_models_package_audit_report">Повторная проверка SHA-256: PASS для весов и компонентов\nПрочитано: %1$s за %2$d мс (проверка хранилища, НЕ скорость нейросети)\nСопутствующих файлов: %3$d\nБазовая структура JSON: %4$d корректных, %5$d некорректных, %6$d пропущено (большие JSON не разбираются)\n\nЭто не проверка работы токенизатора, архитектуры, совместимости ONNX/GGUF, лицензии, качества или скорости модели. Нейросетевая обработка пока отключена.</string>
     <string name="knowledge_models_package_remove">Удалить сопутствующие файлы</string>
     <string name="knowledge_models_package_import_help">Выберите dpks-model-package.json и все сопутствующие файлы вместе через системный множественный выбор Android. Веса .gguf/.onnx уже должны быть установлены для этой роли. Проверяются размер и SHA-256 каждого файла. Интернет и ИИ не запускаются. Формат описан в docs/MODEL_M1_PACKAGE_MANIFEST.md.</string>
     <string name="knowledge_models_package_remove_warning">Удалить манифест и сопутствующие файлы из приватного хранилища? Веса модели, заметки и журнал сохранятся. Для восстановления потребуется повторный импорт комплекта.</string>

@@ -1,12 +1,20 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
@@ -19,7 +27,33 @@ import java.util.Map;
  * with the manifest. No archive extraction, external paths or code execution.
  */
 final class KnowledgeModelPackageStore {
+    private static final int MAX_JSON_PREFLIGHT_BYTES = 512 * 1024;
+    private static final int MAX_JSON_DEPTH = 64;
     interface StreamProvider { InputStream open() throws IOException; }
+    interface AuditProgress { void onVerifiedBytes(long verified, long total); }
+
+    /** An explicit audit of FILE integrity, not an inference/quality benchmark. */
+    static final class Audit {
+        final long verifiedBytes;
+        final long elapsedMillis;
+        final int companionFiles;
+        final int jsonObjectsChecked;
+        final int jsonNotInspected;
+        final int jsonInvalid;
+
+        Audit(final long bytes, final long millis, final int companionCount,
+              final int checked, final int skipped, final int invalid) {
+            verifiedBytes = bytes;
+            elapsedMillis = millis;
+            companionFiles = companionCount;
+            jsonObjectsChecked = checked;
+            jsonNotInspected = skipped;
+            jsonInvalid = invalid;
+        }
+
+        boolean integrityPassed() { return true; } // Otherwise audit throws.
+        boolean jsonPreflightPassed() { return jsonInvalid == 0; }
+    }
 
     static final class Source {
         final String name;
@@ -60,6 +94,71 @@ final class KnowledgeModelPackageStore {
             }
         }
         return manifest;
+    }
+
+    /**
+     * Rehash every saved byte on a user-requested worker thread. Previously
+     * imported files may have been modified or damaged; their name and length
+     * cannot prove present-day integrity. JSON checks are strictly preliminary:
+     * they do not establish an ONNX/GGUF runtime contract or tokenizer support.
+     */
+    synchronized Audit audit(final KnowledgeModelFiles.Entry entry,
+                             final AuditProgress progress) throws IOException {
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null) throw new IOException("No complete package to audit");
+        if (!registered(entry)) throw new IOException("Weight registration changed");
+        final File weight = weightFile(entry);
+        long total = entry.bytes;
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
+            if (Long.MAX_VALUE - total < component.bytes) {
+                throw new IOException("Package audit byte count overflow");
+            }
+            total += component.bytes;
+        }
+        final long totalBytes = total;
+        final File packageDirectory = bundle(entry);
+        final long started = System.nanoTime();
+        long verified = 0;
+        int checked = 0;
+        int skipped = 0;
+        int invalid = 0;
+        final String weightHash;
+        try (InputStream source = new FileInputStream(weight)) {
+            weightHash = digest(source, entry.bytes, progress, 0, null, totalBytes);
+        }
+        if (!entry.sha256.equals(weightHash)) throw new IOException("Weight digest changed");
+        verified += entry.bytes;
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
+            final File part = new File(packageDirectory, component.sha256 + ".sidecar");
+            if (!part.isFile() || part.length() != component.bytes) {
+                throw new IOException("Companion missing or changed size");
+            }
+            final boolean isJson = component.name.endsWith(".json");
+            final boolean inspect = isJson && component.bytes <= MAX_JSON_PREFLIGHT_BYTES;
+            final ByteArrayOutputStream json = inspect
+                    ? new ByteArrayOutputStream((int) component.bytes) : null;
+            final long previous = verified;
+            final String actual;
+            try (InputStream source = new FileInputStream(part)) {
+                actual = digest(source, component.bytes, progress, previous, json, totalBytes);
+            }
+            if (!component.sha256.equals(actual)) {
+                throw new IOException("Companion digest changed");
+            }
+            verified += component.bytes;
+            if (isJson) {
+                if (inspect) {
+                    if (basicJsonObject(json.toByteArray())) checked++;
+                    else invalid++;
+                } else {
+                    skipped++;
+                }
+            }
+        }
+        return new Audit(verified, Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
+                manifest.components.size() - 1, checked, skipped, invalid);
     }
 
     synchronized KnowledgeModelPackageManifest install(final byte[] manifestBytes,
@@ -155,21 +254,27 @@ final class KnowledgeModelPackageStore {
 
     private boolean registeredWeightMatches(final KnowledgeModelFiles.Entry entry)
             throws IOException {
-        boolean registered = false;
-        for (final KnowledgeModelFiles.Entry candidate : weights.installed()) {
-            if (candidate.role == entry.role && candidate.format == entry.format
-                    && candidate.sha256.equals(entry.sha256) && candidate.bytes == entry.bytes) {
-                registered = true;
-                break;
-            }
-        }
-        if (!registered) return false;
-        final File weight = new File(directory, entry.sha256
-                + (entry.format == KnowledgeModelFiles.Format.GGUF ? ".gguf" : ".onnx"));
-        if (!weight.isFile() || weight.length() != entry.bytes) return false;
+        if (!registered(entry)) return false;
+        final File weight = weightFile(entry);
         try (InputStream source = new FileInputStream(weight)) {
             return entry.sha256.equals(digest(source, entry.bytes));
         }
+    }
+
+    private boolean registered(final KnowledgeModelFiles.Entry entry) throws IOException {
+        for (final KnowledgeModelFiles.Entry candidate : weights.installed()) {
+            if (candidate.role == entry.role && candidate.format == entry.format
+                    && candidate.sha256.equals(entry.sha256) && candidate.bytes == entry.bytes) {
+                final File weight = weightFile(entry);
+                return weight.isFile() && weight.length() == entry.bytes;
+            }
+        }
+        return false;
+    }
+
+    private File weightFile(final KnowledgeModelFiles.Entry entry) {
+        return new File(directory, entry.sha256
+                + (entry.format == KnowledgeModelFiles.Format.GGUF ? ".gguf" : ".onnx"));
     }
 
     private static void copyExact(final InputStream source, final File destination,
@@ -202,6 +307,13 @@ final class KnowledgeModelPackageStore {
 
     private static String digest(final InputStream source, final long expectedBytes)
             throws IOException {
+        return digest(source, expectedBytes, null, 0, null, expectedBytes);
+    }
+
+    private static String digest(final InputStream source, final long expectedBytes,
+                                 final AuditProgress progress, final long alreadyVerified,
+                                 final ByteArrayOutputStream capturedJson, final long totalBytes)
+            throws IOException {
         final MessageDigest sha = newDigest();
         final byte[] buffer = new byte[64 * 1024];
         long count = 0;
@@ -211,11 +323,51 @@ final class KnowledgeModelPackageStore {
                 throw new InterruptedIOException("Package verification cancelled");
             }
             if (n == 0) continue;
+            if (n > expectedBytes - count) return "";
             sha.update(buffer, 0, n);
             count += n;
-            if (count > expectedBytes) return "";
+            if (capturedJson != null) capturedJson.write(buffer, 0, n);
+            if (progress != null) progress.onVerifiedBytes(alreadyVerified + count, totalBytes);
         }
         return count == expectedBytes ? hex(sha.digest()) : "";
+    }
+
+    /** Bounded, non-executing JSON-object shape probe; no backend semantics. */
+    private static boolean basicJsonObject(final byte[] utf8) {
+        final String document;
+        try {
+            document = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(utf8)).toString();
+        } catch (CharacterCodingException invalid) {
+            return false;
+        }
+        int depth = 0;
+        boolean quoted = false;
+        boolean escape = false;
+        for (int i = 0; i < document.length(); i++) {
+            final char character = document.charAt(i);
+            if (quoted) {
+                if (escape) escape = false;
+                else if (character == '\\') escape = true;
+                else if (character == '"') quoted = false;
+                continue;
+            }
+            if (character == '"') quoted = true;
+            else if (character == '{' || character == '[') {
+                if (++depth > MAX_JSON_DEPTH) return false;
+            } else if (character == '}' || character == ']') {
+                if (--depth < 0) return false;
+            }
+        }
+        if (quoted || depth != 0) return false;
+        try {
+            new JSONObject(document);
+            return true;
+        } catch (JSONException invalid) {
+            return false;
+        }
     }
 
     private static MessageDigest newDigest() throws IOException {
