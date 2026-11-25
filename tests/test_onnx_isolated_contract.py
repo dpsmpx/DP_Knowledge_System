@@ -61,6 +61,8 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertNotIn("getMyMemoryState", identity)
         self.assertNotIn("getMyMemoryState", service)
         self.assertIn("Application.getProcessName()", identity)
+        self.assertIn("Build.VERSION.SDK_INT >= 34", identity)
+        self.assertIn("Process.isIsolated()", identity)
         self.assertIn("Process.isIsolatedUid(Process.myUid())", identity)
         self.assertIn('new FileInputStream("/proc/self/cmdline")', identity)
         self.assertIn('process.startsWith(PACKAGE_PREFIX + ":")', identity)

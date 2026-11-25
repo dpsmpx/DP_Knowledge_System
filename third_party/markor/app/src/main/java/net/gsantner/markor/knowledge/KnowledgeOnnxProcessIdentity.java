@@ -18,11 +18,14 @@ public final class KnowledgeOnnxProcessIdentity {
     public static boolean isWorker() {
         if (Build.VERSION.SDK_INT >= 28) {
             final String process = Application.getProcessName();
-            return workerName(process)
-                    && Process.isIsolatedUid(Process.myUid());
+            if (!workerName(process)) return false;
+            // isIsolated() arrived with API 28; isIsolatedUid(int) only with 34.
+            // Calling the latter on API 28-33 crashes Application.onCreate().
+            return Build.VERSION.SDK_INT >= 34
+                    ? Process.isIsolatedUid(Process.myUid()) : Process.isIsolated();
         }
         // API 24-27 has no public Application.getProcessName() or
-        // Process.isIsolatedUid(). /proc/self is local process metadata only.
+        // Process.isIsolated(). /proc/self is local process metadata only.
         try (FileInputStream input = new FileInputStream("/proc/self/cmdline")) {
             final byte[] header = new byte[256];
             final int count = input.read(header);

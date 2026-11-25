@@ -13,7 +13,12 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("workflow_dispatch:", action)
         self.assertIn("pull_request:", action)
         self.assertIn("reactivecircus/android-emulator-runner@v2", action)
-        self.assertIn("api: [35, 28, 24]", action)
+        self.assertIn("api: 35", action)
+        self.assertIn("api: 28", action)
+        self.assertIn("api: 24", action)
+        self.assertIn("runner: ubuntu-latest", action)
+        self.assertIn("runner: ubuntu-22.04", action)
+        self.assertIn("runs-on: ${{ matrix.runner }}", action)
         self.assertIn("timeout-minutes: 23", action)
         self.assertIn("max-parallel: 1", action)
         self.assertIn("api-level: ${{ matrix.api }}", action)
@@ -71,6 +76,8 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         identity = (APP / "src/main/java/net/gsantner/markor/knowledge/"
                     "KnowledgeOnnxProcessIdentity.java").read_text()
         self.assertIn("Build.VERSION.SDK_INT >= 28", identity)
+        self.assertIn("Build.VERSION.SDK_INT >= 34", identity)
+        self.assertIn("Process.isIsolated()", identity)
         self.assertIn("Process.isIsolatedUid(Process.myUid())", identity)
         self.assertIn('new FileInputStream("/proc/self/cmdline")', identity)
 
