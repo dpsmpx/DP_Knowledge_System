@@ -257,6 +257,72 @@ def synthetic_title_promotion_probe() -> dict:
         }
 
 
+def synthetic_diverse_query_probe() -> dict:
+    """Small independent labeled fixture: realistic failure *types*, artificial text.
+
+    Reports no note content or paths. The manually assigned labels test only
+    what the lexical SQL mirror can retrieve, not semantic entailment or a
+    representative dataset sampled from a real vault.
+    """
+    documents = (
+        ('a-overlap.md', 'Generic', 'Amberlight violet were written together.'),
+        ('b-separate.md', 'Generic', 'Amber appears far from the violet example.'),
+        ('c-support.md', 'Generic', 'Amber violet supports an artificial premise.'),
+        ('d-refute.md', 'Generic', 'Amber violet refutes an artificial premise.'),
+        ('e-title.md', 'Cobalt willow overview', 'Unrelated generic discussion.'),
+        ('f-title-decoy.md', 'Generic', 'Cobalt separately discusses willow.'),
+        ('g-ru.md', 'Generic', 'Памятью синтезом описывается вымышленный тест.'),
+        ('h-ru-decoy.md', 'Generic', 'Памятью отдельно; синтезом отдельно.'),
+        ('i-five.md', 'Generic', 'Citrine juniper saffron otter acacia appear together.'),
+        ('j-partial.md', 'Generic', 'Citrine juniper saffron appear here.'),
+        ('k-synonym.md', 'Furniture', 'A couch is placed near the desk.'),
+        ('l-unrelated.md', 'Generic', 'Unrelated imaginary field notes.'),
+        ('m-prefix.md', 'Generic', 'Amber amberlight are two separate tokens.'),
+        ('n-prefix-decoy.md', 'Generic', 'Amberlight occurs in isolation.'),
+    )
+    cases = (
+        ('english_phrase', 'amber violet', {'c-support.md', 'd-refute.md'}),
+        ('natural_question', 'Tell me about amber violet',
+         {'c-support.md', 'd-refute.md'}),
+        ('russian_inflection', 'Расскажи про память синтез', {'g-ru.md'}),
+        ('title_metadata', 'cobalt willow', {'e-title.md'}),
+        ('five_term_query', 'citrine juniper saffron otter acacia', {'i-five.md'}),
+        ('overlapping_prefixes', 'amber amberlight', {'m-prefix.md'}),
+        ('synonym_without_expansion', 'sofa', {'k-synonym.md'}),
+        ('no_relevant_document', 'phosphor titanium', set()),
+    )
+    with sqlite3.connect(':memory:') as connection:
+        connection.executescript("""
+            CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT, title TEXT,
+                                generation TEXT, oversized INTEGER);
+            CREATE VIRTUAL TABLE documents_fts USING fts4(
+                path,title,body,tokenize=unicode61);
+        """)
+        for ident, (path, title, body) in enumerate(documents, start=1):
+            connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                               (ident, path, title, GENERATION))
+            connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                               ' VALUES (?,?,?,?)', (ident, path, title, body))
+        universe = {row[0] for row in documents}
+        output = []
+        for label, question, relevant in cases:
+            if not relevant.issubset(universe):
+                raise AssertionError('Gold label has no corresponding fixture source')
+            found = search_production_lexical_mirror(connection, question, 6)
+            recovered = len(relevant.intersection(found))
+            output.append({
+                'case': label,
+                'known_relevant': len(relevant),
+                'retrieved_at_6': len(found),
+                'true_positive_at_6': recovered,
+                'false_positive_at_6': len(found) - recovered,
+                'precision_at_6': round(recovered / 6, 4),
+                # No-ground-truth-positive is not 'perfect recall': undefined.
+                'recall_at_6': round(recovered / len(relevant), 4) if relevant else None,
+            })
+        return {'synthetic_notes': len(documents), 'cases': output}
+
+
 def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
     if not 512 <= notes <= 20_000 or not 1 <= repeats <= 30:
         raise ValueError("notes must be 512..20000 and repeats 1..30")
@@ -318,10 +384,12 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             "query_p50_ms": round(statistics.median(timings), 3),
             "query_p95_ms": round(p95, 3),
             "title_promotion_probe": synthetic_title_promotion_probe(),
+            "diverse_query_probe": synthetic_diverse_query_probe(),
             "queries": queries,
             "natural_question_cases": framed_queries,
             "limitations": [
                 "synthetic adversarial corpus, not representative relevance labels",
+                "small extra manually labeled query types are also artificial, not human-evaluated",
                 "limited English/Russian question prefixes, not language understanding",
                 "synthetic opposing claims are retrieved, not semantically reconciled",
                 "no synonym expansion or natural-language entailment",

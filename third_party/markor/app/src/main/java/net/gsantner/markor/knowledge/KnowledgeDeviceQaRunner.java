@@ -1138,6 +1138,11 @@ public final class KnowledgeDeviceQaRunner {
                 "The observed temperature measured 42 degrees [1].",
                 Collections.singletonList(new KnowledgeLlmEvidence.Item("temperature.md",
                         "The observed temperature measured 24.0 degrees.")));
+        final KnowledgeLlmCitationAudit.Review partiallyMatchingNumbers =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Battery runtime measured 60 minutes and temperature measured 42 degrees [1].",
+                        Collections.singletonList(new KnowledgeLlmEvidence.Item("battery.md",
+                                "Battery runtime measured 60 minutes and temperature measured 24 degrees.")));
         final KnowledgeLlmCitationAudit.Review boilerplate = KnowledgeLlmCitationAudit.inspect(
                 "This that were with about is true [1].", Arrays.asList(
                         new KnowledgeLlmEvidence.Item("generic-true.md",
@@ -1157,12 +1162,15 @@ public final class KnowledgeDeviceQaRunner {
                 || numeric.flaggedSpans.size() != 1
                 || numeric.flaggedSpans.get(0).kind
                         != KnowledgeLlmCitationAudit.Flag.Kind.NUMERIC_MISMATCH
+                || partiallyMatchingNumbers.numericMismatchedCitations != 1
+                || partiallyMatchingNumbers.weakTextAttributions != 0
                 || boilerplate.potentiallyOpposingSources != 0) {
             throw new SyntheticMismatch("verdict=CLAIM_SOURCE_ANCHOR_WARNING_LOST");
         }
         return "syntheticOpposingSources=2, weakAttributionFlagged=true, "
                 + "explicitBooleanMismatchFlagged=true, sourceConflictFlagged=true, "
-                + "numericMismatchFlagged=true, genericWordConflictsExcluded=true, "
+                + "numericMismatchFlagged=true, partialNumberOverlapFlagged=true, "
+                + "genericWordConflictsExcluded=true, "
                 + "exactAnswerOffsets=true, sourceNumbersRetained=true, "
                 + "notSemanticProof=true, noNetwork=true, selectedVaultUntouched=true";
     }

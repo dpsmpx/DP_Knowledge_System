@@ -15,6 +15,7 @@ from scripts.benchmark_stage19_retrieval import (
     search_path_order_or_baseline,
     search_production_lexical_mirror,
     search_two_pass_baseline,
+    synthetic_diverse_query_probe,
     title_evidence_term_matches,
 )
 
@@ -61,6 +62,7 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
             'title_promoted_to_rank_3': True,
             'opposing_phrase_sources_still_first': True,
         }, result['title_promotion_probe'])
+        self.assertEqual(synthetic_diverse_query_probe(), result['diverse_query_probe'])
         self.assertTrue(all(q['known_relevant'] == 4 for q in result['queries']))
         for row in result['queries']:
             self.assertEqual(24, row['retrieved_24'])
@@ -75,6 +77,31 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
             self.assertEqual(1, row['recall_at_6'])
             self.assertEqual(round(4 / 6, 4), row['precision_at_6'])
             self.assertEqual(1, row['recall_at_24'])
+
+    def test_diverse_synthetic_labels_expose_expected_lexical_gaps(self):
+        probe = synthetic_diverse_query_probe()
+        self.assertEqual(14, probe['synthetic_notes'])
+        self.assertEqual(probe, synthetic_diverse_query_probe())  # deterministic SQL
+        cases = {row['case']: row for row in probe['cases']}
+        self.assertEqual({
+            'english_phrase', 'natural_question', 'russian_inflection',
+            'title_metadata', 'five_term_query', 'overlapping_prefixes',
+            'synonym_without_expansion', 'no_relevant_document',
+        }, set(cases))
+        for name in ('english_phrase', 'natural_question', 'russian_inflection',
+                     'title_metadata', 'five_term_query', 'overlapping_prefixes'):
+            self.assertEqual(1, cases[name]['recall_at_6'], name)
+        self.assertEqual(2, cases['english_phrase']['true_positive_at_6'])
+        self.assertEqual(4, cases['english_phrase']['false_positive_at_6'])
+        self.assertEqual(5, cases['overlapping_prefixes']['false_positive_at_6'])
+        self.assertEqual(0, cases['synonym_without_expansion']['recall_at_6'])
+        self.assertEqual(0, cases['synonym_without_expansion']['retrieved_at_6'])
+        self.assertIsNone(cases['no_relevant_document']['recall_at_6'])
+        self.assertEqual(0, cases['no_relevant_document']['retrieved_at_6'])
+        for row in cases.values():
+            self.assertEqual(row['retrieved_at_6'], row['true_positive_at_6']
+                             + row['false_positive_at_6'])
+            self.assertNotIn('.md', str(row))  # no synthetic source paths exposed
 
     def test_rejects_unbounded_workloads_before_allocating(self):
         for count, repeats in ((0, 1), (511, 1), (20_001, 1), (512, 0), (512, 31)):
