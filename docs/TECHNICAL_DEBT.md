@@ -908,6 +908,26 @@ Android instrumentation сравнивает реальный runtime с исх�
 tokenizer/pooling и роли, реальные веса/inference, ARM64/OEM,
 API 24–26, native OOM/LMK. `runnable=false`.
 
+**MODEL-M1: агрегированные категории типов I/O —
+[PR #217](https://github.com/dpsmpx/DP_Knowledge_System/pull/217).**
+SHA-аудированный `GraphProto` теперь считает `float32` и `int64`
+входы/выходы отдельно. После проверки числа входов и тензоров четыре
+счётчика сравниваются с уже ограниченной нативной сводкой, несовпадение
+показывается отдельно без выводов о совместимости. Неизвестные enum
+не приравниваются к стандартным; защита от переполнения исключает
+заведомо некорректные значения отчёта. JVM- и Android-инструментальные
+тесты используют только синтетический `Identity`; ни имен, ни данных
+тензоров через Binder не передаётся. **Открыто:** сравнение конкретных
+пар входов/выходов, типов вне двух категорий, форм/рангов, поддержка
+tokenizer/pooling/роли, реальные веса и inference, ARM64/OEM, API 24–26.
+`runnable=false` сохраняется.
+
+[Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164412):
+**14/14 API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164528)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45654164352)
+зелёные для PR #217. Это только синтетический QA, не аппаратная проверка.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
