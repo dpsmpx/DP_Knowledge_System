@@ -805,6 +805,24 @@ ARM64, API 24–26 и MODEL-M1/M8 остаются открытыми; `runnable
 не резервирует память и не оценивает потребление ONNX Runtime;
 `runnable=false`, MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: timeout/rebind изолированного worker —
+[PR #205](https://github.com/dpsmpx/DP_Knowledge_System/pull/205).**
+Оба ручных клиента сохранили release-дедлайн 35 секунд (30 секунд
+worker watchdog + 5 секунд клиента); короткий тестовый timeout
+доступен только debug-сборке и сбрасывается перед повторной попыткой.
+Синтетический клиент при ошибке/таймауте теперь явно отправляет
+`CANCEL_AND_EXIT`. Два инструментальных теста удерживают первый `bindService`
+через `ContextWrapper`, проверяют один failure/unbind и очистку FD-байтов,
+а затем запускают **новый ручной** `Identity`-запрос, устойчивый к
+запоздалому callback предыдущего соединения. Автоповтора нет.
+[Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166154):
+**12/12 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166198)
+и [Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166183)
+зелёные. **Открыто:** настоящий native hang/OOM, измерение пика RAM,
+аппаратный ARM64, API 24–26 и реальные веса/инференс. Тестовый lifecycle
+не снимает блокировки `runnable=false` и MODEL-M1/M8.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
