@@ -466,6 +466,22 @@ IPC-имитация выбрасывает маленький объект ош
 также зелёные. Тест не моделирует реальный native OOM или LMK и не
 подтверждает физический ARM64; API 24–26 и реальные веса/инференс открыты.
 `runnable=false` сохраняется.
+В [PR #213](https://github.com/dpsmpx/DP_Knowledge_System/pull/213)
+ручная изолированная ONNX CPU-сессия получила **ограниченную диагностику
+типов и рангов входов/выходов** через `OrtSession.getInputInfo/getOutputInfo`
+без `run()`. UI показывает количества тензоров, `float32`/`int64` и
+динамических осей, максимальный ранг с обеих сторон. Только десять
+проверяемых целых чисел проходят через Binder; имена узлов, текстовые
+символьные размерности, реальные формы и тензорные данные остаются в
+изолированном worker. Пределы — 32 входа/выхода и 16 осей на тензор;
+несогласованная метаинформация отклоняется на worker и на клиенте.
+[Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186052)
+прошли **14/14 на API 27/28/35**, проверяя также сгенерированный
+`Identity` (float32, ранг 1); [Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186097)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186095)
+зелёные. Это не полная сигнатура I/O, не согласование tokenizer/pooling
+или роли и не реальный inference. Крупные модели, ARM64 и API 24–26
+ещё не подтверждены; `runnable=false` сохраняется.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
