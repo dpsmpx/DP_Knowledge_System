@@ -7,6 +7,7 @@
 package net.gsantner.markor.knowledge;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -289,7 +290,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 new KnowledgeModelSettingsDialog(this, modelFiles, modelPackages,
                         this::pickModelFile, this::pickModelPackage,
                         this::downloadModel, this::auditModelPackage,
-                        this::prepareOnnxFiles, this::runOnnxCpuSmoke).show();
+                        this::prepareOnnxFiles, this::runOnnxCpuSmoke,
+                        this::inspectOnnxCpuSession).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -767,6 +769,61 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         modelImportActive = false;
                         restoreModelButton();
                         modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Manual, bounded ONNX session creation. No user-model inference occurs. */
+    private void inspectOnnxCpuSession(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null || !KnowledgeOnnxCpuBackend.available()
+                || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_onnx_session_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                // OS-wide available RAM is an additional stop condition, never
+                // a promise that native allocations will fit in this process.
+                final ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                if (am == null) throw new IOException("No Android memory info");
+                final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(memory);
+                if (memory.lowMemory
+                        || memory.availMem < KnowledgeOnnxSessionGate.MIN_AVAILABLE_RAM_BYTES) {
+                    throw new IOException("Not enough available RAM for optional CPU check");
+                }
+                final byte[] bytes = modelPackages.readForCpuSession(entry);
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException("ONNX CPU session inspection cancelled");
+                }
+                final KnowledgeOnnxSessionGate.Report report;
+                try {
+                    report = KnowledgeOnnxCpuBackend.inspect(bytes);
+                } finally {
+                    Arrays.fill(bytes, (byte) 0);
+                }
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(getString(R.string.knowledge_models_onnx_session_passed,
+                                report.runtimeVersion, report.inputs, report.outputs,
+                                report.sessionInitMillis, report.nativeHeapDeltaBytes));
+                    }
+                });
+            } catch (Exception | LinkageError failed) {
+                // Native errors, model names/paths and user data never enter UI/logs.
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_onnx_session_failed);
                     }
                 });
             }

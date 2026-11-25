@@ -28,6 +28,7 @@ final class KnowledgeModelSettingsDialog {
     interface PackageRequest { void pick(KnowledgeModelFiles.Entry entry); }
     interface AuditRequest { void verify(KnowledgeModelFiles.Entry entry); }
     interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
+    interface SessionRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
@@ -41,6 +42,7 @@ final class KnowledgeModelSettingsDialog {
     private final PackageRequest packageImporter;
     private final AuditRequest auditor;
     private final PrepareRequest preparer;
+    private final SessionRequest sessionInspector;
     private final SmokeRequest smokeTester;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
@@ -49,7 +51,8 @@ final class KnowledgeModelSettingsDialog {
                                  final KnowledgeModelPackageStore modelPackages,
                                  final ImportRequest request, final PackageRequest packageRequest,
                                  final DownloadRequest download, final AuditRequest audit,
-                                 final PrepareRequest prepare, final SmokeRequest smoke) {
+                                 final PrepareRequest prepare, final SmokeRequest smoke,
+                                 final SessionRequest sessionInspect) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
@@ -57,6 +60,7 @@ final class KnowledgeModelSettingsDialog {
         packageImporter = packageRequest;
         auditor = audit;
         preparer = prepare;
+        sessionInspector = sessionInspect;
         smokeTester = smoke;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -276,10 +280,12 @@ final class KnowledgeModelSettingsDialog {
 
     private void showPackageActions(final KnowledgeModelFiles.Entry entry) {
         final boolean onnx = entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED;
+        final boolean cpuSession = onnx && KnowledgeOnnxCpuBackend.available();
         final List<String> menu = new ArrayList<>();
         menu.add(context.getString(R.string.knowledge_models_package_import));
         menu.add(context.getString(R.string.knowledge_models_package_audit));
         if (onnx) menu.add(context.getString(R.string.knowledge_models_onnx_prepare));
+        if (cpuSession) menu.add(context.getString(R.string.knowledge_models_onnx_session));
         menu.add(context.getString(R.string.knowledge_models_package_remove));
         menu.add(context.getString(R.string.knowledge_models_delete));
         final String[] actions = menu.toArray(new String[0]);
@@ -289,7 +295,8 @@ final class KnowledgeModelSettingsDialog {
                     if (which == 0) packageImporter.pick(entry);
                     else if (which == 1) auditor.verify(entry);
                     else if (onnx && which == 2) confirmPrepareOnnx(entry);
-                    else if (which == (onnx ? 3 : 2)) confirmRemovePackage(entry);
+                    else if (cpuSession && which == 3) confirmOnnxSession(entry);
+                    else if (which == (onnx ? (cpuSession ? 4 : 3) : 2)) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
                 .setNeutralButton(R.string.knowledge_models_package_help, (dialog, which) ->
@@ -309,6 +316,30 @@ final class KnowledgeModelSettingsDialog {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_models_onnx_smoke,
                         (dialog, which) -> smokeTester.run())
+                .show();
+    }
+
+    private void confirmOnnxSession(final KnowledgeModelFiles.Entry entry) {
+        try {
+            if (packages.installed(entry) == null) {
+                new AlertDialog.Builder(context)
+                        .setMessage(R.string.knowledge_models_onnx_session_requires_package)
+                        .setPositiveButton(android.R.string.ok, null).show();
+                return;
+            }
+        } catch (IOException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_onnx_session_requires_package)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_onnx_session)
+                .setMessage(context.getString(R.string.knowledge_models_onnx_session_warning,
+                        entry.name, formatSize(entry.bytes)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_onnx_session,
+                        (dialog, which) -> sessionInspector.inspect(entry))
                 .show();
     }
 

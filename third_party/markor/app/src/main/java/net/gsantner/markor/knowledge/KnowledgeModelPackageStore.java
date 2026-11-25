@@ -327,6 +327,62 @@ final class KnowledgeModelPackageStore {
         }
     }
 
+    /**
+     * Re-verify a small self-contained package before creating an ORT session
+     * entirely from bytes. ONNX external_data is never resolved as a path.
+     * A successful return is NOT authority to run any model inputs.
+     */
+    synchronized byte[] readForCpuSession(final KnowledgeModelFiles.Entry entry)
+            throws IOException {
+        if (entry == null || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
+                || entry.bytes < 16 || entry.bytes > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES) {
+            throw new IOException("ONNX CPU session size gate refused file");
+        }
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null) throw new IOException("ONNX package required for CPU session");
+        long total = 0;
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (component.kind == KnowledgeModelPackageManifest.Kind.ONNX_EXTERNAL_DATA
+                    || component.bytes > KnowledgeOnnxSessionGate.MAX_PACKAGE_BYTES - total) {
+                throw new IOException("External or oversized ONNX package not permitted");
+            }
+            total += component.bytes;
+        }
+        final Audit audit = audit(entry, null);
+        if (!audit.jsonPreflightPassed() || !audit.externalDataPreflightPassed()) {
+            throw new IOException("ONNX package audit did not pass");
+        }
+        KnowledgeOnnxSessionGate.requireEligible(entry, audit.container);
+        final File sourceFile = weightFile(entry);
+        if (!safeChild(directory, sourceFile) || !sourceFile.isFile()
+                || sourceFile.length() != entry.bytes) {
+            throw new IOException("ONNX weight changed after audit");
+        }
+        // Rehash the exact bytes passed to ORT, not just a prior file snapshot.
+        final byte[] bytes = new byte[(int) entry.bytes];
+        final MessageDigest sha = newDigest();
+        try (InputStream source = new FileInputStream(sourceFile)) {
+            int position = 0;
+            while (position < bytes.length) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException("ONNX CPU session inspection cancelled");
+                }
+                final int count = source.read(bytes, position, bytes.length - position);
+                if (count < 0) throw new IOException("ONNX file truncated during read");
+                if (count == 0) continue;
+                sha.update(bytes, position, count);
+                position += count;
+            }
+            if (source.read() != -1 || !entry.sha256.equals(hex(sha.digest()))) {
+                throw new IOException("ONNX bytes no longer match registered SHA-256");
+            }
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("ONNX CPU session inspection cancelled");
+        }
+        return bytes;
+    }
+
     private static void removePreparedFiles(final File folder, final File model,
                                             final Iterable<File> companions) throws IOException {
         if (!safeChild(folder.getParentFile(), folder)) {
