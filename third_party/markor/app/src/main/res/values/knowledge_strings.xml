@@ -757,6 +757,16 @@
     <string name="knowledge_models_package_audit_json_warning">File digests match, but some small JSON companions are structurally invalid. The model is NOT runnable.</string>
     <string name="knowledge_models_package_audit_failed">Package audit FAILED: missing, modified or unreadable file, or verification cancelled. No AI model was started. Reimport the package if necessary.</string>
     <string name="knowledge_models_package_audit_report">SHA-256 recheck: PASS for weights and companions\nRead: %1$s in %2$d ms (storage integrity scan, NOT AI tokens/sec)\nCompanion files: %3$d\nBasic JSON object checks: %4$d passed, %5$d invalid, %6$d skipped (large JSON files are not parsed)\n\nThis does not validate tokenizer behavior, model architecture, ONNX/GGUF runtime compatibility, license, quality or speed. All AI inference remains disabled.</string>
+    <string name="knowledge_models_container_metadata">Metadata hints found (not runtime-verified)</string>
+    <string name="knowledge_models_container_partial_label">Partial metadata: scan limits or unsupported layout</string>
+    <string name="knowledge_models_container_invalid_label">Unrecognized or damaged container structure</string>
+    <string name="knowledge_models_container_invalid">File SHA-256 matches the manifest, but the ONNX/GGUF container structure is unrecognized or invalid. The model is NOT runnable.</string>
+    <string name="knowledge_models_container_partial">File SHA-256 matches, but the container probe stopped at a bounded scan limit. Compatibility remains UNKNOWN.</string>
+    <string name="knowledge_models_container_unknown">unknown</string>
+    <string name="knowledge_models_container_yes">yes (contents not validated)</string>
+    <string name="knowledge_models_container_no">no</string>
+    <string name="knowledge_models_container_gguf">GGUF container: %1$s\nVersion: %2$d, declared tensors: %3$d, metadata pairs: %4$d\nDeclared architecture: %5$s\nDeclared tokenizer: %6$s\nThe actual tensors, model semantics, Android support and performance were NOT verified.</string>
+    <string name="knowledge_models_container_onnx">ONNX container: %1$s\nIR version: %2$d, declared opsets: %3$d, graph field present: %4$s\nGraph nodes, operators, inputs/outputs, external data and Android runtime were NOT verified.</string>
     <string name="knowledge_models_package_remove">Remove package companions</string>
     <string name="knowledge_models_package_import_help">Choose dpks-model-package.json and all companion files together using Android’s multiple-file picker. The .gguf/.onnx weight must already be installed for this role. Every file is checked against its declared SHA-256 and size. No network request or inference is started. See docs/MODEL_M1_PACKAGE_MANIFEST.md for the JSON format.</string>
     <string name="knowledge_models_package_remove_warning">Remove the manifest and all companions from private app storage? The weight file, notes, and journal remain untouched. This cannot be undone without importing the package again.</string>

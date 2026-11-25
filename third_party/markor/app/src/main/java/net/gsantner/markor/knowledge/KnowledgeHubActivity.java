@@ -654,16 +654,23 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             && modelGeneration.get() == operation) {
                         modelImportActive = false;
                         restoreModelButton();
-                        modelStatus.setText(result.jsonPreflightPassed()
-                                ? R.string.knowledge_models_package_audit_passed
-                                : R.string.knowledge_models_package_audit_json_warning);
+                        modelStatus.setText(result.container.state
+                                == KnowledgeModelContainerProbe.State.INVALID
+                                ? R.string.knowledge_models_container_invalid
+                                : !result.jsonPreflightPassed()
+                                        ? R.string.knowledge_models_package_audit_json_warning
+                                        : result.container.state
+                                                == KnowledgeModelContainerProbe.State.PARTIAL
+                                                ? R.string.knowledge_models_container_partial
+                                                : R.string.knowledge_models_package_audit_passed);
                         new MaterialAlertDialogBuilder(this)
                                 .setTitle(R.string.knowledge_models_package_audit)
                                 .setMessage(getString(R.string.knowledge_models_package_audit_report,
                                         KnowledgeModelSettingsDialog.formatSize(result.verifiedBytes),
                                         result.elapsedMillis, result.companionFiles,
                                         result.jsonObjectsChecked, result.jsonInvalid,
-                                        result.jsonNotInspected))
+                                        result.jsonNotInspected) + "\n\n"
+                                        + containerPreflightLabel(result.container))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
                     }
@@ -679,6 +686,28 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    private String containerPreflightLabel(final KnowledgeModelContainerProbe.Result result) {
+        final String status = result.state == KnowledgeModelContainerProbe.State.METADATA_HINTS
+                ? getString(R.string.knowledge_models_container_metadata)
+                : result.state == KnowledgeModelContainerProbe.State.PARTIAL
+                        ? getString(R.string.knowledge_models_container_partial_label)
+                        : getString(R.string.knowledge_models_container_invalid_label);
+        if (result.format == KnowledgeModelFiles.Format.GGUF) {
+            return getString(R.string.knowledge_models_container_gguf, status, result.version,
+                    result.tensorCount, result.metadataCount,
+                    result.architecture.isEmpty()
+                            ? getString(R.string.knowledge_models_container_unknown)
+                            : result.architecture,
+                    result.tokenizer.isEmpty()
+                            ? getString(R.string.knowledge_models_container_unknown)
+                            : result.tokenizer);
+        }
+        return getString(R.string.knowledge_models_container_onnx, status,
+                result.version, result.opsetDeclarations,
+                result.graphDeclared ? getString(R.string.knowledge_models_container_yes)
+                        : getString(R.string.knowledge_models_container_no));
     }
 
     private String modelDisplayName(final Uri uri) {
