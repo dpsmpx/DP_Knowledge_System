@@ -27,6 +27,7 @@ final class KnowledgeModelSettingsDialog {
     interface ImportRequest { void pick(KnowledgeModelPolicy.Role role); }
     interface PackageRequest { void pick(KnowledgeModelFiles.Entry entry); }
     interface AuditRequest { void verify(KnowledgeModelFiles.Entry entry); }
+    interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -38,19 +39,22 @@ final class KnowledgeModelSettingsDialog {
     private final ImportRequest importer;
     private final PackageRequest packageImporter;
     private final AuditRequest auditor;
+    private final PrepareRequest preparer;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
     KnowledgeModelSettingsDialog(final Context activity, final KnowledgeModelFiles modelFiles,
                                  final KnowledgeModelPackageStore modelPackages,
                                  final ImportRequest request, final PackageRequest packageRequest,
-                                 final DownloadRequest download, final AuditRequest audit) {
+                                 final DownloadRequest download, final AuditRequest audit,
+                                 final PrepareRequest prepare) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
         importer = request;
         packageImporter = packageRequest;
         auditor = audit;
+        preparer = prepare;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -264,18 +268,21 @@ final class KnowledgeModelSettingsDialog {
     }
 
     private void showPackageActions(final KnowledgeModelFiles.Entry entry) {
-        final String[] actions = {
-                context.getString(R.string.knowledge_models_package_import),
-                context.getString(R.string.knowledge_models_package_audit),
-                context.getString(R.string.knowledge_models_package_remove),
-                context.getString(R.string.knowledge_models_delete)
-        };
+        final boolean onnx = entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED;
+        final List<String> menu = new ArrayList<>();
+        menu.add(context.getString(R.string.knowledge_models_package_import));
+        menu.add(context.getString(R.string.knowledge_models_package_audit));
+        if (onnx) menu.add(context.getString(R.string.knowledge_models_onnx_prepare));
+        menu.add(context.getString(R.string.knowledge_models_package_remove));
+        menu.add(context.getString(R.string.knowledge_models_delete));
+        final String[] actions = menu.toArray(new String[0]);
         new AlertDialog.Builder(context)
                 .setTitle(R.string.knowledge_models_package_manage)
                 .setItems(actions, (dialog, which) -> {
                     if (which == 0) packageImporter.pick(entry);
                     else if (which == 1) auditor.verify(entry);
-                    else if (which == 2) confirmRemovePackage(entry);
+                    else if (onnx && which == 2) confirmPrepareOnnx(entry);
+                    else if (which == (onnx ? 3 : 2)) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
                 .setNeutralButton(R.string.knowledge_models_package_help, (dialog, which) ->
@@ -286,6 +293,33 @@ final class KnowledgeModelSettingsDialog {
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
                 .show();
+    }
+
+    private void confirmPrepareOnnx(final KnowledgeModelFiles.Entry entry) {
+        try {
+            final KnowledgeModelPackageManifest manifest = packages.installed(entry);
+            if (manifest == null) throw new IOException("No installed package");
+            long bytes = entry.bytes;
+            for (final KnowledgeModelPackageManifest.Component part : manifest.components) {
+                if (part.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS) continue;
+                bytes = Math.addExact(bytes, part.bytes);
+            }
+            final String required = formatSize(bytes);
+            final String available = formatSize(context.getCacheDir().getUsableSpace());
+            new AlertDialog.Builder(context)
+                    .setTitle(R.string.knowledge_models_onnx_prepare)
+                    .setMessage(context.getString(R.string.knowledge_models_onnx_prepare_warning,
+                            required, available))
+                    .setNegativeButton(android.R.string.cancel, (dialog, which) ->
+                            showPackageActions(entry))
+                    .setPositiveButton(R.string.knowledge_models_onnx_prepare,
+                            (dialog, which) -> preparer.prepare(entry))
+                    .show();
+        } catch (IOException | ArithmeticException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_package_invalid)
+                    .setPositiveButton(android.R.string.ok, null).show();
+        }
     }
 
     private void confirmRemovePackage(final KnowledgeModelFiles.Entry entry) {
