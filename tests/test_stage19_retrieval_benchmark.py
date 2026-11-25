@@ -11,9 +11,11 @@ from scripts.benchmark_stage19_retrieval import (
     benchmark,
     fts_evidence_phrase,
     fts_evidence_query,
+    fts_evidence_terms,
     search_path_order_or_baseline,
     search_production_lexical_mirror,
     search_two_pass_baseline,
+    title_evidence_term_matches,
 )
 
 
@@ -53,6 +55,12 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
         self.assertIn('not_android_or_hybrid', result['mode'])
         self.assertEqual(5, len(result['queries']))
         self.assertEqual(5, len(result['natural_question_cases']))
+        self.assertEqual({
+            'notes': 10, 'candidate_scan_cap_per_pass': 8,
+            'previous_two_pass_missed_titled_source': True,
+            'title_promoted_to_rank_3': True,
+            'opposing_phrase_sources_still_first': True,
+        }, result['title_promotion_probe'])
         self.assertTrue(all(q['known_relevant'] == 4 for q in result['queries']))
         for row in result['queries']:
             self.assertEqual(24, row['retrieved_24'])
@@ -193,6 +201,64 @@ class Stage19RetrievalBenchmarkTests(unittest.TestCase):
                 connection, 'couch', 2))
             self.assertEqual([], search_production_lexical_mirror(
                 connection, 'sofa', 2))
+
+    def test_bounded_title_relevance_uses_complete_words_and_distinct_prefixes(self):
+        terms = fts_evidence_terms('Tell me about amber violet')
+        self.assertEqual(['amber', 'violet'], terms)
+        self.assertEqual(2, title_evidence_term_matches(
+            'Violets related to amberlight', terms))
+        self.assertEqual(0, title_evidence_term_matches(
+            'chamber and ultraviolet', terms))
+        self.assertEqual(1, title_evidence_term_matches('amber amber amber', terms))
+        self.assertEqual(2, title_evidence_term_matches(
+            'ПАМЯТЬ и СИНТЕЗ', fts_evidence_terms('Расскажи про память синтез')))
+        self.assertEqual(0, title_evidence_term_matches('x' * 255 + 'ambermore', terms))
+        self.assertEqual(1, title_evidence_term_matches(' ' * 250 + 'amber!', terms))
+        self.assertEqual(1, title_evidence_term_matches(
+            'amberlight', ['amber', 'amberl']))
+
+    def test_late_title_promoted_within_pass_without_overriding_phrase_priority(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            for ident, path, title, body in (
+                    (1, 'a.md', 'Generic', 'amber synthetic-distance violet'),
+                    (2, 'b.md', 'Generic', 'amber synthetic-distance violet'),
+                    (3, 'y.md', 'Generic', 'amber violet supports a claim'),
+                    (4, 'z.md', 'Violet related to Amber',
+                     'amber synthetic-distance violet'),
+                    (5, 'z-partial.md', 'Violet', 'Only violet')):
+                connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                                   (ident, path, title, 'synthetic-stage19'))
+                connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                                   ' VALUES (?,?,?,?)', (ident, path, title, body))
+            self.assertEqual(['y.md', 'z.md', 'a.md', 'b.md', 'z-partial.md'],
+                             search_production_lexical_mirror(
+                                 connection, 'Which amber violet?', 5))
+            # The first two paths are all the bounded window can see: do not
+            # promise a global ranking or silently scan the whole vault.
+            self.assertEqual(['y.md', 'z.md'], search_production_lexical_mirror(
+                connection, 'amber violet', 2))
+
+    def test_title_promotion_never_exceeds_two_times_the_requested_scan_window(self):
+        with sqlite3.connect(':memory:') as connection:
+            connection.execute('CREATE TABLE notes (id INTEGER, path TEXT, title TEXT,'
+                               ' generation TEXT, oversized INTEGER)')
+            connection.execute('CREATE VIRTUAL TABLE documents_fts'
+                               ' USING fts4(path,title,body,tokenize=unicode61)')
+            for ident in range(1, 7):
+                path = f'{ident:02d}.md'
+                title = 'Amber violet' if ident == 6 else 'Generic'
+                connection.execute('INSERT INTO notes VALUES (?,?,?,?,0)',
+                                   (ident, path, title, 'synthetic-stage19'))
+                connection.execute('INSERT INTO documents_fts(docid,path,title,body)'
+                                   ' VALUES (?,?,?,?)', (ident, path, title, 'amber violet'))
+            # limit=2 => 4 scanned phrase candidates; item 06 is intentionally
+            # beyond that window although its title is a perfect match.
+            self.assertEqual(['01.md', '02.md'], search_production_lexical_mirror(
+                connection, 'amber violet', 2))
 
 
 if __name__ == '__main__':

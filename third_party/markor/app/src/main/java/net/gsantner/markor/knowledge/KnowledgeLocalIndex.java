@@ -516,20 +516,23 @@ public final class KnowledgeLocalIndex {
                 return result;
             }
             final Set<String> seen = new HashSet<>();
+            final List<String> titleTerms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
             // A path-ordered all-term shortlist may itself crowd out exact
             // adjacent phrases. Prefer a bounded phrase pass for 2–4 terms,
             // then all-term matches, then partial OR fallback. Never infer
             // semantic equivalence or silently synthesize synonyms.
             final String phrase = KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(question);
             if (!phrase.isEmpty()) {
-                appendEvidenceHits(db, phrase, generation, limit, limit, result, seen);
+                appendEvidenceHits(db, phrase, generation, limit * 2, limit,
+                        titleTerms, result, seen);
             }
             if (result.size() < limit) {
                 appendEvidenceHits(db, safe.replace(" OR ", " "), generation,
-                        limit * 2, limit, result, seen);
+                        limit * 2, limit, titleTerms, result, seen);
             }
             if (result.size() < limit && safe.contains(" OR ")) {
-                appendEvidenceHits(db, safe, generation, limit * 2, limit, result, seen);
+                appendEvidenceHits(db, safe, generation, limit * 2, limit,
+                        titleTerms, result, seen);
             }
         } finally {
             db.close();
@@ -537,22 +540,47 @@ public final class KnowledgeLocalIndex {
         return result;
     }
 
+    private static final class EvidenceCandidate {
+        final Hit hit;
+        final int titleMatches;
+
+        EvidenceCandidate(final Hit source, final int matches) {
+            hit = source;
+            titleMatches = matches;
+        }
+    }
+
     private static void appendEvidenceHits(final SQLiteDatabase db, final String query,
                                            final String generation, final int scanLimit,
-                                           final int outputLimit, final List<Hit> result,
-                                           final Set<String> seen) {
+                                           final int outputLimit, final List<String> titleTerms,
+                                           final List<Hit> result, final Set<String> seen) {
+        final List<EvidenceCandidate> candidates = new ArrayList<>();
         try (Cursor c = db.rawQuery("SELECT notes.path, notes.title, notes.modified, notes.size FROM documents_fts "
                         + "JOIN notes ON notes.id=documents_fts.docid "
                         + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
                         + "AND notes.generation=? "
                         + "ORDER BY notes.path COLLATE NOCASE, notes.path COLLATE BINARY LIMIT ?",
                 new String[]{query, generation, Integer.toString(scanLimit)})) {
-            while (result.size() < outputLimit && c.moveToNext()) {
+            while (c.moveToNext()) {
                 final String path = c.getString(0);
-                if (seen.add(path)) {
-                    result.add(new Hit(path, c.getString(1), true,
-                            c.getLong(2), c.getLong(3)));
+                if (!seen.contains(path)) {
+                    final String title = c.getString(1);
+                    candidates.add(new EvidenceCandidate(
+                            new Hit(path, title, true, c.getLong(2), c.getLong(3)),
+                            KnowledgeMarkdownMetadata.titleEvidenceTermMatches(title, titleTerms)));
                 }
+            }
+        }
+        // Stable sort preserves SQL's NOCASE/BINARY pathname ordering on ties.
+        // Never promote an ALL/OR pass above a preceding exact-phrase pass.
+        Collections.sort(candidates, (left, right) ->
+                Integer.compare(right.titleMatches, left.titleMatches));
+        for (final EvidenceCandidate candidate : candidates) {
+            if (result.size() >= outputLimit) {
+                break;
+            }
+            if (seen.add(candidate.hit.relativePath)) {
+                result.add(candidate.hit);
             }
         }
     }

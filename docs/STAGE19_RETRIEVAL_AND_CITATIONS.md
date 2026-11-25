@@ -300,18 +300,35 @@ even if every reference and quotation passes the checks below.
     closed before tokenization; the offline SQLite benchmark mirror enforces
     the same bound. JVM/host regressions cover exact duplicates, preservation
     of the top two, stable numbering, the duplicate-only fallback and both
-    sides of the question-length boundary. Ranking within each FTS4 pass is
-    still path-ordered; broad relevance and device latency remain unmeasured.
+    sides of the question-length boundary. Broad relevance and device latency
+    remain unmeasured.
+29. **Bounded title-aware tie-break within each lexical FTS4 pass**: retain
+    exact phrase before ALL-term before partial OR results, but score at most
+    `2 × limit` path-first candidates per pass for distinct query-token
+    prefixes at complete word boundaries in the first 256 UTF-16 title units.
+    Promote candidates with more title matches; equal scores preserve the
+    original SQLite `NOCASE`/binary path order. A single title word cannot
+    satisfy two query terms, and truncated title words earn no credit.
+    Metadata-only scoring reads no additional note content and makes no model
+    request, consent change, or journal update. For the normal 24-result
+    evidence shortlist, no more than 48 rows per pass (144 across three)
+    are examined; the API maximum of 40 caps that at 240 rows total.
+    An important limitation is that relevant notes *outside* those bounded
+    windows still cannot be promoted. Newly added JVM, Python and synthetic
+    English/Russian Android QA cases check token boundaries, stable ties,
+    phrase precedence and within-pass promotion, including rejected
+    oversized/stale notes from pre-existing regressions.
 
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
 The script creates **only an in-memory SQLite FTS4 database** with generated
 text and known synthetic relevance labels. It reads no vault, uses no network,
-and prints aggregate metrics, not source paths. Eleven regression tests cover
+and prints aggregate metrics, not source paths. Fourteen regression tests cover
 FTS4 query syntax, phrase/strict/OR ordering, bounds, labeled recall,
 opposing synthetic claims, exclusion of oversized/stale index rows, stable
-casefold tie-breaking, and the absence of unproven synonym expansion.
+casefold tie-breaking, title-aware bounded promotion and the absence of
+unproven synonym expansion.
 
 Updated Linux host measurement on 24 Nov 2026, SQLite **3.53.1**: 20,000
 artificial notes, five adversarial two-word queries (including one Cyrillic
@@ -324,6 +341,18 @@ path-ordered OR and prior path-ordered two-pass baseline had **recall@24 =
 natural English/Russian question forms produced identical shortlists and
 the same labeled metrics. Query timing across 25 host trials was approximately
 **p50 = 0.23 ms** and **p95 = 0.28 ms**, but varies by machine and build.
+With the title tie-break on 25 Nov 2026, the **same five synthetic topics**
+still achieved recall@6 = 4/4, precision@6 = 4/6, recall@24 = 4/4 and
+unchanged natural-question shortlists. On the same Linux host the updated
+SQL + metadata scoring mirror measured **p50 = 0.456 ms**, **p95 = 0.625 ms**
+over 25 trials. This is a separate host run, not a paired device performance
+comparison. The corpus has generic titles, so its unchanged recall does
+**not** establish representative improvement: dedicated adversarial fixtures
+demonstrate promotion of a matching title among scanned candidates instead.
+The standalone 10-note probe reported that the previous two-pass baseline
+missed a later titled source, while the new windowed ranking promoted it to
+**rank 3**, behind both opposing exact-phrase sources (eight scanned
+candidates per pass); only boolean/count summaries are printed.
 The deliberately adversarial corpus is not a
 representative search evaluation, and this measures a Python SQL mirror,
 **not** Android, embeddings, battery/RAM, provider quality or semantic
@@ -346,6 +375,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   word-only false source conflicts and optional numeric-disagreement warnings;
   exact-excerpt diversity tie-breaking with stable top-two provenance and
   fail-closed overlong evidence questions, mirrored in the offline benchmark;
+  title-token prefix boundaries, one-token-one-term credit, Cyrillic matching,
+  bounded title-rank windows and phrase-first precedence over title rank;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
@@ -370,9 +401,10 @@ grounding. Device and broader human-labeled benchmarks remain open.
 
 ## Deliberately still open
 
-- RRF and the three-pass lexical priority are **relevance heuristics**, not
-  learned rerankers or proof. Results are still pathname-ordered **within
-  each pass**, with no synonym expansion. The adversarial FTS4 fixture does not close the
+- RRF, title-match scores and the three-pass lexical priority are **relevance
+  heuristics**, not learned rerankers or proof. Results are now title-ranked
+  only **within each bounded path-ordered candidate window**, with stable
+  pathname ties and no synonym expansion. The adversarial FTS4 fixture does not close the
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
   semantic model behavior and Android 20k latency remain unmeasured until a
   future physical run of the new synthetic lookup timing fixture.

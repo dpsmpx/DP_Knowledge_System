@@ -926,6 +926,13 @@ public final class KnowledgeDeviceQaRunner {
                     "# Доказательство\nПамять синтез поддерживает вымышленное утверждение.\n");
             writeFixture(new File(vault, "z-r-refute.md"),
                     "# Доказательство\nПамять синтез опровергает вымышленное утверждение.\n");
+            // These titles contain both query prefixes but no adjacent phrase.
+            // They should win only *within* the later all-term pass, after
+            // both true phrase hits, despite their late alphabetical paths.
+            writeFixture(new File(vault, "z-title-en.md"),
+                    "# Violet related to amber\nAmber synthetic-distance violet.\n");
+            writeFixture(new File(vault, "z-title-ru.md"),
+                    "# Синтез и память\nПамять synthetic-distance синтез.\n");
             final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
                     new File(sandbox, "qa-phrase.sqlite"));
             testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 80,
@@ -938,16 +945,20 @@ public final class KnowledgeDeviceQaRunner {
                     testIndex.evidenceSearch("Расскажи, что известно про память синтез?", 6);
             if (ranked.size() != 6 || !"z-refute.md".equals(ranked.get(0).relativePath)
                     || !"z-support.md".equals(ranked.get(1).relativePath)
+                    || !"z-title-en.md".equals(ranked.get(2).relativePath)
                     || naturalEnglish.size() != 6
                     || !"z-refute.md".equals(naturalEnglish.get(0).relativePath)
                     || !"z-support.md".equals(naturalEnglish.get(1).relativePath)
+                    || !"z-title-en.md".equals(naturalEnglish.get(2).relativePath)
                     || naturalRussian.size() != 6
                     || !"z-r-refute.md".equals(naturalRussian.get(0).relativePath)
                     || !"z-r-support.md".equals(naturalRussian.get(1).relativePath)
+                    || !"z-title-ru.md".equals(naturalRussian.get(2).relativePath)
                     || !Arrays.equals(unchanged, sha256(reference))) {
-                throw new SyntheticMismatch("verdict=PHRASE_PRIORITY_OR_CONFLICT_LOSS");
+                throw new SyntheticMismatch("verdict=PHRASE_OR_TITLE_PRIORITY_OR_CONFLICT_LOSS");
             }
-            return "syntheticNotes=64, exactPhraseTop2=true, enRuQuestionFraming=true, "
+            return "syntheticNotes=66, exactPhraseTop2=true, enRuQuestionFraming=true, "
+                    + "titlePriorityWithinAllPass=true, "
                     + "opposingSourcesPreserved=true, noSemanticProof=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
