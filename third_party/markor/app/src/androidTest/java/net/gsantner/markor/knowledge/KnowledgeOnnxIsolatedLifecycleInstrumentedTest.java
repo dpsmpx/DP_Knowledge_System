@@ -145,10 +145,16 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(0, io.dynamicOutputAxes);
             assertEquals(1, io.maxInputRank);
             assertEquals(1, io.maxOutputRank);
+            assertEquals(1, declared.floatInputs);
+            assertEquals(1, declared.floatOutputs);
+            assertEquals(0, declared.int64Inputs);
+            assertEquals(0, declared.int64Outputs);
             assertEquals("Offline GraphProto and native I/O counts diverged for Identity",
                     KnowledgeOnnxIoAgreement.Verdict.COUNTS_AND_TENSORS_AGREE,
                     KnowledgeOnnxIoAgreement.compare(declared.graphInputs,
                             declared.graphOutputs, declared.typedInputs, declared.typedOutputs,
+                            declared.floatInputs, declared.floatOutputs,
+                            declared.int64Inputs, declared.int64Outputs,
                             report.get().inputs, report.get().outputs, io));
             assertTrue(report.get().sessionInitMillis >= 0);
             assertWorkerPssSnapshots(report.get().workerMemory);

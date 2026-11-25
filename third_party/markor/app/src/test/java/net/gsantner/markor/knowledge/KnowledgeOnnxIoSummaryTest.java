@@ -31,5 +31,10 @@ public final class KnowledgeOnnxIoSummaryTest {
                 new KnowledgeOnnxIoSummary(-1, 1, 0, 1, 0, 0, 0, 0, 1, 1), 1, 1));
         assertFalse(KnowledgeOnnxIoSummary.valid(
                 new KnowledgeOnnxIoSummary(1, 1, 1, 1, 0, 0, 0, 0, 1, 1), 33, 1));
+        // Malformed worker diagnostics must not overflow an int category sum
+        // and become a falsely valid input count.
+        assertFalse(KnowledgeOnnxIoSummary.valid(
+                new KnowledgeOnnxIoSummary(1, 1, Integer.MAX_VALUE, 1,
+                        Integer.MAX_VALUE, 0, 0, 0, 1, 1), 1, 1));
     }
 }

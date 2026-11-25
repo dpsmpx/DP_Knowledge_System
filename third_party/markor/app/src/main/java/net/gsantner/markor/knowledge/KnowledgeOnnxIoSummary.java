@@ -46,6 +46,8 @@ final class KnowledgeOnnxIoSummary {
                 || info.outputTensors < 0 || info.outputTensors > outputs
                 || info.floatInputs < 0 || info.int64Inputs < 0
                 || info.floatOutputs < 0 || info.int64Outputs < 0
+                || info.floatInputs > info.inputTensors || info.int64Inputs > info.inputTensors
+                || info.floatOutputs > info.outputTensors || info.int64Outputs > info.outputTensors
                 || info.floatInputs + info.int64Inputs > info.inputTensors
                 || info.floatOutputs + info.int64Outputs > info.outputTensors
                 || info.maxInputRank < 0 || info.maxInputRank > MAX_RANK

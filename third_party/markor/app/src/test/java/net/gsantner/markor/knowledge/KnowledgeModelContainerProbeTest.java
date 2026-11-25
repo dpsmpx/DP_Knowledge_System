@@ -113,6 +113,10 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals("MatMul", result.operatorHints);
         assertEquals(1, result.typedInputs);
         assertEquals(1, result.typedOutputs);
+        assertEquals(0, result.floatInputs);
+        assertEquals(1, result.floatOutputs);
+        assertEquals(1, result.int64Inputs);
+        assertEquals(0, result.int64Outputs);
         assertEquals("in:input_ids:int64[?,384]; out:output:float32[1,384]",
                 result.signatureHints);
         assertEquals("default@17", result.opsetHints);
@@ -580,6 +584,10 @@ public final class KnowledgeModelContainerProbeTest {
                 result.detailState);
         assertEquals(1, result.typedInputs);
         assertEquals(0, result.typedOutputs);
+        assertEquals(0, result.floatInputs);
+        assertEquals(0, result.int64Inputs);
+        assertEquals(0, result.floatOutputs);
+        assertEquals(0, result.int64Outputs);
         assertEquals("in:tensor_future:type#29?", result.signatureHints);
     }
 
