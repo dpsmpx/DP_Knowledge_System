@@ -322,6 +322,22 @@ watchdog. Используется исключительно синтетиче
 синтетический граф `Identity`, а не импортированные веса. Реальный
 native hang/OOM, физический ARM64 и сценарии старых API остаются
 непроверенными; `runnable=false`.
+[PR #193](https://github.com/dpsmpx/DP_Knowledge_System/pull/193)
+расширил обязательный эмуляторный matrix до Android **API 28 и 35**:
+**9/9 инструментальных тестов на каждой версии** (синтетический
+FD/Binder/isolated worker, без пользовательских данных и реального
+инференса; [прогон CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45584071591)).
+На API 28 обнаружен и исправлен реальный стартовый сбой worker:
+`Process.isIsolatedUid(int)` существует лишь с API 34; на API 28–33
+используется `Process.isIsolated()`, на API 34+ — `isIsolatedUid(int)`.
+Ветка API 24–27 сохраняет локальную проверку `/proc/self/cmdline`,
+однако **API 24 не подтверждён**: в двух эмуляторных запусках
+([1](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45574231026),
+[2](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45579021521))
+ADB оставался offline до начала тестов. Это инфраструктурный долг, а
+не доказанная несовместимость приложения. Физический ARM64, реальные
+импортированные модели, native hang/OOM, RAM/ABI/нагрев не проверены;
+`runnable=false`, MODEL-M1/M8 не закрыты.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
