@@ -41,9 +41,9 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("handler.postDelayed(deadline", service)
         self.assertIn("Process.killProcess(Process.myPid())", service)
         self.assertIn("KnowledgeOnnxProcessIdentity.isWorker()", service)
-        self.assertIn("KnowledgeOnnxCpuBackend.smoke()", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.smoke(memory)", service)
         self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
-        self.assertIn("KnowledgeOnnxCpuBackend.inspect(model)", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.inspect(model, memory)", service)
         self.assertIn("Arrays.fill(model, (byte) 0)", service)
         self.assertIn("mainHandler.postDelayed(clientDeadline", client)
         self.assertIn("response.arg1 != activeRequestId", client)
@@ -130,6 +130,29 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("KnowledgeOnnxSessionGate.requireAvailableMemory(", activity)
         self.assertIn("if (lowMemory || availableBytes < MIN_AVAILABLE_RAM_BYTES)", gate)
         self.assertIn("Arrays.fill(bytes, (byte) 0);\n                        modelImportActive = false;", activity)
+
+    def test_worker_pss_and_last_moment_low_memory_gate_are_isolated(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        service = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedService.java").read_text()
+        backend = (APP / "flavorAtest" / base / "KnowledgeOnnxCpuBackend.java").read_text()
+        sample = (APP / "flavorAtest" / base / "KnowledgeOnnxWorkerMemory.java").read_text()
+        protocol = (APP / "main" / base / "KnowledgeOnnxIsolatedProtocol.java").read_text()
+        emulator = (APP / "androidTest" / base /
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("Debug.getPss()", sample)
+        self.assertIn("manager.getMemoryInfo(memory)", sample)
+        self.assertIn("KnowledgeOnnxSessionGate.requireAvailableMemory(", sample)
+        self.assertIn("KnowledgeOnnxWorkerMemory.requireAvailable(this, false)", service)
+        self.assertIn("KnowledgeOnnxWorkerMemory.requireAvailable(this, debugLowMemory)", service)
+        self.assertIn("BuildConfig.DEBUG && request.getBoolean(", service)
+        self.assertIn("KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED", service)
+        self.assertIn("Arrays.fill(model, (byte) 0)", service)
+        self.assertIn("memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB())", backend)
+        self.assertIn("memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB())", backend)
+        self.assertIn("putMemory(data, result.workerMemory)", service)
+        self.assertIn("verifiedFdIsRefusedByDebugWorkerLowRamGate", emulator)
+        self.assertIn("assertWorkerPssSnapshots", emulator)
+        self.assertIn('PSS_OBSERVED_KIB = "pss_observed_kib"', protocol)
 
     def test_manual_fd_smoke_reuses_generated_graph_and_never_selects_user_model(self):
         base = "java/net/gsantner/markor/knowledge/"

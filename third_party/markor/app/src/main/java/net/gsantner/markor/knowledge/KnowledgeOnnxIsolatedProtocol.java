@@ -13,6 +13,7 @@ final class KnowledgeOnnxIsolatedProtocol {
     // Never sent by production clients; accepted by the isolated service in debug builds only.
     static final int DEBUG_STALL = 8;
     static final int DEBUG_STALL_STARTED = 9;
+    static final int RESULT_SESSION_MEMORY_DENIED = 10;
     static final long WATCHDOG_MILLIS = 30_000L;
     static final long CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L;
     static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
@@ -20,6 +21,11 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final String INIT_MILLIS = "init_ms";
     static final String RUN_MICROS = "run_us";
     static final String NATIVE_DELTA = "native_delta";
+    static final String PSS_BEFORE_KIB = "pss_before_kib";
+    static final String PSS_OBSERVED_KIB = "pss_observed_kib";
+    static final String PSS_AFTER_KIB = "pss_after_kib";
+    // A DEBUG-only test signal to refuse a verified FD before native session creation.
+    static final String DEBUG_FORCE_LOW_MEMORY = "debug_force_low_memory";
     static final String PIPE_FD = "fd";
     static final String MODEL_SHA256 = "sha256";
     static final String INPUTS = "inputs";

@@ -78,11 +78,14 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         final int requestId = message.arg1;
         ParcelFileDescriptor pipe = null;
         String expectedSha = null;
+        boolean simulatedLowMemory = false;
         if (sessionRequest) {
             try {
                 final Bundle request = message.getData();
                 pipe = request.getParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD);
                 expectedSha = request.getString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256);
+                simulatedLowMemory = BuildConfig.DEBUG && request.getBoolean(
+                        KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, false);
             } catch (RuntimeException invalidParcel) {
                 closePipe(pipe);
                 answerSession(reply, requestId, null);
@@ -104,19 +107,30 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         }
         final ParcelFileDescriptor inputPipe = pipe;
         final String sha = expectedSha;
+        final boolean debugLowMemory = simulatedLowMemory;
         final int size = message.arg2;
         handler.postDelayed(deadline, KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS);
         worker.execute(() -> {
             KnowledgeOnnxSmoke.Report smoke = null;
             KnowledgeOnnxSessionGate.Report session = null;
+            boolean memoryDenied = false;
+            final KnowledgeOnnxMemoryTrace.Recorder memory =
+                    new KnowledgeOnnxMemoryTrace.Recorder();
+            memory.begin(KnowledgeOnnxWorkerMemory.samplePssKiB());
             try {
                 if (sessionRequest) {
+                    // Check in the worker immediately before allocating model bytes,
+                    // then once more before native session creation. Neither check
+                    // is a reservation and both are independent of the UI gate.
+                    KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
                     final byte[] model;
                     try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe)) {
                         model = KnowledgeOnnxSessionPipe.readVerified(stream, size, sha);
                     }
                     try {
-                        session = KnowledgeOnnxCpuBackend.inspect(model);
+                        memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
+                        KnowledgeOnnxWorkerMemory.requireAvailable(this, debugLowMemory);
+                        session = KnowledgeOnnxCpuBackend.inspect(model, memory);
                         if (session.sessionInitMillis < 0
                                 || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                                 || session.inputs < 1 || session.inputs > 32
@@ -125,14 +139,18 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                         Arrays.fill(model, (byte) 0);
                     }
                 } else {
-                    smoke = KnowledgeOnnxCpuBackend.smoke();
+                    KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
+                    smoke = KnowledgeOnnxCpuBackend.smoke(memory);
                     if (!KnowledgeOnnxIsolatedProtocol.validTimings(
                             smoke.sessionInitMillis, smoke.inferenceMicros)) smoke = null;
                 }
+            } catch (KnowledgeOnnxWorkerMemory.Denied denied) {
+                memoryDenied = true;
             } catch (Exception | LinkageError ignored) {
                 // Native error text and paths never leave the worker process.
             } finally {
-                if (sessionRequest) answerSession(reply, requestId, session);
+                closePipe(inputPipe);
+                if (sessionRequest) answerSession(reply, requestId, session, memoryDenied);
                 else answer(reply, requestId, smoke);
                 handler.post(() -> {
                     handler.removeCallbacks(deadline);
@@ -145,9 +163,16 @@ public final class KnowledgeOnnxIsolatedService extends Service {
 
     private static void answerSession(final Messenger recipient, final int requestId,
                                       final KnowledgeOnnxSessionGate.Report result) {
+        answerSession(recipient, requestId, result, false);
+    }
+
+    private static void answerSession(final Messenger recipient, final int requestId,
+                                      final KnowledgeOnnxSessionGate.Report result,
+                                      final boolean memoryDenied) {
         if (recipient == null) return;
-        final Message reply = Message.obtain(null, result == null
-                ? KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
+        final Message reply = Message.obtain(null, memoryDenied
+                ? KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED
+                : result == null ? KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
                 : KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED);
         reply.arg1 = requestId;
         if (result != null) {
@@ -159,6 +184,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     result.nativeHeapDeltaBytes);
             data.putLong(KnowledgeOnnxIsolatedProtocol.INPUTS, result.inputs);
             data.putLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS, result.outputs);
+            putMemory(data, result.workerMemory);
             reply.setData(data);
         }
         try {
@@ -187,6 +213,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             data.putLong(KnowledgeOnnxIsolatedProtocol.INIT_MILLIS, result.sessionInitMillis);
             data.putLong(KnowledgeOnnxIsolatedProtocol.RUN_MICROS, result.inferenceMicros);
             data.putLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, result.nativeHeapDeltaBytes);
+            putMemory(data, result.workerMemory);
             reply.setData(data);
         }
         try {
@@ -194,6 +221,12 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         } catch (RemoteException ignored) {
             // User cancelled/unbound or Android terminated the owner process.
         }
+    }
+
+    private static void putMemory(final Bundle data, final KnowledgeOnnxMemoryTrace memory) {
+        data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, memory.beforeKiB);
+        data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, memory.maxObservedKiB);
+        data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, memory.afterCloseKiB);
     }
 
     /** Stop ONLY this named worker process, never the main DPKS process. */

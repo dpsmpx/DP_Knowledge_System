@@ -144,10 +144,16 @@ final class KnowledgeOnnxIsolatedClient {
             final long init = data.getLong(KnowledgeOnnxIsolatedProtocol.INIT_MILLIS, -1L);
             final long run = data.getLong(KnowledgeOnnxIsolatedProtocol.RUN_MICROS, -1L);
             if (KnowledgeOnnxIsolatedProtocol.validTimings(init, run)) {
-                report = new KnowledgeOnnxSmoke.Report(
-                        KnowledgeOnnxIsolatedProtocol.safeVersion(
-                                data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
-                        init, run, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0L));
+                final long before = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, -1L);
+                final long observed = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, -1L);
+                final long after = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, -1L);
+                if (KnowledgeOnnxMemoryTrace.valid(before, observed, after)) {
+                    report = new KnowledgeOnnxSmoke.Report(
+                            KnowledgeOnnxIsolatedProtocol.safeVersion(
+                                    data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
+                            init, run, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0L),
+                            new KnowledgeOnnxMemoryTrace(before, observed, after));
+                }
             }
         }
         final Callback done = finish();
