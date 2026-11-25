@@ -42,6 +42,8 @@ final class KnowledgeModelContainerProbe {
     private static final class Details {
         DetailState state = DetailState.NOT_INSPECTED;
         long tensorDescriptors;
+        long tensorExtentsChecked;
+        long tensorExtentsUnknown;
         long nodes;
         long inputs;
         long outputs;
@@ -63,6 +65,8 @@ final class KnowledgeModelContainerProbe {
         final boolean graphDeclared;
         final DetailState detailState;
         final long tensorDescriptors;
+        final long tensorExtentsChecked;
+        final long tensorExtentsUnknown;
         final long graphNodes;
         final long graphInputs;
         final long graphOutputs;
@@ -86,6 +90,8 @@ final class KnowledgeModelContainerProbe {
             graphDeclared = graph;
             detailState = details.state;
             tensorDescriptors = details.tensorDescriptors;
+            tensorExtentsChecked = details.tensorExtentsChecked;
+            tensorExtentsUnknown = details.tensorExtentsUnknown;
             graphNodes = details.nodes;
             graphInputs = details.inputs;
             graphOutputs = details.outputs;
@@ -169,15 +175,17 @@ final class KnowledgeModelContainerProbe {
     }
 
     /**
-     * GGUF tensor descriptors are metadata only. We check bounded names,
-     * dimensions and aligned offsets against the file but deliberately do NOT
-     * infer tensor byte lengths from quantization types or load tensor data.
+     * GGUF tensor descriptors are metadata only. For a small explicit set of
+     * ggml storage formats, compute the declared payload size using its row
+     * block size and check it fits inside the file. Never load tensor bytes.
+     * Unknown/future ggml types remain undecided, not incompatible.
      */
     private static void inspectGgufTensorDescriptors(final RandomAccessFile data,
             final long count, final long alignment, final Details details) throws IOException {
         if (count > MAX_GGUF_TENSOR_INFOS) throw new ScanLimit();
         final Set<String> names = new HashSet<>();
         final long[] offsets = new long[(int) count];
+        final long[] declaredBytes = new long[(int) count];
         for (int index = 0; index < count; index++) {
             checkInterrupted();
             if (data.getFilePointer() > MAX_GGUF_DESCRIPTOR_SCAN) throw new ScanLimit();
@@ -186,24 +194,74 @@ final class KnowledgeModelContainerProbe {
             final long dimensions = readU32(data);
             if (dimensions == 0) throw new BadContainer();
             if (dimensions > 4) throw new ScanLimit(); // Future GGUF may expand dims.
+            final long[] axes = new long[(int) dimensions];
             for (int dim = 0; dim < (int) dimensions; dim++) {
-                if (readPositiveU64(data) == 0) throw new BadContainer();
+                axes[dim] = readPositiveU64(data);
+                if (axes[dim] == 0) throw new BadContainer();
             }
             final long type = readU32(data);
             if (type > 255) throw new ScanLimit(); // Do not reject future quantizers.
             final long offset = readPositiveU64(data);
             if (offset % alignment != 0) throw new BadContainer();
             offsets[index] = offset;
+            declaredBytes[index] = knownGgufTensorBytes(type, axes);
+            if (declaredBytes[index] < 0) details.tensorExtentsUnknown++;
             details.tensorDescriptors++;
         }
         final long position = data.getFilePointer();
         final long padding = (alignment - position % alignment) % alignment;
         if (padding > data.length() - position) throw new BadContainer();
         final long startOfData = position + padding;
-        for (final long offset : offsets) {
+        for (int i = 0; i < offsets.length; i++) {
+            final long offset = offsets[i];
             if (offset >= data.length() - startOfData) throw new BadContainer();
+            if (declaredBytes[i] >= 0) {
+                // Subtraction avoids overflow on offset + declaredBytes.
+                if (declaredBytes[i] > data.length() - startOfData - offset) {
+                    throw new BadContainer();
+                }
+                details.tensorExtentsChecked++;
+            }
         }
-        details.state = DetailState.DECLARATIONS_READ;
+        details.state = details.tensorExtentsUnknown == 0
+                ? DetailState.DECLARATIONS_READ : DetailState.PARTIAL;
+    }
+
+    /**
+     * Selected stable ggml types from ggml/include/ggml.h and its block
+     * traits in ggml/src/ggml.c and ggml/src/ggml-common.h.
+     * Unknown types deliberately return -1 rather than guessing byte size.
+     * Quantized rows require an integral number of blocks along axis 0.
+     */
+    private static long knownGgufTensorBytes(final long type, final long[] axes)
+            throws BadContainer {
+        final int blockSize, blockBytes;
+        if (type == 0 || type == 26) { blockSize = 1; blockBytes = 4; }
+        else if (type == 1 || type == 25 || type == 30) {
+            blockSize = 1; blockBytes = 2;
+        } else if (type == 24) { blockSize = 1; blockBytes = 1; }
+        else if (type == 27 || type == 28) { blockSize = 1; blockBytes = 8; }
+        else if (type == 2) { blockSize = 32; blockBytes = 18; }
+        else if (type == 3) { blockSize = 32; blockBytes = 20; }
+        else if (type == 6) { blockSize = 32; blockBytes = 22; }
+        else if (type == 7) { blockSize = 32; blockBytes = 24; }
+        else if (type == 8) { blockSize = 32; blockBytes = 34; }
+        else if (type == 10) { blockSize = 256; blockBytes = 84; }
+        else if (type == 11) { blockSize = 256; blockBytes = 110; }
+        else if (type == 12) { blockSize = 256; blockBytes = 144; }
+        else if (type == 13) { blockSize = 256; blockBytes = 176; }
+        else if (type == 14) { blockSize = 256; blockBytes = 210; }
+        else return -1;
+
+        if (axes[0] % blockSize != 0) throw new BadContainer();
+        long bytes = axes[0] / blockSize;
+        if (bytes > Long.MAX_VALUE / blockBytes) throw new BadContainer();
+        bytes *= blockBytes;
+        for (int i = 1; i < axes.length; i++) {
+            if (bytes > Long.MAX_VALUE / axes[i]) throw new BadContainer();
+            bytes *= axes[i];
+        }
+        return bytes;
     }
 
     /** Reads the top-level protobuf tags only: no tensor allocation or execution. */

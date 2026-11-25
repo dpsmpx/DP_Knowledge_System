@@ -768,7 +768,8 @@
     <string name="knowledge_models_container_gguf">Контейнер GGUF: %1$s\nВерсия: %2$d, заявлено тензоров: %3$d, метаданных: %4$d\nЗаявленная архитектура: %5$s\nЗаявленный токенизатор: %6$s\nСами тензоры, семантика модели, поддержка Android и производительность НЕ проверены.</string>
     <string name="knowledge_models_container_onnx">Контейнер ONNX: %1$s\nВерсия IR: %2$d, объявлений opset: %3$d, поле графа присутствует: %4$s\nУзлы графа, операторы, входы/выходы, внешние данные и Android-движок НЕ проверены.</string>
     <string name="knowledge_models_container_detail_read">Объявления ограниченно прочитаны (движком НЕ проверены)</string>
-    <string name="knowledge_models_container_gguf_descriptors">Описания тензоров GGUF: %1$s; проверено: %2$d. Проверены имена, размерности и выравнивание смещений; длины данных тензоров, квантизация и ABI НЕ проверены.</string>
+    <string name="knowledge_models_container_gguf_descriptors">Описания тензоров GGUF: %1$s; проверено: %2$d. Проверены имена, размерности и выравнивание смещений. Реальные байты тензоров и ABI НЕ проверены.</string>
+    <string name="knowledge_models_container_gguf_extents">По известным форматам хранения ggml расчётные данные %1$d тензоров помещаются в файл; неизвестных/непроверенных форматов: %2$d. Это НЕ доказывает, что какой-либо движок сможет загрузить или запустить модель.</string>
     <string name="knowledge_models_container_onnx_graph">Объявления графа ONNX: %1$s; узлов: %2$d, входов: %3$d, выходов: %4$d; примеры операций: %5$s. Поддержка операторов и внешние тензоры НЕ проверены.</string>
     <string name="knowledge_models_container_onnx_signatures">Ограниченно прочитаны тензорные объявления: входов %1$d, выходов %2$d; примеры: %3$s. Это только подсказки TypeProto, НЕ проверенные сигнатуры исполнения и НЕ доказательство поддержки операторов.</string>
     <string name="knowledge_models_package_remove">Удалить сопутствующие файлы</string>
