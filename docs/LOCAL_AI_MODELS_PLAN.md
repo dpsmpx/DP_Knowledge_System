@@ -338,6 +338,19 @@ ADB оставался offline до начала тестов. Это инфра
 не доказанная несовместимость приложения. Физический ARM64, реальные
 импортированные модели, native hang/OOM, RAM/ABI/нагрев не проверены;
 `runnable=false`, MODEL-M1/M8 не закрыты.
+[PR #195](https://github.com/dpsmpx/DP_Knowledge_System/pull/195)
+расширил эмуляторную проверку на Android **API 27** (AOSP
+`default;x86_64`), сохранив API 28 и 35 (Google APIs x86_64).
+[CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45591963305)
+подтвердил **9/9 инструментальных тестов на каждой из трёх версий**,
+включая sandbox identity через локальный `/proc/self/cmdline` на
+Android 8.1. Первый вариант образа `android-27;google_apis;x86_64`
+отсутствовал в SDK, поэтому не запускал тесты
+([диагностика](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45590263162)).
+API 24–26 **не проверены**: две предыдущие попытки API 24 остановились
+до тестов из-за `adb offline`. Синтетика не подтверждает реальные
+модели, инференс, native hang/OOM или физический ARM64;
+`runnable=false`, MODEL-M1/M8 открыты.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
