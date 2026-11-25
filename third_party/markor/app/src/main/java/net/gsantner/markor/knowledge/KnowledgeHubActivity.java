@@ -805,7 +805,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             modelStatus.setText(getString(R.string.knowledge_models_onnx_fd_passed,
                                     report.runtimeVersion, report.inputs, report.outputs,
                                     report.sessionInitMillis, report.nativeHeapDeltaBytes,
-                                    formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)));
+                                    formatSessionDiagnostics(report)));
                         }
                     }
                 }
@@ -846,6 +846,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 ? getString(R.string.knowledge_models_worker_rss_high_water, rssHighWaterKiB)
                 : getString(R.string.knowledge_models_worker_rss_high_water_unavailable);
         return pss + "\n" + rss;
+    }
+
+    /** Numeric I/O aggregates only; node names, symbolic labels and bytes stay isolated. */
+    private String formatSessionDiagnostics(final KnowledgeOnnxSessionGate.Report report) {
+        final KnowledgeOnnxIoSummary io = report.ioSummary;
+        return formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)
+                + "\n" + getString(R.string.knowledge_models_onnx_io_summary,
+                io.inputTensors, io.outputTensors, io.floatInputs, io.floatOutputs,
+                io.int64Inputs, io.int64Outputs, io.dynamicInputAxes, io.dynamicOutputAxes,
+                io.maxInputRank, io.maxOutputRank);
     }
 
     /** Fail closed on an unavailable/low OS RAM snapshot; this reserves no memory. */
@@ -904,7 +914,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         R.string.knowledge_models_onnx_session_passed,
                                         report.runtimeVersion, report.inputs, report.outputs,
                                         report.sessionInitMillis, report.nativeHeapDeltaBytes,
-                                        formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)));
+                                        formatSessionDiagnostics(report)));
                             }
                         }
 

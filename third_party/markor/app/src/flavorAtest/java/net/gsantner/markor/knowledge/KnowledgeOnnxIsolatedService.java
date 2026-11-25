@@ -141,7 +141,11 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                         if (session.sessionInitMillis < 0
                                 || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                                 || session.inputs < 1 || session.inputs > 32
-                                || session.outputs < 1 || session.outputs > 32) session = null;
+                                || session.outputs < 1 || session.outputs > 32
+                                || !KnowledgeOnnxIoSummary.valid(
+                                        session.ioSummary, session.inputs, session.outputs)) {
+                            session = null;
+                        }
                     } finally {
                         Arrays.fill(model, (byte) 0);
                     }
@@ -198,6 +202,17 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     result.nativeHeapDeltaBytes);
             data.putLong(KnowledgeOnnxIsolatedProtocol.INPUTS, result.inputs);
             data.putLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS, result.outputs);
+            final KnowledgeOnnxIoSummary io = result.ioSummary;
+            data.putInt(KnowledgeOnnxIsolatedProtocol.INPUT_TENSORS, io.inputTensors);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.OUTPUT_TENSORS, io.outputTensors);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.FLOAT_INPUTS, io.floatInputs);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.FLOAT_OUTPUTS, io.floatOutputs);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.INT64_INPUTS, io.int64Inputs);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.INT64_OUTPUTS, io.int64Outputs);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_INPUT_AXES, io.dynamicInputAxes);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_OUTPUT_AXES, io.dynamicOutputAxes);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.MAX_INPUT_RANK, io.maxInputRank);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK, io.maxOutputRank);
             putMemory(data, result.workerMemory, result.workerRssHighWaterKiB);
             reply.setData(data);
         }

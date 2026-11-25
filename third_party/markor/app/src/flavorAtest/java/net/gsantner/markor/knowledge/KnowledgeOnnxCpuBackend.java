@@ -9,10 +9,14 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.Collections;
+import java.util.Map;
 
+import ai.onnxruntime.NodeInfo;
+import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
+import ai.onnxruntime.TensorInfo;
 
 /** DPKS-only, explicit CPU smoke run against a generated, weight-free graph. */
 final class KnowledgeOnnxCpuBackend {
@@ -37,6 +41,7 @@ final class KnowledgeOnnxCpuBackend {
         final long elapsed;
         final long inputs;
         final long outputs;
+        final KnowledgeOnnxIoSummary summary;
         try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
             options.setIntraOpNumThreads(1);
             options.setInterOpNumThreads(1);
@@ -51,6 +56,17 @@ final class KnowledgeOnnxCpuBackend {
                 if (inputs < 1 || outputs < 1) {
                     throw new IOException("ONNX CPU session has no external I/O");
                 }
+                // Inspect runtime I/O shapes/types only in this isolated UID.
+                // Names and symbolic dimension labels NEVER enter the report.
+                final IoCounts in = countTensors(session.getInputInfo());
+                final IoCounts out = countTensors(session.getOutputInfo());
+                summary = new KnowledgeOnnxIoSummary(in.tensors, out.tensors,
+                        in.floatCount, out.floatCount, in.int64Count, out.int64Count,
+                        in.dynamicAxes, out.dynamicAxes, in.maxRank, out.maxRank);
+                if (in.nodes != inputs || out.nodes != outputs
+                        || !KnowledgeOnnxIoSummary.valid(summary, inputs, outputs)) {
+                    throw new IOException("ONNX I/O metadata outside bounded diagnostic contract");
+                }
             }
         }
         if (Thread.currentThread().isInterrupted()) {
@@ -59,7 +75,42 @@ final class KnowledgeOnnxCpuBackend {
         memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB());
         return new KnowledgeOnnxSessionGate.Report(environment.getVersion(), elapsed,
                 Debug.getNativeHeapAllocatedSize() - nativeBefore, inputs, outputs,
-                memory.result(), KnowledgeOnnxRssHighWater.readSelf());
+                summary, memory.result(), KnowledgeOnnxRssHighWater.readSelf());
+    }
+
+    private static final class IoCounts {
+        int nodes;
+        int tensors;
+        int floatCount;
+        int int64Count;
+        int dynamicAxes;
+        int maxRank;
+    }
+
+    private static IoCounts countTensors(final Map<String, NodeInfo> nodes)
+            throws IOException {
+        if (nodes == null || nodes.isEmpty() || nodes.size() > KnowledgeOnnxIoSummary.MAX_IO) {
+            throw new IOException("ONNX I/O node count outside bound");
+        }
+        final IoCounts found = new IoCounts();
+        found.nodes = nodes.size();
+        for (final NodeInfo node : nodes.values()) {
+            if (node == null) throw new IOException("Missing ONNX I/O type");
+            if (!(node.getInfo() instanceof TensorInfo)) continue;
+            final TensorInfo tensor = (TensorInfo) node.getInfo();
+            final long[] shape = tensor.getShape();
+            if (shape == null || shape.length > KnowledgeOnnxIoSummary.MAX_RANK) {
+                throw new IOException("ONNX tensor rank outside bound");
+            }
+            found.tensors++;
+            if (tensor.type == OnnxJavaType.FLOAT) found.floatCount++;
+            if (tensor.type == OnnxJavaType.INT64) found.int64Count++;
+            found.maxRank = Math.max(found.maxRank, shape.length);
+            for (final long dimension : shape) {
+                if (dimension < 0) found.dynamicAxes++;
+            }
+        }
+        return found;
     }
 
     static KnowledgeOnnxSmoke.Report smoke(final KnowledgeOnnxMemoryTrace.Recorder memory)

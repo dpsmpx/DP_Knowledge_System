@@ -139,6 +139,36 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Fresh manual run invoked multiple callbacks", emulator)
         self.assertNotIn("new byte[", emulator)
 
+    def test_native_onnx_io_summary_is_bounded_scalar_only_and_name_free(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        summary = (APP / "main" / base / "KnowledgeOnnxIoSummary.java").read_text()
+        protocol = (APP / "main" / base / "KnowledgeOnnxIsolatedProtocol.java").read_text()
+        backend = (APP / "flavorAtest" / base / "KnowledgeOnnxCpuBackend.java").read_text()
+        service = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedService.java").read_text()
+        client = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        emulator = (APP / "androidTest" / base /
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("MAX_IO = 32", summary)
+        self.assertIn("MAX_RANK = 16", summary)
+        self.assertIn("info.floatInputs + info.int64Inputs > info.inputTensors", summary)
+        self.assertIn("info.dynamicInputAxes <= info.inputTensors * info.maxInputRank", summary)
+        self.assertIn("session.getInputInfo()", backend)
+        self.assertIn("session.getOutputInfo()", backend)
+        self.assertIn("tensor.getShape()", backend)
+        self.assertIn("tensor.type == OnnxJavaType.FLOAT", backend)
+        self.assertNotIn("getDimensionNames()", backend)
+        self.assertNotIn("node.getName()", backend)
+        self.assertIn("KnowledgeOnnxIoSummary.valid(summary, inputs, outputs)", backend)
+        self.assertIn("KnowledgeOnnxIoSummary.valid(io, inputs, outputs)", client)
+        self.assertIn("KnowledgeOnnxIoSummary.valid(", service)
+        self.assertIn("data.putInt(KnowledgeOnnxIsolatedProtocol.INPUT_TENSORS", service)
+        self.assertIn("formatSessionDiagnostics(report)", activity)
+        self.assertIn("Native ONNX I/O summary failed its IPC bounds", emulator)
+        for key in ("INPUT_TENSORS", "FLOAT_INPUTS", "INT64_INPUTS",
+                    "DYNAMIC_INPUT_AXES", "MAX_INPUT_RANK"):
+            self.assertIn(key, protocol)
+
     def test_live_ram_gate_is_rechecked_after_model_sha_audit(self):
         base = "java/net/gsantner/markor/knowledge/"
         activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()

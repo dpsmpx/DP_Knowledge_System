@@ -33,6 +33,16 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final String MODEL_SHA256 = "sha256";
     static final String INPUTS = "inputs";
     static final String OUTPUTS = "outputs";
+    static final String INPUT_TENSORS = "input_tensors";
+    static final String OUTPUT_TENSORS = "output_tensors";
+    static final String FLOAT_INPUTS = "float_inputs";
+    static final String FLOAT_OUTPUTS = "float_outputs";
+    static final String INT64_INPUTS = "int64_inputs";
+    static final String INT64_OUTPUTS = "int64_outputs";
+    static final String DYNAMIC_INPUT_AXES = "dynamic_input_axes";
+    static final String DYNAMIC_OUTPUT_AXES = "dynamic_output_axes";
+    static final String MAX_INPUT_RANK = "max_input_rank";
+    static final String MAX_OUTPUT_RANK = "max_output_rank";
 
     private KnowledgeOnnxIsolatedProtocol() { }
 
