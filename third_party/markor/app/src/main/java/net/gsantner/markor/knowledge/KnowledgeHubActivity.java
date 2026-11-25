@@ -295,6 +295,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::pickModelFile, this::pickModelPackage,
                         this::downloadModel, this::auditModelPackage,
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
+                        this::runOnnxFdSmoke,
                         this::inspectOnnxCpuSession).show();
             }
         });
@@ -775,6 +776,56 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             modelImportActive = false;
             restoreModelButton();
             modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
+        }
+    }
+
+    /** Manual synthetic end-to-end FD transport + isolated session, never a user model. */
+    private void runOnnxFdSmoke() {
+        if (modelImportActive || !KnowledgeOnnxCpuBackend.available()
+                || onnxSessionClient == null) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_onnx_fd_running);
+        final byte[] fixture = KnowledgeOnnxSmoke.identityModel();
+        try {
+            final String digest = KnowledgeOnnxSessionPipe.sha256Hex(fixture);
+            if (onnxSessionClient.start(fixture, digest,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report report) {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        if (report.inputs != 1 || report.outputs != 1) {
+                            modelStatus.setText(R.string.knowledge_models_onnx_fd_failed);
+                        } else {
+                            modelStatus.setText(getString(R.string.knowledge_models_onnx_fd_passed,
+                                    report.runtimeVersion, report.inputs, report.outputs,
+                                    report.sessionInitMillis, report.nativeHeapDeltaBytes));
+                        }
+                    }
+                }
+
+                @Override public void failure() {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_onnx_fd_failed);
+                    }
+                }
+            })) {
+                modelImportActive = false;
+                restoreModelButton();
+                modelStatus.setText(R.string.knowledge_models_onnx_fd_failed);
+            }
+        } catch (IOException failed) {
+            Arrays.fill(fixture, (byte) 0);
+            modelImportActive = false;
+            restoreModelButton();
+            modelStatus.setText(R.string.knowledge_models_onnx_fd_failed);
         }
     }
 

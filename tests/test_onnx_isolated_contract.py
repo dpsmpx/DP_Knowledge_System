@@ -67,6 +67,20 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
             shim = (APP / flavor / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
             self.assertIn("return false;", shim)
 
+    def test_manual_fd_smoke_reuses_generated_graph_and_never_selects_user_model(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        dialog = (APP / "main" / base / "KnowledgeModelSettingsDialog.java").read_text()
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        pipe = (APP / "main" / base / "KnowledgeOnnxSessionPipe.java").read_text()
+        self.assertIn(".setTitle(R.string.knowledge_models_onnx_fd_smoke)", dialog)
+        self.assertIn(".setMessage(R.string.knowledge_models_onnx_fd_warning)", dialog)
+        self.assertIn("(dialog, which) -> fdSmokeTester.run()", dialog)
+        self.assertIn("final byte[] fixture = KnowledgeOnnxSmoke.identityModel()", activity)
+        self.assertIn("KnowledgeOnnxSessionPipe.sha256Hex(fixture)", activity)
+        self.assertIn("onnxSessionClient.start(fixture, digest", activity)
+        self.assertIn("Arrays.fill(fixture, (byte) 0)", activity)
+        self.assertIn("static String sha256Hex(final byte[] bytes)", pipe)
+
 
 if __name__ == "__main__":
     unittest.main()

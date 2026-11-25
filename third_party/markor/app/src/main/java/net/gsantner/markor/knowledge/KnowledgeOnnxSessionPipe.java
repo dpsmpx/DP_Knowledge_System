@@ -12,6 +12,19 @@ import java.util.Arrays;
 final class KnowledgeOnnxSessionPipe {
     private KnowledgeOnnxSessionPipe() { }
 
+    /** Lowercase transfer checksum for generated test fixtures and audited weights. */
+    static String sha256Hex(final byte[] bytes) throws IOException {
+        if (bytes == null) throw new IOException("Missing ONNX bytes");
+        final byte[] hashed = digest().digest(bytes);
+        final char[] digits = "0123456789abcdef".toCharArray();
+        final char[] out = new char[hashed.length * 2];
+        for (int i = 0; i < hashed.length; i++) {
+            out[i * 2] = digits[(hashed[i] >>> 4) & 15];
+            out[i * 2 + 1] = digits[hashed[i] & 15];
+        }
+        return new String(out);
+    }
+
     static byte[] readVerified(final InputStream stream, final int length,
                                final String expectedSha256) throws IOException {
         if (stream == null || length < 16 || length > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
