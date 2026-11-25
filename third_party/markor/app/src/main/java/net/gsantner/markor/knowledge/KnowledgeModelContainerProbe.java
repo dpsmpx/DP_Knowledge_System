@@ -63,6 +63,10 @@ final class KnowledgeModelContainerProbe {
         long outputs;
         long typedInputs;
         long typedOutputs;
+        long floatInputs;
+        long floatOutputs;
+        long int64Inputs;
+        long int64Outputs;
         long customDomainNodes;
         long customNodesMissingImport;
         long duplicateOpsetDomains;
@@ -202,6 +206,10 @@ final class KnowledgeModelContainerProbe {
         final long graphOutputs;
         final long typedInputs;
         final long typedOutputs;
+        final long floatInputs;
+        final long floatOutputs;
+        final long int64Inputs;
+        final long int64Outputs;
         final long customDomainNodes;
         final long customNodesMissingImport;
         final long duplicateOpsetDomains;
@@ -268,6 +276,10 @@ final class KnowledgeModelContainerProbe {
             graphOutputs = details.outputs;
             typedInputs = details.typedInputs;
             typedOutputs = details.typedOutputs;
+            floatInputs = details.floatInputs;
+            floatOutputs = details.floatOutputs;
+            int64Inputs = details.int64Inputs;
+            int64Outputs = details.int64Outputs;
             customDomainNodes = details.customDomainNodes;
             customNodesMissingImport = details.customNodesMissingImport;
             duplicateOpsetDomains = details.duplicateOpsetDomains;
@@ -696,10 +708,20 @@ final class KnowledgeModelContainerProbe {
                 if (details.inputs + details.outputs > MAX_ONNX_TYPED_VALUES) {
                     throw new ScanLimit();
                 }
-                final String signature = inspectOnnxValueInfo(data, length, end);
+                final long[] elementType = new long[1];
+                final String signature = inspectOnnxValueInfo(data, length, end, elementType);
                 if (!signature.isEmpty()) {
                     if (field == 11) details.typedInputs++;
                     else details.typedOutputs++;
+                    // Count only explicit ONNX TensorProto.FLOAT (1) and INT64
+                    // (7). Unknown/future enum values stay in the other bucket.
+                    if (elementType[0] == 1) {
+                        if (field == 11) details.floatInputs++;
+                        else details.floatOutputs++;
+                    } else if (elementType[0] == 7) {
+                        if (field == 11) details.int64Inputs++;
+                        else details.int64Outputs++;
+                    }
                     if (details.typedInputs + details.typedOutputs <= 4) {
                         details.signatureHints += (details.signatureHints.isEmpty() ? "" : "; ")
                                 + (field == 11 ? "in:" : "out:") + signature;
@@ -856,7 +878,8 @@ final class KnowledgeModelContainerProbe {
 
     /** Reads bounded ValueInfoProto.name and tensor-only TypeProto declarations. */
     private static String inspectOnnxValueInfo(final RandomAccessFile data, final long bytes,
-                                               final long parentEnd) throws IOException {
+                                               final long parentEnd, final long[] elementType)
+            throws IOException {
         final long end = boundedOnnxEnd(data, bytes, parentEnd, MAX_ONNX_VALUE_INFO_BYTES);
         String name = "", type = "";
         long fields = 0;
@@ -885,7 +908,7 @@ final class KnowledgeModelContainerProbe {
                 }
             } else if (field == 2 && wire == 2) {
                 final long size = readVarint(data);
-                type = inspectOnnxType(data, size, end);
+                type = inspectOnnxType(data, size, end, elementType);
             } else {
                 skipWire(data, wire);
             }
@@ -896,8 +919,10 @@ final class KnowledgeModelContainerProbe {
 
     /** Non-tensor and future ONNX type variants are left undecided, not rejected. */
     private static String inspectOnnxType(final RandomAccessFile data, final long bytes,
-                                          final long parentEnd) throws IOException {
+                                          final long parentEnd, final long[] elementType)
+            throws IOException {
         final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
+        elementType[0] = 0;
         String tensorType = "";
         long fields = 0;
         while (data.getFilePointer() < end) {
@@ -907,10 +932,11 @@ final class KnowledgeModelContainerProbe {
             final long field = tag >>> 3;
             final int wire = (int) (tag & 7);
             if (field == 1 && wire == 2) {
-                tensorType = inspectOnnxTensorType(data, readVarint(data), end);
+                tensorType = inspectOnnxTensorType(data, readVarint(data), end, elementType);
             } else if ((field == 4 || field == 5 || field == 7 || field == 8
                     || field == 9) && wire == 2) {
                 tensorType = ""; // TypeProto oneof: sequences/maps/etc are not decoded.
+                elementType[0] = 0;
                 skipExact(data, readVarint(data));
             } else {
                 skipWire(data, wire);
@@ -921,7 +947,8 @@ final class KnowledgeModelContainerProbe {
     }
 
     private static String inspectOnnxTensorType(final RandomAccessFile data, final long bytes,
-                                                final long parentEnd) throws IOException {
+                                                final long parentEnd, final long[] elementTypeOut)
+            throws IOException {
         final long end = boundedOnnxEnd(data, bytes, parentEnd, 4096);
         long elementType = 0;
         String shape = "?"; // Absent shape is unknown rank; [] is a scalar.
@@ -942,6 +969,7 @@ final class KnowledgeModelContainerProbe {
             if (data.getFilePointer() > end) throw new BadContainer();
         }
         if (elementType == 0) throw new BadContainer(); // TensorProto.UNDEFINED is not legal here.
+        elementTypeOut[0] = elementType;
         return onnxElementTypeHint(elementType) + shape;
     }
 

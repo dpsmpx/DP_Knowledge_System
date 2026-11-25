@@ -864,6 +864,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         final KnowledgeOnnxIoAgreement.Verdict verdict = KnowledgeOnnxIoAgreement.compare(
                 prepared.declaredInputs, prepared.declaredOutputs,
                 prepared.typedInputs, prepared.typedOutputs,
+                prepared.floatInputs, prepared.floatOutputs,
+                prepared.int64Inputs, prepared.int64Outputs,
                 report.inputs, report.outputs, report.ioSummary);
         switch (verdict) {
             case COUNTS_AND_TENSORS_AGREE:
@@ -878,6 +880,12 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 return getString(R.string.knowledge_models_onnx_io_tensors_differ,
                         prepared.typedInputs, prepared.typedOutputs,
                         report.ioSummary.inputTensors, report.ioSummary.outputTensors);
+            case KNOWN_TYPE_COUNTS_DIFFER:
+                return getString(R.string.knowledge_models_onnx_io_known_types_differ,
+                        prepared.floatInputs, prepared.floatOutputs,
+                        report.ioSummary.floatInputs, report.ioSummary.floatOutputs,
+                        prepared.int64Inputs, prepared.int64Outputs,
+                        report.ioSummary.int64Inputs, report.ioSummary.int64Outputs);
             default:
                 return getString(R.string.knowledge_models_onnx_io_comparison_unavailable);
         }

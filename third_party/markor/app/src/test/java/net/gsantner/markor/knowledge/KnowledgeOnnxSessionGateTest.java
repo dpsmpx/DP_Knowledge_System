@@ -64,6 +64,10 @@ public final class KnowledgeOnnxSessionGateTest {
             assertEquals(1, prepared.declaredOutputs);
             assertEquals(1, prepared.typedInputs);
             assertEquals(1, prepared.typedOutputs);
+            assertEquals(1, prepared.floatInputs);
+            assertEquals(1, prepared.floatOutputs);
+            assertEquals(0, prepared.int64Inputs);
+            assertEquals(0, prepared.int64Outputs);
             final KnowledgeModelPackageStore.Audit report = store.audit(entry, null);
             KnowledgeOnnxSessionGate.requireEligible(entry, report.container);
 

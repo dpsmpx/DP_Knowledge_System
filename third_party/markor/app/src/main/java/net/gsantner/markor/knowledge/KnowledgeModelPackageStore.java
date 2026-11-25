@@ -342,6 +342,10 @@ final class KnowledgeModelPackageStore {
         final long declaredOutputs;
         final long typedInputs;
         final long typedOutputs;
+        final long floatInputs;
+        final long floatOutputs;
+        final long int64Inputs;
+        final long int64Outputs;
 
         CpuSessionInput(final byte[] verifiedBytes,
                         final KnowledgeModelContainerProbe.Result container) {
@@ -350,6 +354,10 @@ final class KnowledgeModelPackageStore {
             declaredOutputs = container.graphOutputs;
             typedInputs = container.typedInputs;
             typedOutputs = container.typedOutputs;
+            floatInputs = container.floatInputs;
+            floatOutputs = container.floatOutputs;
+            int64Inputs = container.int64Inputs;
+            int64Outputs = container.int64Outputs;
         }
     }
 
