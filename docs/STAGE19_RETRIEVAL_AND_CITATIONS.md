@@ -271,6 +271,23 @@ even if every reference and quotation passes the checks below.
     boundaries. These remain conservative structural diagnostics, **not**
     factuality or entailment detection, and Android OEM/lifecycle QA remains
     open.
+27. Claim-to-excerpt warnings now distinguish **informative anchor terms**
+    from a small, fixed English/Russian set of generic connective words.
+    The two-shared-anchor heuristic also warns if a long (8+ distinct anchor)
+    claim overlaps on fewer than a quarter of its terms. Opposing-source
+    boolean pair hints require two shared informative terms rather than
+    agreement on generic words. A new, separately localized **possible
+    number mismatch** warning appears only if an attributed claim and its
+    excerpt share at least two distinctive terms, both contain explicit
+    unsigned written numbers, and their complete number sets have **no
+    intersection**. Model citation numbers `[1]` are excluded; simple decimal
+    comma/dot and trailing zeros normalize deterministically. The UI lists
+    per-source suspect model-answer snippets under the existing eight-detail
+    cap; it does not quote private source contents or alter any journal state.
+    These are deliberately weak heuristics: inflection, synonyms, arithmetic,
+    units, dates and number formatting can lead to false positives or missed
+    warnings. They do not verify semantic entailment, computed quantities or
+    truth; all decisions stay with the user.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -311,6 +328,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   text and a repeated-citation mixed Markdown answer;
   trailing sentence-end citation clusters, all six ATX heading levels and
   CR/CRLF/Unicode line separator isolation from following uncited claims;
+  distinctive-term overlap, low fractional overlap in long claims, generic-
+  word-only false source conflicts and optional numeric-disagreement warnings;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

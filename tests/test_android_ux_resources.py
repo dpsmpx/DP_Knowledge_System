@@ -78,6 +78,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
         hub = (folder / "KnowledgeHubActivity.java").read_text()
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
         for marker in ("nearestLocalCitations(", "containsSentenceBreak(",
                        "MAX_LOCAL_CITATION_GAP", "mismatchedQuoteCitations"):
             self.assertIn(marker, audit)
@@ -111,6 +112,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
             names = {element.get("name") for element in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_llm_uncited_prose_spans", names)
+
+    def test_llm_numeric_and_distinctive_anchor_hints_are_localized_and_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("NON_ANCHOR_WORDS", "informativeTerms(", "NUMERIC_LITERAL",
+                       "numericTokens(", "numericMismatchedCitations",
+                       "Flag.Kind.NUMERIC_MISMATCH", "Collections.disjoint("):
+            self.assertIn(marker, audit)
+        for marker in ("knowledge_llm_numeric_mismatch", "knowledge_llm_flagged_numeric",
+                       "review.numericMismatchedCitations"):
+            self.assertIn(marker, hub)
+        for marker in ("numericMismatchFlagged=true", "genericWordConflictsExcluded=true"):
+            self.assertIn(marker, qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_numeric_mismatch", names)
+            self.assertIn("knowledge_llm_flagged_numeric", names)
 
     def test_lexical_evidence_boosts_short_phrases_without_dropping_fallback(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"

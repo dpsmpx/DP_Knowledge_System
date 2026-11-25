@@ -5,6 +5,7 @@
 package net.gsantner.markor.knowledge;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -29,6 +30,18 @@ public final class KnowledgeLlmCitationAudit {
             "«([^»\\r\\n\\x{85}\\x{2028}\\x{2029}]{4,240})»|"
                     + "“([^”\\r\\n\\x{85}\\x{2028}\\x{2029}]{4,240})”");
     private static final Pattern NEGATED_BOOLEAN = Pattern.compile("(?i)\\bnot\\s+(?:true|false)\\b");
+    private static final Pattern NUMERIC_LITERAL = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])[0-9]{1,12}(?:[.,][0-9]{1,4})?(?![0-9])");
+    /** Generic connective words cannot make an otherwise unrelated source
+     * look lexically grounded. This shortlist is intentionally conservative.
+     */
+    private static final Set<String> NON_ANCHOR_WORDS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(
+                    "this", "that", "these", "those", "with", "from", "have", "were",
+                    "there", "their", "which", "about", "into", "where", "when", "what",
+                    "also", "then", "your", "does", "been", "being",
+                    "этого", "этому", "этой", "также", "когда", "которые",
+                    "который", "которая", "которое", "своего", "этими", "если", "чтобы")));
     private static final int MAX_LOCAL_CITATION_GAP = 180;
     private static final int MIN_PROSE_LETTERS = 16;
     private static final int MIN_PROSE_WORDS = 3;
@@ -37,7 +50,7 @@ public final class KnowledgeLlmCitationAudit {
 
     /** Offsets refer to the original model answer, not private source text. */
     public static final class Flag {
-        public enum Kind { WEAK_TEXT, EXPLICIT_POLARITY }
+        public enum Kind { WEAK_TEXT, EXPLICIT_POLARITY, NUMERIC_MISMATCH }
 
         public final Kind kind;
         public final int sourceNumber;
@@ -55,11 +68,13 @@ public final class KnowledgeLlmCitationAudit {
     private static final class ClaimAudit {
         int weak;
         int polarity;
+        int numeric;
         final List<Flag> details = new ArrayList<>();
 
         void add(final Flag.Kind kind, final int source, final int from, final int to) {
             if (kind == Flag.Kind.WEAK_TEXT) weak++;
-            else polarity++;
+            else if (kind == Flag.Kind.EXPLICIT_POLARITY) polarity++;
+            else numeric++;
             if (details.size() < MAX_FLAG_DETAILS) {
                 details.add(new Flag(kind, source + 1, from, to));
             }
@@ -98,10 +113,14 @@ public final class KnowledgeLlmCitationAudit {
      */
     private static final class SourceLexicon {
         final Set<String> terms;
+        final Set<String> anchors;
+        final Set<String> numbers;
         final int polarity;
 
         SourceLexicon(final String excerpt) {
             terms = contentWords(excerpt);
+            anchors = informativeTerms(terms);
+            numbers = numericTokens(excerpt, null, 0);
             polarity = explicitBooleanPolarity(excerpt, terms);
         }
     }
@@ -114,10 +133,12 @@ public final class KnowledgeLlmCitationAudit {
         public final int mismatchedQuoteCitations;
         /** Formatting heuristic only; these spans are not factuality judgments. */
         public final int uncitedProseSpans;
-        /** Cited spans with no two shared content words in the cited excerpt. */
+        /** Cited spans with weak overlap among distinctive content terms. */
         public final int weakTextAttributions;
         /** Explicit true/false disagreement between a span and its cited text. */
         public final int polarityMismatchedCitations;
+        /** Possible differing written numbers in otherwise overlapping text. */
+        public final int numericMismatchedCitations;
         /** Pairs of supplied excerpts with opposing explicit true/false labels. */
         public final int potentiallyOpposingSources;
         /** At most eight exact model-answer spans, never vault excerpts. */
@@ -125,7 +146,8 @@ public final class KnowledgeLlmCitationAudit {
 
         Review(final int count, final int invalid, final int quotes, final int unsupported,
                final int mismatched, final int uncited, final int weak,
-               final int polarity, final int opposing, final List<Flag> details) {
+               final int polarity, final int numeric, final int opposing,
+               final List<Flag> details) {
             referenceCount = count;
             invalidReferences = invalid;
             quotedPassages = quotes;
@@ -134,6 +156,7 @@ public final class KnowledgeLlmCitationAudit {
             uncitedProseSpans = uncited;
             weakTextAttributions = weak;
             polarityMismatchedCitations = polarity;
+            numericMismatchedCitations = numeric;
             potentiallyOpposingSources = opposing;
             flaggedSpans = Collections.unmodifiableList(new ArrayList<>(details));
         }
@@ -235,7 +258,7 @@ public final class KnowledgeLlmCitationAudit {
         final ClaimAudit attribution = inspectCitedTextAnchors(visible, markers, lexicons);
         return new Review(count, invalid, quotes.size(), unsupported, mismatched,
                 countUncitedProseSpans(visible, markers), attribution.weak, attribution.polarity,
-                countOpposingSourcePairs(lexicons), attribution.details);
+                attribution.numeric, countOpposingSourcePairs(lexicons), attribution.details);
     }
 
     /** A single backslash escapes a visible bracket; two backslashes do not. */
@@ -590,6 +613,8 @@ public final class KnowledgeLlmCitationAudit {
         final String statement = visible.substring(from, to);
         final Set<String> terms = contentWords(statement);
         if (terms.size() < 2) return;
+        final Set<String> anchors = informativeTerms(terms);
+        final Set<String> numbers = numericTokens(statement, markers, from);
         final int statementPolarity = explicitBooleanPolarity(statement, terms);
         final Set<Integer> checked = new HashSet<>();
         for (final Citation marker : markers) {
@@ -597,14 +622,18 @@ public final class KnowledgeLlmCitationAudit {
                     || !checked.add(marker.source)) continue;
             final SourceLexicon source = sources.get(marker.source);
             int overlap = 0;
-            for (final String term : terms) {
-                if (source.terms.contains(term)) overlap++;
+            for (final String term : anchors) {
+                if (source.anchors.contains(term)) overlap++;
             }
-            if (overlap < 2) {
+            if (overlap < 2 || (anchors.size() >= 8 && overlap * 4 < anchors.size())) {
                 counts.add(Flag.Kind.WEAK_TEXT, marker.source, from, to);
             }
             if (statementPolarity != 0 && source.polarity == -statementPolarity) {
                 counts.add(Flag.Kind.EXPLICIT_POLARITY, marker.source, from, to);
+            }
+            if (overlap >= 2 && !numbers.isEmpty() && !source.numbers.isEmpty()
+                    && Collections.disjoint(numbers, source.numbers)) {
+                counts.add(Flag.Kind.NUMERIC_MISMATCH, marker.source, from, to);
             }
         }
     }
@@ -647,9 +676,9 @@ public final class KnowledgeLlmCitationAudit {
             for (int j = i + 1; j < sources.size(); j++) {
                 if (sources.get(j).polarity != -sources.get(i).polarity) continue;
                 int shared = 0;
-                for (final String term : sources.get(i).terms) {
+                for (final String term : sources.get(i).anchors) {
                     if (!"true".equals(term) && !"false".equals(term)
-                            && sources.get(j).terms.contains(term)) shared++;
+                            && sources.get(j).anchors.contains(term)) shared++;
                 }
                 if (shared >= 2) opposing++;
             }
@@ -679,6 +708,60 @@ public final class KnowledgeLlmCitationAudit {
             }
         }
         return result;
+    }
+
+    private static Set<String> informativeTerms(final Set<String> terms) {
+        final Set<String> anchors = new HashSet<>(terms);
+        anchors.removeAll(NON_ANCHOR_WORDS);
+        return anchors;
+    }
+
+    /** Only compare simple explicitly written unsigned numbers. Exclude the
+     * numbered [1] citation markers themselves from the model claim. This is
+     * not quantity extraction, arithmetic verification or unit conversion.
+     */
+    private static Set<String> numericTokens(final String text,
+                                             final List<Citation> markers,
+                                             final int answerOffset) {
+        final Set<String> values = new HashSet<>();
+        if (text == null) return values;
+        final Matcher numbers = NUMERIC_LITERAL.matcher(text);
+        while (numbers.find()) {
+            // A [2](url) link label or [^2] footnote is not a measured value,
+            // even if another real citation occurs in the same sentence.
+            if (numbers.end() < text.length() && text.charAt(numbers.end()) == ']'
+                    && ((numbers.start() > 0 && text.charAt(numbers.start() - 1) == '[')
+                    || (numbers.start() > 1 && text.charAt(numbers.start() - 1) == '^'
+                    && text.charAt(numbers.start() - 2) == '['))) continue;
+            boolean isCitation = false;
+            if (markers != null) {
+                final int from = answerOffset + numbers.start();
+                final int to = answerOffset + numbers.end();
+                for (final Citation marker : markers) {
+                    if (marker.end <= from) continue;
+                    if (marker.start >= to) break;
+                    if (marker.start <= from && marker.end >= to) {
+                        isCitation = true;
+                        break;
+                    }
+                }
+            }
+            if (!isCitation) values.add(canonicalNumber(numbers.group()));
+        }
+        return values;
+    }
+
+    private static String canonicalNumber(final String literal) {
+        final String formatted = literal.replace(',', '.');
+        final int dot = formatted.indexOf('.');
+        String integer = dot < 0 ? formatted : formatted.substring(0, dot);
+        while (integer.length() > 1 && integer.charAt(0) == '0') {
+            integer = integer.substring(1);
+        }
+        if (dot < 0) return integer;
+        String fraction = formatted.substring(dot + 1);
+        while (fraction.endsWith("0")) fraction = fraction.substring(0, fraction.length() - 1);
+        return fraction.isEmpty() ? integer : integer + "." + fraction;
     }
 
     /** Prefer the citation cluster after a quote in the same clause. Fall back

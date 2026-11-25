@@ -432,6 +432,93 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void genericWordsDoNotCreateFalseLexicalGroundingOrSourceConflicts() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md",
+                        "This that were with about there is described."));
+        final KnowledgeLlmCitationAudit.Review weak = KnowledgeLlmCitationAudit.inspect(
+                "This that were with about there is asserted [1].", sources);
+        assertEquals(1, weak.referenceCount);
+        assertEquals(1, weak.weakTextAttributions);
+        assertEquals(KnowledgeLlmCitationAudit.Flag.Kind.WEAK_TEXT,
+                weak.flaggedSpans.get(0).kind);
+
+        final KnowledgeLlmCitationAudit.Review boilerplateOpposition =
+                KnowledgeLlmCitationAudit.inspect("This that were with about is true [1].",
+                        Arrays.asList(
+                                new KnowledgeLlmEvidence.Item("true.md",
+                                        "This that were with about is true."),
+                                new KnowledgeLlmEvidence.Item("false.md",
+                                        "This that were with about is false.")));
+        assertEquals(0, boilerplateOpposition.potentiallyOpposingSources);
+        // Two actual topic words still connect genuinely opposing labels.
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1].", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("true.md", "Amber violet is true."),
+                        new KnowledgeLlmEvidence.Item("false.md", "Amber violet is false.")))
+                .potentiallyOpposingSources);
+    }
+
+    @Test
+    public void longClaimsWithOnlyTinyDistinctiveOverlapAreFlagged() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final String invented = "The observed result allegedly supports a fabricated "
+                + "surprising conclusion with imaginary measurable separate hypothetical "
+                + "predictions [1].";
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(invented, sources);
+        assertEquals(1, review.weakTextAttributions);
+        assertEquals(0, review.numericMismatchedCitations);
+
+        final String consistent = "The observed result allegedly supports a surprising "
+                + "conclusion with measurable separate hypothetical predictions [1].";
+        final KnowledgeLlmCitationAudit.Review grounded = KnowledgeLlmCitationAudit.inspect(
+                consistent, Collections.singletonList(
+                        new KnowledgeLlmEvidence.Item("source.md", consistent.replace(" [1]", ""))));
+        assertEquals(0, grounded.weakTextAttributions);
+    }
+
+    @Test
+    public void differentWrittenNumbersProduceSeparateNonAuthoritativeWarnings() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md",
+                        "The observed temperature measured 24.0 degrees in the chamber."));
+        final String mismatch = "The observed temperature measured 42 degrees [1].";
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(mismatch, sources);
+        assertEquals(1, review.referenceCount);
+        assertEquals(0, review.weakTextAttributions);
+        assertEquals(1, review.numericMismatchedCitations);
+        assertEquals(1, review.flaggedSpans.size());
+        assertEquals(KnowledgeLlmCitationAudit.Flag.Kind.NUMERIC_MISMATCH,
+                review.flaggedSpans.get(0).kind);
+        assertEquals(1, review.flaggedSpans.get(0).sourceNumber);
+        assertTrue(KnowledgeLlmCitationAudit.flaggedAnswerSnippet(
+                mismatch, review.flaggedSpans.get(0)).contains("42 degrees"));
+        for (final String compatible : Arrays.asList(
+                "The observed temperature measured 24 degrees [1].",
+                "The observed temperature measured 24,00 degrees [1].",
+                "The observed temperature measured degrees [1].",
+                "The observed temperature measured degrees [2](https://invalid.example) [1].",
+                "The observed temperature measured 42 and 24 degrees [1].")) {
+            assertEquals(compatible, 0, KnowledgeLlmCitationAudit.inspect(
+                    compatible, sources).numericMismatchedCitations);
+        }
+        assertEquals(0, KnowledgeLlmCitationAudit.inspect(mismatch,
+                Collections.singletonList(new KnowledgeLlmEvidence.Item("no-number.md",
+                        "The observed temperature measured degrees in the chamber.")))
+                .numericMismatchedCitations);
+
+        final StringBuilder repeated = new StringBuilder();
+        for (int i = 0; i < 50; i++) repeated.append(mismatch).append('\n');
+        final KnowledgeLlmCitationAudit.Review dense =
+                KnowledgeLlmCitationAudit.inspect(repeated.toString(), sources);
+        assertEquals(50, dense.numericMismatchedCitations);
+        assertEquals(KnowledgeLlmCitationAudit.MAX_FLAG_DETAILS, dense.flaggedSpans.size());
+    }
+
+    @Test
     public void flaggedAnswerDetailsAreBoundedAndImmutableWithoutSourceTextLeakage() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("private/path.md", "Amber violet is true. SECRET SOURCE TEXT"));

@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -1093,6 +1094,16 @@ public final class KnowledgeDeviceQaRunner {
         final KnowledgeLlmCitationAudit.Review wrong = KnowledgeLlmCitationAudit.inspect(
                 "Amber violet is true [2]. A fabricated unrelated conclusion is certain [1].",
                 sources);
+        final KnowledgeLlmCitationAudit.Review numeric = KnowledgeLlmCitationAudit.inspect(
+                "The observed temperature measured 42 degrees [1].",
+                Collections.singletonList(new KnowledgeLlmEvidence.Item("temperature.md",
+                        "The observed temperature measured 24.0 degrees.")));
+        final KnowledgeLlmCitationAudit.Review boilerplate = KnowledgeLlmCitationAudit.inspect(
+                "This that were with about is true [1].", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("generic-true.md",
+                                "This that were with about is true."),
+                        new KnowledgeLlmEvidence.Item("generic-false.md",
+                                "This that were with about is false.")));
         if (correct.weakTextAttributions != 0 || correct.polarityMismatchedCitations != 0
                 || correct.potentiallyOpposingSources != 1
                 || wrong.weakTextAttributions != 1
@@ -1100,11 +1111,18 @@ public final class KnowledgeDeviceQaRunner {
                 || wrong.potentiallyOpposingSources != 1
                 || wrong.flaggedSpans.size() != 2
                 || wrong.flaggedSpans.get(0).sourceNumber != 2
-                || wrong.flaggedSpans.get(1).sourceNumber != 1) {
+                || wrong.flaggedSpans.get(1).sourceNumber != 1
+                || numeric.numericMismatchedCitations != 1
+                || numeric.weakTextAttributions != 0
+                || numeric.flaggedSpans.size() != 1
+                || numeric.flaggedSpans.get(0).kind
+                        != KnowledgeLlmCitationAudit.Flag.Kind.NUMERIC_MISMATCH
+                || boilerplate.potentiallyOpposingSources != 0) {
             throw new SyntheticMismatch("verdict=CLAIM_SOURCE_ANCHOR_WARNING_LOST");
         }
         return "syntheticOpposingSources=2, weakAttributionFlagged=true, "
                 + "explicitBooleanMismatchFlagged=true, sourceConflictFlagged=true, "
+                + "numericMismatchFlagged=true, genericWordConflictsExcluded=true, "
                 + "exactAnswerOffsets=true, sourceNumbersRetained=true, "
                 + "notSemanticProof=true, noNetwork=true, selectedVaultUntouched=true";
     }
