@@ -84,6 +84,20 @@ public final class KnowledgeLlmCitationAudit {
         }
     }
 
+    /** Reuse the bounded source lexicon across sentences and pair checks.
+     * Model answers can cite the same excerpt hundreds of times; repeatedly
+     * tokenizing private source text adds work without adding evidence.
+     */
+    private static final class SourceLexicon {
+        final Set<String> terms;
+        final int polarity;
+
+        SourceLexicon(final String excerpt) {
+            terms = contentWords(excerpt);
+            polarity = explicitBooleanPolarity(excerpt, terms);
+        }
+    }
+
     public static final class Review {
         public final int referenceCount;
         public final int invalidReferences;
@@ -130,6 +144,14 @@ public final class KnowledgeLlmCitationAudit {
                 || sources.size() > KnowledgeLlmClient.MAX_EVIDENCE || answer.length() > 12_000) {
             throw new IllegalArgumentException("Unbounded or absent LLM citation input");
         }
+        final List<SourceLexicon> lexicons = new ArrayList<>(sources.size());
+        for (final KnowledgeLlmEvidence.Item item : sources) {
+            final String excerpt = item == null ? null : item.excerpt;
+            if (excerpt != null && excerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS) {
+                throw new IllegalArgumentException("Unbounded source excerpt for citation audit");
+            }
+            lexicons.add(new SourceLexicon(excerpt));
+        }
         // The model can echo fake [1] references inside a fenced example or
         // inline code. Preserve offsets while excluding those from evidence.
         final String visible = maskMarkdownCode(answer);
@@ -154,9 +176,9 @@ public final class KnowledgeLlmCitationAudit {
             if (quotedLabel) continue;
             // [1](url) is a Markdown link label, not our standalone [1] source
             // citation. The same applies to a bracket nested inside [[1]].
-            if ((citations.end() < visible.length() && visible.charAt(citations.end()) == '(')
-                    || (citations.start() > 0 && visible.charAt(citations.start() - 1) == '[')
-                    || (citations.end() < visible.length() && visible.charAt(citations.end()) == ']')) {
+            if (isEscapedBracket(visible, citations.start())
+                    || isMarkdownLinkLabel(visible, citations.start(), citations.end())
+                    || citations.group(1).startsWith("^")) {
                 continue;
             }
             final String label = citations.group(1);
@@ -202,10 +224,47 @@ public final class KnowledgeLlmCitationAudit {
             }
             if (!found) unsupported++;
         }
-        final ClaimAudit attribution = inspectCitedTextAnchors(visible, markers, sources);
+        final ClaimAudit attribution = inspectCitedTextAnchors(visible, markers, lexicons);
         return new Review(count, invalid, quotes.size(), unsupported, mismatched,
                 countUncitedProseSpans(visible, markers), attribution.weak, attribution.polarity,
-                countOpposingSourcePairs(sources), attribution.details);
+                countOpposingSourcePairs(lexicons), attribution.details);
+    }
+
+    /** A single backslash escapes a visible bracket; two backslashes do not. */
+    private static boolean isEscapedBracket(final String text, final int bracket) {
+        int backslashes = 0;
+        for (int i = bracket - 1; i >= 0 && text.charAt(i) == '\\'; i--) backslashes++;
+        return (backslashes & 1) != 0;
+    }
+
+    /** Exclude Markdown link syntax without suppressing the established [1][2]
+     * convention for two adjacent numeric source citations.
+     */
+    private static boolean isMarkdownLinkLabel(final String text, final int start,
+                                               final int end) {
+        if ((end < text.length() && text.charAt(end) == '(')
+                || (start > 0 && text.charAt(start - 1) == '[')
+                || (end < text.length() && text.charAt(end) == ']')) return true;
+        if (end < text.length() && text.charAt(end) == ':') {
+            final int lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            if (start - lineStart <= 3) {
+                boolean definition = true;
+                for (int i = lineStart; i < start; i++) {
+                    if (text.charAt(i) != ' ') definition = false;
+                }
+                if (definition) return true;
+            }
+        }
+        int next = end;
+        if (next < text.length() && text.charAt(next) == ' ') next++;
+        if (next < text.length() && text.charAt(next) == '[') {
+            final int close = text.indexOf(']', next + 1);
+            if (close > next && close - next <= 25) {
+                final String reference = text.substring(next + 1, close);
+                if (reference.isEmpty() || !NUMBER.matcher(reference).matches()) return true;
+            }
+        }
+        return false;
     }
 
     /** Markdown code is not the model's cited prose. Mask without changing
@@ -219,6 +278,20 @@ public final class KnowledgeLlmCitationAudit {
         for (int lineStart = 0; lineStart < answer.length();) {
             int lineEnd = answer.indexOf('\n', lineStart);
             if (lineEnd < 0) lineEnd = answer.length();
+            // Markdown indented code (four columns, including mixed spaces
+            // and tabs) is not answer prose. Be conservative about list context.
+            int indentColumns = 0;
+            for (int at = lineStart; at < lineEnd && indentColumns < 4; at++) {
+                final char whitespace = answer.charAt(at);
+                if (whitespace == ' ') indentColumns++;
+                else if (whitespace == '\t') indentColumns += 4 - indentColumns % 4;
+                else break;
+            }
+            if (fenceChar == 0 && indentColumns >= 4) {
+                maskRange(visible, lineStart, lineEnd);
+                lineStart = lineEnd + 1;
+                continue;
+            }
             int first = lineStart;
             while (first < lineEnd && first - lineStart < 4 && answer.charAt(first) == ' ') {
                 first++;
@@ -352,7 +425,7 @@ public final class KnowledgeLlmCitationAudit {
      */
     private static ClaimAudit inspectCitedTextAnchors(final String visible,
                                                       final List<Citation> markers,
-                                                      final List<KnowledgeLlmEvidence.Item> sources) {
+                                                      final List<SourceLexicon> sources) {
         final ClaimAudit result = new ClaimAudit();
         for (int lineStart = 0; lineStart < visible.length();) {
             int lineEnd = visible.indexOf('\n', lineStart);
@@ -380,7 +453,7 @@ public final class KnowledgeLlmCitationAudit {
 
     private static void inspectOneAttributedSpan(final String visible, final int from,
                                                  final int to, final List<Citation> markers,
-                                                 final List<KnowledgeLlmEvidence.Item> sources,
+                                                 final List<SourceLexicon> sources,
                                                  final ClaimAudit counts) {
         if (!substantiveSpan(visible, from, to)) return;
         final String statement = visible.substring(from, to);
@@ -391,18 +464,15 @@ public final class KnowledgeLlmCitationAudit {
         for (final Citation marker : markers) {
             if (marker.source < 0 || marker.start < from || marker.end > to
                     || !checked.add(marker.source)) continue;
-            final KnowledgeLlmEvidence.Item source = sources.get(marker.source);
-            final String excerpt = source == null ? null : source.excerpt;
-            final Set<String> sourceTerms = contentWords(excerpt);
+            final SourceLexicon source = sources.get(marker.source);
             int overlap = 0;
             for (final String term : terms) {
-                if (sourceTerms.contains(term)) overlap++;
+                if (source.terms.contains(term)) overlap++;
             }
             if (overlap < 2) {
                 counts.add(Flag.Kind.WEAK_TEXT, marker.source, from, to);
             }
-            final int sourcePolarity = explicitBooleanPolarity(excerpt, sourceTerms);
-            if (statementPolarity != 0 && sourcePolarity == -statementPolarity) {
+            if (statementPolarity != 0 && source.polarity == -statementPolarity) {
                 counts.add(Flag.Kind.EXPLICIT_POLARITY, marker.source, from, to);
             }
         }
@@ -439,25 +509,16 @@ public final class KnowledgeLlmCitationAudit {
     /** Identify ONLY simple explicit true/false opposition in otherwise
      * related excerpts. Never infer general contradiction or source truth.
      */
-    private static int countOpposingSourcePairs(final List<KnowledgeLlmEvidence.Item> sources) {
-        final List<Set<String>> words = new ArrayList<>();
-        final int[] polarity = new int[sources.size()];
-        for (int i = 0; i < sources.size(); i++) {
-            final KnowledgeLlmEvidence.Item source = sources.get(i);
-            final String excerpt = source == null ? null : source.excerpt;
-            final Set<String> terms = contentWords(excerpt);
-            words.add(terms);
-            polarity[i] = explicitBooleanPolarity(excerpt, terms);
-        }
+    private static int countOpposingSourcePairs(final List<SourceLexicon> sources) {
         int opposing = 0;
         for (int i = 0; i < sources.size(); i++) {
-            if (polarity[i] == 0) continue;
+            if (sources.get(i).polarity == 0) continue;
             for (int j = i + 1; j < sources.size(); j++) {
-                if (polarity[j] != -polarity[i]) continue;
+                if (sources.get(j).polarity != -sources.get(i).polarity) continue;
                 int shared = 0;
-                for (final String term : words.get(i)) {
+                for (final String term : sources.get(i).terms) {
                     if (!"true".equals(term) && !"false".equals(term)
-                            && words.get(j).contains(term)) shared++;
+                            && sources.get(j).terms.contains(term)) shared++;
                 }
                 if (shared >= 2) opposing++;
             }

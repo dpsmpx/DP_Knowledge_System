@@ -96,6 +96,9 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         for marker in ("maskMarkdownCode(answer)", "countUncitedProseSpans(",
                        "uncitedProseSpans", "uncitedSubstantiveSpan("):
             self.assertIn(marker, audit)
+        for marker in ("isEscapedBracket(", "isMarkdownLinkLabel(",
+                       "SourceLexicon", "MAX_EXCERPT_CHARS"):
+            self.assertIn(marker, audit)
         self.assertIn("R.string.knowledge_llm_uncited_prose_spans", hub)
         self.assertIn('step("CITE-COVER-19",', qa)
         for locale in ("values", "values-ru"):
