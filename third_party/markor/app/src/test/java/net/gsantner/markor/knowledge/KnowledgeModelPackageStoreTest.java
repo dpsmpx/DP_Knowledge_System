@@ -372,6 +372,73 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void explicitOnnxPreparationCreatesVerifiedLayoutAndCleansOnlyItsOwnFiles()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-runtime-stage").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4, 5, 6, 7, 8};
+            final byte[] onnx = onnxExternal("tensors.data", 2, 5);
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnx), "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final File cache = new File(directory, "runtime-cache");
+            assertTrue(cache.mkdir());
+            final File unrelated = new File(cache, "preserve-unrelated.txt");
+            Files.write(unrelated.toPath(), new byte[]{21});
+
+            final KnowledgeModelPackageStore.PreparedOnnx prepared =
+                    packages.prepareOnnx(entry, cache);
+            assertTrue(prepared.modelFile.getParentFile().getName().endsWith(".ready"));
+            assertEquals("model.onnx", prepared.modelFile.getName());
+            assertArrayEquals(onnx, Files.readAllBytes(prepared.modelFile.toPath()));
+            assertArrayEquals(shard,
+                    Files.readAllBytes(prepared.companions.get("tensors.data").toPath()));
+            assertArrayEquals(TOKENIZER,
+                    Files.readAllBytes(prepared.companions.get("tokenizer.json").toPath()));
+            assertArrayEquals(CONFIG,
+                    Files.readAllBytes(prepared.companions.get("config.json").toPath()));
+            final File preparedDirectory = prepared.modelFile.getParentFile();
+            prepared.close();
+            prepared.close(); // Idempotent release: no new mutation or failure.
+            assertFalse(preparedDirectory.exists());
+            assertArrayEquals(new byte[]{21}, Files.readAllBytes(unrelated.toPath()));
+            assertNotNull(packages.installed(entry));
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void stagingRefusesUnmatchedExternalAndCancellationWithoutCacheLeak()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-stage-refuse").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("not-selected.data", 0, 4)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final File cache = new File(directory, "runtime-cache");
+            try {
+                packages.prepareOnnx(entry, cache);
+                fail("Unresolved ONNX external reference was staged");
+            } catch (IOException expected) { }
+            assertFalse("Preflight failure must not allocate temporary files", cache.exists());
+            Thread.currentThread().interrupt();
+            try {
+                packages.prepareOnnx(entry, cache);
+                fail("Cancelled staging proceeded");
+            } catch (InterruptedIOException expected) { }
+            finally { Thread.interrupted(); }
+            assertFalse(cache.exists());
+        } finally { removeTree(directory); }
+    }
+
     private static void reject(final JSONObject json) throws Exception {
         try {
             KnowledgeModelPackageManifest.parse(json.toString().getBytes(StandardCharsets.UTF_8));

@@ -288,7 +288,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             } else {
                 new KnowledgeModelSettingsDialog(this, modelFiles, modelPackages,
                         this::pickModelFile, this::pickModelPackage,
-                        this::downloadModel, this::auditModelPackage).show();
+                        this::downloadModel, this::auditModelPackage,
+                        this::prepareOnnxFiles).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -695,6 +696,45 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     }
                 });
             }
+        });
+    }
+
+    /** User-confirmed dry-run of the file layout; never creates an inference session. */
+    private void prepareOnnxFiles(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null
+                || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_onnx_preparing);
+        runningModelImport = modelWorker.submit(() -> {
+            try (KnowledgeModelPackageStore.PreparedOnnx prepared = modelPackages.prepareOnnx(
+                    entry, new File(getCacheDir(), "dpks-onnx-runtime-prep"))) {
+                if (!prepared.modelFile.isFile()) {
+                    throw new IOException("ONNX preparation did not produce a model file");
+                }
+                // Closing the session immediately removes the private copies.
+                // A future explicit inference action may hold it until its session ends.
+            } catch (IOException | RuntimeException failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_onnx_prepare_failed);
+                    }
+                });
+                return;
+            }
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()
+                        && modelGeneration.get() == operation) {
+                    modelImportActive = false;
+                    restoreModelButton();
+                    modelStatus.setText(R.string.knowledge_models_onnx_prepare_success);
+                }
+            });
         });
     }
 

@@ -19,9 +19,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 
 /**
  * User-triggered, offline package assembly for a weight already on our private
@@ -31,6 +33,7 @@ import java.util.Set;
 final class KnowledgeModelPackageStore {
     private static final int MAX_JSON_PREFLIGHT_BYTES = 512 * 1024;
     private static final int MAX_JSON_DEPTH = 64;
+    private static final long MIN_STAGING_FREE_BYTES = 64L * 1024L * 1024L;
     interface StreamProvider { InputStream open() throws IOException; }
     interface AuditProgress { void onVerifiedBytes(long verified, long total); }
 
@@ -82,6 +85,30 @@ final class KnowledgeModelPackageStore {
         Source(final String filename, final StreamProvider stream) {
             name = filename;
             provider = stream;
+        }
+    }
+
+    /**
+     * One explicitly prepared, transient ONNX directory. No inference engine
+     * is started. Call close() even if a future runtime rejects the model.
+     */
+    static final class PreparedOnnx implements AutoCloseable {
+        final File modelFile;
+        final Map<String, File> companions;
+        private final File folder;
+        private boolean closed;
+
+        private PreparedOnnx(final File temporaryFolder, final File model,
+                             final Map<String, File> copied) {
+            folder = temporaryFolder;
+            modelFile = model;
+            companions = Collections.unmodifiableMap(new LinkedHashMap<>(copied));
+        }
+
+        @Override public synchronized void close() throws IOException {
+            if (closed) return;
+            removePreparedFiles(folder, modelFile, companions.values());
+            closed = true;
         }
     }
 
@@ -214,6 +241,108 @@ final class KnowledgeModelPackageStore {
         return new Audit(verified, Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
                 manifest.components.size() - 1, checked, skipped, invalid, container,
                 matched, unresolved, outOfBounds, externalFiles.size() - usedExternal.size());
+    }
+
+    /**
+     * Create the safe, short-lived on-disk layout required by file-based ONNX
+     * loaders. It is never invoked automatically, and deliberately does not
+     * create an inference session. The caller supplies app-private cacheDir.
+     * All source paths come from our own shelf and SHA-named package storage;
+     * untrusted ONNX `location` values are only compared to manifest names.
+     */
+    synchronized PreparedOnnx prepareOnnx(final KnowledgeModelFiles.Entry entry,
+                                         final File privateCache) throws IOException {
+        if (entry == null || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED) {
+            throw new IOException("Only installed ONNX models can be staged");
+        }
+        final Audit verified = audit(entry, null);
+        if (verified.container.state != KnowledgeModelContainerProbe.State.METADATA_HINTS
+                || !verified.jsonPreflightPassed() || !verified.externalDataPreflightPassed()) {
+            throw new IOException("ONNX package preflight is incomplete");
+        }
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null) throw new IOException("Model package no longer installed");
+        if (privateCache == null || (!privateCache.isDirectory() && !privateCache.mkdirs())) {
+            throw new IOException("Private cache unavailable");
+        }
+        long total = 0;
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (Long.MAX_VALUE - total < component.bytes) {
+                throw new IOException("ONNX staging size overflow");
+            }
+            total += component.bytes;
+        }
+        final long free = privateCache.getUsableSpace();
+        if (free < total || free - total < MIN_STAGING_FREE_BYTES) {
+            throw new IOException("Insufficient private space to prepare ONNX package");
+        }
+        final File stage = File.createTempFile("dpks-onnx-", ".part", privateCache);
+        if (!stage.delete() || !stage.mkdir()) {
+            throw new IOException("Could not allocate ONNX session directory");
+        }
+        final Map<String, File> copied = new LinkedHashMap<>();
+        File stagedModel = null;
+        boolean finished = false;
+        try {
+            final File installedPackage = bundle(entry);
+            for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException("ONNX preparation cancelled");
+                }
+                final boolean model = component.kind == KnowledgeModelPackageManifest.Kind.WEIGHTS;
+                final File parent = model ? directory : installedPackage;
+                final File source = model ? weightFile(entry)
+                        : new File(installedPackage, component.sha256 + ".sidecar");
+                if (!safeChild(parent, source) || !source.isFile()
+                        || source.length() != component.bytes) {
+                    throw new IOException("Source changed before ONNX preparation");
+                }
+                // Manifest already validates names as single ASCII path segments.
+                final File destination = new File(stage, component.name);
+                if (!safeChild(stage, destination)) {
+                    throw new IOException("Unsafe ONNX staging destination");
+                }
+                // Track before copying so cancellation removes a partial file.
+                if (model) stagedModel = destination;
+                else copied.put(component.name, destination);
+                try (InputStream input = new FileInputStream(source)) {
+                    copyExact(input, destination, component.bytes, component.sha256);
+                }
+            }
+            if (stagedModel == null || Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("ONNX preparation cancelled before commit");
+            }
+            final File ready = new File(privateCache,
+                    stage.getName().substring(0, stage.getName().length() - 5) + ".ready");
+            if (ready.exists() || !stage.renameTo(ready)) {
+                throw new IOException("Could not commit private ONNX staging directory");
+            }
+            final File modelPath = new File(ready, stagedModel.getName());
+            final Map<String, File> paths = new LinkedHashMap<>();
+            for (final String name : copied.keySet()) paths.put(name, new File(ready, name));
+            finished = true;
+            return new PreparedOnnx(ready, modelPath, paths);
+        } finally {
+            if (!finished) removePreparedFiles(stage, stagedModel, copied.values());
+        }
+    }
+
+    private static void removePreparedFiles(final File folder, final File model,
+                                            final Iterable<File> companions) throws IOException {
+        if (!safeChild(folder.getParentFile(), folder)) {
+            throw new IOException("Unsafe ONNX staging directory");
+        }
+        if (!folder.exists()) return;
+        if (model != null) deleteStagedChild(folder, new File(folder, model.getName()));
+        for (final File companion : companions) {
+            deleteStagedChild(folder, new File(folder, companion.getName()));
+        }
+        if (!folder.delete()) throw new IOException("Could not remove ONNX staging directory");
+    }
+
+    private static void deleteStagedChild(final File folder, final File file) throws IOException {
+        if (!safeChild(folder, file)) throw new IOException("Unsafe ONNX staged file");
+        if (file.exists() && !file.delete()) throw new IOException("Could not remove ONNX staged file");
     }
 
     synchronized KnowledgeModelPackageManifest install(final byte[] manifestBytes,
