@@ -10,7 +10,11 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int RUN_MODEL_SESSION = 5;
     static final int RESULT_SESSION_PASSED = 6;
     static final int RESULT_SESSION_FAILED = 7;
+    // Never sent by production clients; accepted by the isolated service in debug builds only.
+    static final int DEBUG_STALL = 8;
+    static final int DEBUG_STALL_STARTED = 9;
     static final long WATCHDOG_MILLIS = 30_000L;
+    static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
     static final String VERSION = "v";
     static final String INIT_MILLIS = "init_ms";
     static final String RUN_MICROS = "run_us";

@@ -4,8 +4,16 @@ package net.gsantner.markor.knowledge;
 import android.app.Instrumentation;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -126,5 +134,85 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         Thread.sleep(1200);
         instrumentation.waitForIdleSync();
         assertEquals(0, unexpectedCallbacks.get());
+    }
+
+    @Test public void debugStallWatchdogKillsOnlyWorker() throws Exception {
+        final DebugWorkerConnection connection = bindDebugWorker();
+        try {
+            connection.startStall();
+            assertTrue("Debug-only stall did not begin", connection.started.await(5, TimeUnit.SECONDS));
+            assertTrue("Worker Binder survived its debug watchdog",
+                    connection.died.await(15, TimeUnit.SECONDS));
+            assertFalse("Watchdog killed the DPKS app process", KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            unbindDebugWorker(connection);
+        }
+    }
+
+    @Test public void cancellingDebugStallKillsWorkerBeforeWatchdog() throws Exception {
+        final DebugWorkerConnection connection = bindDebugWorker();
+        try {
+            connection.startStall();
+            assertTrue("Debug-only stall did not begin", connection.started.await(5, TimeUnit.SECONDS));
+            connection.messenger.send(Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT));
+            // Shorter than the six-second synthetic watchdog: proves explicit cancel.
+            assertTrue("Cancel did not kill isolated Binder before watchdog",
+                    connection.died.await(5, TimeUnit.SECONDS));
+            assertFalse("Cancel killed the DPKS app process", KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            unbindDebugWorker(connection);
+        }
+    }
+
+    private DebugWorkerConnection bindDebugWorker() throws Exception {
+        final DebugWorkerConnection connection = new DebugWorkerConnection();
+        final AtomicBoolean bound = new AtomicBoolean();
+        instrumentation.runOnMainSync(() -> bound.set(context.bindService(
+                new Intent(context, KnowledgeOnnxIsolatedService.class), connection,
+                Context.BIND_AUTO_CREATE)));
+        assertTrue("Debug worker bind failed", bound.get());
+        if (!connection.connected.await(10, TimeUnit.SECONDS)) {
+            unbindDebugWorker(connection);
+            fail("Debug worker service never connected");
+        }
+        return connection;
+    }
+
+    private void unbindDebugWorker(final DebugWorkerConnection connection) {
+        instrumentation.runOnMainSync(() -> context.unbindService(connection));
+    }
+
+    private static final class DebugWorkerConnection implements ServiceConnection {
+        final CountDownLatch connected = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch died = new CountDownLatch(1);
+        final Messenger reply = new Messenger(new Handler(Looper.getMainLooper(), message -> {
+            if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED) {
+                started.countDown();
+            }
+            return true;
+        }));
+        Messenger messenger;
+
+        @Override public void onServiceConnected(final ComponentName name, final IBinder binder) {
+            try {
+                binder.linkToDeath(died::countDown, 0);
+            } catch (RemoteException alreadyDead) {
+                died.countDown();
+            }
+            messenger = new Messenger(binder);
+            connected.countDown();
+        }
+
+        @Override public void onServiceDisconnected(final ComponentName name) {
+            died.countDown();
+        }
+
+        void startStall() throws RemoteException {
+            final Message request = Message.obtain(null, KnowledgeOnnxIsolatedProtocol.DEBUG_STALL);
+            request.replyTo = reply;
+            messenger.send(request);
+        }
     }
 }
