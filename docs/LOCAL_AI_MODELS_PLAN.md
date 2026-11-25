@@ -435,6 +435,23 @@ Debug-only тест имитирует отказ по памяти после �
 также зелёные. Несколько PSS-снимков не резервируют память и не ловят
 кратковременный native пик; реальный OOM/LMK, крупные веса, физический
 ARM64 и API 24–26 ещё не проверены; `runnable=false`, MODEL-M1/M8 открыты.
+[PR #209](https://github.com/dpsmpx/DP_Knowledge_System/pull/209)
+добавил отдельную диагностику `VmHWM` ядра Linux — максимум
+резидентной памяти **изолированного worker с момента его запуска**
+в КиБ, прочитанный только из собственного `/proc/self/status`.
+В отличие от наибольшего из отдельных PSS-снимков, high-water RSS
+учитывает и краткие пики, но включает Java, ONNX Runtime и разделяемые
+страницы; это **не RAM модели** и не прогноз будущего инференса.
+Если SELinux/ядро ограничивает `/proc`, значение отображается как
+«недоступно» без отказа операции. Число ограничено и проверяется на
+IPC-границе; сырые данные `/proc` не передаются.
+[Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578195)
+прошёл **13/13 на API 27/28/35**; [Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578512)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578206)
+также зелёные (Android повторно запущен после инфраструктурного
+HTTP 429 от Maven). Доступность `VmHWM` на каждом OEM не гарантируется;
+настоящий LMK/native OOM, реальные веса, физический ARM64 и API 24–26
+по-прежнему открыты; `runnable=false`.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического

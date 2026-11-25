@@ -841,6 +841,24 @@ OOM. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/a
 эксплуатация крупных/внешних моделей, физический ARM64, API 24–26 и
 реальный инференс. Нет гарантий резервирования памяти или `runnable=true`.
 
+**MODEL-M1: kernel RSS high-water внутри isolated worker —
+[PR #209](https://github.com/dpsmpx/DP_Knowledge_System/pull/209).**
+Отдельным ограниченным числом теперь передаётся `VmHWM` собственного
+`/proc/self/status`: максимум resident set size рабочего процесса
+за всю его жизнь, включая Java, runtime и общие страницы. Метрика
+отличается от выборочного PSS и не определяет память отдельной модели.
+Доступ к `/proc` может запрещаться SELinux; тогда UI показывает
+«недоступно», а ручная сессия продолжается. JVM-тесты отклоняют
+некорректные единицы/числа, Android IPC проверяет границы.
+[Эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578195):
+**13/13 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578512)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45629578206)
+зелёные (последний перезапущен после Maven HTTP 429). **Открыто:**
+проверка физического ARM64 и доступности `/proc` на OEM, системный
+LMK/native OOM, реальные веса/инференс, API 24–26 и гарантии против
+пиковых аллокаций. `runnable=false` сохраняется.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
