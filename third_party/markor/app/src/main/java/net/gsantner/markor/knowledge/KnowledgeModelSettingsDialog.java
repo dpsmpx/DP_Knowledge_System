@@ -1,6 +1,7 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -262,10 +263,11 @@ final class KnowledgeModelSettingsDialog {
         final String packageSummary = context.getString(R.string.knowledge_models_package_report,
                 packageReport.schemaVersion, packageReport.sourceId,
                 packageReport.license, packageReport.engineCandidate, missing.toString());
+        final String resources = resourceReport(entry, installed);
         new AlertDialog.Builder(context)
                 .setTitle(roleName(entry.role))
                 .setMessage(summary + provenance + "\n\n" + packageFiles + "\n\n"
-                        + packageSummary + "\n\n"
+                        + packageSummary + "\n\n" + resources + "\n\n"
                         + context.getString(R.string.knowledge_models_imported_not_runnable))
                 .setPositiveButton(R.string.knowledge_models_select, (dialog, which) -> {
                     preferences.edit().putString(entry.role.name(), entry.sha256).apply();
@@ -276,6 +278,50 @@ final class KnowledgeModelSettingsDialog {
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showRole(entry.role))
                 .show();
+    }
+
+    /** No file scan, inference or model download occurs when opening details. */
+    private String resourceReport(final KnowledgeModelFiles.Entry entry,
+                                  final KnowledgeModelPackageManifest manifest) {
+        long osAvailableRam = 0;
+        try {
+            final ActivityManager manager = (ActivityManager)
+                    context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (manager != null) {
+                final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+                manager.getMemoryInfo(memory);
+                osAvailableRam = memory.availMem;
+            }
+            final KnowledgeModelResourcePlan.Report report = KnowledgeModelResourcePlan.plan(
+                    entry, manifest, osAvailableRam, context.getFilesDir().getUsableSpace());
+            return context.getString(R.string.knowledge_models_resource_report,
+                    formatSize(report.weightBytes), formatSize(report.externalBytes),
+                    report.externalFiles, formatSize(report.otherCompanionBytes),
+                    formatSize(report.totalDeclaredBytes),
+                    report.availableRamBytes == 0
+                            ? context.getString(R.string.knowledge_models_container_unknown)
+                            : formatSize(report.availableRamBytes),
+                    report.freeStorageBytes == 0
+                            ? context.getString(R.string.knowledge_models_container_unknown)
+                            : formatSize(report.freeStorageBytes),
+                    context.getString(resourceGateLabel(report.gate)));
+        } catch (IOException | RuntimeException invalid) {
+            return context.getString(R.string.knowledge_models_resource_unavailable);
+        }
+    }
+
+    private static int resourceGateLabel(final KnowledgeModelResourcePlan.Gate gate) {
+        switch (gate) {
+            case GGUF_BACKEND_PENDING: return R.string.knowledge_models_resource_gguf;
+            case MISSING_PACKAGE: return R.string.knowledge_models_resource_no_package;
+            case EXTERNAL_DATA_PENDING: return R.string.knowledge_models_resource_external;
+            case MODEL_TOO_LARGE: return R.string.knowledge_models_resource_weight_limit;
+            case PACKAGE_TOO_LARGE: return R.string.knowledge_models_resource_package_limit;
+            case RAM_UNKNOWN: return R.string.knowledge_models_resource_ram_unknown;
+            case RAM_TOO_LOW: return R.string.knowledge_models_resource_ram_low;
+            case RESOURCES_ONLY_PASSED: return R.string.knowledge_models_resource_prefilter;
+            default: throw new IllegalArgumentException("Unknown resource gate");
+        }
     }
 
     private void showPackageActions(final KnowledgeModelFiles.Entry entry) {

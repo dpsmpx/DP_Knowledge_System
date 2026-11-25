@@ -798,6 +798,16 @@
     <string name="knowledge_models_onnx_session_running">Проверка SHA-256 комплекта и CPU-сессии без инференса. Повторное нажатие «Управление» запросит отмену; нативный вызов может завершиться позже.</string>
     <string name="knowledge_models_onnx_session_passed">ONNX CPU-сессия СОЗДАНА и ЗАКРЫТА; инференс не выполнялся. Движок %1$s; входов %2$d, выходов %3$d; инициализация %4$d мс; изменение native heap после закрытия %5$d байт. Это только диагностика: готовность модели, контракт входов, качество и пиковая RAM НЕ проверены.</string>
     <string name="knowledge_models_onnx_session_failed">Проверка ONNX CPU-сессии отклонена, не прошла или отменена. Возможны: отсутствие комплекта, неподдерживаемый размер/структура/внешние тензоры, изменение SHA-256, мало RAM либо отказ движка. Инференс и чтение заметок/журнала не выполнялись. Это НЕ окончательный вердикт о несовместимости модели.</string>
+    <string name="knowledge_models_resource_report">Размер модели и ресурсы устройства (только чтение):\nФайл весов: %1$s\nЗаявленные внешние данные ONNX: %2$s в %3$d файлах\nПрочие компоненты: %4$s\nПолный заявленный комплект: %5$s\nДоступная RAM по данным ОС: %6$s\nСвободно на разделе данных приложения: %7$s\nПредварительный ресурсный фильтр малой CPU-сессии: %8$s.\nРазмеры взяты из локального реестра и указанного пользователем манифеста БЕЗ повторной проверки SHA-256. RAM — моментальный показатель ОС; пиковая память, нагрузка CPU/GPU, качество и скорость модели НЕИЗВЕСТНЫ до отдельного подтверждённого теста.</string>
+    <string name="knowledge_models_resource_unavailable">Сведения о ресурсах модели недоступны. Модель не загружалась.</string>
+    <string name="knowledge_models_resource_gguf">Движок GGUF не подключён; исполнение недоступно</string>
+    <string name="knowledge_models_resource_no_package">Манифест комплекта пока не установлен</string>
+    <string name="knowledge_models_resource_external">Внешние тензоры ONNX требуют будущего изолированного движка</string>
+    <string name="knowledge_models_resource_weight_limit">Файл превышает экспериментальный лимит CPU-сессии 16 МиБ</string>
+    <string name="knowledge_models_resource_package_limit">Комплект превышает экспериментальный лимит CPU-сессии 32 МиБ</string>
+    <string name="knowledge_models_resource_ram_unknown">Данные RAM от ОС недоступны; CPU-сессия не разрешена заранее</string>
+    <string name="knowledge_models_resource_ram_low">Доступно меньше 512 МиБ RAM; CPU-сессия блокируется</string>
+    <string name="knowledge_models_resource_prefilter">размер и RAM предварительно подходят; SHA-256 и граф ещё требуют ручной проверки</string>
     <string name="knowledge_models_package_import_help">Выберите dpks-model-package.json и все сопутствующие файлы вместе через системный множественный выбор Android. Веса .gguf/.onnx уже должны быть установлены для этой роли. Проверяются размер и SHA-256 каждого файла. Интернет и ИИ не запускаются. Формат описан в docs/MODEL_M1_PACKAGE_MANIFEST.md.</string>
     <string name="knowledge_models_package_remove_warning">Удалить манифест и сопутствующие файлы из приватного хранилища? Веса модели, заметки и журнал сохранятся. Для восстановления потребуется повторный импорт комплекта.</string>
     <string name="knowledge_models_package_none">Сопутствующие файлы не установлены. Одного файла весов недостаточно для запуска.</string>
