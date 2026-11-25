@@ -40,7 +40,7 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("WATCHDOG_MILLIS = 30_000L", protocol)
         self.assertIn("handler.postDelayed(deadline", service)
         self.assertIn("Process.killProcess(Process.myPid())", service)
-        self.assertIn(".endsWith(\":dpks_onnx_cpu\")", service)
+        self.assertIn("KnowledgeOnnxProcessIdentity.isWorker()", service)
         self.assertIn("KnowledgeOnnxCpuBackend.smoke()", service)
         self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
         self.assertIn("KnowledgeOnnxCpuBackend.inspect(model)", service)
@@ -50,6 +50,19 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("CANCEL_AND_EXIT", client)
         self.assertIn("onnxSmokeClient.start(", activity)
         self.assertNotIn("final KnowledgeOnnxSmoke.Report report = KnowledgeOnnxCpuBackend.smoke()", activity)
+
+    def test_isolated_process_identity_uses_no_forbidden_activity_manager_call(self):
+        folder = APP / "main/java/net/gsantner/markor"
+        application = (folder / "ApplicationObject.java").read_text()
+        identity = (folder / "knowledge/KnowledgeOnnxProcessIdentity.java").read_text()
+        service = (APP / "flavorAtest/java/net/gsantner/markor/knowledge/"
+                   "KnowledgeOnnxIsolatedService.java").read_text()
+        self.assertNotIn("getMyMemoryState", application)
+        self.assertNotIn("getMyMemoryState", identity)
+        self.assertNotIn("getMyMemoryState", service)
+        self.assertIn("Application.getProcessName()", identity)
+        self.assertIn("Process.isIsolatedUid(Process.myUid())", identity)
+        self.assertIn('new FileInputStream("/proc/self/cmdline")', identity)
 
     def test_real_session_uses_fd_not_model_path_or_binder_payload(self):
         base = "java/net/gsantner/markor/knowledge/"
