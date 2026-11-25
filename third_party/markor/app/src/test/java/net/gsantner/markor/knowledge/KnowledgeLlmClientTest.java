@@ -242,6 +242,48 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void hybridSharedSourceExcerptPrefersVisibleLexicalCoverageAndPhrase() {
+        final String direct = "AMBER, violet is the exact artificial observation.";
+        final String offTopic = "A different synthetic discussion appears in this paragraph.";
+        assertEquals(direct, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "Tell me about amber violet", direct, offTopic));
+        final String weakerLexical = "Amber appears here by itself.";
+        final String strongerVector = "Amber and violet were both explicitly observed.";
+        assertEquals(strongerVector, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber violet", weakerLexical, strongerVector));
+        final String separated = "Amber is distant from the final violet reference.";
+        assertEquals(direct, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "Which amber violet?", direct, separated));
+        // If both chunks cover all terms but neither contains an adjacent
+        // phrase, keep the vector chunk rather than inventing a score margin.
+        assertEquals(separated, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber violet", "Violet is elsewhere than amber.", separated));
+        final String vectorPhrase = "Amber violet also occurs in this vector chunk.";
+        assertEquals(vectorPhrase, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber violet", direct, vectorPhrase));
+    }
+
+    @Test
+    public void hybridSharedSourceExcerptHandlesRussianPrefixesAndRejectsUnboundedInput() {
+        final String russian = "ПАМЯТЬЮ — синтезом объясняется вымышленный пример.";
+        final String scattered = "Память упоминалась давно, а синтез описывался отдельно.";
+        assertEquals(russian, KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "Расскажи про память синтез", russian, scattered));
+        assertEquals("Amber and amberlight are distinct terms.",
+                KnowledgeLlmEvidence.chooseHybridExcerpt("amber amberlight",
+                        "Amberlight alone.", "Amber and amberlight are distinct terms."));
+        assertEquals("Amber is visible.", KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber", "Amber is visible.", ""));
+        assertEquals("", KnowledgeLlmEvidence.chooseHybridExcerpt("amber",
+                "Visible lexical text", new String(new char[905]).replace('\0', 'x')));
+        assertEquals("", KnowledgeLlmEvidence.chooseHybridExcerpt(
+                new String(new char[1201]).replace('\0', 'x'), "Visible lexical text",
+                "Visible vector text"));
+        assertEquals("", KnowledgeLlmEvidence.chooseHybridExcerpt(
+                null, "Visible lexical text", "Visible vector text"));
+    }
+
+    @Test
     public void lexicalCandidateSelectionPreservesTopTwoAndCoversMissingQuestionTerms() {
         final java.util.List<KnowledgeLlmEvidence.Item> ranked = Arrays.asList(
                 new KnowledgeLlmEvidence.Item("first.md", "Amber is supported."),

@@ -15,6 +15,21 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_hybrid_shared_source_excerpt_preserves_literal_evidence_and_consent(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("chooseHybridExcerpt(final String question,", evidence)
+        self.assertIn("adjacentPhraseStart(foldForOffsets(lexicalExcerpt), terms)", evidence)
+        self.assertIn("KnowledgeLlmEvidence.chooseHybridExcerpt(question,", hub)
+        self.assertIn("KnowledgeEmbeddingChunks.atOffset(", hub)
+        self.assertIn("matchesIndexedEvidenceSource(relativePath,", hub)
+        self.assertIn("new KnowledgeLlmEvidence.ConsentSeal(", hub)
+        for marker in ("sharedSourceLexicalPhraseVisible=true",
+                       "strongerVectorRetained=true", "russianPrefixPassageSupported=true"):
+            self.assertIn(marker, qa)
+
     def test_llm_excerpt_uses_same_search_terms_and_phrase_priority(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()

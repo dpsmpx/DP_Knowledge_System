@@ -1161,11 +1161,29 @@ public final class KnowledgeDeviceQaRunner {
                 Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md", "semantic.md"),
                 Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md"),
                 Arrays.asList("semantic.md"), 3);
-        if (!selected.equals(Arrays.asList(0, 1, 3))) {
+        final String source = "Amber violet is the actual artificial observation.\n"
+                + new String(new char[1100]).replace('\0', 'x')
+                + "\nThis distant vector passage concerns an unrelated synthetic item.";
+        final String lexical = KnowledgeLlmEvidence.excerpt(source, "amber violet");
+        final String vector = KnowledgeEmbeddingChunks.atOffset(source,
+                source.indexOf("This distant vector passage"), 60);
+        final String chosen = KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber violet", lexical, vector);
+        final String strongVector = "Amber and violet appear in this vector passage.";
+        if (!selected.equals(Arrays.asList(0, 1, 3))
+                || !chosen.equals(lexical) || !chosen.contains("Amber violet is the actual")
+                || !strongVector.equals(KnowledgeLlmEvidence.chooseHybridExcerpt(
+                        "amber violet", "Only amber is mentioned.", strongVector))
+                || !KnowledgeLlmEvidence.chooseHybridExcerpt("Расскажи про память синтез",
+                        "ПАМЯТЬЮ — синтезом связан пример.",
+                        "Память рассматривали раньше, а синтез позднее.")
+                        .startsWith("ПАМЯТЬЮ")) {
             throw new SyntheticMismatch("verdict=HYBRID_MODALITY_DISCARDED");
         }
         return "syntheticCandidates=4, originalTopTwoPreserved=true, "
                 + "semanticRepresentativeIncluded=true, boundedAndReadOnly=true, "
+                + "sharedSourceLexicalPhraseVisible=true, strongerVectorRetained=true, "
+                + "russianPrefixPassageSupported=true, "
                 + "noModelCall=true, selectedVaultUntouched=true";
     }
 
