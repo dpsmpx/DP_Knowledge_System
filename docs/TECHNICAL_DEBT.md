@@ -721,6 +721,22 @@ Python и Android JVM/debug проверки зелёные. API 28 выявил
 нагрев и ARM64 ABI не проверены. `runnable=false`; MODEL-M1/M8
 не закрыты.
 
+**MODEL-M1: Android API 27 / pre-28 isolated-process fallback —
+[PR #195](https://github.com/dpsmpx/DP_Knowledge_System/pull/195).**
+[Успешный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45591963305):
+**9/9 instrumented-тестов на API 27 (Android 8.1/AOSP x86_64)**,
+а также 9/9 на API 28 и 35 (Google APIs x86_64). Подтверждена
+изолированная служба и синтетические FD/Binder/отмена с определением
+worker через `/proc/self/cmdline` на API 27, без реальных весов,
+заметок, журнала и сети. Первое задание API 27
+[не запускало тесты](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45590263162):
+пакет `google_apis;x86_64` для API 27 отсутствовал в SDK;
+переключение именно этого API на `default;x86_64` позволило провести
+проверку. **API 24–26 не подтверждены**; API 24 ранее оставался
+`adb offline` в двух запускавшихся средах. Физический ARM64, реальные
+импортированные модели, native hang/OOM, пик RAM/нагрев/ABI остаются
+открытыми. `runnable=false`; MODEL-M1/M8 не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
