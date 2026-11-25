@@ -336,7 +336,30 @@ final class KnowledgeModelPackageStore {
      * entirely from bytes. ONNX external_data is never resolved as a path.
      * A successful return is NOT authority to run any model inputs.
      */
+    static final class CpuSessionInput {
+        final byte[] bytes;
+        final long declaredInputs;
+        final long declaredOutputs;
+        final long typedInputs;
+        final long typedOutputs;
+
+        CpuSessionInput(final byte[] verifiedBytes,
+                        final KnowledgeModelContainerProbe.Result container) {
+            bytes = verifiedBytes;
+            declaredInputs = container.graphInputs;
+            declaredOutputs = container.graphOutputs;
+            typedInputs = container.typedInputs;
+            typedOutputs = container.typedOutputs;
+        }
+    }
+
     synchronized byte[] readForCpuSession(final KnowledgeModelFiles.Entry entry)
+            throws IOException {
+        return readForCpuSessionWithAudit(entry).bytes;
+    }
+
+    /** Carries numeric declarations from the same preflight as the verified bytes. */
+    synchronized CpuSessionInput readForCpuSessionWithAudit(final KnowledgeModelFiles.Entry entry)
             throws IOException {
         if (entry == null || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
                 || entry.bytes < 16 || entry.bytes > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES) {
@@ -384,8 +407,9 @@ final class KnowledgeModelPackageStore {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedIOException("ONNX CPU session inspection cancelled");
             }
+            final CpuSessionInput input = new CpuSessionInput(bytes, audit.container);
             verified = true;
-            return bytes;
+            return input;
         } finally {
             if (!verified) Arrays.fill(bytes, (byte) 0);
         }

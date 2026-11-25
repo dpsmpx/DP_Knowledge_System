@@ -858,6 +858,31 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 io.maxInputRank, io.maxOutputRank);
     }
 
+    /** Compare only bounded counts; never present this as model compatibility. */
+    private String formatIoAgreement(final KnowledgeModelPackageStore.CpuSessionInput prepared,
+                                     final KnowledgeOnnxSessionGate.Report report) {
+        final KnowledgeOnnxIoAgreement.Verdict verdict = KnowledgeOnnxIoAgreement.compare(
+                prepared.declaredInputs, prepared.declaredOutputs,
+                prepared.typedInputs, prepared.typedOutputs,
+                report.inputs, report.outputs, report.ioSummary);
+        switch (verdict) {
+            case COUNTS_AND_TENSORS_AGREE:
+                return getString(R.string.knowledge_models_onnx_io_counts_agree);
+            case COUNTS_AGREE_TYPES_PARTIAL:
+                return getString(R.string.knowledge_models_onnx_io_types_partial);
+            case INPUT_OUTPUT_COUNTS_DIFFER:
+                return getString(R.string.knowledge_models_onnx_io_counts_differ,
+                        prepared.declaredInputs, prepared.declaredOutputs,
+                        report.inputs, report.outputs);
+            case TENSOR_COUNTS_DIFFER:
+                return getString(R.string.knowledge_models_onnx_io_tensors_differ,
+                        prepared.typedInputs, prepared.typedOutputs,
+                        report.ioSummary.inputTensors, report.ioSummary.outputTensors);
+            default:
+                return getString(R.string.knowledge_models_onnx_io_comparison_unavailable);
+        }
+    }
+
     /** Fail closed on an unavailable/low OS RAM snapshot; this reserves no memory. */
     private void requireAvailableOnnxMemory() throws IOException {
         // Read a current system-wide snapshot. Neither this nor the isolated
@@ -886,7 +911,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         runningModelImport = modelWorker.submit(() -> {
             try {
                 requireAvailableOnnxMemory();
-                final byte[] bytes = modelPackages.readForCpuSession(entry);
+                final KnowledgeModelPackageStore.CpuSessionInput prepared =
+                        modelPackages.readForCpuSessionWithAudit(entry);
+                final byte[] bytes = prepared.bytes;
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || modelGeneration.get() != operation) {
                         Arrays.fill(bytes, (byte) 0);
@@ -914,7 +941,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         R.string.knowledge_models_onnx_session_passed,
                                         report.runtimeVersion, report.inputs, report.outputs,
                                         report.sessionInitMillis, report.nativeHeapDeltaBytes,
-                                        formatSessionDiagnostics(report)));
+                                        formatSessionDiagnostics(report) + "\n"
+                                                + formatIoAgreement(prepared, report)));
                             }
                         }
 

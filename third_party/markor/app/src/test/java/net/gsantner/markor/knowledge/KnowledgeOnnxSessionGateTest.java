@@ -57,6 +57,13 @@ public final class KnowledgeOnnxSessionGateTest {
                     new KnowledgeModelPackageStore.Source("config.json",
                             () -> new ByteArrayInputStream(CONFIG))), entry);
             assertArrayEquals(model, store.readForCpuSession(entry));
+            final KnowledgeModelPackageStore.CpuSessionInput prepared =
+                    store.readForCpuSessionWithAudit(entry);
+            assertArrayEquals(model, prepared.bytes);
+            assertEquals(1, prepared.declaredInputs);
+            assertEquals(1, prepared.declaredOutputs);
+            assertEquals(1, prepared.typedInputs);
+            assertEquals(1, prepared.typedOutputs);
             final KnowledgeModelPackageStore.Audit report = store.audit(entry, null);
             KnowledgeOnnxSessionGate.requireEligible(entry, report.container);
 
