@@ -32,8 +32,6 @@ jobs:
           # Older emulator images can hang on newer hosted runner images.
           - api: 28
             runner: ubuntu-22.04
-          - api: 24
-            runner: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
