@@ -48,6 +48,7 @@ jobs:
             python3 - <<'PY'
           import glob
           import xml.etree.ElementTree as ET
+          import re
           for path in sorted(glob.glob('app/build/test-results/test*UnitTest/TEST-*.xml')):
               try:
                   suite = ET.parse(path).getroot()
@@ -56,6 +57,13 @@ jobs:
               for case in suite.iter('testcase'):
                   if case.find('failure') is not None or case.find('error') is not None:
                       print(f"{case.get('classname', '?')}#{case.get('name', '?')}")
+                      issue = case.find('failure')
+                      if issue is None:
+                          issue = case.find('error')
+                      line = re.search(r'KnowledgeLlmClientTest\.java:(\d+)',
+                                       issue.text or '') if issue is not None else None
+                      if line is not None:
+                          print(f"  JUnit assertion at line {line.group(1)}")
           PY
             echo '::endgroup::'
             echo '::group::Final Gradle lines'
