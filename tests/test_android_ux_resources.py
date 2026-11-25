@@ -15,6 +15,15 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_citation_numeric_warnings_check_each_claimed_value(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("!source.numbers.containsAll(numbers)", audit)
+        self.assertIn("numbers.isEmpty() && !source.numbers.isEmpty()", audit)
+        self.assertIn('step("CITE-ANCHOR-19",', qa)
+        self.assertIn("partialNumberOverlapFlagged=true", qa)
+
     def test_markdown_reference_spacing_and_escaped_backticks_stay_in_citation_audit(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
@@ -155,7 +164,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
         for marker in ("NON_ANCHOR_WORDS", "informativeTerms(", "NUMERIC_LITERAL",
                        "numericTokens(", "numericMismatchedCitations",
-                       "Flag.Kind.NUMERIC_MISMATCH", "Collections.disjoint("):
+                       "Flag.Kind.NUMERIC_MISMATCH", "source.numbers.containsAll(numbers)"):
             self.assertIn(marker, audit)
         for marker in ("knowledge_llm_numeric_mismatch", "knowledge_llm_flagged_numeric",
                        "review.numericMismatchedCitations"):

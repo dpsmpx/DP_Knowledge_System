@@ -597,14 +597,32 @@ public class KnowledgeLlmClientTest {
                 "The observed temperature measured 24 degrees [1].",
                 "The observed temperature measured 24,00 degrees [1].",
                 "The observed temperature measured degrees [1].",
-                "The observed temperature measured degrees [2](https://invalid.example) [1].",
-                "The observed temperature measured 42 and 24 degrees [1].")) {
+                "The observed temperature measured degrees [2](https://invalid.example) [1].")) {
             assertEquals(compatible, 0, KnowledgeLlmCitationAudit.inspect(
                     compatible, sources).numericMismatchedCitations);
         }
         assertEquals(0, KnowledgeLlmCitationAudit.inspect(mismatch,
                 Collections.singletonList(new KnowledgeLlmEvidence.Item("no-number.md",
                         "The observed temperature measured degrees in the chamber.")))
+                .numericMismatchedCitations);
+
+        // Sharing one correct written number must not hide another invented
+        // one: old disjoint-only comparison silently accepted these claims.
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed temperature measured 42 and 24 degrees [1].", sources)
+                .numericMismatchedCitations);
+        final java.util.List<KnowledgeLlmEvidence.Item> measured = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("measurements.md",
+                        "Battery runtime measured 60 minutes and temperature measured 24 degrees."));
+        final KnowledgeLlmCitationAudit.Review partial = KnowledgeLlmCitationAudit.inspect(
+                "Battery runtime measured 60 minutes and temperature measured 42 degrees [1].",
+                measured);
+        assertEquals(1, partial.numericMismatchedCitations);
+        assertEquals(0, partial.weakTextAttributions);
+        assertEquals(KnowledgeLlmCitationAudit.Flag.Kind.NUMERIC_MISMATCH,
+                partial.flaggedSpans.get(0).kind);
+        assertEquals(0, KnowledgeLlmCitationAudit.inspect(
+                "Battery runtime measured 60 minutes [1].", measured)
                 .numericMismatchedCitations);
 
         final StringBuilder repeated = new StringBuilder();

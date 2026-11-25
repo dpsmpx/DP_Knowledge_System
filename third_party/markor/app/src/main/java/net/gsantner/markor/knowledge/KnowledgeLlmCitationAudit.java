@@ -765,8 +765,11 @@ public final class KnowledgeLlmCitationAudit {
             if (statementPolarity != 0 && source.polarity == -statementPolarity) {
                 counts.add(Flag.Kind.EXPLICIT_POLARITY, marker.source, from, to);
             }
+            // A single shared number must not hide a second changed number.
+            // Check every explicit claim number against the cited excerpt;
+            // the source may legitimately contain extra numbers.
             if (overlap >= 2 && !numbers.isEmpty() && !source.numbers.isEmpty()
-                    && Collections.disjoint(numbers, source.numbers)) {
+                    && !source.numbers.containsAll(numbers)) {
                 counts.add(Flag.Kind.NUMERIC_MISMATCH, marker.source, from, to);
             }
         }

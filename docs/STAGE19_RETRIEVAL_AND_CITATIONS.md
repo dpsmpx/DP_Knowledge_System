@@ -279,8 +279,9 @@ even if every reference and quotation passes the checks below.
     agreement on generic words. A new, separately localized **possible
     number mismatch** warning appears only if an attributed claim and its
     excerpt share at least two distinctive terms, both contain explicit
-    unsigned written numbers, and their complete number sets have **no
-    intersection**. Model citation numbers `[1]` are excluded; simple decimal
+    unsigned written numbers, and at least one number in the attributed claim
+    is **absent from the cited excerpt**. A correctly shared number no longer
+    hides another altered number. Model citation numbers `[1]` are excluded; simple decimal
     comma/dot and trailing zeros normalize deterministically. The UI lists
     per-source suspect model-answer snippets under the existing eight-detail
     cap; it does not quote private source contents or alter any journal state.
@@ -377,13 +378,25 @@ even if every reference and quotation passes the checks below.
     these two distinct Markdown edges without provider calls, private notes
     or changes to consent. This is conservative bounded syntax parsing, not
     a complete CommonMark renderer or semantic grounding.
+34. The existing **possible number mismatch** warning now examines *every*
+    explicitly written number in a cited claim (after the current decimal
+    normalization), instead of warning only when the claim and excerpt have
+    zero numeric overlap. In a synthetic statement claiming `60` minutes and
+    `42` degrees from an excerpt containing `60` minutes and `24` degrees,
+    the altered `42` is now flagged; numbers present in the source may still
+    be mentioned selectively. Existing lexical overlap, source-size, answer
+    bounds, citation-number exclusion, eight-warning-detail cap and explicit
+    per-request consent are unchanged. JVM and cache-only `CITE-ANCHOR-19`
+    checks cover both partial overlap and compatible subsets. This is only
+    a local written-number discrepancy heuristic, not unit conversion,
+    arithmetic verification or a semantic truth judgment.
 
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
-The script creates **only an in-memory SQLite FTS4 database** with generated
+The script creates **only in-memory SQLite FTS4 databases** with generated
 text and known synthetic relevance labels. It reads no vault, uses no network,
-and prints aggregate metrics, not source paths. Fourteen regression tests cover
+and prints aggregate metrics, not source paths. The regression tests cover
 FTS4 query syntax, phrase/strict/OR ordering, bounds, labeled recall,
 opposing synthetic claims, exclusion of oversized/stale index rows, stable
 casefold tie-breaking, title-aware bounded promotion and the absence of
@@ -412,6 +425,16 @@ The standalone 10-note probe reported that the previous two-pass baseline
 missed a later titled source, while the new windowed ranking promoted it to
 **rank 3**, behind both opposing exact-phrase sources (eight scanned
 candidates per pass); only boolean/count summaries are printed.
+The new **14-note, eight-query diverse synthetic probe** separately tests
+English phrases and natural wording, Russian inflected prefixes, title matches,
+five-term questions, overlapping prefixes, a missing synonym and a query
+with **zero** relevant documents. Its six positive lexical cases recover all
+of their manually labeled targets at six results, but the synonym-only case
+still has **recall@6 = 0/1**, and overlapping prefixes yield **five
+false-positive results among six**. For the no-relevant-document case recall
+is reported as `null`, rather than falsely treating it as perfect recall.
+The fixture therefore makes known lexical limitations observable instead
+of implying that five two-word topic scores represent broad relevance.
 The deliberately adversarial corpus is not a
 representative search evaluation, and this measures a Python SQL mirror,
 **not** Android, embeddings, battery/RAM, provider quality or semantic
@@ -431,7 +454,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   trailing sentence-end citation clusters, all six ATX heading levels and
   CR/CRLF/Unicode line separator isolation from following uncited claims;
   distinctive-term overlap, low fractional overlap in long claims, generic-
-  word-only false source conflicts and optional numeric-disagreement warnings;
+  word-only false source conflicts and optional per-number disagreement warnings,
+  including a changed number hidden by another matching number;
   exact-excerpt diversity tie-breaking with stable top-two provenance and
   fail-closed overlong evidence questions, mirrored in the offline benchmark;
   title-token prefix boundaries, one-token-one-term credit, Cyrillic matching,
