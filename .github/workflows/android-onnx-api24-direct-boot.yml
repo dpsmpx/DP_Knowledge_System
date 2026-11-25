@@ -1,0 +1,81 @@
+name: Android ONNX API24 direct-boot probe
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/android-onnx-api24-direct-boot.yml'
+      - 'tests/test_onnx_instrumentation_contract.py'
+
+permissions:
+  contents: read
+
+jobs:
+  api24-aosp-direct-boot:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: android-actions/setup-android@v4
+      - name: Prepare emulator acceleration and AOSP API24 image
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          sdkmanager --install emulator 'platforms;android-24' 'system-images;android-24;default;x86_64'
+          printf 'no\n' | avdmanager create avd --force -n dpks-api24 -k 'system-images;android-24;default;x86_64'
+          printf 'hw.ramSize=4096\nhw.cpu.ncore=2\nvm.heapSize=512\n' >> "$HOME/.android/avd/dpks-api24.avd/config.ini"
+      - name: Boot and run synthetic instrumentation without UI unlock
+        env:
+          GRADLE_OPTS: -Xms128m -Xmx768m
+        run: |
+          set -euo pipefail
+          trap 'timeout 8s adb -s emulator-5554 emu kill || true' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd dpks-api24 -port 5554 \
+            -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect \
+            > /tmp/dpks-api24-emulator.log 2>&1 &
+          emulator_pid=$!
+          completed=""
+          for attempt in $(seq 1 180); do
+            completed="$(timeout 5s adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+            if [ "$completed" = "1" ]; then break; fi
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              tail -n 120 /tmp/dpks-api24-emulator.log
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$completed" != "1" ]; then
+            tail -n 120 /tmp/dpks-api24-emulator.log
+            exit 1
+          fi
+          test "$(timeout 8s adb -s emulator-5554 shell getprop ro.build.version.sdk | tr -d '\r')" = "24"
+          ready=false
+          for attempt in $(seq 1 24); do
+            if timeout 10s adb -s emulator-5554 shell pm path android >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          chmod +x third_party/markor/gradlew
+          timeout --signal=TERM --kill-after=25s 12m bash -lc \
+            'cd third_party/markor && ./gradlew :app:connectedFlavorAtestDebugAndroidTest --no-daemon --no-parallel --max-workers=2 --stacktrace'
+      - name: Preserve synthetic instrumentation failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-api24-aosp-direct-boot-results
+          path: |
+            third_party/markor/app/build/outputs/androidTest-results/connected/
+            third_party/markor/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 3

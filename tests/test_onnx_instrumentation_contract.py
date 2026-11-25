@@ -16,7 +16,7 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         self.assertIn("api: 35", action)
         self.assertIn("api: 28", action)
         self.assertIn("api: 27", action)
-        self.assertIn("api: 24", action)
+        self.assertNotIn("api: 24", action)
         self.assertIn("runner: ubuntu-latest", action)
         self.assertIn("runner: ubuntu-22.04", action)
         self.assertIn("runs-on: ${{ matrix.runner }}", action)
@@ -38,6 +38,17 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
                       gradle)
         self.assertIn("androidTestImplementation 'androidx.test:runner:1.7.0'", gradle)
         self.assertIn("androidTestImplementation 'androidx.test.ext:junit:1.3.0'", gradle)
+
+    def test_api24_direct_boot_probe_is_bounded_and_does_not_unlock_screen(self):
+        probe = (ROOT / ".github/workflows/android-onnx-api24-direct-boot.yml").read_text()
+        self.assertIn("api24-aosp-direct-boot:", probe)
+        self.assertIn("timeout-minutes: 18", probe)
+        self.assertIn("system-images;android-24;default;x86_64", probe)
+        self.assertIn("sys.boot_completed", probe)
+        self.assertIn("pm path android", probe)
+        self.assertIn("timeout --signal=TERM --kill-after=25s 12m", probe)
+        self.assertIn("connectedFlavorAtestDebugAndroidTest", probe)
+        self.assertNotIn("input keyevent", probe)
 
     def test_synthetic_lifecycle_cases_do_not_open_imported_models(self):
         suite = (APP / "src/androidTest/java/net/gsantner/markor/knowledge/"
