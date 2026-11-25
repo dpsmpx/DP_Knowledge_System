@@ -10,15 +10,20 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
+import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.os.RemoteException;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * DPKS-only isolated process: no notes, model paths, weights or network input.
+ * DPKS-only isolated process: never sees note text, model paths or network input.
+ * Real ONNX bytes enter only after separate manual consent through a bounded FD pipe.
  * A separate, permissionless UID is enforced by the flavor manifest.
  */
 public final class KnowledgeOnnxIsolatedService extends Service {
@@ -43,24 +48,70 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             exitSandboxProcess();
             return true;
         }
-        if (message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC) return true;
-        final Messenger reply = message.replyTo;
-        final int requestId = message.arg1;
-        if (reply == null || !running.compareAndSet(false, true)) {
-            answer(reply, requestId, null);
+        final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION;
+        if (!sessionRequest && message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC) {
             return true;
         }
+        final Messenger reply = message.replyTo;
+        final int requestId = message.arg1;
+        ParcelFileDescriptor pipe = null;
+        String expectedSha = null;
+        if (sessionRequest) {
+            try {
+                final Bundle request = message.getData();
+                pipe = request.getParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD);
+                expectedSha = request.getString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256);
+            } catch (RuntimeException invalidParcel) {
+                closePipe(pipe);
+                answerSession(reply, requestId, null);
+                return true;
+            }
+            if (pipe == null || message.arg2 < 16
+                    || message.arg2 > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
+                    || !KnowledgeOnnxSessionPipe.validSha256(expectedSha)) {
+                closePipe(pipe);
+                answerSession(reply, requestId, null);
+                return true;
+            }
+        }
+        if (reply == null || !running.compareAndSet(false, true)) {
+            closePipe(pipe);
+            if (sessionRequest) answerSession(reply, requestId, null);
+            else answer(reply, requestId, null);
+            return true;
+        }
+        final ParcelFileDescriptor inputPipe = pipe;
+        final String sha = expectedSha;
+        final int size = message.arg2;
         handler.postDelayed(deadline, KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS);
         worker.execute(() -> {
-            KnowledgeOnnxSmoke.Report report = null;
+            KnowledgeOnnxSmoke.Report smoke = null;
+            KnowledgeOnnxSessionGate.Report session = null;
             try {
-                report = KnowledgeOnnxCpuBackend.smoke();
-                if (!KnowledgeOnnxIsolatedProtocol.validTimings(
-                        report.sessionInitMillis, report.inferenceMicros)) report = null;
+                if (sessionRequest) {
+                    final byte[] model;
+                    try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe)) {
+                        model = KnowledgeOnnxSessionPipe.readVerified(stream, size, sha);
+                    }
+                    try {
+                        session = KnowledgeOnnxCpuBackend.inspect(model);
+                        if (session.sessionInitMillis < 0
+                                || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
+                                || session.inputs < 1 || session.inputs > 32
+                                || session.outputs < 1 || session.outputs > 32) session = null;
+                    } finally {
+                        Arrays.fill(model, (byte) 0);
+                    }
+                } else {
+                    smoke = KnowledgeOnnxCpuBackend.smoke();
+                    if (!KnowledgeOnnxIsolatedProtocol.validTimings(
+                            smoke.sessionInitMillis, smoke.inferenceMicros)) smoke = null;
+                }
             } catch (Exception | LinkageError ignored) {
                 // Native error text and paths never leave the worker process.
             } finally {
-                answer(reply, requestId, report);
+                if (sessionRequest) answerSession(reply, requestId, session);
+                else answer(reply, requestId, smoke);
                 handler.post(() -> {
                     handler.removeCallbacks(deadline);
                     stopSelf();
@@ -68,6 +119,36 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             }
         });
         return true;
+    }
+
+    private static void answerSession(final Messenger recipient, final int requestId,
+                                      final KnowledgeOnnxSessionGate.Report result) {
+        if (recipient == null) return;
+        final Message reply = Message.obtain(null, result == null
+                ? KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
+                : KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED);
+        reply.arg1 = requestId;
+        if (result != null) {
+            final Bundle data = new Bundle();
+            data.putString(KnowledgeOnnxIsolatedProtocol.VERSION,
+                    KnowledgeOnnxIsolatedProtocol.safeVersion(result.runtimeVersion));
+            data.putLong(KnowledgeOnnxIsolatedProtocol.INIT_MILLIS, result.sessionInitMillis);
+            data.putLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA,
+                    result.nativeHeapDeltaBytes);
+            data.putLong(KnowledgeOnnxIsolatedProtocol.INPUTS, result.inputs);
+            data.putLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS, result.outputs);
+            reply.setData(data);
+        }
+        try {
+            recipient.send(reply);
+        } catch (RemoteException ignored) { }
+    }
+
+    private static void closePipe(final ParcelFileDescriptor pipe) {
+        if (pipe == null) return;
+        try {
+            pipe.close();
+        } catch (IOException ignored) { }
     }
 
     private static void answer(final Messenger recipient, final int requestId,

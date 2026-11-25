@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Collections;
+import java.util.Arrays;
 
 /**
  * User-triggered, offline package assembly for a weight already on our private
@@ -361,6 +362,7 @@ final class KnowledgeModelPackageStore {
         // Rehash the exact bytes passed to ORT, not just a prior file snapshot.
         final byte[] bytes = new byte[(int) entry.bytes];
         final MessageDigest sha = newDigest();
+        boolean verified = false;
         try (InputStream source = new FileInputStream(sourceFile)) {
             int position = 0;
             while (position < bytes.length) {
@@ -376,11 +378,14 @@ final class KnowledgeModelPackageStore {
             if (source.read() != -1 || !entry.sha256.equals(hex(sha.digest()))) {
                 throw new IOException("ONNX bytes no longer match registered SHA-256");
             }
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("ONNX CPU session inspection cancelled");
+            }
+            verified = true;
+            return bytes;
+        } finally {
+            if (!verified) Arrays.fill(bytes, (byte) 0);
         }
-        if (Thread.currentThread().isInterrupted()) {
-            throw new InterruptedIOException("ONNX CPU session inspection cancelled");
-        }
-        return bytes;
     }
 
     private static void removePreparedFiles(final File folder, final File model,

@@ -42,12 +42,30 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Process.killProcess(Process.myPid())", service)
         self.assertIn(".endsWith(\":dpks_onnx_cpu\")", service)
         self.assertIn("KnowledgeOnnxCpuBackend.smoke()", service)
-        self.assertNotIn("KnowledgeOnnxCpuBackend.inspect(", service)
+        self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.inspect(model)", service)
+        self.assertIn("Arrays.fill(model, (byte) 0)", service)
         self.assertIn("mainHandler.postDelayed(clientDeadline", client)
         self.assertIn("response.arg1 != activeRequestId", client)
         self.assertIn("CANCEL_AND_EXIT", client)
         self.assertIn("onnxSmokeClient.start(", activity)
         self.assertNotIn("final KnowledgeOnnxSmoke.Report report = KnowledgeOnnxCpuBackend.smoke()", activity)
+
+    def test_real_session_uses_fd_not_model_path_or_binder_payload(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        client = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
+        activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
+        service = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedService.java").read_text()
+        self.assertIn("ParcelFileDescriptor.createPipe()", client)
+        self.assertIn("data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe)", client)
+        self.assertIn("Math.min(64 * 1024, bytes.length - offset)", client)
+        self.assertIn("KnowledgeOnnxSessionPipe.validSha256(expectedSha256)", client)
+        self.assertIn("onnxSessionClient.start(bytes, entry.sha256", activity)
+        self.assertNotIn("KnowledgeOnnxCpuBackend.inspect(bytes)", activity)
+        self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
+        for flavor in ("flavorDefault", "flavorGplay"):
+            shim = (APP / flavor / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
+            self.assertIn("return false;", shim)
 
 
 if __name__ == "__main__":

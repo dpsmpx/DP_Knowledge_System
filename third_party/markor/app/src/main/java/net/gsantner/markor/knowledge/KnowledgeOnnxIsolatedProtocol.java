@@ -1,17 +1,24 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
-/** Scalar-only Messenger contract. No user notes, model bytes or file paths. */
+/** Scalar metadata plus one explicit bounded model FD; no note text or file paths. */
 final class KnowledgeOnnxIsolatedProtocol {
     static final int RUN_SYNTHETIC = 1;
     static final int CANCEL_AND_EXIT = 2;
     static final int RESULT_PASSED = 3;
     static final int RESULT_FAILED = 4;
+    static final int RUN_MODEL_SESSION = 5;
+    static final int RESULT_SESSION_PASSED = 6;
+    static final int RESULT_SESSION_FAILED = 7;
     static final long WATCHDOG_MILLIS = 30_000L;
     static final String VERSION = "v";
     static final String INIT_MILLIS = "init_ms";
     static final String RUN_MICROS = "run_us";
     static final String NATIVE_DELTA = "native_delta";
+    static final String PIPE_FD = "fd";
+    static final String MODEL_SHA256 = "sha256";
+    static final String INPUTS = "inputs";
+    static final String OUTPUTS = "outputs";
 
     private KnowledgeOnnxIsolatedProtocol() { }
 
