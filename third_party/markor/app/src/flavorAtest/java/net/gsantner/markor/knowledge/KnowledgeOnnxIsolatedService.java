@@ -71,7 +71,9 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             return true;
         }
         final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION;
-        if (!sessionRequest && message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC) {
+        final boolean debugOom = message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_SIMULATE_OOM;
+        if ((debugOom && !BuildConfig.DEBUG) || (!sessionRequest
+                && message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC && !debugOom)) {
             return true;
         }
         final Messenger reply = message.replyTo;
@@ -114,11 +116,16 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             KnowledgeOnnxSmoke.Report smoke = null;
             KnowledgeOnnxSessionGate.Report session = null;
             boolean memoryDenied = false;
-            final KnowledgeOnnxMemoryTrace.Recorder memory =
-                    new KnowledgeOnnxMemoryTrace.Recorder();
-            memory.begin(KnowledgeOnnxWorkerMemory.samplePssKiB());
+            boolean fatalMemory = false;
             try {
-                if (sessionRequest) {
+                final KnowledgeOnnxMemoryTrace.Recorder memory =
+                        new KnowledgeOnnxMemoryTrace.Recorder();
+                memory.begin(KnowledgeOnnxWorkerMemory.samplePssKiB());
+                if (debugOom) {
+                    // Exercise the same fatal-memory handler as production ONNX work,
+                    // without exhausting RAM or opening a user-supplied model.
+                    throw new OutOfMemoryError("debug-only simulated worker OOM");
+                } else if (sessionRequest) {
                     // Check in the worker immediately before allocating model bytes,
                     // then once more before native session creation. Neither check
                     // is a reservation and both are independent of the UI gate.
@@ -146,16 +153,23 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                 }
             } catch (KnowledgeOnnxWorkerMemory.Denied denied) {
                 memoryDenied = true;
+            } catch (OutOfMemoryError exhausted) {
+                // After Java/native allocation failure, the worker must not be reused.
+                // Let the owning client observe Binder death and fail this manual run.
+                fatalMemory = true;
+                exitSandboxProcess();
             } catch (Exception | LinkageError ignored) {
                 // Native error text and paths never leave the worker process.
             } finally {
                 closePipe(inputPipe);
-                if (sessionRequest) answerSession(reply, requestId, session, memoryDenied);
-                else answer(reply, requestId, smoke);
-                handler.post(() -> {
-                    handler.removeCallbacks(deadline);
-                    stopSelf();
-                });
+                if (!fatalMemory) {
+                    if (sessionRequest) answerSession(reply, requestId, session, memoryDenied);
+                    else answer(reply, requestId, smoke);
+                    handler.post(() -> {
+                        handler.removeCallbacks(deadline);
+                        stopSelf();
+                    });
+                }
             }
         });
         return true;

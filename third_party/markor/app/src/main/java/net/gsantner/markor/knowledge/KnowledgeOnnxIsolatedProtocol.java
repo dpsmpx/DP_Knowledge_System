@@ -14,6 +14,8 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int DEBUG_STALL = 8;
     static final int DEBUG_STALL_STARTED = 9;
     static final int RESULT_SESSION_MEMORY_DENIED = 10;
+    // Debug-only synthetic fatal Java error; never allocate memory to trigger a real OOM.
+    static final int DEBUG_SIMULATE_OOM = 11;
     static final long WATCHDOG_MILLIS = 30_000L;
     static final long CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L;
     static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
