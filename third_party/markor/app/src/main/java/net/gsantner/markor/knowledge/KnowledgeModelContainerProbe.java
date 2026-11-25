@@ -44,6 +44,7 @@ final class KnowledgeModelContainerProbe {
     private static final int MAX_ONNX_OPERATOR_KINDS = 128;
     private static final int MAX_ONNX_LOCAL_FUNCTIONS = 128;
     private static final long MAX_ONNX_FUNCTION_IMPORTS = 2048;
+    private static final int MAX_ONNX_FUNCTION_OPERATOR_KINDS = 128;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -80,12 +81,16 @@ final class KnowledgeModelContainerProbe {
         long localFunctionImportAmbiguousModel;
         long duplicateLocalFunctionImportDomains;
         long invalidLocalFunctionImportVersions;
+        long localFunctionOperatorKinds;
+        long undecodedLocalFunctionOperatorNodes;
+        long localFunctionCustomNodesMissingImport;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
         String operatorInventoryHints = "";
         String schemaSnapshotHints = "";
         String localFunctionHints = "";
+        String localFunctionOperatorHints = "";
     }
 
     private static final class OpsetImport {
@@ -142,6 +147,7 @@ final class KnowledgeModelContainerProbe {
     private static final class FunctionMetadata {
         FunctionKey identity;
         final Map<String, Long> importedVersions = new HashMap<>();
+        final Map<String, Long> referencedCustomDomains = new HashMap<>();
     }
 
     static final class Result {
@@ -185,12 +191,16 @@ final class KnowledgeModelContainerProbe {
         final long localFunctionImportAmbiguousModel;
         final long duplicateLocalFunctionImportDomains;
         final long invalidLocalFunctionImportVersions;
+        final long localFunctionOperatorKinds;
+        final long undecodedLocalFunctionOperatorNodes;
+        final long localFunctionCustomNodesMissingImport;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
         final String operatorInventoryHints;
         final String schemaSnapshotHints;
         final String localFunctionHints;
+        final String localFunctionOperatorHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -236,12 +246,16 @@ final class KnowledgeModelContainerProbe {
             localFunctionImportAmbiguousModel = details.localFunctionImportAmbiguousModel;
             duplicateLocalFunctionImportDomains = details.duplicateLocalFunctionImportDomains;
             invalidLocalFunctionImportVersions = details.invalidLocalFunctionImportVersions;
+            localFunctionOperatorKinds = details.localFunctionOperatorKinds;
+            undecodedLocalFunctionOperatorNodes = details.undecodedLocalFunctionOperatorNodes;
+            localFunctionCustomNodesMissingImport = details.localFunctionCustomNodesMissingImport;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
             operatorInventoryHints = details.operatorInventoryHints;
             schemaSnapshotHints = details.schemaSnapshotHints;
             localFunctionHints = details.localFunctionHints;
+            localFunctionOperatorHints = details.localFunctionOperatorHints;
         }
     }
 
@@ -420,6 +434,7 @@ final class KnowledgeModelContainerProbe {
         final Map<FunctionKey, Long> graphFunctionCalls = new HashMap<>();
         final Set<FunctionKey> localFunctions = new HashSet<>();
         final List<FunctionMetadata> functionMetadata = new ArrayList<>();
+        final Set<OperatorKey> functionBodyOperatorKinds = new HashSet<>();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -464,7 +479,8 @@ final class KnowledgeModelContainerProbe {
                     if (++details.localFunctionDeclarations > MAX_ONNX_LOCAL_FUNCTIONS) {
                         throw new ScanLimit();
                     }
-                    final FunctionMetadata metadata = inspectOnnxLocalFunction(data, size, details);
+                    final FunctionMetadata metadata = inspectOnnxLocalFunction(data, size, details,
+                            functionBodyOperatorKinds);
                     functionMetadata.add(metadata);
                     final FunctionKey key = metadata.identity;
                     if (key == null) {
@@ -507,7 +523,14 @@ final class KnowledgeModelContainerProbe {
                         details.localFunctionImportVersionDifferences++;
                     }
                 }
+                for (final Map.Entry<String, Long> entry :
+                        function.referencedCustomDomains.entrySet()) {
+                    if (!function.importedVersions.containsKey(entry.getKey())) {
+                        details.localFunctionCustomNodesMissingImport += entry.getValue();
+                    }
+                }
             }
+            details.localFunctionOperatorKinds = functionBodyOperatorKinds.size();
             details.distinctOperatorKinds = operatorInventory.size();
             int shown = 0;
             for (final Map.Entry<OperatorKey, Long> entry : operatorInventory.entrySet()) {
@@ -547,7 +570,9 @@ final class KnowledgeModelContainerProbe {
                     || details.duplicateLocalFunctions > 0
                     || details.undecodedFunctionOverloads > 0
                     || details.duplicateLocalFunctionImportDomains > 0
-                    || details.invalidLocalFunctionImportVersions > 0) {
+                    || details.invalidLocalFunctionImportVersions > 0
+                    || details.undecodedLocalFunctionOperatorNodes > 0
+                    || details.localFunctionCustomNodesMissingImport > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -849,10 +874,11 @@ final class KnowledgeModelContainerProbe {
         }
     }
 
-    /** Inspect only direct FunctionProto declarations; skip nested nodes/attributes. */
+    /** Inspect FunctionProto declarations and direct node names, not attributes/subgraphs. */
     private static FunctionMetadata inspectOnnxLocalFunction(final RandomAccessFile data,
                                                              final long size,
-                                                             final Details details)
+                                                             final Details details,
+                                                             final Set<OperatorKey> operatorKinds)
             throws IOException {
         if (size < 0 || size > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + size;
@@ -879,7 +905,8 @@ final class KnowledgeModelContainerProbe {
                 if (overload == null) decoded = false;
             } else if (field == 7 && wire == 2) { // FunctionProto.node
                 if (++details.localFunctionBodyNodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
-                skipExact(data, readVarint(data));
+                inspectOnnxFunctionBodyNode(data, readVarint(data), end,
+                        details, metadata, operatorKinds);
             } else if (field == 9 && wire == 2) { // FunctionProto.opset_import
                 if (++details.localFunctionImportDeclarations > MAX_ONNX_FUNCTION_IMPORTS) {
                     throw new ScanLimit();
@@ -904,6 +931,56 @@ final class KnowledgeModelContainerProbe {
             metadata.identity = new FunctionKey(domain, name, overload);
         }
         return metadata;
+    }
+
+    /** Read only a local function node's operator name/domain, never its attributes. */
+    private static void inspectOnnxFunctionBodyNode(final RandomAccessFile data,
+                                                    final long bytes, final long parentEnd,
+                                                    final Details details,
+                                                    final FunctionMetadata metadata,
+                                                    final Set<OperatorKey> operatorKinds)
+            throws IOException {
+        if (bytes < 0 || bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        final long end = data.getFilePointer() + bytes;
+        String operation = "";
+        String domain = "";
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            checkInterrupted();
+            if (++fields > 1000) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 4 && wire == 2) { // NodeProto.op_type
+                operation = readOnnxSafeIdentifier(data, readVarint(data), end);
+            } else if (field == 7 && wire == 2) { // NodeProto.domain
+                domain = readOnnxDomain(data, readVarint(data), end);
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        if (operation == null || operation.isEmpty()) {
+            details.undecodedLocalFunctionOperatorNodes++;
+            return;
+        }
+        final OperatorKey kind = new OperatorKey(domain, operation);
+        if (operatorKinds.size() >= MAX_ONNX_FUNCTION_OPERATOR_KINDS
+                && !operatorKinds.contains(kind)) throw new ScanLimit();
+        if (operatorKinds.add(kind) && operatorKinds.size() <= 6) {
+            details.localFunctionOperatorHints +=
+                    (details.localFunctionOperatorHints.isEmpty() ? "" : "; ")
+                    + safeOnnxDomainHint(domain) + "/" + operation;
+        }
+        if (!domain.isEmpty()) {
+            if (metadata.referencedCustomDomains.size() >= MAX_ONNX_DOMAINS
+                    && !metadata.referencedCustomDomains.containsKey(domain)) {
+                throw new ScanLimit();
+            }
+            final Long count = metadata.referencedCustomDomains.get(domain);
+            metadata.referencedCustomDomains.put(domain, count == null ? 1 : count + 1);
+        }
     }
 
     /** A short, display-safe identifier. A long/unsafe string never becomes a key. */
