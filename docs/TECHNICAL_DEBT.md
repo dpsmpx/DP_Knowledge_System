@@ -823,6 +823,24 @@ worker watchdog + 5 секунд клиента); короткий тестов�
 аппаратный ARM64, API 24–26 и реальные веса/инференс. Тестовый lifecycle
 не снимает блокировки `runnable=false` и MODEL-M1/M8.
 
+**MODEL-M1: снимки PSS изолированного worker и повторный RAM-gate —
+[PR #207](https://github.com/dpsmpx/DP_Knowledge_System/pull/207).**
+В отдельном UID измеряется PSS до операции, после проверенной FD-передачи,
+при открытой ONNX CPU-сессии и после её закрытия. В UI выводится только
+наибольший **наблюдённый** PSS с исходным и конечным снимками; это НЕ
+непрерывное измерение истинного пика RSS. В worker повторно запрашивается
+системный `MemoryInfo` до чтения FD и непосредственно перед native
+`createSession` (не менее 512 МиБ и без флага `lowMemory`); отказ
+завершает операцию и очищает байты. Отдельный debug-only эмуляторный
+тест имитирует нехватку RAM после корректной SHA-256-передачи без реального
+OOM. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45625266808):
+**13/13 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45625266539)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45625266692)
+зелёные. **Открыто:** истинный пик RSS/системный LMK/native OOM,
+эксплуатация крупных/внешних моделей, физический ARM64, API 24–26 и
+реальный инференс. Нет гарантий резервирования памяти или `runnable=true`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
