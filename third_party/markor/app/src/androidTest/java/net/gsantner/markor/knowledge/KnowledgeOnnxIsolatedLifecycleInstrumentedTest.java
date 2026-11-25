@@ -4,6 +4,7 @@ package net.gsantner.markor.knowledge;
 import android.app.Instrumentation;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
@@ -211,6 +212,108 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void syntheticBindTimeoutFailsOnceAndFreshRequestCanReconnect()
+            throws Exception {
+        final DelayedBindContext delayed = new DelayedBindContext(context);
+        final KnowledgeOnnxIsolatedClient client = new KnowledgeOnnxIsolatedClient(delayed, 350L);
+        final CountDownLatch expired = new CountDownLatch(1);
+        final AtomicInteger expiredCallbacks = new AtomicInteger();
+        final AtomicBoolean bound = new AtomicBoolean();
+        final AtomicReference<KnowledgeOnnxSmoke.Report> recovered = new AtomicReference<>();
+        final CountDownLatch retryDone = new CountDownLatch(1);
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.start(
+                    new KnowledgeOnnxIsolatedClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSmoke.Report ignored) {
+                    expiredCallbacks.incrementAndGet();
+                    expired.countDown();
+                }
+                @Override public void failure() {
+                    expiredCallbacks.incrementAndGet();
+                    expired.countDown();
+                }
+            })));
+            assertTrue("Synthetic delayed bind not accepted", bound.get());
+            assertTrue("Synthetic bind deadline never fired", expired.await(5, TimeUnit.SECONDS));
+            assertTrue("Timed-out bind was not released", delayed.firstUnbound);
+            assertEquals("Synthetic timeout notified more than once", 1, expiredCallbacks.get());
+
+            instrumentation.runOnMainSync(() -> {
+                client.restoreDefaultTimeoutForDebugTest();
+                bound.set(client.start(new KnowledgeOnnxIsolatedClient.Callback() {
+                    @Override public void success(final KnowledgeOnnxSmoke.Report report) {
+                        recovered.set(report);
+                        retryDone.countDown();
+                    }
+                    @Override public void failure() { retryDone.countDown(); }
+                }));
+                // Simulate a stale notification from the previous dead connection.
+                delayed.firstConnection.onServiceDisconnected(
+                        new ComponentName(context, KnowledgeOnnxIsolatedService.class));
+            });
+            assertTrue("Synthetic reconnect failed to bind", bound.get());
+            assertTrue("Synthetic reconnect never completed", retryDone.await(40, TimeUnit.SECONDS));
+            assertNotNull("Synthetic reconnect failed after expired bind", recovered.get());
+            assertEquals("Expired synthetic callback ran again", 1, expiredCallbacks.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void fdBindTimeoutWipesBytesAndFreshRequestCanReconnect()
+            throws Exception {
+        final DelayedBindContext delayed = new DelayedBindContext(context);
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(delayed, 350L);
+        final byte[] discarded = KnowledgeOnnxSmoke.identityModel();
+        final String sha = KnowledgeOnnxSessionPipe.sha256Hex(discarded);
+        final CountDownLatch expired = new CountDownLatch(1);
+        final AtomicInteger expiredCallbacks = new AtomicInteger();
+        final AtomicBoolean bound = new AtomicBoolean();
+        final AtomicReference<KnowledgeOnnxSessionGate.Report> recovered = new AtomicReference<>();
+        final CountDownLatch retryDone = new CountDownLatch(1);
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.start(discarded, sha,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
+                    expiredCallbacks.incrementAndGet();
+                    expired.countDown();
+                }
+                @Override public void failure() {
+                    expiredCallbacks.incrementAndGet();
+                    expired.countDown();
+                }
+            })));
+            assertTrue("FD delayed bind not accepted", bound.get());
+            assertTrue("FD bind deadline never fired", expired.await(5, TimeUnit.SECONDS));
+            assertTrue("Timed-out FD bind was not released", delayed.firstUnbound);
+            for (final byte wiped : discarded) assertEquals("Timed-out weights not wiped", 0, wiped);
+            assertEquals("FD timeout notified more than once", 1, expiredCallbacks.get());
+
+            final byte[] retry = KnowledgeOnnxSmoke.identityModel();
+            final String retrySha = KnowledgeOnnxSessionPipe.sha256Hex(retry);
+            instrumentation.runOnMainSync(() -> {
+                client.restoreDefaultTimeoutForDebugTest();
+                bound.set(client.start(retry, retrySha,
+                        new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                    @Override public void success(final KnowledgeOnnxSessionGate.Report report) {
+                        recovered.set(report);
+                        retryDone.countDown();
+                    }
+                    @Override public void failure() { retryDone.countDown(); }
+                }));
+                delayed.firstConnection.onServiceDisconnected(
+                        new ComponentName(context, KnowledgeOnnxIsolatedService.class));
+            });
+            assertTrue("FD reconnect failed to bind", bound.get());
+            assertTrue("FD reconnect never completed", retryDone.await(40, TimeUnit.SECONDS));
+            assertNotNull("FD reconnect failed after expired bind", recovered.get());
+            assertEquals("Expired FD callback ran again", 1, expiredCallbacks.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     @Test public void debugStallWatchdogKillsOnlyWorker() throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
         try {
@@ -324,6 +427,32 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         try {
             descriptor.close();
         } catch (IOException ignored) { }
+    }
+
+    /** First bind intentionally never connects; later binds use the real service. */
+    private static final class DelayedBindContext extends ContextWrapper {
+        ServiceConnection firstConnection;
+        volatile boolean firstUnbound;
+
+        DelayedBindContext(final Context base) { super(base); }
+
+        @Override public boolean bindService(final Intent intent,
+                                             final ServiceConnection connection,
+                                             final int flags) {
+            if (firstConnection == null) {
+                firstConnection = connection;
+                return true;
+            }
+            return super.bindService(intent, connection, flags);
+        }
+
+        @Override public void unbindService(final ServiceConnection connection) {
+            if (connection == firstConnection) {
+                firstUnbound = true;
+                return;
+            }
+            super.unbindService(connection);
+        }
     }
 
     private static final class IsolatedWorkerConnection implements ServiceConnection {

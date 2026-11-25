@@ -101,6 +101,26 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Parallel session unexpectedly bound", emulator)
         self.assertIn("Rejected weights not wiped", emulator)
 
+    def test_debug_only_bind_timeout_retry_contract(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        protocol = (APP / "main" / base / "KnowledgeOnnxIsolatedProtocol.java").read_text()
+        self.assertIn("CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L", protocol)
+        for name in ("KnowledgeOnnxIsolatedClient.java",
+                     "KnowledgeOnnxIsolatedSessionClient.java"):
+            source = (APP / "flavorAtest" / base / name).read_text()
+            self.assertIn("BuildConfig.DEBUG && debugTimeoutMillis >= 250L", source)
+            self.assertIn("debugTimeoutMillis < KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS", source)
+            self.assertIn("restoreDefaultTimeoutForDebugTest()", source)
+            self.assertIn("mainHandler.postDelayed(", source)
+            self.assertIn("final Callback done = callback;\n        cancel();", source)
+        emulator = (APP / "androidTest/java/net/gsantner/markor/knowledge/"
+                    "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("syntheticBindTimeoutFailsOnceAndFreshRequestCanReconnect", emulator)
+        self.assertIn("fdBindTimeoutWipesBytesAndFreshRequestCanReconnect", emulator)
+        self.assertIn("class DelayedBindContext extends ContextWrapper", emulator)
+        self.assertIn("Timed-out weights not wiped", emulator)
+        self.assertIn("Expired FD callback ran again", emulator)
+
     def test_live_ram_gate_is_rechecked_after_model_sha_audit(self):
         base = "java/net/gsantner/markor/knowledge/"
         activity = (APP / "main" / base / "KnowledgeHubActivity.java").read_text()
