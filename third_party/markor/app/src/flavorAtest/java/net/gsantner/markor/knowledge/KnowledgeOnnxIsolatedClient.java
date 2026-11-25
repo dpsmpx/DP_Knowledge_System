@@ -13,6 +13,8 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 
+import net.gsantner.markor.BuildConfig;
+
 /** One manual synthetic request at a time; no model bytes cross Binder. */
 final class KnowledgeOnnxIsolatedClient {
     interface Callback {
@@ -31,12 +33,25 @@ final class KnowledgeOnnxIsolatedClient {
     private boolean bound;
     private int nextRequestId;
     private int activeRequestId;
+    private long timeoutMillis;
     private final Runnable clientDeadline = this::notifyFailure;
 
     KnowledgeOnnxIsolatedClient(final Context owner) {
+        this(owner, 0L);
+    }
+
+    /** Shorter timeouts are accepted only in debug instrumentation, never release. */
+    KnowledgeOnnxIsolatedClient(final Context owner, final long debugTimeoutMillis) {
         context = owner;
+        timeoutMillis = BuildConfig.DEBUG && debugTimeoutMillis >= 250L
+                && debugTimeoutMillis < KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS
+                ? debugTimeoutMillis : KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS;
         mainHandler = new Handler(Looper.getMainLooper());
         inbox = new Messenger(new Handler(Looper.getMainLooper(), this::handleResponse));
+    }
+
+    void restoreDefaultTimeoutForDebugTest() {
+        if (BuildConfig.DEBUG) timeoutMillis = KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS;
     }
 
     boolean start(final Callback result) {
@@ -96,8 +111,7 @@ final class KnowledgeOnnxIsolatedClient {
                 connection = null;
                 callback = null;
             } else {
-                mainHandler.postDelayed(clientDeadline,
-                        KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS + 5_000L);
+                mainHandler.postDelayed(clientDeadline, timeoutMillis);
             }
             return bound;
         } catch (RuntimeException blocked) {
@@ -145,7 +159,10 @@ final class KnowledgeOnnxIsolatedClient {
     }
 
     private void notifyFailure() {
-        final Callback done = finish();
+        // Match the FD client: a watchdog timeout actively requests the
+        // isolated process to exit, even when other bindings still exist.
+        final Callback done = callback;
+        cancel();
         if (done != null) done.failure();
     }
 

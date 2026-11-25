@@ -14,6 +14,8 @@ import android.os.Messenger;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 
+import net.gsantner.markor.BuildConfig;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
@@ -39,12 +41,25 @@ final class KnowledgeOnnxIsolatedSessionClient {
     private boolean bound;
     private int sequence;
     private int activeRequestId;
+    private long timeoutMillis;
     private final Runnable deadline = this::notifyFailure;
 
     KnowledgeOnnxIsolatedSessionClient(final Context owner) {
+        this(owner, 0L);
+    }
+
+    /** The production client always retains its full 35-second deadline. */
+    KnowledgeOnnxIsolatedSessionClient(final Context owner, final long debugTimeoutMillis) {
         context = owner;
+        timeoutMillis = BuildConfig.DEBUG && debugTimeoutMillis >= 250L
+                && debugTimeoutMillis < KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS
+                ? debugTimeoutMillis : KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS;
         mainHandler = new Handler(Looper.getMainLooper());
         inbox = new Messenger(new Handler(Looper.getMainLooper(), this::receive));
+    }
+
+    void restoreDefaultTimeoutForDebugTest() {
+        if (BuildConfig.DEBUG) timeoutMillis = KnowledgeOnnxIsolatedProtocol.CLIENT_TIMEOUT_MILLIS;
     }
 
     /** Takes ownership of bytes even when binding fails; never retains a file path. */
@@ -130,8 +145,7 @@ final class KnowledgeOnnxIsolatedSessionClient {
                 finish();
                 return false;
             }
-            mainHandler.postDelayed(deadline,
-                    KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS + 5_000L);
+            mainHandler.postDelayed(deadline, timeoutMillis);
             return true;
         } catch (RuntimeException unavailable) {
             finish();
