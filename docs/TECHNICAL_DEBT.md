@@ -756,6 +756,22 @@ worker через `/proc/self/cmdline` на API 27, без реальных ве
 ARM64, RAM/нагрев, реальный inference и MODEL-M1/M8 остаются открытыми;
 `runnable=false`.
 
+**MODEL-M1: завершение запроса при смерти Binder и безопасный ручной повтор —
+[PR #199](https://github.com/dpsmpx/DP_Knowledge_System/pull/199).**
+Оба клиента изолированного ONNX worker теперь отслеживают Binder death,
+потерю/смерть привязки и null binding; при любом завершении снимают
+регистрацию получателя. Запоздалый сигнал от старого подключения не может
+отменить следующий ручной запрос. Синтетический тест проверяет отмену
+ожидающего FD-подключения, отсутствие старых callbacks и новый запуск.
+[Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640457):
+**API 27/28/35 — по 9/9 PASS**;
+[Python CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640092)
+и [Android integration CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640328)
+успешны. **Открыто:** API 24–26, native hang/OOM, пик памяти/температура,
+повторные bind/timeout под нагрузкой, реальные импортированные веса и
+физический ARM64 (Redmi Note 13/Poco X7 Pro). Автоповтора/инференса нет,
+`runnable=false`; MODEL-M1/M8 не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его

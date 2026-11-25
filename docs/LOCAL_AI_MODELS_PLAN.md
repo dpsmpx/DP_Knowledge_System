@@ -363,6 +363,19 @@ API 24–26 **не проверены**: две предыдущие попыт�
 Итоговый [Python/Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45603742902)
 успешен. Android 7, физические устройства, реальные веса и инференс
 по-прежнему не подтверждены; `runnable=false`.
+[PR #199](https://github.com/dpsmpx/DP_Knowledge_System/pull/199)
+укрепил жизненный цикл обоих ручных ONNX-клиентов: смерть Binder,
+`onServiceDisconnected`, `onBindingDied`, `onNullBinding` и отсутствие
+привязки завершают запрос без автоматического повтора; получатель смерти
+отписывается при завершении, а события старой привязки не влияют на новую.
+Инструментальный тест отменяет ожидающее FD-подключение и затем явно
+повторяет синтетическую `Identity`-сессию со свежими байтами.
+[CI Android emulator](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640457)
+прошёл **9/9 на каждом API 27/28/35**; отдельные
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640092)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640328)
+также зелёные. Нет проверки реального native hang/OOM, аппаратного ARM64,
+API 24–26 или пользовательских моделей; `runnable=false`, MODEL-M1/M8 открыты.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
