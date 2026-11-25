@@ -334,6 +334,18 @@ even if every reference and quotation passes the checks below.
     attribution. This is a **bounded Markdown/HTML heuristic**, not a full
     HTML parser or a proof that the model answer is factual.
 
+31. Citation markers that **look numeric but use non-ASCII Unicode digits**
+    are now counted as invalid references instead of being silently skipped.
+    Only canonical ASCII `[1]` through `[N]` may refer to the exact previewed
+    source set; examples `[１]` (full-width), `[١]` (Arabic-Indic) and `[𝟙]`
+    (supplementary mathematical digit) generate the existing invalid-citation
+    warning. The bounded scanner iterates Unicode code points, so surrogate
+    pairs cannot evade the check. Markdown link labels, inline code and
+    masked HTML attributes still cannot create false references. JVM tests
+    and cache-only `CITE-LOCAL-19` synthetic Android QA assert both the
+    warning counts and nonverification of quotes attributed only to such
+    markers. This enforces source *label syntax*, not factual grounding.
+
 ## Reproducible synthetic retrieval benchmark
 
 Run `python scripts/benchmark_stage19_retrieval.py --notes 20000 --repeats 5`.
@@ -394,6 +406,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   bounded title-rank windows and phrase-first precedence over title rank;
   HTML tag attributes, quoted `>` characters, raw script/style/template
   bodies and long mixed HTML without allowing hidden source references;
+  full-width, Arabic-Indic and supplementary Unicode digit lookalikes in
+  malformed citations, while preserving ordinary Markdown labels;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

@@ -1061,13 +1061,18 @@ public final class KnowledgeDeviceQaRunner {
                 "«Amber violet is true.» [2]. A different sentence cites [1].", sources);
         final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
                 "«Amber violet is true.» [1][2]", sources);
+        final KnowledgeLlmCitationAudit.Review unicodeFake = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [１][١][𝟙]", sources);
         if (correct.unverifiedQuotes != 0 || correct.mismatchedQuoteCitations != 0
                 || laundered.unverifiedQuotes != 1 || laundered.mismatchedQuoteCitations != 1
-                || mixed.unverifiedQuotes != 0 || mixed.mismatchedQuoteCitations != 1) {
+                || mixed.unverifiedQuotes != 0 || mixed.mismatchedQuoteCitations != 1
+                || unicodeFake.referenceCount != 0 || unicodeFake.invalidReferences != 3
+                || unicodeFake.unverifiedQuotes != 1) {
             throw new SyntheticMismatch("verdict=LOCAL_CITATION_ATTRIBUTION_MISMATCH");
         }
         return "syntheticSources=2, localQuotesVerified=true, "
-                + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true; "
+                + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true, "
+                + "unicodeDigitSpoofRejected=true; "
                 + "no model request or selected vault access";
     }
 

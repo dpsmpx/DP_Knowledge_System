@@ -222,7 +222,7 @@ public final class KnowledgeLlmCitationAudit {
                     invalid++;
                     markers.add(new Citation(citations.start(), citations.end(), -1));
                 }
-            } else if (label.matches(".*[0-9].*")) {
+            } else if (containsNumericDigit(label)) {
                 // Reject malformed numeric citations, including [0], [1, 2],
                 // and numbers larger than the supplied source count.
                 invalid++;
@@ -259,6 +259,19 @@ public final class KnowledgeLlmCitationAudit {
         return new Review(count, invalid, quotes.size(), unsupported, mismatched,
                 countUncitedProseSpans(visible, markers), attribution.weak, attribution.polarity,
                 attribution.numeric, countOpposingSourcePairs(lexicons), attribution.details);
+    }
+
+    /** Non-ASCII decimal digits still look like source references to a reader.
+     * Reject them as malformed rather than silently ignoring the marker.
+     * Iterate code points to include supplementary-plane mathematical digits.
+     */
+    private static boolean containsNumericDigit(final String label) {
+        for (int i = 0; i < label.length();) {
+            final int point = label.codePointAt(i);
+            if (Character.isDigit(point)) return true;
+            i += Character.charCount(point);
+        }
+        return false;
     }
 
     /** A single backslash escapes a visible bracket; two backslashes do not. */
