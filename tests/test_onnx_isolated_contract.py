@@ -63,6 +63,7 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("Application.getProcessName()", identity)
         self.assertIn("Process.isIsolatedUid(Process.myUid())", identity)
         self.assertIn('new FileInputStream("/proc/self/cmdline")', identity)
+        self.assertIn('process.startsWith(PACKAGE_PREFIX + ":")', identity)
 
     def test_real_session_uses_fd_not_model_path_or_binder_payload(self):
         base = "java/net/gsantner/markor/knowledge/"

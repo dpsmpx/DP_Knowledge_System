@@ -11,14 +11,14 @@ import java.nio.charset.StandardCharsets;
 
 /** Permission-free identity check before application settings and worker exit. */
 public final class KnowledgeOnnxProcessIdentity {
-    private static final String SUFFIX = ":dpks_onnx_cpu";
+    private static final String PACKAGE_PREFIX = "com.dpsmpx.dpks:dpks_onnx_cpu";
 
     private KnowledgeOnnxProcessIdentity() { }
 
     public static boolean isWorker() {
         if (Build.VERSION.SDK_INT >= 28) {
             final String process = Application.getProcessName();
-            return process != null && process.endsWith(SUFFIX)
+            return workerName(process)
                     && Process.isIsolatedUid(Process.myUid());
         }
         // API 24-27 has no public Application.getProcessName() or
@@ -29,9 +29,15 @@ public final class KnowledgeOnnxProcessIdentity {
             if (count <= 0) return false;
             int length = 0;
             while (length < count && header[length] != 0) length++;
-            return new String(header, 0, length, StandardCharsets.UTF_8).endsWith(SUFFIX);
+            return workerName(new String(header, 0, length, StandardCharsets.UTF_8));
         } catch (IOException | SecurityException ignored) {
             return false;
         }
+    }
+
+    /** Isolated service names may append an instance suffix after :dpks_onnx_cpu. */
+    static boolean workerName(final String process) {
+        return process != null && (process.equals(PACKAGE_PREFIX)
+                || process.startsWith(PACKAGE_PREFIX + ":"));
     }
 }

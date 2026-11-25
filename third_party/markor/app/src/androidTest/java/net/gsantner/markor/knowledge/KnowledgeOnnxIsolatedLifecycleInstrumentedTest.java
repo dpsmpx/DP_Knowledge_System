@@ -34,6 +34,12 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
     @Test public void manifestWorkerIsPrivateAndIsolated() throws Exception {
         assertEquals("com.dpsmpx.dpks", context.getPackageName());
         assertFalse(KnowledgeOnnxProcessIdentity.isWorker());
+        assertTrue(KnowledgeOnnxProcessIdentity.workerName(
+                "com.dpsmpx.dpks:dpks_onnx_cpu:net.gsantner.markor.knowledge.KnowledgeOnnxIsolatedService"));
+        assertTrue(KnowledgeOnnxProcessIdentity.workerName(
+                "com.dpsmpx.dpks:dpks_onnx_cpu"));
+        assertFalse(KnowledgeOnnxProcessIdentity.workerName(
+                "com.dpsmpx.dpks:dpks_onnx_cpu_fake"));
         final ServiceInfo service = context.getPackageManager().getServiceInfo(
                 new ComponentName(context, KnowledgeOnnxIsolatedService.class), 0);
         assertFalse(service.exported);
