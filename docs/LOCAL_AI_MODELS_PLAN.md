@@ -376,6 +376,18 @@ API 24–26 **не проверены**: две предыдущие попыт�
 и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45612640328)
 также зелёные. Нет проверки реального native hang/OOM, аппаратного ARM64,
 API 24–26 или пользовательских моделей; `runnable=false`, MODEL-M1/M8 открыты.
+[PR #201](https://github.com/dpsmpx/DP_Knowledge_System/pull/201)
+закрыл ложный положительный результат ограниченного JSON preflight:
+компонент `.json` размером более 512 КиБ по-прежнему проходит SHA-256,
+но его синтаксис **не проверен** и поэтому статус подготовки пакета
+остаётся неполным. Android UI сообщает предупреждение; отдельная
+ручная ONNX-staging-операция не создаёт layout с непроверенным JSON.
+Два синтетических JVM-теста покрывают большой корректный JSON и
+ONNX `external_data`, не загружая реальные модели или заметки.
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45615243529)
+и [Android CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45615243496)
+прошли. Это не валидация tokenizer, совместимости backend или inference;
+`runnable=false`, MODEL-M1/M8 остаются открытыми.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
