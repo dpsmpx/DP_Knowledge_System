@@ -478,6 +478,25 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_models_container_onnx_function_imports", labels)
 
+    def test_model_m1_onnx_function_body_operator_names_are_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_FUNCTION_OPERATOR_KINDS = 128",
+                       "inspectOnnxFunctionBodyNode",
+                       "localFunctionOperatorKinds",
+                       "undecodedLocalFunctionOperatorNodes",
+                       "localFunctionCustomNodesMissingImport",
+                       "localFunctionOperatorHints"):
+            self.assertIn(marker, probe)
+        for marker in ("result.localFunctionOperatorKinds",
+                       "knowledge_models_container_onnx_function_operators"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_function_operators", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
