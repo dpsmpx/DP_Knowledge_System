@@ -337,6 +337,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                         "knowledge_models_container_invalid", "knowledge_models_container_partial"):
                 self.assertIn(key, labels)
 
+    def test_m1_tensor_and_graph_declarations_are_bounded_preflight_only(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_GGUF_TENSOR_INFOS", "MAX_GGUF_DESCRIPTOR_SCAN",
+                       "MAX_ONNX_GRAPH_FIELDS", "MAX_ONNX_GRAPH_NODES",
+                       "inspectGgufTensorDescriptors(", "inspectOnnxGraph(",
+                       "inspectOnnxNode(", "offset % alignment", "skipWire("):
+            self.assertIn(marker, probe)
+        for marker in ("result.tensorDescriptors", "result.graphNodes",
+                       "result.graphInputs", "result.graphOutputs", "result.operatorHints"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_container_gguf_descriptors",
+                        "knowledge_models_container_onnx_graph",
+                        "knowledge_models_container_detail_read"):
+                self.assertIn(key, labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()

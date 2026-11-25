@@ -21,6 +21,9 @@ public final class KnowledgeModelContainerProbeTest {
         ggufString(data, "tokenizer.ggml.model");
         u32(data, 8);
         ggufString(data, "gpt2");
+        ggufTensorInfo(data, "blk.0.attn", new long[]{16, 16}, 2, 0);
+        ggufTensorInfo(data, "output", new long[]{128}, 2, 32);
+        ggufTensorBytes(data, 32, 64);
         final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
                 KnowledgeModelFiles.Format.GGUF);
         assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
@@ -29,6 +32,9 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(2, result.metadataCount);
         assertEquals("llama", result.architecture);
         assertEquals("gpt2", result.tokenizer);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(2, result.tensorDescriptors);
     }
 
     @Test public void ggufMalformedAndUnboundedArrayNeverReachRuntimeValidation() throws Exception {
@@ -61,6 +67,8 @@ public final class KnowledgeModelContainerProbeTest {
         ggufString(data, "general.architecture");
         u32(data, 8);
         ggufString(data, "llama\nRUNTIME_PASS");
+        ggufTensorInfo(data, "weight", new long[]{8}, 0, 0);
+        ggufTensorBytes(data, 32, 64);
         final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
                 KnowledgeModelFiles.Format.GGUF);
         assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
@@ -73,9 +81,23 @@ public final class KnowledgeModelContainerProbeTest {
         varint(data, 8); // ModelProto.ir_version, field 1
         varint(data, 9);
         varint(data, 58); // ModelProto.graph, field 7
-        varint(data, 2);
-        data.write(0x12); // opaque GraphProto bytes are intentionally not parsed
-        data.write(0);
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        varint(node, 34); // NodeProto.op_type, field 4
+        protobufString(node, "MatMul");
+        varint(graph, 10); // GraphProto.node, field 1
+        protobufBytes(graph, node.toByteArray());
+        final ByteArrayOutputStream input = new ByteArrayOutputStream();
+        varint(input, 10); // ValueInfoProto.name, field 1
+        protobufString(input, "input_ids");
+        varint(graph, 90); // GraphProto.input, field 11
+        protobufBytes(graph, input.toByteArray());
+        final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        varint(output, 10);
+        protobufString(output, "output");
+        varint(graph, 98); // GraphProto.output, field 12
+        protobufBytes(graph, output.toByteArray());
+        protobufBytes(data, graph.toByteArray());
         varint(data, 66); // ModelProto.opset_import, field 8
         varint(data, 2);
         varint(data, 16); // OperatorSetIdProto.version, field 2
@@ -87,6 +109,45 @@ public final class KnowledgeModelContainerProbeTest {
         assertTrue(result.graphDeclared);
         assertEquals(1, result.opsetDeclarations);
         assertEquals("", result.architecture);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.graphNodes);
+        assertEquals(1, result.graphInputs);
+        assertEquals(1, result.graphOutputs);
+        assertEquals("MatMul", result.operatorHints);
+    }
+
+    @Test public void ggufRejectsMisalignedOrDuplicateTensorDescriptor() throws Exception {
+        final ByteArrayOutputStream misaligned = newGguf(3, 1, 0);
+        ggufTensorInfo(misaligned, "weight", new long[]{12}, 2, 3);
+        ggufTensorBytes(misaligned, 32, 64);
+        final KnowledgeModelContainerProbe.Result badOffset = probe(misaligned.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, badOffset.state);
+
+        final ByteArrayOutputStream duplicate = newGguf(3, 2, 0);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 2, 0);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 2, 32);
+        ggufTensorBytes(duplicate, 32, 64);
+        final KnowledgeModelContainerProbe.Result badNames = probe(duplicate.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, badNames.state);
+    }
+
+    @Test public void truncatedOnnxGraphFieldCannotReportDeclarationsRead() throws Exception {
+        final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        varint(data, 8);
+        varint(data, 9);
+        varint(data, 58);
+        varint(data, 4); // A malformed GraphProto node length within declared graph.
+        data.write(10);
+        data.write(5);
+        data.write(34);
+        data.write(0);
+        final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, result.detailState);
     }
 
     @Test public void invalidOnnxProtobufCannotClaimMetadataHints() throws Exception {
@@ -154,6 +215,30 @@ public final class KnowledgeModelContainerProbeTest {
         final byte[] utf8 = text.getBytes(StandardCharsets.UTF_8);
         u64(data, utf8.length);
         data.write(utf8, 0, utf8.length);
+    }
+
+    private static void ggufTensorInfo(final ByteArrayOutputStream data, final String name,
+                                       final long[] dimensions, final long type, final long offset) {
+        ggufString(data, name);
+        u32(data, dimensions.length);
+        for (final long dimension : dimensions) u64(data, dimension);
+        u32(data, type);
+        u64(data, offset);
+    }
+
+    private static void ggufTensorBytes(final ByteArrayOutputStream data,
+                                        final int alignment, final int bytes) {
+        while (data.size() % alignment != 0) data.write(0);
+        for (int i = 0; i < bytes; i++) data.write(0);
+    }
+
+    private static void protobufBytes(final ByteArrayOutputStream data, final byte[] contents) {
+        varint(data, contents.length);
+        data.write(contents, 0, contents.length);
+    }
+
+    private static void protobufString(final ByteArrayOutputStream data, final String value) {
+        protobufBytes(data, value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void u32(final ByteArrayOutputStream data, final long value) {

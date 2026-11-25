@@ -694,6 +694,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 : result.state == KnowledgeModelContainerProbe.State.PARTIAL
                         ? getString(R.string.knowledge_models_container_partial_label)
                         : getString(R.string.knowledge_models_container_invalid_label);
+        final String detailStatus = result.detailState
+                == KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ
+                ? getString(R.string.knowledge_models_container_detail_read)
+                : result.detailState == KnowledgeModelContainerProbe.DetailState.INVALID
+                        ? getString(R.string.knowledge_models_container_invalid_label)
+                        : result.detailState == KnowledgeModelContainerProbe.DetailState.PARTIAL
+                                ? getString(R.string.knowledge_models_container_partial_label)
+                                : getString(R.string.knowledge_models_container_unknown);
         if (result.format == KnowledgeModelFiles.Format.GGUF) {
             return getString(R.string.knowledge_models_container_gguf, status, result.version,
                     result.tensorCount, result.metadataCount,
@@ -702,12 +710,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             : result.architecture,
                     result.tokenizer.isEmpty()
                             ? getString(R.string.knowledge_models_container_unknown)
-                            : result.tokenizer);
+                            : result.tokenizer) + "\n"
+                    + getString(R.string.knowledge_models_container_gguf_descriptors,
+                            detailStatus, result.tensorDescriptors);
         }
         return getString(R.string.knowledge_models_container_onnx, status,
                 result.version, result.opsetDeclarations,
                 result.graphDeclared ? getString(R.string.knowledge_models_container_yes)
-                        : getString(R.string.knowledge_models_container_no));
+                        : getString(R.string.knowledge_models_container_no)) + "\n"
+                + getString(R.string.knowledge_models_container_onnx_graph,
+                        detailStatus, result.graphNodes, result.graphInputs,
+                        result.graphOutputs, result.operatorHints.isEmpty()
+                                ? getString(R.string.knowledge_models_container_unknown)
+                                : result.operatorHints);
     }
 
     private String modelDisplayName(final Uri uri) {
