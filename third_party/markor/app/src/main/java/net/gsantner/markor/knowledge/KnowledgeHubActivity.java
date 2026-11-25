@@ -181,6 +181,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private KnowledgeModelFiles modelFiles;
     private KnowledgeModelPackageStore modelPackages;
     private KnowledgeOnnxIsolatedClient onnxSmokeClient;
+    private KnowledgeOnnxIsolatedSessionClient onnxSessionClient;
     private KnowledgeModelPolicy.Role pendingModelImportRole;
     private String pendingModelPackageKey;
     private boolean modelImportActive;
@@ -285,6 +286,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 new File(getFilesDir(), "dpks-models-v1"), modelFiles);
         modelStatus = findViewById(R.id.knowledge_models_status);
         onnxSmokeClient = new KnowledgeOnnxIsolatedClient(this);
+        onnxSessionClient = new KnowledgeOnnxIsolatedSessionClient(this);
         findViewById(R.id.knowledge_models_open).setOnClickListener(view -> {
             if (modelImportActive) {
                 cancelModelImport();
@@ -776,9 +778,10 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
-    /** Manual, bounded ONNX session creation. No user-model inference occurs. */
+    /** Audit model bytes in the app, then create a bounded session in an isolated UID. */
     private void inspectOnnxCpuSession(final KnowledgeModelFiles.Entry entry) {
         if (modelImportActive || entry == null || !KnowledgeOnnxCpuBackend.available()
+                || onnxSessionClient == null
                 || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED) return;
         modelImportActive = true;
         ((Button) findViewById(R.id.knowledge_models_open))
@@ -798,23 +801,37 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     throw new IOException("Not enough available RAM for optional CPU check");
                 }
                 final byte[] bytes = modelPackages.readForCpuSession(entry);
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new InterruptedIOException("ONNX CPU session inspection cancelled");
-                }
-                final KnowledgeOnnxSessionGate.Report report;
-                try {
-                    report = KnowledgeOnnxCpuBackend.inspect(bytes);
-                } finally {
-                    Arrays.fill(bytes, (byte) 0);
-                }
                 runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed()
-                            && modelGeneration.get() == operation) {
+                    if (isFinishing() || isDestroyed() || modelGeneration.get() != operation) {
+                        Arrays.fill(bytes, (byte) 0);
+                        return;
+                    }
+                    if (!onnxSessionClient.start(bytes, entry.sha256,
+                            new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                        @Override public void success(final KnowledgeOnnxSessionGate.Report report) {
+                            if (!isFinishing() && !isDestroyed()
+                                    && modelGeneration.get() == operation) {
+                                modelImportActive = false;
+                                restoreModelButton();
+                                modelStatus.setText(getString(
+                                        R.string.knowledge_models_onnx_session_passed,
+                                        report.runtimeVersion, report.inputs, report.outputs,
+                                        report.sessionInitMillis, report.nativeHeapDeltaBytes));
+                            }
+                        }
+
+                        @Override public void failure() {
+                            if (!isFinishing() && !isDestroyed()
+                                    && modelGeneration.get() == operation) {
+                                modelImportActive = false;
+                                restoreModelButton();
+                                modelStatus.setText(R.string.knowledge_models_onnx_session_failed);
+                            }
+                        }
+                    })) {
                         modelImportActive = false;
                         restoreModelButton();
-                        modelStatus.setText(getString(R.string.knowledge_models_onnx_session_passed,
-                                report.runtimeVersion, report.inputs, report.outputs,
-                                report.sessionInitMillis, report.nativeHeapDeltaBytes));
+                        modelStatus.setText(R.string.knowledge_models_onnx_session_failed);
                     }
                 });
             } catch (Exception | LinkageError failed) {
@@ -1029,6 +1046,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private void cancelModelImport() {
         modelGeneration.incrementAndGet();
         if (onnxSmokeClient != null) onnxSmokeClient.cancel();
+        if (onnxSessionClient != null) onnxSessionClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         modelImportActive = false;
         restoreModelButton();
@@ -5144,6 +5162,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     protected void onDestroy() {
         modelGeneration.incrementAndGet();
         if (onnxSmokeClient != null) onnxSmokeClient.cancel();
+        if (onnxSessionClient != null) onnxSessionClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
