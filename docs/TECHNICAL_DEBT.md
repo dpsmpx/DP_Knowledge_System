@@ -874,6 +874,22 @@ Android instrumentation проверяет смерть рабочего Binder 
 зелёные. **Открыто:** настоящий native OOM, Android LMK, физический
 ARM64/OEM, API 24–26, реальные веса и inference. `runnable=false`.
 
+**MODEL-M1: ограниченные сводки I/O из ONNX Runtime без инференса —
+[PR #213](https://github.com/dpsmpx/DP_Knowledge_System/pull/213).**
+При отдельной ручной CPU-проверке worker извлекает метаданные входных
+и выходных `NodeInfo` и возвращает только 10 ограниченных целочисленных
+агрегатов: тензоры, `float32`, `int64`, динамические оси и максимум ранга.
+Имена и символические размерности не передаются, лимиты 32 I/O и 16 осей
+проверяются на обоих концах Binder; отсутствующие и противоречивые поля
+превращаются в отказ. JVM-тесты проверяют границы, а
+[эмуляторы](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186052)
+прошли **14/14 на API 27/28/35** с проверкой `Identity`-сессии;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186097)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45641186095)
+зелёные. **Открыто:** полные имена/типы/формы I/O и их сопоставление с
+tokenizer/pooling и ролью, native inference, реальные веса и ARM64/OEM,
+API 24–26, настоящий OOM/LMK. `runnable=false`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
