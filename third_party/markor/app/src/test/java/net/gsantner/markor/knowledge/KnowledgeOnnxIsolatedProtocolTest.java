@@ -1,0 +1,25 @@
+/* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
+package net.gsantner.markor.knowledge;
+
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+
+/** Pure JVM checks; the actual IPC/native service still needs Android QA. */
+public final class KnowledgeOnnxIsolatedProtocolTest {
+    @Test public void onlySmallStatusScalarsArePartOfTheContract() {
+        assertEquals("1.31.1", KnowledgeOnnxIsolatedProtocol.safeVersion("1.31.1"));
+        assertEquals("unknown", KnowledgeOnnxIsolatedProtocol.safeVersion(null));
+        assertEquals("?sdcard?secret?path", KnowledgeOnnxIsolatedProtocol.safeVersion(
+                "/sdcard/secret/path"));
+        assertEquals(48, KnowledgeOnnxIsolatedProtocol.safeVersion(
+                "12345678901234567890123456789012345678901234567890").length());
+        assertTrue(KnowledgeOnnxIsolatedProtocol.validTimings(1, 150));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validTimings(-1, 1));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validTimings(0, -1));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validTimings(
+                KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS + 1, 0));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validTimings(0,
+                KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS * 1000L + 1));
+    }
+}
