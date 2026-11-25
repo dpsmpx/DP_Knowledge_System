@@ -10,6 +10,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * A bounded, read-only GGUF/ONNX container probe. It identifies metadata
@@ -25,8 +27,22 @@ final class KnowledgeModelContainerProbe {
     private static final long MAX_GGUF_KEYS = 100_000L;
     private static final long MAX_ARRAY_MEMBERS = 20_000L;
     private static final long MAX_ONNX_FIELDS = 100_000L;
+    private static final long MAX_GGUF_TENSOR_INFOS = 20_000L;
+    private static final long MAX_ONNX_GRAPH_FIELDS = 100_000L;
+    private static final long MAX_GGUF_DESCRIPTOR_SCAN = 32L * 1024L * 1024L;
+    private static final long MAX_ONNX_GRAPH_NODES = 50_000L;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
+    enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
+
+    private static final class Details {
+        DetailState state = DetailState.NOT_INSPECTED;
+        long tensorDescriptors;
+        long nodes;
+        long inputs;
+        long outputs;
+        String operatorHints = "";
+    }
 
     static final class Result {
         final KnowledgeModelFiles.Format format;
@@ -38,11 +54,17 @@ final class KnowledgeModelContainerProbe {
         final String tokenizer;
         final int opsetDeclarations;
         final boolean graphDeclared;
+        final DetailState detailState;
+        final long tensorDescriptors;
+        final long graphNodes;
+        final long graphInputs;
+        final long graphOutputs;
+        final String operatorHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
                        final String family, final String tokenizerHint,
-                       final int opsets, final boolean graph) {
+                       final int opsets, final boolean graph, final Details details) {
             format = containerFormat;
             state = outcome;
             version = versionNumber;
@@ -52,6 +74,12 @@ final class KnowledgeModelContainerProbe {
             tokenizer = tokenizerHint;
             opsetDeclarations = opsets;
             graphDeclared = graph;
+            detailState = details.state;
+            tensorDescriptors = details.tensorDescriptors;
+            graphNodes = details.nodes;
+            graphInputs = details.inputs;
+            graphOutputs = details.outputs;
+            operatorHints = details.operatorHints;
         }
     }
 
@@ -74,7 +102,9 @@ final class KnowledgeModelContainerProbe {
 
     private static Result inspectGguf(final RandomAccessFile data) throws IOException {
         long version = 0, tensors = 0, metadata = 0;
+        long alignment = 32;
         String architecture = "", tokenizer = "";
+        final Details details = new Details();
         try {
             final byte[] magic = new byte[4];
             data.readFully(magic);
@@ -94,25 +124,73 @@ final class KnowledgeModelContainerProbe {
                     architecture = safeHint(readGgufString(data, 128));
                 } else if ("tokenizer.ggml.model".equals(key) && type == 8) {
                     tokenizer = safeHint(readGgufString(data, 128));
+                } else if ("general.alignment".equals(key) && (type == 4 || type == 10)) {
+                    alignment = type == 4 ? readU32(data) : readPositiveU64(data);
+                    if (alignment < 8 || alignment > 4096 || alignment % 8 != 0) {
+                        throw new BadContainer();
+                    }
                 } else {
                     skipGgufValue(data, type, 0);
                 }
             }
-            return gguf(tensors == 0 && metadata == 0
-                    ? State.INVALID : State.METADATA_HINTS,
-                    version, tensors, metadata, architecture, tokenizer);
+            inspectGgufTensorDescriptors(data, tensors, alignment, details);
+            return gguf(tensors == 0 && metadata == 0 ? State.INVALID
+                    : State.METADATA_HINTS, version, tensors, metadata,
+                    architecture, tokenizer, details);
         } catch (ScanLimit limit) {
-            return gguf(State.PARTIAL, version, tensors, metadata, architecture, tokenizer);
+            details.state = DetailState.PARTIAL;
+            return gguf(State.PARTIAL, version, tensors, metadata,
+                    architecture, tokenizer, details);
         } catch (EOFException | BadContainer invalid) {
-            return gguf(State.INVALID, version, tensors, metadata, architecture, tokenizer);
+            details.state = DetailState.INVALID;
+            return gguf(State.INVALID, version, tensors, metadata,
+                    architecture, tokenizer, details);
         }
     }
 
     private static Result gguf(final State state, final long version,
                                final long tensors, final long keys, final String architecture,
-                               final String tokenizer) {
+                               final String tokenizer, final Details details) {
         return new Result(KnowledgeModelFiles.Format.GGUF, state, version, tensors, keys,
-                architecture, tokenizer, 0, false);
+                architecture, tokenizer, 0, false, details);
+    }
+
+    /**
+     * GGUF tensor descriptors are metadata only. We check bounded names,
+     * dimensions and aligned offsets against the file but deliberately do NOT
+     * infer tensor byte lengths from quantization types or load tensor data.
+     */
+    private static void inspectGgufTensorDescriptors(final RandomAccessFile data,
+            final long count, final long alignment, final Details details) throws IOException {
+        if (count > MAX_GGUF_TENSOR_INFOS) throw new ScanLimit();
+        final Set<String> names = new HashSet<>();
+        final long[] offsets = new long[(int) count];
+        for (int index = 0; index < count; index++) {
+            checkInterrupted();
+            if (data.getFilePointer() > MAX_GGUF_DESCRIPTOR_SCAN) throw new ScanLimit();
+            final String name = readGgufString(data, 64);
+            if (name.isEmpty() || !names.add(name)) throw new BadContainer();
+            final long dimensions = readU32(data);
+            if (dimensions == 0) throw new BadContainer();
+            if (dimensions > 4) throw new ScanLimit(); // Future GGUF may expand dims.
+            for (int dim = 0; dim < (int) dimensions; dim++) {
+                if (readPositiveU64(data) == 0) throw new BadContainer();
+            }
+            final long type = readU32(data);
+            if (type > 255) throw new ScanLimit(); // Do not reject future quantizers.
+            final long offset = readPositiveU64(data);
+            if (offset % alignment != 0) throw new BadContainer();
+            offsets[index] = offset;
+            details.tensorDescriptors++;
+        }
+        final long position = data.getFilePointer();
+        final long padding = (alignment - position % alignment) % alignment;
+        if (padding > data.length() - position) throw new BadContainer();
+        final long startOfData = position + padding;
+        for (final long offset : offsets) {
+            if (offset >= data.length() - startOfData) throw new BadContainer();
+        }
+        details.state = DetailState.DECLARATIONS_READ;
     }
 
     /** Reads the top-level protobuf tags only: no tensor allocation or execution. */
@@ -120,6 +198,7 @@ final class KnowledgeModelContainerProbe {
         long ir = 0;
         int opsets = 0;
         boolean graph = false;
+        final Details details = new Details();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -135,7 +214,7 @@ final class KnowledgeModelContainerProbe {
                     final long size = readVarint(data);
                     if (size <= 0) throw new BadContainer();
                     graph = true;
-                    skipExact(data, size);
+                    inspectOnnxGraph(data, size, details);
                 } else if (field == 8 && wire == 2) {
                     final long size = readVarint(data);
                     if (size < 2) throw new BadContainer();
@@ -145,18 +224,92 @@ final class KnowledgeModelContainerProbe {
                 }
             }
             return onnx(ir > 0 && graph && opsets > 0
-                    ? State.METADATA_HINTS : State.INVALID, ir, opsets, graph);
+                    ? State.METADATA_HINTS : State.INVALID, ir, opsets, graph, details);
         } catch (ScanLimit limit) {
-            return onnx(State.PARTIAL, ir, opsets, graph);
+            details.state = DetailState.PARTIAL;
+            return onnx(State.PARTIAL, ir, opsets, graph, details);
         } catch (EOFException | BadContainer invalid) {
-            return onnx(State.INVALID, ir, opsets, graph);
+            details.state = DetailState.INVALID;
+            return onnx(State.INVALID, ir, opsets, graph, details);
         }
     }
 
     private static Result onnx(final State state, final long ir,
-                               final int opsets, final boolean graph) {
+                               final int opsets, final boolean graph, final Details details) {
         return new Result(KnowledgeModelFiles.Format.ONNX_UNVERIFIED, state, ir,
-                0, 0, "", "", opsets, graph);
+                0, 0, "", "", opsets, graph, details);
+    }
+
+    /**
+     * Walks only the direct fields of GraphProto, skipping huge TensorProto
+     * initializers via bounded seeks. Input/output counts are declarations,
+     * not validated TypeProto signatures or validated operator support.
+     */
+    private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
+                                         final Details details) throws IOException {
+        if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
+        final long end = data.getFilePointer() + bytes;
+        long fields = 0;
+        final Set<String> examples = new HashSet<>();
+        while (data.getFilePointer() < end) {
+            checkInterrupted();
+            if (++fields > MAX_ONNX_GRAPH_FIELDS) throw new ScanLimit();
+            final long tag = readVarint(data);
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 0) throw new BadContainer();
+            if (wire == 2 && field == 1) {
+                final long length = readVarint(data);
+                if (++details.nodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
+                inspectOnnxNode(data, length, details, examples);
+            } else if (wire == 2 && (field == 11 || field == 12)) {
+                final long length = readVarint(data);
+                if (field == 11) details.inputs++;
+                else details.outputs++;
+                skipExact(data, length);
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        details.state = DetailState.DECLARATIONS_READ;
+    }
+
+    private static void inspectOnnxNode(final RandomAccessFile data, final long bytes,
+                                        final Details details, final Set<String> examples)
+            throws IOException {
+        if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
+        final long end = data.getFilePointer() + bytes;
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            if (++fields > 1000) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            if ((tag >>> 3) == 4 && (tag & 7) == 2) {
+                final long size = readVarint(data);
+                if (size > 64) {
+                    skipExact(data, size);
+                } else {
+                    final byte[] dataBytes = new byte[(int) size];
+                    data.readFully(dataBytes);
+                    final String name;
+                    try {
+                        name = StandardCharsets.UTF_8.newDecoder()
+                                .onMalformedInput(CodingErrorAction.REPORT)
+                                .decode(ByteBuffer.wrap(dataBytes)).toString();
+                    } catch (CharacterCodingException invalid) {
+                        throw new BadContainer();
+                    }
+                    final String safe = safeHint(name);
+                    if (!safe.isEmpty() && examples.size() < 4 && examples.add(safe)) {
+                        details.operatorHints += (details.operatorHints.isEmpty() ? "" : ", ") + safe;
+                    }
+                }
+            } else {
+                skipWire(data, (int) (tag & 7));
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
     }
 
     private static void skipWire(final RandomAccessFile data, final int wire) throws IOException {
