@@ -27,6 +27,11 @@ jobs:
       max-parallel: 1
       matrix:
         include:
+          # Diagnostic first: previous API 24 Google APIs images stayed adb
+          # offline on hosted runners. Probe the available AOSP image instead.
+          - api: 24
+            runner: ubuntu-22.04
+            target: default
           - api: 35
             runner: ubuntu-latest
             target: google_apis
