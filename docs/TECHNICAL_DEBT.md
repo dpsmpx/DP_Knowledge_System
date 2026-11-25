@@ -661,6 +661,22 @@ Android CI проверяют код, но фактический FD/Binder/nati
 отмену/таймауты, RAM/OOM и ABI на физическом Android ещё предстоит
 подтвердить. `runnable=false`; MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: автоматизированный ONNX isolated-process Android emulator QA — [PR #187](https://github.com/dpsmpx/DP_Knowledge_System/pull/187).**
+Добавлена отдельная GitHub Actions инструментальная проверка на Android
+15 API 35/x86_64, не требующая личных данных или установленной модели.
+[Успешный прогон](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45569057050):
+**4/4 Android-теста** — непубличный изолированный сервис, два
+последовательных синтетических CPU запуска, FD/SHA-256/создание ONNX
+сессии без инференса, отмена до bind без запоздалого callback.
+Эмулятор выявил и помог устранить ошибки `getMyMemoryState()` (запрещён
+изолированному UID) и определения имени процесса: Android добавляет
+суффикс экземпляра сервиса. На API 28+ используется `getProcessName()`
+вместе с `isIsolatedUid()`, на API 24–27 — локальный `/proc/self/cmdline`.
+Открыты реальные Redmi Note 13/Poco X7 Pro, особенность старых API,
+последовательность отмены во время блокирующей native-сессии, пик RAM,
+OOM/ABI/нагрев, крупные веса, жизненный цикл в фоне и реальная модель.
+`runnable=false`; MODEL-M1/M8 не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
