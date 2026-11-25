@@ -677,6 +677,18 @@ Android CI проверяют код, но фактический FD/Binder/nati
 OOM/ABI/нагрев, крупные веса, жизненный цикл в фоне и реальная модель.
 `runnable=false`; MODEL-M1/M8 не закрыты.
 
+**MODEL-M1: эмуляторная проверка смерти isolated worker по cancel/watchdog — [PR #189](https://github.com/dpsmpx/DP_Knowledge_System/pull/189).**
+[Успешный прогон API 35/x86_64](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45570321758):
+**6/6 инструментальных Android-тестов** (вместо 4/4), Android JVM/debug
+build и Python CI зелёные. Два новых теста запускают **только в debug**
+синтетическое Java-ожидание в изолированном процессе и по смерти Binder
+проверяют явную отмену до шестисекундного watchdog и завершение по самому
+watchdog. Не выполняют реальную ONNX-инференцию, не читают веса/заметки,
+не обращаются к сети. В `release` test-команда отклоняется; штатный
+watchdog 30 секунд не менялся. **Остаются открытыми:** реальный native
+hang/OOM, физические устройства, API 24–34, RAM/тепло/ABI и совместимость
+импортированных моделей. `runnable=false`; MODEL-M1/M8 не закрыты.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
