@@ -402,6 +402,21 @@ ONNX `external_data`, не загружая реальные модели или
 также зелёные. Это два моментальных снимка RAM, а не её резервирование,
 измерение пика или предотвращение native OOM. Физический ARM64, API 24–26,
 реальные веса и inference остаются непроверенными; `runnable=false`.
+[PR #205](https://github.com/dpsmpx/DP_Knowledge_System/pull/205)
+добавил детерминированную проверку таймаута привязки изолированного ONNX
+worker и **только ручного** повторного запроса. Рабочий лимит не изменён:
+30 секунд watchdog + 5 секунд клиента; сокращённый лимит допускается
+только в debug-тестах, а release его игнорирует. При отказе синтетический
+клиент теперь посылает `CANCEL_AND_EXIT` и освобождает привязку.
+Два Android-теста задерживают первое подключение через `ContextWrapper`,
+дожидаются настоящего таймаута, проверяют однократный callback, очистку
+FD-байтов и успешную новую `Identity`-сессию даже при запоздалом событии
+старой привязки. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166154)
+прошёл **12/12 на API 27/28/35**; [Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166198)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45620166183)
+также зелёные. Это проверка lifecycle на синтетике, а не воспроизведение
+native hang/OOM, пиковой RAM или аппаратного ARM64; реальные модели,
+API 24–26 и инференс не проверены; `runnable=false`, MODEL-M1/M8 открыты.
 **Защитный срез MODEL-M0:**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 ввёл неперсистентные одноразовые разрешения для LLM и семантического
