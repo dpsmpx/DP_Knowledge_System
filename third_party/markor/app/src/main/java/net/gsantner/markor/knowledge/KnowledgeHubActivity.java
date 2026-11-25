@@ -4678,6 +4678,11 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             R.string.knowledge_llm_polarity_mismatch,
                             review.polarityMismatchedCitations));
                 }
+                if (review.numericMismatchedCitations > 0) {
+                    display.append("\n").append(getString(
+                            R.string.knowledge_llm_numeric_mismatch,
+                            review.numericMismatchedCitations));
+                }
                 if (review.potentiallyOpposingSources > 0) {
                     display.append("\n").append(getString(
                             R.string.knowledge_llm_possible_source_conflicts,
@@ -4687,15 +4692,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     display.append("\n\n").append(getString(
                             R.string.knowledge_llm_flagged_spans_title));
                     for (final KnowledgeLlmCitationAudit.Flag flagged : review.flaggedSpans) {
-                        final int label = flagged.kind
-                                == KnowledgeLlmCitationAudit.Flag.Kind.WEAK_TEXT
-                                ? R.string.knowledge_llm_flagged_weak
-                                : R.string.knowledge_llm_flagged_polarity;
+                        final int label;
+                        if (flagged.kind == KnowledgeLlmCitationAudit.Flag.Kind.WEAK_TEXT) {
+                            label = R.string.knowledge_llm_flagged_weak;
+                        } else if (flagged.kind
+                                == KnowledgeLlmCitationAudit.Flag.Kind.EXPLICIT_POLARITY) {
+                            label = R.string.knowledge_llm_flagged_polarity;
+                        } else {
+                            label = R.string.knowledge_llm_flagged_numeric;
+                        }
                         display.append("\n• ").append(getString(label, flagged.sourceNumber,
                                 KnowledgeLlmCitationAudit.flaggedAnswerSnippet(answer, flagged)));
                     }
                     final int hidden = review.weakTextAttributions
-                            + review.polarityMismatchedCitations - review.flaggedSpans.size();
+                            + review.polarityMismatchedCitations
+                            + review.numericMismatchedCitations - review.flaggedSpans.size();
                     if (hidden > 0) {
                         display.append("\n").append(getString(
                                 R.string.knowledge_llm_flagged_more, hidden));
