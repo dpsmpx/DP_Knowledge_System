@@ -412,7 +412,11 @@ final class KnowledgeModelFiles {
     synchronized boolean delete(final Entry entry) throws IOException {
         if (entry == null) return false;
         final File metadata = metadataFile(entry.sha256, entry.role);
-        if (!metadata.isFile() || !metadata.delete()) return false;
+        if (!metadata.isFile()) return false;
+        // Package companions belong to this role/weight pair. A deleted model
+        // must not strand hundreds of MB of unreferenced private sidecars.
+        new KnowledgeModelPackageStore(directory, this).forget(entry);
+        if (!metadata.delete()) return false;
         boolean shared = false;
         for (final Entry other : installed()) {
             if (entry.sha256.equals(other.sha256)) shared = true;

@@ -25,6 +25,7 @@ import java.util.Locale;
  */
 final class KnowledgeModelSettingsDialog {
     interface ImportRequest { void pick(KnowledgeModelPolicy.Role role); }
+    interface PackageRequest { void pick(KnowledgeModelFiles.Entry entry); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -32,15 +33,21 @@ final class KnowledgeModelSettingsDialog {
     private static final String PREFS = "dpks_local_model_choices_v1";
     private final Context context;
     private final KnowledgeModelFiles files;
+    private final KnowledgeModelPackageStore packages;
     private final ImportRequest importer;
+    private final PackageRequest packageImporter;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
     KnowledgeModelSettingsDialog(final Context activity, final KnowledgeModelFiles modelFiles,
-                                 final ImportRequest request, final DownloadRequest download) {
+                                 final KnowledgeModelPackageStore modelPackages,
+                                 final ImportRequest request, final PackageRequest packageRequest,
+                                 final DownloadRequest download) {
         context = activity;
         files = modelFiles;
+        packages = modelPackages;
         importer = request;
+        packageImporter = packageRequest;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -212,8 +219,24 @@ final class KnowledgeModelSettingsDialog {
         final String provenance = known == null ? "" : "\n\n"
                 + context.getString(R.string.knowledge_models_catalog_provenance,
                         known.id, known.license, known.sourcePage);
-        final KnowledgeModelPackageContract.Report packageReport =
+        KnowledgeModelPackageContract.Report packageReport =
                 KnowledgeModelPackageContract.inspect(entry);
+        KnowledgeModelPackageManifest installed = null;
+        boolean packageCorrupt = false;
+        try {
+            installed = packages.installed(entry);
+            if (installed != null) {
+                packageReport = KnowledgeModelPackageContract.inspect(entry, installed);
+            }
+        } catch (IOException invalid) {
+            packageCorrupt = true;
+        }
+        final String packageFiles = packageCorrupt
+                ? context.getString(R.string.knowledge_models_package_invalid)
+                : installed == null ? context.getString(R.string.knowledge_models_package_none)
+                : context.getString(R.string.knowledge_models_package_present,
+                        packageReport.companionFileCount, packageReport.assertedRevision,
+                        installed.assertedLicense);
         final StringBuilder missing = new StringBuilder();
         for (final KnowledgeModelPackageContract.Requirement requirement : packageReport.missing) {
             missing.append("\n• ").append(packageRequirementName(requirement));
@@ -223,17 +246,55 @@ final class KnowledgeModelSettingsDialog {
                 packageReport.license, packageReport.engineCandidate, missing.toString());
         new AlertDialog.Builder(context)
                 .setTitle(roleName(entry.role))
-                .setMessage(summary + provenance + "\n\n" + packageSummary + "\n\n"
+                .setMessage(summary + provenance + "\n\n" + packageFiles + "\n\n"
+                        + packageSummary + "\n\n"
                         + context.getString(R.string.knowledge_models_imported_not_runnable))
                 .setPositiveButton(R.string.knowledge_models_select, (dialog, which) -> {
                     preferences.edit().putString(entry.role.name(), entry.sha256).apply();
                     showRole(entry.role);
                 })
-                .setNeutralButton(R.string.knowledge_models_delete, (dialog, which) ->
-                        confirmDelete(entry))
+                .setNeutralButton(R.string.knowledge_models_package_manage,
+                        (dialog, which) -> showPackageActions(entry))
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showRole(entry.role))
                 .show();
+    }
+
+    private void showPackageActions(final KnowledgeModelFiles.Entry entry) {
+        final String[] actions = {
+                context.getString(R.string.knowledge_models_package_import),
+                context.getString(R.string.knowledge_models_package_remove),
+                context.getString(R.string.knowledge_models_delete)
+        };
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_package_manage)
+                .setMessage(R.string.knowledge_models_package_import_help)
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) packageImporter.pick(entry);
+                    else if (which == 1) confirmRemovePackage(entry);
+                    else confirmDelete(entry);
+                })
+                .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
+                        showDetails(entry))
+                .show();
+    }
+
+    private void confirmRemovePackage(final KnowledgeModelFiles.Entry entry) {
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_package_remove)
+                .setMessage(R.string.knowledge_models_package_remove_warning)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) ->
+                        showPackageActions(entry))
+                .setPositiveButton(R.string.knowledge_models_package_remove, (dialog, which) -> {
+                    try {
+                        packages.forget(entry);
+                        showDetails(entry);
+                    } catch (IOException invalid) {
+                        new AlertDialog.Builder(context)
+                                .setMessage(R.string.knowledge_models_package_invalid)
+                                .setPositiveButton(android.R.string.ok, null).show();
+                    }
+                }).show();
     }
 
     private String packageRequirementName(final KnowledgeModelPackageContract.Requirement item) {

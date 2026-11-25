@@ -34,16 +34,24 @@ final class KnowledgeModelPackageContract {
         final String license;
         final String engineCandidate;
         final boolean curatedWeight;
+        final boolean companionFilesInstalled;
+        final int companionFileCount;
+        final String assertedRevision;
         final List<Requirement> missing;
 
         private Report(final KnowledgeModelFiles.Entry entry,
                        final KnowledgeModelCatalog.Artifact known,
+                       final KnowledgeModelPackageManifest installed,
                        final List<Requirement> requirements) {
             schemaVersion = SCHEMA_VERSION;
             weightSha256 = entry.sha256;
             curatedWeight = known != null;
-            sourceId = curatedWeight ? known.id : "user-imported/unverified";
+            sourceId = installed != null ? installed.sourceId
+                    : curatedWeight ? known.id : "user-imported/unverified";
             license = curatedWeight ? known.license : "unverified";
+            assertedRevision = installed == null ? "none" : installed.assertedRevision;
+            companionFilesInstalled = installed != null;
+            companionFileCount = installed == null ? 0 : installed.components.size() - 1;
             engineCandidate = entry.format == KnowledgeModelFiles.Format.GGUF
                     ? "llama.cpp / GGUF candidate" : "ONNX Runtime Mobile candidate";
             missing = Collections.unmodifiableList(new ArrayList<>(requirements));
@@ -59,9 +67,21 @@ final class KnowledgeModelPackageContract {
     private KnowledgeModelPackageContract() { }
 
     static Report inspect(final KnowledgeModelFiles.Entry entry) {
+        return inspect(entry, null);
+    }
+
+    static Report inspect(final KnowledgeModelFiles.Entry entry,
+                          final KnowledgeModelPackageManifest installed) {
         if (entry == null || entry.role == null || entry.format == null
                 || entry.sha256 == null || !entry.sha256.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException("Invalid package identity");
+        }
+        if (installed != null) {
+            try {
+                installed.requireWeight(entry);
+            } catch (java.io.IOException invalid) {
+                throw new IllegalArgumentException("Package does not match installed weight", invalid);
+            }
         }
         final KnowledgeModelCatalog.Artifact candidate =
                 KnowledgeModelCatalog.findInstalled(entry.role, entry.sha256);
@@ -76,22 +96,31 @@ final class KnowledgeModelPackageContract {
         if (known == null) missing.add(Requirement.LICENSE_REVIEW);
         switch (entry.role) {
             case EMBEDDING:
-                missing.add(Requirement.TOKENIZER);
-                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED) {
+                if (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.TOKENIZER)) {
+                    missing.add(Requirement.TOKENIZER);
+                }
+                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED &&
+                        (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.MODEL_CONFIG))) {
                     missing.add(Requirement.MODEL_CONFIG);
                 }
                 missing.add(Requirement.EMBEDDING_POOLING);
                 break;
             case GENERATION:
-                missing.add(Requirement.TOKENIZER);
-                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED) {
+                if (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.TOKENIZER)) {
+                    missing.add(Requirement.TOKENIZER);
+                }
+                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED &&
+                        (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.MODEL_CONFIG))) {
                     missing.add(Requirement.MODEL_CONFIG);
                 }
                 missing.add(Requirement.CHAT_TEMPLATE);
                 break;
             case RERANKING:
-                missing.add(Requirement.TOKENIZER);
-                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED) {
+                if (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.TOKENIZER)) {
+                    missing.add(Requirement.TOKENIZER);
+                }
+                if (entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED &&
+                        (installed == null || !installed.includes(KnowledgeModelPackageManifest.Kind.MODEL_CONFIG))) {
                     missing.add(Requirement.MODEL_CONFIG);
                 }
                 missing.add(Requirement.RERANKER_SCORE);
@@ -106,6 +135,6 @@ final class KnowledgeModelPackageContract {
                 throw new IllegalArgumentException("Unknown package role");
         }
         missing.add(Requirement.VALIDATED_ANDROID_BACKEND);
-        return new Report(entry, known, missing);
+        return new Report(entry, known, installed, missing);
     }
 }

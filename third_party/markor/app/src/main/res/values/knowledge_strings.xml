@@ -747,6 +747,17 @@
     <string name="knowledge_models_imported_not_runnable">Stored file only: on-device inference, model compatibility verification, RAM estimates and benchmarks will arrive in later stages. Selecting a file does not start an AI model.</string>
     <string name="knowledge_models_details">%1$s\nSize: %2$s (%3$d bytes)\nFormat: %4$s (not runtime validated)\nSHA-256: %5$s</string>
     <string name="knowledge_models_package_report">Package contract v%1$d\nProvenance: %2$s\nDeclared license: %3$s\nPossible runtime: %4$s (NOT VERIFIED)\nMissing before local execution:%5$s</string>
+    <string name="knowledge_models_package_manage">Package files</string>
+    <string name="knowledge_models_package_import">Import manifest + companions</string>
+    <string name="knowledge_models_package_remove">Remove package companions</string>
+    <string name="knowledge_models_package_import_help">Choose dpks-model-package.json and all companion files together using Android’s multiple-file picker. The .gguf/.onnx weight must already be installed for this role. Every file is checked against its declared SHA-256 and size. No network request or inference is started. See docs/MODEL_M1_PACKAGE_MANIFEST.md for the JSON format.</string>
+    <string name="knowledge_models_package_remove_warning">Remove the manifest and all companions from private app storage? The weight file, notes, and journal remain untouched. This cannot be undone without importing the package again.</string>
+    <string name="knowledge_models_package_none">No package companions are installed. A weight file alone is not runnable.</string>
+    <string name="knowledge_models_package_invalid">Package unavailable or damaged. Remove its companion files before importing a replacement; the original model weight remains unchanged.</string>
+    <string name="knowledge_models_package_present">Companion files installed: %1$d (SHA-256 verified at import, size rechecked). Asserted revision: %2$s. User-declared license: %3$s. Upstream provenance and runtime compatibility are NOT verified.</string>
+    <string name="knowledge_models_package_importing">Validating existing weight and companion SHA-256 files offline. Tap Manage again to cancel. Android’s selected file provider may access its own files.</string>
+    <string name="knowledge_models_package_imported">Package stored with %1$d companion files. No AI runtime has been started.</string>
+    <string name="knowledge_models_package_failed">Package import failed. Select exactly dpks-model-package.json and its named companions, with correct sizes and SHA-256. Nothing was executed, and notes were not changed.</string>
     <string name="knowledge_models_req_revision">Pinned repository revision / package manifest</string>
     <string name="knowledge_models_req_license">Verified source and license</string>
     <string name="knowledge_models_req_tokenizer">Validated tokenizer metadata and files</string>

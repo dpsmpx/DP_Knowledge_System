@@ -747,6 +747,17 @@
     <string name="knowledge_models_imported_not_runnable">Пока это только сохранённый файл: локальное исполнение, проверка совместимости, оценки RAM и бенчмарки будут добавлены в следующих этапах. Выбор файла не запускает нейросеть.</string>
     <string name="knowledge_models_details">%1$s\nРазмер: %2$s (%3$d байт)\nФормат: %4$s (движком не проверен)\nSHA-256: %5$s</string>
     <string name="knowledge_models_package_report">Контракт комплекта v%1$d\nПроисхождение: %2$s\nЗаявленная лицензия: %3$s\nПредполагаемый движок: %4$s (НЕ ПРОВЕРЕН)\nНедостаёт для локального запуска:%5$s</string>
+    <string name="knowledge_models_package_manage">Файлы комплекта</string>
+    <string name="knowledge_models_package_import">Импортировать манифест и файлы</string>
+    <string name="knowledge_models_package_remove">Удалить сопутствующие файлы</string>
+    <string name="knowledge_models_package_import_help">Выберите dpks-model-package.json и все сопутствующие файлы вместе через системный множественный выбор Android. Веса .gguf/.onnx уже должны быть установлены для этой роли. Проверяются размер и SHA-256 каждого файла. Интернет и ИИ не запускаются. Формат описан в docs/MODEL_M1_PACKAGE_MANIFEST.md.</string>
+    <string name="knowledge_models_package_remove_warning">Удалить манифест и сопутствующие файлы из приватного хранилища? Веса модели, заметки и журнал сохранятся. Для восстановления потребуется повторный импорт комплекта.</string>
+    <string name="knowledge_models_package_none">Сопутствующие файлы не установлены. Одного файла весов недостаточно для запуска.</string>
+    <string name="knowledge_models_package_invalid">Комплект недоступен или повреждён. Перед заменой удалите его сопутствующие файлы; сами веса модели не затронуты.</string>
+    <string name="knowledge_models_package_present">Сопутствующих файлов: %1$d (SHA-256 проверен при импорте, размер проверен повторно). Заявленная ревизия: %2$s. Лицензия указана пользователем: %3$s. Происхождение и совместимость движка НЕ проверены.</string>
+    <string name="knowledge_models_package_importing">Локальная проверка установленных весов и SHA-256 сопутствующих файлов. Повторное нажатие отменит операцию. Выбранный провайдер файлов Android может получать свои файлы из сети.</string>
+    <string name="knowledge_models_package_imported">Комплект с %1$d сопутствующими файлами сохранён. Движок ИИ не запускался.</string>
+    <string name="knowledge_models_package_failed">Не удалось импортировать комплект. Выберите dpks-model-package.json и все указанные в нём файлы с верными размерами и SHA-256. Ничего не исполнялось, заметки не изменены.</string>
     <string name="knowledge_models_req_revision">Закреплённая ревизия репозитория / манифест комплекта</string>
     <string name="knowledge_models_req_license">Проверенные источник и лицензия</string>
     <string name="knowledge_models_req_tokenizer">Проверенные файлы и метаданные токенизатора</string>
