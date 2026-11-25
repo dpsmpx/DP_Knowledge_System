@@ -764,6 +764,47 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void spacedAndSoftWrappedReferenceLinksCannotBorrowNumberedCitations() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String separator : Arrays.asList("  ", "\t", " \t ", "\n", "\r\n", " \n  ")) {
+            final String answer = "The invented finding uses [1]" + separator
+                    + "[bibliography] as its Markdown reference link.";
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 0, review.referenceCount);
+            assertEquals(answer, 0, review.invalidReferences);
+        }
+        // Numeric clusters remain genuine source markers; a blank line does
+        // not turn independent labels into a single reference-style link.
+        assertEquals(2, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1]  [1].", sources).referenceCount);
+        final KnowledgeLlmCitationAudit.Review digits = KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1]\n[١].", sources);
+        assertEquals(1, digits.referenceCount);
+        assertEquals(1, digits.invalidReferences);
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1]\n\n[bibliography].", sources).referenceCount);
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 [1]  \\[bibliography].", sources).referenceCount);
+    }
+
+    @Test
+    public void escapedBackticksNeverHideVisibleCitationsOrCloseActualCode() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        // A literal escaped backtick is not an inline-code opener.
+        assertEquals(2, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 \\`[1] still visible [1].", sources).referenceCount);
+        // An escaped backtick *inside* code cannot end its span early.
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 `[2] \\` [2]` then [1].", sources).referenceCount);
+        // Even backslashes leave the following backtick unescaped.
+        assertEquals(1, KnowledgeLlmCitationAudit.inspect(
+                "The observed result was 42 \\\\`[2]` then [1].", sources).referenceCount);
+    }
+
+    @Test
     public void indentedMarkdownCodeCannotDonateCitationsOrQuotes() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));

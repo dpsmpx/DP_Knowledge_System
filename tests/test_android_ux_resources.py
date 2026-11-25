@@ -15,6 +15,18 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_markdown_reference_spacing_and_escaped_backticks_stay_in_citation_audit(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("final int maximum = Math.min(text.length(), end + 64);", audit)
+        self.assertIn("isLineBreak(character) && breaks == 0", audit)
+        self.assertIn("answer.charAt(at) != '`' || isEscapedAt(answer, at)", audit)
+        self.assertIn("answer.charAt(end) != '`' || isEscapedAt(answer, end)", audit)
+        self.assertIn('step("CITE-COVER-19",', qa)
+        self.assertIn("softWrappedReferenceExcluded=true", qa)
+        self.assertIn("escapedBacktickHandled=true", qa)
+
     def test_hybrid_shared_source_excerpt_preserves_literal_evidence_and_consent(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         hub = (folder / "KnowledgeHubActivity.java").read_text()

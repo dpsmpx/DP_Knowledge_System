@@ -1096,18 +1096,30 @@ public final class KnowledgeDeviceQaRunner {
                         + "The final unsupported synthetic claim is asserted.", sources);
         final KnowledgeLlmCitationAudit.Review htmlVisible = KnowledgeLlmCitationAudit.inspect(
                 "<span data-source='[2]'>Amber violet is true [1].</span>", sources);
+        final KnowledgeLlmCitationAudit.Review wrappedReference =
+                KnowledgeLlmCitationAudit.inspect(
+                        "An invented claim uses [1] \n  [bibliography] as a link.", sources);
+        final KnowledgeLlmCitationAudit.Review escapedBacktick =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true \\`[1] on screen [1].", sources);
+        final KnowledgeLlmCitationAudit.Review actualCode =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true `[2] \\` [2]` then [1].", sources);
         if (covered.uncitedProseSpans != 0 || uncited.uncitedProseSpans != 1
                 || !uncited.hasValidReferences() || spoofed.hasValidReferences()
                 || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1
                 || htmlHidden.referenceCount != 0 || htmlHidden.invalidReferences != 0
                 || htmlHidden.quotedPassages != 0 || htmlHidden.uncitedProseSpans != 2
                 || htmlVisible.referenceCount != 1 || htmlVisible.invalidReferences != 0
-                || htmlVisible.uncitedProseSpans != 0) {
+                || htmlVisible.uncitedProseSpans != 0
+                || wrappedReference.referenceCount != 0 || wrappedReference.invalidReferences != 0
+                || escapedBacktick.referenceCount != 2 || actualCode.referenceCount != 1) {
             throw new SyntheticMismatch("verdict=UNCITED_CLAIM_OR_CODE_REFERENCE_LAUNDERING");
         }
         return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
                 + "codeFenceCitationsExcluded=true, htmlNonProseExcluded=true, "
                 + "htmlVisibleTextPreserved=true, heuristicNotSemanticProof=true; "
+                + "softWrappedReferenceExcluded=true, escapedBacktickHandled=true, "
                 + "no network or selected vault access";
     }
 

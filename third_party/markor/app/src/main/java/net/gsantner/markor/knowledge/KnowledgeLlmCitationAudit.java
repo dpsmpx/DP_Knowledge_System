@@ -322,9 +322,28 @@ public final class KnowledgeLlmCitationAudit {
                 if (definition) return true;
             }
         }
+        // Full Markdown reference links permit horizontal whitespace and a
+        // single soft line break between [label] and [reference]. A literal
+        // [1] followed by a named label is not a citation, even with tabs or
+        // more than one space. Bound the look-ahead within a 12k answer and
+        // never bridge blank lines or a second line break.
         int next = end;
-        if (next < text.length() && text.charAt(next) == ' ') next++;
-        if (next < text.length() && text.charAt(next) == '[') {
+        int breaks = 0;
+        final int maximum = Math.min(text.length(), end + 64);
+        while (next < maximum) {
+            final char character = text.charAt(next);
+            if (character == ' ' || character == '\t') {
+                next++;
+            } else if (isLineBreak(character) && breaks == 0) {
+                breaks++;
+                next += character == '\r' && next + 1 < text.length()
+                        && text.charAt(next + 1) == '\n' ? 2 : 1;
+            } else {
+                break;
+            }
+        }
+        if (next < text.length() && next <= maximum && text.charAt(next) == '['
+                && !isEscapedAt(text, next)) {
             final int close = text.indexOf(']', next + 1);
             if (close > next && close - next <= 25) {
                 final String reference = text.substring(next + 1, close);
@@ -540,7 +559,7 @@ public final class KnowledgeLlmCitationAudit {
                 maskRange(visible, lineStart, lineEnd);
             } else {
                 for (int at = lineStart; at < lineEnd;) {
-                    if (answer.charAt(at) != '`') {
+                    if (answer.charAt(at) != '`' || isEscapedAt(answer, at)) {
                         at++;
                         continue;
                     }
@@ -549,7 +568,7 @@ public final class KnowledgeLlmCitationAudit {
                     final int ticks = close - at;
                     int end = close;
                     while (end < lineEnd) {
-                        if (answer.charAt(end) != '`') {
+                        if (answer.charAt(end) != '`' || isEscapedAt(answer, end)) {
                             end++;
                             continue;
                         }
