@@ -746,7 +746,14 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         result.schemaBeyondSnapshotKinds,
                         result.schemaSnapshotHints.isEmpty()
                                 ? getString(R.string.knowledge_models_container_unknown)
-                                : result.schemaSnapshotHints);
+                                : result.schemaSnapshotHints) + "\n"
+                + getString(R.string.knowledge_models_container_onnx_local_functions,
+                        result.localFunctionDeclarations, result.matchedGraphFunctionNodes,
+                        result.duplicateLocalFunctions, result.undecodedLocalFunctions,
+                        result.undecodedFunctionOverloads,
+                        result.localFunctionHints.isEmpty()
+                                ? getString(R.string.knowledge_models_container_unknown)
+                                : result.localFunctionHints);
     }
 
     private String modelDisplayName(final Uri uri) {

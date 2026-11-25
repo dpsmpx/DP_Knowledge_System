@@ -442,6 +442,22 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
             self.assertIn("knowledge_models_container_onnx_schema_snapshot", labels)
 
+    def test_model_m1_onnx_local_functions_are_inspected_without_execution(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_LOCAL_FUNCTIONS = 128", "class FunctionKey",
+                       "inspectOnnxLocalFunction", "matchedGraphFunctionNodes",
+                       "undecodedLocalFunctions", "duplicateLocalFunctions",
+                       "undecodedFunctionOverloads", "field == 25 && wire == 2"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.matchedGraphFunctionNodes", hub)
+        self.assertIn("knowledge_models_container_onnx_local_functions", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_local_functions", labels)
+
     def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
