@@ -185,7 +185,8 @@ final class KnowledgeOnnxIsolatedSessionClient {
             return true;
         }
         if (response.what != KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
-                && response.what != KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED) {
+                && response.what != KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
+                && response.what != KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED) {
             return true;
         }
         KnowledgeOnnxSessionGate.Report report = null;
@@ -194,13 +195,17 @@ final class KnowledgeOnnxIsolatedSessionClient {
             final long millis = data.getLong(KnowledgeOnnxIsolatedProtocol.INIT_MILLIS, -1);
             final long inputs = data.getLong(KnowledgeOnnxIsolatedProtocol.INPUTS, -1);
             final long outputs = data.getLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS, -1);
+            final long before = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, -1);
+            final long observed = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, -1);
+            final long after = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, -1);
             if (millis >= 0 && millis <= KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
-                    && inputs >= 1 && inputs <= 32 && outputs >= 1 && outputs <= 32) {
+                    && inputs >= 1 && inputs <= 32 && outputs >= 1 && outputs <= 32
+                    && KnowledgeOnnxMemoryTrace.valid(before, observed, after)) {
                 report = new KnowledgeOnnxSessionGate.Report(
                         KnowledgeOnnxIsolatedProtocol.safeVersion(
                                 data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
                         millis, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0),
-                        inputs, outputs);
+                        inputs, outputs, new KnowledgeOnnxMemoryTrace(before, observed, after));
             }
         }
         final Callback done = finish();

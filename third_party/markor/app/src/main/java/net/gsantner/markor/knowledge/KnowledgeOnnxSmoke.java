@@ -18,13 +18,16 @@ final class KnowledgeOnnxSmoke {
         final long sessionInitMillis;
         final long inferenceMicros;
         final long nativeHeapDeltaBytes;
+        final KnowledgeOnnxMemoryTrace workerMemory;
 
         Report(final String version, final long initMillis,
-               final long runMicros, final long nativeDeltaBytes) {
+               final long runMicros, final long nativeDeltaBytes,
+               final KnowledgeOnnxMemoryTrace memory) {
             runtimeVersion = version;
             sessionInitMillis = initMillis;
             inferenceMicros = runMicros;
             nativeHeapDeltaBytes = nativeDeltaBytes;
+            workerMemory = memory;
         }
     }
 

@@ -82,6 +82,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                 assertNotNull("Generated Identity CPU test failed", report.get());
                 assertTrue(report.get().sessionInitMillis >= 0);
                 assertTrue(report.get().inferenceMicros >= 0);
+                assertWorkerPssSnapshots(report.get().workerMemory);
                 // Give the unbound isolated process a moment to exit before rebinding.
                 if (run == 0) Thread.sleep(1000);
             }
@@ -114,6 +115,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(1, report.get().inputs);
             assertEquals(1, report.get().outputs);
             assertTrue(report.get().sessionInitMillis >= 0);
+            assertWorkerPssSnapshots(report.get().workerMemory);
         } finally {
             instrumentation.runOnMainSync(client::cancel);
         }
@@ -350,6 +352,40 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         assertRejectedSession(graph, graph.length, originalSha);
     }
 
+    @Test public void verifiedFdIsRefusedByDebugWorkerLowRamGate() throws Exception {
+        final byte[] graph = KnowledgeOnnxSmoke.identityModel();
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendSession(pipe[0], graph.length,
+                    KnowledgeOnnxSessionPipe.sha256Hex(graph), true);
+            closePipe(pipe[0]);
+            try (OutputStream sender = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                sender.write(graph);
+            }
+            assertTrue("Low-RAM worker did not return a final denial",
+                    connection.responded.await(15, TimeUnit.SECONDS));
+            assertEquals("Forced low RAM must refuse before native createSession",
+                    KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED,
+                    connection.responseCode.get());
+            assertFalse("Worker memory denial killed the owning app",
+                    KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    private static void assertWorkerPssSnapshots(final KnowledgeOnnxMemoryTrace memory) {
+        assertNotNull("Missing isolated worker PSS report", memory);
+        assertTrue("Malformed worker PSS report", KnowledgeOnnxMemoryTrace.valid(
+                memory.beforeKiB, memory.maxObservedKiB, memory.afterCloseKiB));
+        assertTrue("Worker PSS baseline was unavailable", memory.beforeKiB > 0);
+        assertTrue("Open-session worker PSS was unavailable", memory.maxObservedKiB > 0);
+        assertTrue("Worker PSS after close was unavailable", memory.afterCloseKiB > 0);
+    }
+
     @Test public void fdSessionRejectsTruncatedAndTrailingBytes() throws Exception {
         final byte[] graph = KnowledgeOnnxSmoke.identityModel();
         final String sha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
@@ -465,7 +501,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED) {
                 started.countDown();
             } else if (message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
-                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED) {
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED) {
                 responseCode.set(message.what);
                 responded.countDown();
             }
@@ -495,6 +532,12 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
 
         void sendSession(final ParcelFileDescriptor readPipe, final int length,
                          final String expectedSha) throws RemoteException {
+            sendSession(readPipe, length, expectedSha, false);
+        }
+
+        void sendSession(final ParcelFileDescriptor readPipe, final int length,
+                         final String expectedSha, final boolean debugLowMemory)
+                throws RemoteException {
             final Message request = Message.obtain(null,
                     KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION);
             request.arg1 = 1;
@@ -503,6 +546,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             final Bundle data = new Bundle();
             data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            if (debugLowMemory) data.putBoolean(
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, true);
             request.setData(data);
             messenger.send(request);
         }

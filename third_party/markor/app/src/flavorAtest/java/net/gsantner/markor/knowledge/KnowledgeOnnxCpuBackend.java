@@ -21,7 +21,9 @@ final class KnowledgeOnnxCpuBackend {
     static boolean available() { return true; }
 
     /** Parse one user-approved, hash-verified model in memory; NEVER call run(). */
-    static KnowledgeOnnxSessionGate.Report inspect(final byte[] modelBytes) throws Exception {
+    static KnowledgeOnnxSessionGate.Report inspect(final byte[] modelBytes,
+                                                   final KnowledgeOnnxMemoryTrace.Recorder memory)
+            throws Exception {
         if (modelBytes == null || modelBytes.length < 16
                 || modelBytes.length > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES) {
             throw new IOException("ONNX CPU input outside the size gate");
@@ -42,6 +44,7 @@ final class KnowledgeOnnxCpuBackend {
             // No model filename is passed to native code, so paths from ONNX
             // external_data cannot be deliberately resolved via the API.
             try (OrtSession session = environment.createSession(modelBytes, options)) {
+                memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
                 elapsed = Math.max(0L, (System.nanoTime() - began) / 1_000_000L);
                 inputs = session.getNumInputs();
                 outputs = session.getNumOutputs();
@@ -53,11 +56,14 @@ final class KnowledgeOnnxCpuBackend {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("ONNX CPU session inspection cancelled");
         }
+        memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB());
         return new KnowledgeOnnxSessionGate.Report(environment.getVersion(), elapsed,
-                Debug.getNativeHeapAllocatedSize() - nativeBefore, inputs, outputs);
+                Debug.getNativeHeapAllocatedSize() - nativeBefore, inputs, outputs,
+                memory.result());
     }
 
-    static KnowledgeOnnxSmoke.Report smoke() throws Exception {
+    static KnowledgeOnnxSmoke.Report smoke(final KnowledgeOnnxMemoryTrace.Recorder memory)
+            throws Exception {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("CPU smoke test cancelled");
         }
@@ -73,6 +79,7 @@ final class KnowledgeOnnxCpuBackend {
             options.setInterOpNumThreads(1);
             try (OrtSession session = environment.createSession(
                     KnowledgeOnnxSmoke.identityModel(), options)) {
+                memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
                 initMillis = Math.max(0L,
                         (System.nanoTime() - started) / 1_000_000L);
                 final FloatBuffer input = ByteBuffer.allocateDirect(4)
@@ -109,7 +116,8 @@ final class KnowledgeOnnxCpuBackend {
         // Count AFTER the session, options, result and input tensor have closed.
         // This is a diagnostic native-heap delta, NOT peak RSS or model RAM.
         final long nativeDelta = Debug.getNativeHeapAllocatedSize() - nativeBefore;
+        memory.complete(KnowledgeOnnxWorkerMemory.samplePssKiB());
         return new KnowledgeOnnxSmoke.Report(environment.getVersion(),
-                initMillis, runMicros, nativeDelta);
+                initMillis, runMicros, nativeDelta, memory.result());
     }
 }
