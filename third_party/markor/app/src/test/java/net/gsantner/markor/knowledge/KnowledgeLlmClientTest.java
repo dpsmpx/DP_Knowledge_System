@@ -760,6 +760,83 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void htmlAttributesAndQuotedGreaterThanCannotForgeReferencesOrQuotes() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String answer : Arrays.asList(
+                "The invented conclusion remains unsupported <span data-ref=\"[1]\">plain</span>.",
+                "The invented conclusion remains unsupported <a title='«Fake quote» > [1]'>link</a>.",
+                "The invented conclusion remains unsupported <x-panel\n title=\"[2]\" data=\"«Fake quote»\">text</x-panel>.")) {
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 0, review.referenceCount);
+            assertEquals(answer, 0, review.invalidReferences);
+            assertEquals(answer, 0, review.quotedPassages);
+            assertEquals(answer, 1, review.uncitedProseSpans);
+        }
+        final KnowledgeLlmCitationAudit.Review visible = KnowledgeLlmCitationAudit.inspect(
+                "<span title=\"[2]\">The observed result was 42 [1].</span>", sources);
+        assertEquals(1, visible.referenceCount);
+        assertEquals(0, visible.invalidReferences);
+        assertEquals(0, visible.uncitedProseSpans);
+    }
+
+    @Test
+    public void rawHtmlBlocksAreExcludedButFollowingClaimsRemainVisible() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String tag : Arrays.asList("script", "STYLE", "template")) {
+            final String answer = "The unsupported first conclusion is invented.\n<" + tag
+                    + " data-x=\"[1]\">\nThe hidden source [1] «Fake quote» is not visible.\n</"
+                    + tag + ">\nThe unsupported final conclusion is invented.";
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(tag, 0, review.referenceCount);
+            assertEquals(tag, 0, review.invalidReferences);
+            assertEquals(tag, 0, review.quotedPassages);
+            assertEquals(tag, 2, review.uncitedProseSpans);
+        }
+        final KnowledgeLlmCitationAudit.Review unclosed = KnowledgeLlmCitationAudit.inspect(
+                "<script>[1] «Fake quote»\nHidden still is not a visible claim.", sources);
+        assertEquals(0, unclosed.referenceCount);
+        assertEquals(0, unclosed.quotedPassages);
+        assertEquals(0, unclosed.uncitedProseSpans);
+    }
+
+    @Test
+    public void mathComparisonsAndEscapedHtmlStayOrdinaryVisibleText() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final KnowledgeLlmCitationAudit.Review math = KnowledgeLlmCitationAudit.inspect(
+                "The synthetic result was 3 < 5 and its conclusion is fabricated.", sources);
+        assertEquals(1, math.uncitedProseSpans);
+        final KnowledgeLlmCitationAudit.Review escaped = KnowledgeLlmCitationAudit.inspect(
+                "\\<span>The observed result was 42 [1].", sources);
+        assertEquals(1, escaped.referenceCount);
+        assertEquals(0, escaped.invalidReferences);
+    }
+
+    @Test
+    public void repeatedHtmlAttributesDoNotDisplaceGenuineVisibleCitations() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        final StringBuilder answer = new StringBuilder();
+        for (int i = 0; i < 80; i++) {
+            answer.append("<span data-cite='[2]' title='«Fake quote»'>")
+                    .append("The observed result was 42 [1].</span>\n")
+                    .append("<style>[2] «Fake quote»</style>\n");
+        }
+        assertTrue(answer.length() <= 12_000);
+        final KnowledgeLlmCitationAudit.Review review =
+                KnowledgeLlmCitationAudit.inspect(answer.toString(), sources);
+        assertEquals(80, review.referenceCount);
+        assertEquals(0, review.invalidReferences);
+        assertEquals(0, review.quotedPassages);
+        assertEquals(0, review.uncitedProseSpans);
+        assertEquals(0, review.weakTextAttributions);
+    }
+
+    @Test
     public void longMixedMarkdownAuditKeepsOnlyVisibleCitations() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));

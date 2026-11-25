@@ -101,13 +101,17 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        "SourceLexicon", "MAX_EXCERPT_CHARS"):
             self.assertIn(marker, audit)
         for marker in ("maskMarkdownNonProse(answer)", "REFERENCE_DEFINITION",
-                       "AUTOLINK", "markdownLinkDestinationEnd("):
+                       "AUTOLINK", "markdownLinkDestinationEnd(",
+                       "maskHtmlTagsAndRawSections(visible)", "htmlRawClosingEnd(",
+                       "htmlTagEnd("):
             self.assertIn(marker, audit)
         for marker in ("sentenceBoundaryEnd(", "citationStartingAt(",
                        "isMarkdownAtxHeading(", "isLineBreak(", "nextLineStart("):
             self.assertIn(marker, audit)
         self.assertIn("R.string.knowledge_llm_uncited_prose_spans", hub)
         self.assertIn('step("CITE-COVER-19",', qa)
+        self.assertIn('htmlNonProseExcluded=true', qa)
+        self.assertIn('htmlVisibleTextPreserved=true', qa)
         for locale in ("values", "values-ru"):
             names = {element.get("name") for element in ET.parse(
                 ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}

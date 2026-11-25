@@ -318,6 +318,21 @@ even if every reference and quotation passes the checks below.
     English/Russian Android QA cases check token boundaries, stable ties,
     phrase precedence and within-pass promotion, including rejected
     oversized/stale notes from pre-existing regressions.
+30. Citation and quotation checks now also mask **HTML tag syntax and
+    attributes**, plus the non-rendered bodies of `<script>`, `<style>` and
+    `<template>` elements. Thus a fabricated `[1]` or `«quote»` inside a
+    `title`/`data-*` attribute, hidden script or CSS cannot silently serve
+    as a citation, whereas a marker in visible content between ordinary
+    `<span>` tags remains checkable. The scanner respects `>` inside quoted
+    attributes, preserves original offsets and all line breaks, bounds
+    individual tag scans to 1,024 characters and uses the existing 12,000-
+    character answer cap. A missing raw-section close conservatively masks
+    the remainder, just like an unclosed comment or code fence. JVM tests
+    include uppercase closing tags, multiline attributes, numeric markers,
+    quotation strings, literal `<` comparisons and repeated mixed HTML;
+    `CITE-COVER-19` synthetic Android QA now asserts hidden-versus-visible
+    attribution. This is a **bounded Markdown/HTML heuristic**, not a full
+    HTML parser or a proof that the model answer is factual.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -377,6 +392,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   fail-closed overlong evidence questions, mirrored in the offline benchmark;
   title-token prefix boundaries, one-token-one-term credit, Cyrillic matching,
   bounded title-rank windows and phrase-first precedence over title rank;
+  HTML tag attributes, quoted `>` characters, raw script/style/template
+  bodies and long mixed HTML without allowing hidden source references;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
@@ -444,6 +461,10 @@ grounding. Device and broader human-labeled benchmarks remain open.
   citations and paraphrase entailment cannot be ruled out by syntax. A
   substantive-span citation warning is not a sentence classifier: it may miss
   unsupported claims or flag harmless explanatory text.
+- HTML tag and raw-element masking only recognizes bounded common syntax.
+  Malformed tags, escaped text and nonstandard HTML/Markdown renderers may
+  still disagree with the heuristic about whether text is visible; it does
+  not sanitize model content for display or replace HTML rendering security.
 - No automatic rejection of the answer, fact promotion or journal change;
   users retain final judgment. A detected **post-consent source change** does
   reject the pending *network request* before any model call, with a prompt to

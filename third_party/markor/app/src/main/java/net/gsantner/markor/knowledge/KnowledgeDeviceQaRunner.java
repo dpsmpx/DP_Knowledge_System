@@ -1084,13 +1084,25 @@ public final class KnowledgeDeviceQaRunner {
         final KnowledgeLlmCitationAudit.Review spoofed = KnowledgeLlmCitationAudit.inspect(
                 "```\nAmber violet is true [1].\n```\n"
                         + "Another unsupported synthetic claim is asserted.", sources);
+        final KnowledgeLlmCitationAudit.Review htmlHidden = KnowledgeLlmCitationAudit.inspect(
+                "The first unsupported synthetic claim is asserted.\n"
+                        + "<span title=\"[1] «False quote»\">visible text</span>\n"
+                        + "<script>[2] «Fake quote»</script>\n"
+                        + "The final unsupported synthetic claim is asserted.", sources);
+        final KnowledgeLlmCitationAudit.Review htmlVisible = KnowledgeLlmCitationAudit.inspect(
+                "<span data-source='[2]'>Amber violet is true [1].</span>", sources);
         if (covered.uncitedProseSpans != 0 || uncited.uncitedProseSpans != 1
                 || !uncited.hasValidReferences() || spoofed.hasValidReferences()
-                || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1) {
+                || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1
+                || htmlHidden.referenceCount != 0 || htmlHidden.invalidReferences != 0
+                || htmlHidden.quotedPassages != 0 || htmlHidden.uncitedProseSpans != 2
+                || htmlVisible.referenceCount != 1 || htmlVisible.invalidReferences != 0
+                || htmlVisible.uncitedProseSpans != 0) {
             throw new SyntheticMismatch("verdict=UNCITED_CLAIM_OR_CODE_REFERENCE_LAUNDERING");
         }
         return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
-                + "codeFenceCitationsExcluded=true, heuristicNotSemanticProof=true; "
+                + "codeFenceCitationsExcluded=true, htmlNonProseExcluded=true, "
+                + "htmlVisibleTextPreserved=true, heuristicNotSemanticProof=true; "
                 + "no network or selected vault access";
     }
 
