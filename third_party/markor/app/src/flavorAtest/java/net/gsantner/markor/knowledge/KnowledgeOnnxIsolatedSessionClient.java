@@ -85,7 +85,7 @@ final class KnowledgeOnnxIsolatedSessionClient {
                     sender.setDaemon(true);
                     senderThread = sender;
                     sender.start();
-                } catch (IOException | RuntimeException failed) {
+                } catch (IOException | RemoteException | RuntimeException failed) {
                     notifyFailure();
                 } finally {
                     closePipe(readPipe);
