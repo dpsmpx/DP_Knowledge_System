@@ -363,6 +363,20 @@ even if every reference and quotation passes the checks below.
     gates; cache-only `HYBRID-BALANCE-19` Android QA exercises two passage
     candidates from one artificial Markdown note. This is a local visibility
     heuristic, not a learned cross-encoder or semantic support proof.
+33. The citation audit no longer misreads **soft-wrapped or whitespace-separated
+    Markdown reference links** such as `[1]  [bibliography]`, `[1]\t[reference]`
+    or `[1]` followed by a single line break and `[bibliography]` as an approved
+    citation. It bounds the look-ahead to 64 characters and never crosses a
+    blank line; escaped opening brackets in the following label do not make
+    reference links, and numeric citation groups like `[1] [2]` (including
+    malformed Unicode digit labels) retain their existing audit path. **Escaped
+    backticks** are also ignored when opening or closing inline code spans:
+    a visible `[1]` next to a literal escaped backtick no longer disappears into a false
+    code span, while a source marker inside genuine code remains masked.
+    JVM cases and the cache-only `CITE-COVER-19` Android fixture exercise
+    these two distinct Markdown edges without provider calls, private notes
+    or changes to consent. This is conservative bounded syntax parsing, not
+    a complete CommonMark renderer or semantic grounding.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -428,6 +442,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   malformed citations, while preserving ordinary Markdown labels;
   hybrid shared-note excerpt choice with stronger lexical word coverage,
   compact phrases, semantic tie retention and bounded EN/RU regressions;
+  soft-wrapped/full-reference Markdown links and escaped inline-code backticks,
+  including numeric citation cluster retention and code-span false positives;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
