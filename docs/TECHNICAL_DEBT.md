@@ -890,6 +890,24 @@ ARM64/OEM, API 24–26, реальные веса и inference. `runnable=false`
 tokenizer/pooling и ролью, native inference, реальные веса и ARM64/OEM,
 API 24–26, настоящий OOM/LMK. `runnable=false`.
 
+**MODEL-M1: сравнение объявленных `GraphProto` и нативных I/O-счётчиков —
+[PR #215](https://github.com/dpsmpx/DP_Knowledge_System/pull/215).**
+Ручной SHA-аудит перед FD-передачей теперь сохраняет числовое количество
+входов/выходов и распознанных тензорных типов из исходного ONNX.
+После открытия/закрытия CPU-сессии UI сопоставляет их со сводкой
+изолированного ONNX Runtime: совпадение, частичные данные либо предупреждение
+о расхождении. При несовпадении входов, например из-за начальных значений
+`initializer`, выводится предупреждение **без вердикта о совместимости**.
+JVM-тесты проверяют все границы сравнения и SHA-аудированную синтетику,
+Android instrumentation сравнивает реальный runtime с исходным `Identity`
+без пользовательских файлов. [Эмуляторный CI](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45649779902):
+**14/14 на API 27/28/35**;
+[Python](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45649779958)
+и [Android integration](https://github.com/dpsmpx/DP_Knowledge_System/actions/runs/45649780010)
+зелёные. **Открыто:** сопоставление полных имён/типов/форм,
+tokenizer/pooling и роли, реальные веса/inference, ARM64/OEM,
+API 24–26, native OOM/LMK. `runnable=false`.
+
 **MODEL-M0: программная защита явного сетевого согласия — PR #136/#137/#139.**
 [PR #136](https://github.com/dpsmpx/DP_Knowledge_System/pull/136)
 привязал разрешение к HTTP endpoint/model/типу операции и проверяет его
