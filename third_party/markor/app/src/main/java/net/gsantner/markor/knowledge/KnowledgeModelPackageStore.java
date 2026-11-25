@@ -71,7 +71,10 @@ final class KnowledgeModelPackageStore {
         }
 
         boolean integrityPassed() { return true; } // Otherwise audit throws.
-        boolean jsonPreflightPassed() { return jsonInvalid == 0; }
+        // Hash verification covers bytes, but a skipped oversized JSON file
+        // has not passed even the limited syntax preflight. Fail closed for
+        // diagnostic status and explicit ONNX staging, never claim readiness.
+        boolean jsonPreflightPassed() { return jsonInvalid == 0 && jsonNotInspected == 0; }
         boolean externalDataPreflightPassed() {
             return container.detailState == KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ
                     && externalReferencesUnresolved == 0 && externalRangesOutOfBounds == 0

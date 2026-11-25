@@ -259,6 +259,31 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void oversizedButWellFormedJsonMustNotPassUncheckedPreflight()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-json-oversized").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] large = new byte[512 * 1024 + 1];
+            Arrays.fill(large, (byte) ' ');
+            large[0] = '{';
+            large[large.length - 1] = '}'; // Valid JSON, but intentionally not parsed.
+            packages.install(manifest(entry, "tokenizer.json", TOKENIZER, "config.json", large),
+                    companions("tokenizer.json", TOKENIZER, "config.json", large), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertTrue("All declared bytes were hashed", audit.integrityPassed());
+            assertEquals(1, audit.jsonObjectsChecked);
+            assertEquals(1, audit.jsonNotInspected);
+            assertEquals(0, audit.jsonInvalid);
+            assertFalse("Uninspected JSON cannot be called preflight-passed",
+                    audit.jsonPreflightPassed());
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
     @Test public void auditCancellationMustNeverReturnSuccess() throws Exception {
         final File directory = Files.createTempDirectory("dpks-package-audit-cancel").toFile();
         try {
@@ -408,6 +433,50 @@ public final class KnowledgeModelPackageStoreTest {
             assertNotNull(packages.installed(entry));
             assertFalse(KnowledgeModelPackageContract.inspect(entry,
                     packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void onnxStagingRefusesUninspectedLargeJsonWithoutCreatingCache()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-stage-large-json").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4, 5, 6, 7, 8};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("tensors.data", 2, 5)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final byte[] large = new byte[512 * 1024 + 1];
+            Arrays.fill(large, (byte) ' ');
+            large[0] = '{';
+            large[large.length - 1] = '}';
+            final JSONObject manifest = new JSONObject(new String(
+                    externalManifest(entry, "tensors.data", shard), StandardCharsets.UTF_8));
+            final JSONArray files = manifest.getJSONArray("files");
+            for (int i = 0; i < files.length(); i++) {
+                final JSONObject component = files.getJSONObject(i);
+                if ("config.json".equals(component.getString("name"))) {
+                    component.put("sha256", sha256(large));
+                    component.put("bytes", large.length);
+                }
+            }
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    Arrays.asList(
+                            new KnowledgeModelPackageStore.Source("tokenizer.json",
+                                    () -> new ByteArrayInputStream(TOKENIZER)),
+                            new KnowledgeModelPackageStore.Source("config.json",
+                                    () -> new ByteArrayInputStream(large)),
+                            new KnowledgeModelPackageStore.Source("tensors.data",
+                                    () -> new ByteArrayInputStream(shard))), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertTrue(audit.externalDataPreflightPassed());
+            assertFalse(audit.jsonPreflightPassed());
+            final File cache = new File(directory, "uncreated-cache");
+            try {
+                packages.prepareOnnx(entry, cache);
+                fail("Unchecked JSON was staged as if it had passed preflight");
+            } catch (IOException expected) { }
+            assertFalse("Rejected staging must not create a cache", cache.exists());
         } finally { removeTree(directory); }
     }
 
