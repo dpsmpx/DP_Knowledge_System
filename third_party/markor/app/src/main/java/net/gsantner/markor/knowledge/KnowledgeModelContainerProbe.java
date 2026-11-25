@@ -40,6 +40,7 @@ final class KnowledgeModelContainerProbe {
     private static final int MAX_ONNX_SHAPE_DIMS = 16;
     private static final int MAX_ONNX_DOMAINS = 128;
     private static final int MAX_ONNX_OPERATOR_KINDS = 128;
+    private static final int MAX_ONNX_LOCAL_FUNCTIONS = 128;
 
     enum State { METADATA_HINTS, PARTIAL, INVALID }
     enum DetailState { NOT_INSPECTED, DECLARATIONS_READ, PARTIAL, INVALID }
@@ -64,11 +65,17 @@ final class KnowledgeModelContainerProbe {
         long schemaUnlistedKinds;
         long schemaUnresolvedKinds;
         long schemaBeyondSnapshotKinds;
+        long localFunctionDeclarations;
+        long undecodedLocalFunctions;
+        long duplicateLocalFunctions;
+        long matchedGraphFunctionNodes;
+        long undecodedFunctionOverloads;
         String operatorHints = "";
         String signatureHints = "";
         String opsetHints = "";
         String operatorInventoryHints = "";
         String schemaSnapshotHints = "";
+        String localFunctionHints = "";
     }
 
     private static final class OpsetImport {
@@ -94,6 +101,31 @@ final class KnowledgeModelContainerProbe {
 
         @Override public int hashCode() {
             return 31 * domain.hashCode() + operator.hashCode();
+        }
+    }
+
+    /** Model-local function identity (domain, name, overload); overload matters since IR 10. */
+    private static final class FunctionKey {
+        final String domain;
+        final String name;
+        final String overload;
+
+        FunctionKey(final String namespace, final String operation, final String variant) {
+            domain = namespace;
+            name = operation;
+            overload = variant;
+        }
+
+        @Override public boolean equals(final Object other) {
+            if (this == other) return true;
+            if (!(other instanceof FunctionKey)) return false;
+            final FunctionKey key = (FunctionKey) other;
+            return domain.equals(key.domain) && name.equals(key.name)
+                    && overload.equals(key.overload);
+        }
+
+        @Override public int hashCode() {
+            return (31 * domain.hashCode() + name.hashCode()) * 31 + overload.hashCode();
         }
     }
 
@@ -126,11 +158,17 @@ final class KnowledgeModelContainerProbe {
         final long schemaUnlistedKinds;
         final long schemaUnresolvedKinds;
         final long schemaBeyondSnapshotKinds;
+        final long localFunctionDeclarations;
+        final long undecodedLocalFunctions;
+        final long duplicateLocalFunctions;
+        final long matchedGraphFunctionNodes;
+        final long undecodedFunctionOverloads;
         final String operatorHints;
         final String signatureHints;
         final String opsetHints;
         final String operatorInventoryHints;
         final String schemaSnapshotHints;
+        final String localFunctionHints;
 
         private Result(final KnowledgeModelFiles.Format containerFormat, final State outcome,
                        final long versionNumber, final long tensors, final long metadata,
@@ -164,11 +202,17 @@ final class KnowledgeModelContainerProbe {
             schemaUnlistedKinds = details.schemaUnlistedKinds;
             schemaUnresolvedKinds = details.schemaUnresolvedKinds;
             schemaBeyondSnapshotKinds = details.schemaBeyondSnapshotKinds;
+            localFunctionDeclarations = details.localFunctionDeclarations;
+            undecodedLocalFunctions = details.undecodedLocalFunctions;
+            duplicateLocalFunctions = details.duplicateLocalFunctions;
+            matchedGraphFunctionNodes = details.matchedGraphFunctionNodes;
+            undecodedFunctionOverloads = details.undecodedFunctionOverloads;
             operatorHints = details.operatorHints;
             signatureHints = details.signatureHints;
             opsetHints = details.opsetHints;
             operatorInventoryHints = details.operatorInventoryHints;
             schemaSnapshotHints = details.schemaSnapshotHints;
+            localFunctionHints = details.localFunctionHints;
         }
     }
 
@@ -344,6 +388,8 @@ final class KnowledgeModelContainerProbe {
         final Map<String, Long> referencedDomains = new HashMap<>();
         final Set<String> ambiguousDomains = new HashSet<>();
         final Map<OperatorKey, Long> operatorInventory = new LinkedHashMap<>();
+        final Map<FunctionKey, Long> graphFunctionCalls = new HashMap<>();
+        final Set<FunctionKey> localFunctions = new HashSet<>();
         try {
             long fields = 0;
             while (data.getFilePointer() < data.length()) {
@@ -359,7 +405,8 @@ final class KnowledgeModelContainerProbe {
                     final long size = readVarint(data);
                     if (size <= 0) throw new BadContainer();
                     graph = true;
-                    inspectOnnxGraph(data, size, details, referencedDomains, operatorInventory);
+                    inspectOnnxGraph(data, size, details, referencedDomains, operatorInventory,
+                            graphFunctionCalls);
                 } else if (field == 8 && wire == 2) {
                     final long size = readVarint(data);
                     if (size < 2) throw new BadContainer();
@@ -382,6 +429,23 @@ final class KnowledgeModelContainerProbe {
                             }
                         }
                     }
+                } else if (field == 25 && wire == 2) { // ModelProto.functions
+                    final long size = readVarint(data);
+                    if (++details.localFunctionDeclarations > MAX_ONNX_LOCAL_FUNCTIONS) {
+                        throw new ScanLimit();
+                    }
+                    final FunctionKey key = inspectOnnxLocalFunction(data, size);
+                    if (key == null) {
+                        details.undecodedLocalFunctions++;
+                    } else {
+                        if (!localFunctions.add(key)) details.duplicateLocalFunctions++;
+                        if (details.localFunctionDeclarations <= 6) {
+                            details.localFunctionHints +=
+                                    (details.localFunctionHints.isEmpty() ? "" : "; ")
+                                    + safeOnnxDomainHint(key.domain) + "/" + key.name
+                                    + (key.overload.isEmpty() ? "" : "#" + key.overload);
+                        }
+                    }
                 } else {
                     skipWire(data, wire);
                 }
@@ -391,6 +455,11 @@ final class KnowledgeModelContainerProbe {
             for (final Map.Entry<String, Long> domain : referencedDomains.entrySet()) {
                 if (!importedDomains.containsKey(domain.getKey())) {
                     details.customNodesMissingImport += domain.getValue();
+                }
+            }
+            for (final Map.Entry<FunctionKey, Long> call : graphFunctionCalls.entrySet()) {
+                if (localFunctions.contains(call.getKey())) {
+                    details.matchedGraphFunctionNodes += call.getValue();
                 }
             }
             details.distinctOperatorKinds = operatorInventory.size();
@@ -427,7 +496,10 @@ final class KnowledgeModelContainerProbe {
                         + safeOnnxDomainHint(key.domain) + "/" + key.operator + "=" + revision;
             }
             if (details.customNodesMissingImport > 0 || details.duplicateOpsetDomains > 0
-                    || details.undecodedOperatorNodes > 0) {
+                    || details.undecodedOperatorNodes > 0
+                    || details.undecodedLocalFunctions > 0
+                    || details.duplicateLocalFunctions > 0
+                    || details.undecodedFunctionOverloads > 0) {
                 details.state = DetailState.PARTIAL;
             }
             return onnx(ir > 0 && graph && opsets > 0
@@ -455,7 +527,8 @@ final class KnowledgeModelContainerProbe {
     private static void inspectOnnxGraph(final RandomAccessFile data, final long bytes,
                                          final Details details,
                                          final Map<String, Long> referencedDomains,
-                                         final Map<OperatorKey, Long> operatorInventory)
+                                         final Map<OperatorKey, Long> operatorInventory,
+                                         final Map<FunctionKey, Long> graphFunctionCalls)
             throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
@@ -472,7 +545,7 @@ final class KnowledgeModelContainerProbe {
                 final long length = readVarint(data);
                 if (++details.nodes > MAX_ONNX_GRAPH_NODES) throw new ScanLimit();
                 inspectOnnxNode(data, length, details, examples,
-                        referencedDomains, operatorInventory);
+                        referencedDomains, operatorInventory, graphFunctionCalls);
             } else if (wire == 2 && (field == 11 || field == 12)) {
                 final long length = readVarint(data);
                 if (field == 11) details.inputs++;
@@ -654,13 +727,16 @@ final class KnowledgeModelContainerProbe {
     private static void inspectOnnxNode(final RandomAccessFile data, final long bytes,
                                         final Details details, final Set<String> examples,
                                         final Map<String, Long> referencedDomains,
-                                        final Map<OperatorKey, Long> operatorInventory)
+                                        final Map<OperatorKey, Long> operatorInventory,
+                                        final Map<FunctionKey, Long> graphFunctionCalls)
             throws IOException {
         if (bytes > data.length() - data.getFilePointer()) throw new BadContainer();
         final long end = data.getFilePointer() + bytes;
         long fields = 0;
         String domain = "";
         String operation = "";
+        String overload = "";
+        boolean decodedOverload = true;
         while (data.getFilePointer() < end) {
             if (++fields > 1000) throw new ScanLimit();
             final long tag = readVarint(data);
@@ -685,6 +761,10 @@ final class KnowledgeModelContainerProbe {
                 }
             } else if ((tag >>> 3) == 7 && (tag & 7) == 2) {
                 domain = readOnnxDomain(data, readVarint(data), end);
+            } else if ((tag >>> 3) == 8 && (tag & 7) == 2) {
+                final String name = readOnnxSafeIdentifier(data, readVarint(data), end);
+                overload = name;
+                decodedOverload = name != null;
             } else {
                 skipWire(data, (int) (tag & 7));
             }
@@ -709,6 +789,72 @@ final class KnowledgeModelContainerProbe {
                     && !operatorInventory.containsKey(key)) throw new ScanLimit();
             final Long count = operatorInventory.get(key);
             operatorInventory.put(key, count == null ? 1 : count + 1);
+            if (!decodedOverload) {
+                details.undecodedFunctionOverloads++;
+            } else {
+                final FunctionKey function = new FunctionKey(domain, operation, overload);
+                if (graphFunctionCalls.size() >= MAX_ONNX_OPERATOR_KINDS
+                        && !graphFunctionCalls.containsKey(function)) throw new ScanLimit();
+                final Long calls = graphFunctionCalls.get(function);
+                graphFunctionCalls.put(function, calls == null ? 1 : calls + 1);
+            }
+        }
+    }
+
+    /** Inspect only a FunctionProto's top-level identity fields; skip its entire body. */
+    private static FunctionKey inspectOnnxLocalFunction(final RandomAccessFile data,
+                                                        final long size) throws IOException {
+        if (size < 0 || size > data.length() - data.getFilePointer()) throw new BadContainer();
+        final long end = data.getFilePointer() + size;
+        String name = "";
+        String domain = "";
+        String overload = "";
+        boolean decoded = true;
+        long fields = 0;
+        while (data.getFilePointer() < end) {
+            checkInterrupted();
+            if (++fields > 1024) throw new ScanLimit();
+            final long tag = readVarint(data);
+            if (tag == 0) throw new BadContainer();
+            final long field = tag >>> 3;
+            final int wire = (int) (tag & 7);
+            if (field == 1 && wire == 2) {
+                name = readOnnxSafeIdentifier(data, readVarint(data), end);
+                if (name == null) decoded = false;
+            } else if (field == 10 && wire == 2) {
+                domain = readOnnxDomain(data, readVarint(data), end);
+            } else if (field == 13 && wire == 2) {
+                overload = readOnnxSafeIdentifier(data, readVarint(data), end);
+                if (overload == null) decoded = false;
+            } else {
+                skipWire(data, wire);
+            }
+            if (data.getFilePointer() > end) throw new BadContainer();
+        }
+        return !decoded || name == null || name.isEmpty() || overload == null
+                ? null : new FunctionKey(domain, name, overload);
+    }
+
+    /** A short, display-safe identifier. A long/unsafe string never becomes a key. */
+    private static String readOnnxSafeIdentifier(final RandomAccessFile data, final long bytes,
+                                                  final long parentEnd) throws IOException {
+        if (bytes < 0 || bytes > parentEnd - data.getFilePointer()) throw new BadContainer();
+        if (bytes > 64) {
+            skipExact(data, bytes);
+            return null;
+        }
+        final byte[] raw = new byte[(int) bytes];
+        data.readFully(raw);
+        try {
+            final String name = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw)).toString();
+            if (name.isEmpty()) return ""; // Empty overload is valid.
+            final String safe = safeHint(name);
+            return safe.isEmpty() ? null : safe;
+        } catch (CharacterCodingException invalid) {
+            throw new BadContainer();
         }
     }
 

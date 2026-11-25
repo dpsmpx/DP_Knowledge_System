@@ -261,6 +261,73 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(sinceVersion, match.sinceVersion);
     }
 
+    @Test public void onnxLocalFunctionsMatchExactIdentityWithoutExecutingBodies()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MyOp", "com.example", "alt"));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MyOp", "com.example", "other"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxOpset(model, "com.example", 1);
+        appendOnnxFunction(model, "MatMul", "", "");
+        appendOnnxFunction(model, "MyOp", "com.example", "alt");
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(2, result.localFunctionDeclarations);
+        assertEquals(2, result.matchedGraphFunctionNodes);
+        assertEquals(0, result.duplicateLocalFunctions);
+        assertEquals(0, result.undecodedLocalFunctions);
+        assertEquals("default/MatMul; com.example/MyOp#alt", result.localFunctionHints);
+        assertEquals(1, result.schemaMatchedKinds); // Still only a revision hint.
+    }
+
+    @Test public void onnxLocalFunctionDuplicatesAndUnsafeNamesAreOnlyWarnings()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(new byte[]{10, 2, 34, 0});
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunction(model, "Same", "com.example", "");
+        appendOnnxFunction(model, "Same", "com.example", "");
+        appendOnnxFunction(model, "Bad\nFUNCTION", "com.example", "");
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(3, result.localFunctionDeclarations);
+        assertEquals(1, result.duplicateLocalFunctions);
+        assertEquals(1, result.undecodedLocalFunctions);
+        assertEquals("com.example/Same; com.example/Same", result.localFunctionHints);
+    }
+
+    @Test public void onnxLocalFunctionsHaveBoundedCountAndUnknownOverloads()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MatMul", "", "line\nattack"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunction(model, "MatMul", "", "");
+        final KnowledgeModelContainerProbe.Result unknown = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, unknown.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, unknown.detailState);
+        assertEquals(1, unknown.undecodedFunctionOverloads);
+        assertEquals(0, unknown.matchedGraphFunctionNodes);
+
+        for (int i = 0; i < 128; i++) appendOnnxFunction(model, "F" + i, "", "");
+        final KnowledgeModelContainerProbe.Result excessive = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, excessive.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
+    }
+
     @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         varint(graph, 90);
@@ -536,6 +603,34 @@ public final class KnowledgeModelContainerProbeTest {
         varint(node, 58); // NodeProto.domain, field 7
         protobufString(node, domain);
         return node.toByteArray();
+    }
+
+    private static byte[] onnxNodeWithOverload(final String operation, final String domain,
+                                               final String overload) {
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        final byte[] base = onnxNode(operation, domain);
+        node.write(base, 0, base.length);
+        varint(node, 66); // NodeProto.overload, field 8
+        protobufString(node, overload);
+        return node.toByteArray();
+    }
+
+    private static void appendOnnxFunction(final ByteArrayOutputStream model,
+                                           final String name, final String domain,
+                                           final String overload) {
+        final ByteArrayOutputStream function = new ByteArrayOutputStream();
+        varint(function, 10); // FunctionProto.name, field 1
+        protobufString(function, name);
+        varint(function, 82); // FunctionProto.domain, field 10
+        protobufString(function, domain);
+        if (!overload.isEmpty()) {
+            varint(function, 106); // FunctionProto.overload, field 13
+            protobufString(function, overload);
+        }
+        varint(function, 58); // FunctionProto.node, field 7: skip body
+        protobufBytes(function, onnxNode("Add", ""));
+        varint(model, 202); // ModelProto.functions, field 25
+        protobufBytes(model, function.toByteArray());
     }
 
     private static void appendOnnxOpset(final ByteArrayOutputStream model,
