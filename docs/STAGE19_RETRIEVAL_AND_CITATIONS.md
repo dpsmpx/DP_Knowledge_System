@@ -257,6 +257,20 @@ even if every reference and quotation passes the checks below.
     and 90 repeated mixed lines under the existing 12k answer bound. This
     improves **syntax** and false-positive resistance only; source truth,
     paraphrase entailment and real device behavior remain unverified.
+26. Sentence boundaries now keep trailing source clusters attached to their
+    **preceding** claim: in `Statement A. [1] Statement B.`, `[1]` cannot
+    launder the next uncited sentence. Adjacent and comma-separated clusters
+    retain their source numbering and offsets; a subsequent independently
+    cited sentence is checked against its own source rather than against both
+    clauses combined. ATX headings with one through six hashes are excluded
+    consistently from prose-attribution warnings (seven hashes are ordinary
+    Markdown text). The code/quote/citation audit also recognizes CR, CRLF,
+    Unicode NEL, line separator and paragraph separator as distinct line
+    boundaries, preserving those characters when masking hidden Markdown.
+    Synthetic JVM tests cover both genuine and fabricated claims across these
+    boundaries. These remain conservative structural diagnostics, **not**
+    factuality or entailment detection, and Android OEM/lifecycle QA remains
+    open.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -295,6 +309,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   citation source-lexicon reuse and oversized source rejection;
   non-prose HTML comments, link targets and autolinks, including quoted URL
   text and a repeated-citation mixed Markdown answer;
+  trailing sentence-end citation clusters, all six ATX heading levels and
+  CR/CRLF/Unicode line separator isolation from following uncited claims;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier
