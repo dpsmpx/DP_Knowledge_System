@@ -24,6 +24,7 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final String PSS_BEFORE_KIB = "pss_before_kib";
     static final String PSS_OBSERVED_KIB = "pss_observed_kib";
     static final String PSS_AFTER_KIB = "pss_after_kib";
+    static final String RSS_HIGH_WATER_KIB = "rss_hwm_kib";
     // A DEBUG-only test signal to refuse a verified FD before native session creation.
     static final String DEBUG_FORCE_LOW_MEMORY = "debug_force_low_memory";
     static final String PIPE_FD = "fd";

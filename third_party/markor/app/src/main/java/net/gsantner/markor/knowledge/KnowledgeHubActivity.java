@@ -762,7 +762,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     modelStatus.setText(getString(R.string.knowledge_models_onnx_smoke_passed,
                             report.runtimeVersion, report.sessionInitMillis,
                             report.inferenceMicros, report.nativeHeapDeltaBytes,
-                            formatWorkerPss(report.workerMemory)));
+                            formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)));
                 }
             }
 
@@ -805,7 +805,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             modelStatus.setText(getString(R.string.knowledge_models_onnx_fd_passed,
                                     report.runtimeVersion, report.inputs, report.outputs,
                                     report.sessionInitMillis, report.nativeHeapDeltaBytes,
-                                    formatWorkerPss(report.workerMemory)));
+                                    formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)));
                         }
                     }
                 }
@@ -831,14 +831,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
-    /** Only isolated-worker PSS snapshots; no measurement of a true native peak. */
-    private String formatWorkerPss(final KnowledgeOnnxMemoryTrace memory) {
+    /** PSS samples and kernel self RSS high-water are distinct memory measurements. */
+    private String formatWorkerMemory(final KnowledgeOnnxMemoryTrace memory,
+                                      final long rssHighWaterKiB) {
+        final String pss;
         if (memory == null || memory.beforeKiB < 0 || memory.maxObservedKiB < 0
                 || memory.afterCloseKiB < 0) {
-            return getString(R.string.knowledge_models_worker_pss_unavailable);
+            pss = getString(R.string.knowledge_models_worker_pss_unavailable);
+        } else {
+            pss = getString(R.string.knowledge_models_worker_pss_samples,
+                    memory.beforeKiB, memory.maxObservedKiB, memory.afterCloseKiB);
         }
-        return getString(R.string.knowledge_models_worker_pss_samples,
-                memory.beforeKiB, memory.maxObservedKiB, memory.afterCloseKiB);
+        final String rss = rssHighWaterKiB > 0 && KnowledgeOnnxRssHighWater.valid(rssHighWaterKiB)
+                ? getString(R.string.knowledge_models_worker_rss_high_water, rssHighWaterKiB)
+                : getString(R.string.knowledge_models_worker_rss_high_water_unavailable);
+        return pss + "\n" + rss;
     }
 
     /** Fail closed on an unavailable/low OS RAM snapshot; this reserves no memory. */
@@ -897,7 +904,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         R.string.knowledge_models_onnx_session_passed,
                                         report.runtimeVersion, report.inputs, report.outputs,
                                         report.sessionInitMillis, report.nativeHeapDeltaBytes,
-                                        formatWorkerPss(report.workerMemory)));
+                                        formatWorkerMemory(report.workerMemory, report.workerRssHighWaterKiB)));
                             }
                         }
 

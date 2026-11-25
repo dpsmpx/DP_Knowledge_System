@@ -184,7 +184,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     result.nativeHeapDeltaBytes);
             data.putLong(KnowledgeOnnxIsolatedProtocol.INPUTS, result.inputs);
             data.putLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS, result.outputs);
-            putMemory(data, result.workerMemory);
+            putMemory(data, result.workerMemory, result.workerRssHighWaterKiB);
             reply.setData(data);
         }
         try {
@@ -213,7 +213,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             data.putLong(KnowledgeOnnxIsolatedProtocol.INIT_MILLIS, result.sessionInitMillis);
             data.putLong(KnowledgeOnnxIsolatedProtocol.RUN_MICROS, result.inferenceMicros);
             data.putLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, result.nativeHeapDeltaBytes);
-            putMemory(data, result.workerMemory);
+            putMemory(data, result.workerMemory, result.workerRssHighWaterKiB);
             reply.setData(data);
         }
         try {
@@ -223,10 +223,12 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         }
     }
 
-    private static void putMemory(final Bundle data, final KnowledgeOnnxMemoryTrace memory) {
+    private static void putMemory(final Bundle data, final KnowledgeOnnxMemoryTrace memory,
+                                  final long rssHighWaterKiB) {
         data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, memory.beforeKiB);
         data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, memory.maxObservedKiB);
         data.putLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, memory.afterCloseKiB);
+        data.putLong(KnowledgeOnnxIsolatedProtocol.RSS_HIGH_WATER_KIB, rssHighWaterKiB);
     }
 
     /** Stop ONLY this named worker process, never the main DPKS process. */

@@ -83,6 +83,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                 assertTrue(report.get().sessionInitMillis >= 0);
                 assertTrue(report.get().inferenceMicros >= 0);
                 assertWorkerPssSnapshots(report.get().workerMemory);
+                assertTrue("Worker kernel RSS high-water is not bounded",
+                        KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
                 // Give the unbound isolated process a moment to exit before rebinding.
                 if (run == 0) Thread.sleep(1000);
             }
@@ -116,6 +118,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(1, report.get().outputs);
             assertTrue(report.get().sessionInitMillis >= 0);
             assertWorkerPssSnapshots(report.get().workerMemory);
+            assertTrue("Worker kernel RSS high-water is not bounded",
+                    KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
         } finally {
             instrumentation.runOnMainSync(client::cancel);
         }

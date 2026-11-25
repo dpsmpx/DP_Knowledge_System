@@ -198,14 +198,18 @@ final class KnowledgeOnnxIsolatedSessionClient {
             final long before = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_BEFORE_KIB, -1);
             final long observed = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_OBSERVED_KIB, -1);
             final long after = data.getLong(KnowledgeOnnxIsolatedProtocol.PSS_AFTER_KIB, -1);
+            final long rssHighWater = data.getLong(
+                    KnowledgeOnnxIsolatedProtocol.RSS_HIGH_WATER_KIB, -1L);
             if (millis >= 0 && millis <= KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                     && inputs >= 1 && inputs <= 32 && outputs >= 1 && outputs <= 32
-                    && KnowledgeOnnxMemoryTrace.valid(before, observed, after)) {
+                    && KnowledgeOnnxMemoryTrace.valid(before, observed, after)
+                    && KnowledgeOnnxRssHighWater.valid(rssHighWater)) {
                 report = new KnowledgeOnnxSessionGate.Report(
                         KnowledgeOnnxIsolatedProtocol.safeVersion(
                                 data.getString(KnowledgeOnnxIsolatedProtocol.VERSION)),
                         millis, data.getLong(KnowledgeOnnxIsolatedProtocol.NATIVE_DELTA, 0),
-                        inputs, outputs, new KnowledgeOnnxMemoryTrace(before, observed, after));
+                        inputs, outputs, new KnowledgeOnnxMemoryTrace(before, observed, after),
+                        rssHighWater);
             }
         }
         final Callback done = finish();
