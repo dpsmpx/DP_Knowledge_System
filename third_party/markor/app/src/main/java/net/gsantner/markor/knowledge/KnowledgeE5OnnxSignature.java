@@ -36,6 +36,21 @@ final class KnowledgeE5OnnxSignature {
         require(inputs, outputs, config.hiddenSize);
     }
 
+    /** Compare exact names, element types and axes from two independent readers. */
+    static boolean sameDescriptors(final Map<String, Tensor> first,
+                                   final Map<String, Tensor> second) {
+        if (first == null || second == null || !first.keySet().equals(second.keySet())) {
+            return false;
+        }
+        for (final Map.Entry<String, Tensor> item : first.entrySet()) {
+            final Tensor a = item.getValue();
+            final Tensor b = second.get(item.getKey());
+            if (a == null || b == null || a.type != b.type
+                    || !Arrays.equals(a.shape, b.shape)) return false;
+        }
+        return true;
+    }
+
     static void require(final Map<String, Tensor> inputs, final Map<String, Tensor> outputs,
                         final int expectedDimensions) {
         if (inputs == null || outputs == null || expectedDimensions < 8

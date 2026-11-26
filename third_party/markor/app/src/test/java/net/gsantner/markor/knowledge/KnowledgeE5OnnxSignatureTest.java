@@ -125,4 +125,18 @@ public final class KnowledgeE5OnnxSignatureTest {
             fail("ONNX output channels differed from canonical E5 config");
         } catch (IllegalArgumentException expected) { }
     }
+
+    @Test public void nativeAndOfflineDescriptorsMustMatchExactNamesTypesAndAxes() {
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> first = inputs();
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> same = inputs();
+        assertTrue(KnowledgeE5OnnxSignature.sameDescriptors(first, same));
+        same.put("input_ids", t(KnowledgeE5OnnxSignature.DataType.INT64, 1, 512));
+        assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(first, same));
+        same.put("input_ids", t(KnowledgeE5OnnxSignature.DataType.FLOAT32, -1, -1));
+        assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(first, same));
+        same.remove("attention_mask");
+        same.put("masked_attention", t(KnowledgeE5OnnxSignature.DataType.INT64, -1, -1));
+        assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(first, same));
+        assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(null, same));
+    }
 }

@@ -230,7 +230,8 @@ final class KnowledgeOnnxCpuBackend {
         }
     }
 
-    private static Map<String, KnowledgeE5OnnxSignature.Tensor> signature(
+    /** Reused by synthetic instrumentation when comparing ORT and protobuf I/O. */
+    static Map<String, KnowledgeE5OnnxSignature.Tensor> signature(
             final Map<String, NodeInfo> nodes) throws IOException {
         if (nodes == null || nodes.size() > KnowledgeOnnxIoSummary.MAX_IO) {
             throw new IOException("Invalid ONNX synthetic graph I/O");
