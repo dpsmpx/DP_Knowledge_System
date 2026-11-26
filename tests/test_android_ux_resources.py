@@ -97,6 +97,48 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('overloadedCandidateFixtureIncludesExactNeighborOverlapButNotHiddenSource',
                       jvm.read_text())
 
+    def test_android_quota_experiment_is_cache_only_and_does_not_change_public_search(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('MAX_SEMANTIC_CANDIDATES, false)', index)
+        self.assertIn('syntheticSemanticSearchWithBudget(final String modelKey,', index)
+        self.assertIn('candidateBudget, false)', index)
+        self.assertIn('syntheticSemanticSearchQuotaWithBudget(final String modelKey,', index)
+        self.assertIn('checkSyntheticSearchBudget(candidateBudget)', index)
+        self.assertIn('candidateBudget, true)', index)
+        for marker in ('!syntheticDatabase', 'dpks-device-qa-',
+                       'databaseFile.getName().startsWith("qa-")',
+                       'SELECT COUNT(*) FROM embedding_notes e',
+                       'e.completed=e.chunks AND n.oversized=0',
+                       'n.raw_sha256=e.source_sha256',
+                       'n.generation=(SELECT value FROM meta',
+                       'final int quota = (int) Math.max(1L, candidateBudget / completedSources)',
+                       'chunkRange.append(" AND l.chunk>=?")',
+                       'chunkRange.append(" AND l.chunk<?")',
+                       'candidateBudget - early'):
+            self.assertIn(marker, index)
+        self.assertIn('step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget)', qa)
+        start = qa.index('private String checkSyntheticSourceQuotaBudget()')
+        end = qa.index('\n    /** Synthetic cache-only post-approval', start)
+        fixture = qa[start:end]
+        for marker in ('qa-quota-skew.sqlite', 'qa-quota-uniform.sqlite',
+                       'KnowledgeVaultScanner.scan(vault, 8,',
+                       'KnowledgeEmbeddingChunks.fromNote(body)',
+                       'testIndex.beginEmbedding(paths[i]', 'testIndex.appendEmbeddingBatch(paths[i]',
+                       'syntheticSemanticSearchWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget)',
+                       'quota.get(0).excerptStart', 'matchesIndexedEvidenceSource(paths[i]',
+                       'uniformLateExactRecovered=true', 'skewLateOnlyStillMissed=true',
+                       'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+        self.assertNotIn('actualIndex.', fixture)
+        self.assertNotIn('notebook.', fixture)
+        jvm = (ROOT.parent / 'test/java/net/gsantner/markor/knowledge/KnowledgeEmbeddingTest.java')
+        self.assertIn('sourceQuotaQaFixtureHasOneNearExactBucketAndLateOnlyTarget',
+                      jvm.read_text())
+
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         ranking = (folder / "KnowledgeHybridRanking.java").read_text()
