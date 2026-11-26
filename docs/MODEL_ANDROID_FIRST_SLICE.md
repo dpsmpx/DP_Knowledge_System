@@ -92,6 +92,10 @@
 синтетических числах без inference:
 [MODEL_M2_SYNTHETIC_BENCHMARK.md](MODEL_M2_SYNTHETIC_BENCHMARK.md).
 Это не заменяет ещё отсутствующие тесты скорости и качества реальных моделей.
+Для `MODEL-M3` подготовлены строгие Java-контракты префиксов E5, готовых
+`int64` token/attention-тензоров и masked-mean/L2 postprocessing:
+[MODEL_M3_E5_TENSOR_CONTRACT.md](MODEL_M3_E5_TENSOR_CONTRACT.md).
+Внешний проверенный SentencePiece-токенизатор и ONNX `Run` пока отсутствуют.
 
 1. `MODEL-M1`: дополнить первый SHA-манифест каталогом совместимых
    артефактов со всеми зависимостями/tokenizer, лицензиями/ревизиями,
