@@ -26,7 +26,7 @@ import static org.junit.Assert.*;
  */
 @RunWith(AndroidJUnit4.class)
 public final class KnowledgeE5OnnxMetadataInstrumentedTest {
-    private static KnowledgeE5ConfigProfile.Result profile() throws Exception {
+    static KnowledgeE5ConfigProfile.Result profile() throws Exception {
         final byte[] config = new JSONObject()
                 .put("model_type", "bert")
                 .put("tokenizer_class", "XLMRobertaTokenizer")
@@ -44,7 +44,7 @@ public final class KnowledgeE5OnnxMetadataInstrumentedTest {
         return KnowledgeE5ConfigProfile.parse(config, null);
     }
 
-    private static KnowledgeE5OnnxMetadataProbe.Report staticMetadata(
+    static KnowledgeE5OnnxMetadataProbe.Report staticMetadata(
             final Context context, final byte[] bytes,
             final KnowledgeE5ConfigProfile.Result profile) throws Exception {
         final File file = File.createTempFile("dpks-e5-onnx-meta-", ".onnx",
