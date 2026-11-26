@@ -502,6 +502,25 @@ even if every reference and quotation passes the checks below.
     nearest-neighbor completeness**: many exact-bucket chunks can still
     monopolize the budget. Device RAM/latency and a broader human-labeled
     retrieval benchmark remain outstanding.
+41. **Do not spend overloaded LSH candidate budget on the same chunk twice.**
+    A vector can match an exact signature in one table and a one-bit neighbor
+    in another. The original two-pass query counted it once in each pass,
+    potentially using the final candidate slot without inspecting a different
+    neighboring document. The overloaded-only second query now excludes
+    `(path, chunk)` pairs that have *any* of the four exact-bucket postings,
+    using a correlated `NOT EXISTS` lookup against the existing
+    `(bucket, path, chunk)` SQLite primary key. The total bound stays **45k
+    distinct inspected chunks**; no index migration, full vector scan or
+    model call is introduced. The unchanged fast path runs one SQL query for
+    indices at or below the cap. A two-slot SQL regression reproduces the
+    dropped neighbor before the exclusion, and `EMBED-OVERLAP-19` exercises
+    the same three-note, float32-safe fixture in a disposable Android QA
+    index, including SHA-256 source checks. The JVM LSH test locks in the
+    bucket-overlap geometry, while the Python mirror validates query behavior.
+    **This only eliminates cross-pass duplication**: exact buckets may still
+    consume the entire cap, and a zero-collision true neighbor remains
+    unreachable. Device/OEM multi-chunk latency and broader human-labeled
+    retrieval quality remain acceptance debts.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -588,6 +607,15 @@ SQLite ordering guarantee. The Android `EMBED-CHUNKS-19` QA separately
 exercises the later exact chunk at a one-chunk synthetic budget and ensures
 incomplete checkpoints remain excluded. All inputs are generated and
 model-free.
+
+The new `EMBED-OVERLAP-19` fixture separately uses three cache-only synthetic
+notes: cosine 0.99 with one exact and one neighbor signature, cosine 0.98
+reached *only* by neighbor probes, and cosine 0.80 outside all query probes.
+With a two-chunk diagnostic cap, both reachable sources are retained. The
+unmodified two-pass implementation lost the neighbor-only note because it
+revisited the first chunk in its second pass. This narrow fixture demonstrates
+candidate-budget accounting, not true semantic recall or device speed.
+
 The `angular_noise_probe` similarly reports the five artificial cosine
 values and which (if any) of the four LSH tables still reach a query probe.
 It is a fixed geometry probe, not a claim about real model noise or a

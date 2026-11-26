@@ -74,6 +74,29 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,',
                       index)
 
+    def test_overloaded_semantic_neighbor_pass_excludes_exact_candidates_in_android_qa(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        jvm = (ROOT.parent / "test/java/net/gsantner/markor/knowledge/KnowledgeEmbeddingTest.java")
+        # The new exclusion must only run for the overloaded neighbor pass.
+        self.assertIn('AND NOT EXISTS (SELECT 1 FROM embedding_lsh prior', index)
+        self.assertIn('prior.path=l.path AND prior.chunk=l.chunk', index)
+        self.assertIn('candidateBudget - exactRows, exact,', index)
+        self.assertIn('candidateBudget, null, best', index)
+        self.assertIn('step("EMBED-OVERLAP-19", this::checkSyntheticLshOverlapBudget)', qa)
+        start = qa.index('private String checkSyntheticLshOverlapBudget()')
+        end = qa.index('\n    private ', start + 1)
+        fixture = qa[start:end]
+        for marker in ('dpks-device-qa-', 'qa-overlap.sqlite',
+                       'syntheticSemanticSearchWithBudget(model, exact, 8, 2)',
+                       'neighborOnlySourceRecovered=true', 'sourceBytesSealed=true',
+                       'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+        self.assertIn('overloadedCandidateFixtureIncludesExactNeighborOverlapButNotHiddenSource',
+                      jvm.read_text())
+
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         ranking = (folder / "KnowledgeHybridRanking.java").read_text()

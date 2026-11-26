@@ -127,6 +127,38 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
         self.assertTrue(probe['exact_target_retrieved_at_6_without_cap'])
         self.assertNotIn('.md', str(probe))
 
+    def test_overloaded_exact_and_neighbor_passes_do_not_spend_budget_twice(self):
+        """A chunk in one exact and one neighbor bucket must be counted once."""
+        with sqlite3.connect(':memory:') as connection:
+            connection.executescript('''
+                CREATE TABLE notes(path TEXT PRIMARY KEY, generation TEXT, oversized INTEGER);
+                CREATE TABLE embedding_notes(path TEXT PRIMARY KEY, model_key TEXT,
+                                             dimension INTEGER, chunks INTEGER, completed INTEGER);
+                CREATE TABLE embedding_chunks(path TEXT, chunk INTEGER, vector BLOB,
+                                              PRIMARY KEY(path,chunk));
+                CREATE TABLE embedding_lsh(bucket INTEGER, path TEXT, chunk INTEGER,
+                                           PRIMARY KEY(bucket,path,chunk));
+            ''')
+            from scripts.benchmark_stage19_hybrid import MODEL_KEY
+            from scripts.benchmark_stage19_retrieval import GENERATION
+            for path, cosine in (('a-overlap.md', .99), ('z-neighbor.md', .98),
+                                 ('zz-unreachable.md', .80)):
+                vec = [cosine, 0., 0., 0., 0., 0., 0., 0.]
+                vec[7 if path == 'z-neighbor.md' else 1] = math.sqrt(1 - cosine * cosine)
+                connection.execute('INSERT INTO notes VALUES (?,?,0)', (path, GENERATION))
+                connection.execute('INSERT INTO embedding_notes VALUES (?,?,?,?,?)',
+                                   (path, MODEL_KEY, 8, 1, 1))
+                connection.execute('INSERT INTO embedding_chunks VALUES (?,?,?)',
+                                   (path, 0, struct.pack('<8f', *vec)))
+                connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,0)',
+                                       ((bucket, path) for bucket in lsh_buckets(vec)))
+            self.assertEqual(['a-overlap.md', 'z-neighbor.md'],
+                             search_semantic_mirror(connection, basis(0), 8,
+                                                    candidate_cap=2, policy='exact_first'))
+            self.assertEqual(['a-overlap.md', 'z-neighbor.md'],
+                             search_semantic_mirror(connection, basis(0), 8,
+                                                    candidate_cap=2))
+
     def test_noisy_vector_can_leave_all_lsh_probes_while_cosine_still_positive(self):
         angles = synthetic_angular_noise_probe()
         self.assertEqual([1.0, 0.99, 0.95, 0.9, 0.8],

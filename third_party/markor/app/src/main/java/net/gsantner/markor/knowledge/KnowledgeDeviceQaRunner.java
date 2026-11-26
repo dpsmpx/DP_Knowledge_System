@@ -155,6 +155,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("HYBRID-BALANCE-19", this::checkSyntheticHybridBalance);
                 step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex);
                 step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex);
+                step("EMBED-OVERLAP-19", this::checkSyntheticLshOverlapBudget);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -1458,6 +1459,76 @@ public final class KnowledgeDeviceQaRunner {
                     + "bestLaterChunkSelected=true, perPathDeduplicated=true, "
                     + "exactBucketAtOneChunkBudget=true, "
                     + "rawByteSealVerified=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Cross-pass duplicates must not crowd out another source within a
+     * tiny, explicit budget. This uses only three cache-generated files.
+     */
+    private String checkSyntheticLshOverlapBudget() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create overlap sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Cannot create overlap vault");
+            final String[] paths = {
+                    "a-overlap.md", "z-neighbor.md", "zz-unreachable.md"};
+            final float[] cosines = {0.99f, 0.98f, 0.80f};
+            final File[] notes = new File[paths.length];
+            final String[] bodies = new String[paths.length];
+            for (int i = 0; i < paths.length; i++) {
+                notes[i] = new File(vault, paths[i]);
+                bodies[i] = "# Synthetic isolated LSH overlap " + i + "\n";
+                writeFixture(notes[i], bodies[i]);
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-overlap.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 4,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-lsh-overlap-budget";
+            final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            for (int i = 0; i < paths.length; i++) {
+                final float cosine = cosines[i];
+                final float[] vector = new float[8];
+                vector[0] = cosine;
+                // The neighbor-only vector uses a different rotation plane:
+                // float32 rounding near one LSH hyperplane is otherwise unstable.
+                vector[i == 1 ? 7 : 1] = (float) Math.sqrt(1 - cosine * cosine);
+                final float[] normalized = KnowledgeEmbeddingVectors.normalize(vector);
+                final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                        KnowledgeEmbeddingChunks.fromNote(bodies[i]);
+                if (chunks.size() != 1 || testIndex.beginEmbedding(paths[i],
+                        notes[i].lastModified(), notes[i].length(), model, 1,
+                        false, sha256(notes[i])) != 0) {
+                    throw new SyntheticMismatch("verdict=EMBED_OVERLAP_FIXTURE_INVALID");
+                }
+                testIndex.appendEmbeddingBatch(paths[i], notes[i].lastModified(),
+                        notes[i].length(), model, chunks, 0,
+                        new float[][]{normalized}, sha256(notes[i]));
+            }
+            final List<KnowledgeLocalIndex.SemanticHit> limited =
+                    testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 2);
+            if (testIndex.embeddingNoteCount(model) != 3 || limited.size() != 2
+                    || !paths[0].equals(limited.get(0).relativePath)
+                    || !paths[1].equals(limited.get(1).relativePath)
+                    || limited.get(0).score <= limited.get(1).score
+                    || !testIndex.matchesIndexedEvidenceSource(paths[0],
+                            notes[0].lastModified(), notes[0].length(),
+                            readFixtureBytes(notes[0]))
+                    || !testIndex.matchesIndexedEvidenceSource(paths[1],
+                            notes[1].lastModified(), notes[1].length(),
+                            readFixtureBytes(notes[1]))) {
+                throw new SyntheticMismatch("verdict=EMBED_OVERLAP_BUDGET_DOUBLE_COUNT");
+            }
+            return "syntheticNotes=3, candidateBudget=2, "
+                    + "exactAndNeighborOverlapDeduplicated=true, "
+                    + "neighborOnlySourceRecovered=true, "
+                    + "sourceBytesSealed=true, noModelCall=true, "
                     + "selectedVaultUntouched=true";
         } finally {
             removeSandbox(sandbox);

@@ -141,6 +141,33 @@ public class KnowledgeEmbeddingTest {
     }
 
     @Test
+    public void overloadedCandidateFixtureIncludesExactNeighborOverlapButNotHiddenSource() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final int[] exact = KnowledgeEmbeddingLsh.buckets(query);
+        final int[] probes = KnowledgeEmbeddingLsh.probes(query);
+        // Same 0.99/0.98/0.80 vectors as EMBED-OVERLAP-19 and the Python mirror.
+        for (int i = 0; i < 3; i++) {
+            final float cosine = i == 0 ? .99f : i == 1 ? .98f : .80f;
+            final float[] direction = new float[8];
+            direction[0] = cosine;
+            direction[i == 1 ? 7 : 1] = (float) Math.sqrt(1 - cosine * cosine);
+            final float[] candidate = KnowledgeEmbeddingVectors.normalize(direction);
+            int exactMatches = 0;
+            int neighborMatches = 0;
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(candidate)) {
+                for (final int value : exact) if (bucket == value) exactMatches++;
+                for (int j = 0; j < probes.length; j++) {
+                    if (j % (KnowledgeEmbeddingLsh.BITS + 1) != 0
+                            && bucket == probes[j]) neighborMatches++;
+                }
+            }
+            assertEquals(i == 0 ? 1 : 0, exactMatches);
+            assertEquals(i == 0 ? 1 : i == 1 ? 4 : 0, neighborMatches);
+        }
+    }
+
+    @Test
     public void cosineSearchRanksSemanticVectorsAndRejectsInvalidBuffers() {
         final float[] direction = new float[]{3, 4, 0, 0, 0, 0, 0, 0};
         final float[] query = KnowledgeEmbeddingVectors.normalize(direction);
