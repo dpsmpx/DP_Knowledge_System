@@ -49,7 +49,8 @@ public final class KnowledgeE5NativeSentencePieceInstrumentedTest {
         return out.toByteArray();
     }
 
-    private static byte[] syntheticBpe() throws Exception {
+    /** Shared all-synthetic native tokenizer fixture for end-to-end emulator QA. */
+    static byte[] syntheticBpe() throws Exception {
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
         bytes(out, 1, piece("<unk>", 2));
         bytes(out, 1, piece("<s>", 3));
@@ -195,7 +196,7 @@ public final class KnowledgeE5NativeSentencePieceInstrumentedTest {
         }
     }
 
-    private static String sha256(final byte[] bytes) throws Exception {
+    static String sha256(final byte[] bytes) throws Exception {
         final byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
         final StringBuilder hex = new StringBuilder();
         for (final byte item : hash) {
