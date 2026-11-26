@@ -109,6 +109,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('CandidatePolicy.SOURCE_QUOTA)', index)
         self.assertIn('syntheticSemanticSearchSampleQuotaWithBudget(', index)
         self.assertIn('CandidatePolicy.SAMPLE_THEN_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchDedupSampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA)', index)
         for marker in ('!syntheticDatabase', 'dpks-device-qa-',
                        'databaseFile.getName().startsWith("qa-")',
                        'SELECT COUNT(*) FROM embedding_notes e',
@@ -118,6 +120,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'final int quota = (int) Math.max(1L, remaining / completedSources)',
                        'new int[]{bucket}', 'candidateBudget - sampled',
                        'samplePerSource ? "GROUP BY l.path LIMIT ?"',
+                       'CREATE TEMP TABLE qa_seen_lsh_candidates(',
+                       'if (temporaryExclusion && db.inTransaction())',
+                       'db.endTransaction();',
+                       'NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen',
+                       'selected.add(new String[]{c.getString(0)',
+                       'INSERT OR IGNORE INTO qa_seen_lsh_candidates(path,chunk)',
+                       'insert.executeInsert()',
                        'chunkRange.append(" AND l.chunk>=?")',
                        'chunkRange.append(" AND l.chunk<?")',
                        'remaining - early'):
@@ -127,16 +136,19 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         end = qa.index('\n    /** Synthetic cache-only post-approval', start)
         fixture = qa[start:end]
         for marker in ('qa-quota-skew.sqlite', 'qa-quota-uniform.sqlite',
+                       'qa-quota-dedup.sqlite',
                        'KnowledgeVaultScanner.scan(vault, 8,',
                        'KnowledgeEmbeddingChunks.fromNote(body)',
                        'testIndex.beginEmbedding(paths[i]', 'testIndex.appendEmbeddingBatch(paths[i]',
                        'syntheticSemanticSearchWithBudget(model, exact, 8, budget)',
                        'syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget)',
                        'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchDedupSampleQuotaWithBudget(',
                        'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1)',
                        'quota.get(0).excerptStart', 'matchesIndexedEvidenceSource(paths[i]',
                        'uniformLateExactRecovered=true', 'skewLateOnlyStillMissed=true',
                        'sampleThenQuotaSkewRecovered=true', 'tightSampleBudgetBounded=true',
+                       'syntheticScenarios=3', 'dedupLateBestRecovered=true',
                        'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
             self.assertIn(marker, fixture)
         self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)

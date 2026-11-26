@@ -4,7 +4,9 @@ import json
 import unittest
 
 from scripts.benchmark_stage19_lsh_fairness import (
-    FOURWAY_QUERY, POLICIES, _candidates, _database, compare,
+    FOURWAY_QUERY, POLICIES, TARGET, _candidates, _database,
+    _make_target_earlier_chunks_exact_reachable,
+    _make_target_best_only_within_same_exact_bucket, compare,
 )
 from scripts.benchmark_stage19_hybrid import MODEL_KEY
 from scripts.benchmark_stage19_retrieval import GENERATION
@@ -39,6 +41,9 @@ class Stage19LshFairnessTests(unittest.TestCase):
             self.assertTrue(record['chunk_interleaved_sort']['late_best_retrieved_at_6'])
             self.assertTrue(record['source_chunk_quota_then_fill']['late_best_retrieved_at_6'])
             self.assertTrue(record['source_sample_quota_fill']['late_best_retrieved_at_6'])
+            self.assertTrue(record['source_sample_quota_dedup']['late_best_retrieved_at_6'])
+            self.assertEqual(record['source_sample_quota_dedup']['raw_chunk_rows'],
+                             record['source_sample_quota_dedup']['distinct_chunk_rows'])
             self.assertGreater(record['fourway_indexed_merge']['additional_index_kib'], 0)
         self.assertLess(early['equal_exact_bucket_quotas']['sources_seen'],
                         early['one_chunk_per_source']['sources_seen'])
@@ -73,7 +78,8 @@ class Stage19LshFairnessTests(unittest.TestCase):
         self.assertFalse(skew['policies']['source_chunk_quota_then_fill']
                          ['late_best_retrieved_at_6'])
         self.assertEqual(89, skew['policies']['source_chunk_quota_then_fill']['sources_seen'])
-        for policy in ('source_sample_quota_fill', 'chunk_interleaved_sort',
+        for policy in ('source_sample_quota_fill', 'source_sample_quota_dedup',
+                       'chunk_interleaved_sort',
                        'one_chunk_per_source'):
             self.assertTrue(skew['policies'][policy]['late_best_retrieved_at_6'])
         for data in probes.values():
@@ -85,10 +91,10 @@ class Stage19LshFairnessTests(unittest.TestCase):
         self.assertEqual((90, 88, 344), (sweep['sources'],
                                          sweep['short_sources'], sweep['total_chunks']))
         expected_first_hits = {
-            '0': (217, 90, 90, 90),
-            '1': (217, 216, 90, 91),
-            '3': (217, 217, 90, 93),
-            '127': (217, 217, 90, 217),
+            '0': (217, 90, 90, 90, 90),
+            '1': (217, 216, 90, 90, 91),
+            '3': (217, 217, 90, 90, 93),
+            '127': (217, 217, 90, 90, 217),
         }
         for offset, expected in expected_first_hits.items():
             outcomes = sweep['single_exact_chunk'][offset]
@@ -103,7 +109,8 @@ class Stage19LshFairnessTests(unittest.TestCase):
 
     def test_recovering_source_is_not_recovering_its_later_best_chunk(self):
         same = self.data['skew_budget_sweep']['late_better_same_bucket']
-        for policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill'):
+        for policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill',
+                       'source_sample_quota_dedup'):
             self.assertTrue(same['90'][policy]['source_seen'])
             self.assertEqual(.99, same['90'][policy]['best_cosine'])
             self.assertEqual(.99, same['100'][policy]['best_cosine'])
@@ -118,6 +125,27 @@ class Stage19LshFairnessTests(unittest.TestCase):
             self.assertEqual(1200, len(rows))
             self.assertEqual(len(rows), len({(path, chunk) for path, chunk, _ in rows}))
             self.assertEqual(90, len({path for path, _, _ in rows}))
+        finally:
+            connection.close()
+
+    def test_temporary_dedup_reclaims_raw_budget_for_late_same_bucket_chunk(self):
+        connection = _database(8, 4)
+        try:
+            _make_target_earlier_chunks_exact_reachable(connection, 4)
+            _make_target_best_only_within_same_exact_bucket(connection)
+            old = _candidates(connection, 'source_sample_quota_fill', 32)
+            deduplicated = _candidates(connection, 'source_sample_quota_dedup', 32)
+            self.assertEqual(32, len(old))
+            self.assertLess(len({(path, chunk) for path, chunk, _ in old}), len(old))
+            self.assertFalse(any(path == TARGET and chunk == 3 for path, chunk, _ in old))
+            self.assertEqual(32, len(deduplicated))
+            self.assertEqual(32, len({(path, chunk) for path, chunk, _ in deduplicated}))
+            self.assertTrue(any(path == TARGET and chunk == 3
+                                for path, chunk, _ in deduplicated))
+            # The TEMP exclusion table is discarded after each diagnostic.
+            self.assertEqual([], connection.execute(
+                "SELECT name FROM sqlite_temp_master WHERE name='qa_seen_lsh_candidates'")
+                .fetchall())
         finally:
             connection.close()
 

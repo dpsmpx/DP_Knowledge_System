@@ -33,7 +33,8 @@ TARGET = 'z-synthetic-late-source.md'
 POLICIES = ('current_exact_first', 'one_chunk_per_source',
             'chunk_interleaved_sort', 'equal_exact_bucket_quotas',
             'per_bucket_source_sample', 'fourway_indexed_merge',
-            'source_chunk_quota_then_fill', 'source_sample_quota_fill')
+            'source_chunk_quota_then_fill', 'source_sample_quota_fill',
+            'source_sample_quota_dedup')
 
 FOURWAY_QUERY = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
                    INDEXED BY embedding_lsh_bucket_chunk_path
@@ -164,7 +165,8 @@ def _candidates(connection: sqlite3.Connection, policy: str,
 
     def fetch(buckets: tuple[int, ...], maximum: int,
               grouping: str, order: str = '',
-              chunk_range: tuple[int | None, int | None] | None = None
+              chunk_range: tuple[int | None, int | None] | None = None,
+              skip_seen: bool = False,
               ) -> list[tuple[str, int, bytes]]:
         # The same model/checkpoint/scan filters apply to each bounded pass.
         # A split by chunk number uses the *existing* (bucket,path,chunk)
@@ -184,7 +186,11 @@ def _candidates(connection: sqlite3.Connection, policy: str,
                  JOIN embedding_notes e ON e.path=v.path
                  JOIN notes n ON n.path=e.path
                  WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')'
-        sql += chunk_sql + ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+        sql += chunk_sql
+        if skip_seen:
+            sql += ''' AND NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen
+                         WHERE seen.path=l.path AND seen.chunk=l.chunk)'''
+        sql += ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
                    AND n.generation=? AND n.oversized=0
                  GROUP BY ''' + grouping + order + ' LIMIT ?'
         return list(connection.execute(sql, (*buckets, *range_args, MODEL_KEY, DIMENSIONS,
@@ -215,6 +221,39 @@ def _candidates(connection: sqlite3.Connection, policy: str,
                 break
             rows.extend(fetch((bucket,), remaining, 'l.path'))
         return rows
+    if policy == 'source_sample_quota_dedup':
+        # The intentionally temporary PRIMARY KEY excludes already-inspected
+        # (path,chunk) pairs from the next SQL. Never exceed the raw-row cap
+        # or add an index to the persistent Android schema.
+        source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+            WHERE model_key=? AND dimension=? AND completed=chunks''',
+            (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+        if source_count == 0:
+            return []
+        connection.execute('''CREATE TEMP TABLE qa_seen_lsh_candidates(
+            path TEXT, chunk INTEGER, PRIMARY KEY(path,chunk))''')
+        try:
+            rows = []
+
+            def reserve(fetched: list[tuple[str, int, bytes]]) -> None:
+                connection.executemany('''INSERT OR IGNORE INTO qa_seen_lsh_candidates
+                    VALUES (?,?)''', ((path, chunk) for path, chunk, _ in fetched))
+                rows.extend(fetched)
+
+            for bucket in exact:
+                if len(rows) == cap:
+                    break
+                reserve(fetch((bucket,), cap - len(rows), 'l.path', skip_seen=True))
+            if len(rows) < cap:
+                quota = max(1, (cap - len(rows)) // source_count)
+                reserve(fetch(exact, cap - len(rows), 'l.path,l.chunk',
+                              chunk_range=(None, quota), skip_seen=True))
+                if len(rows) < cap:
+                    reserve(fetch(exact, cap - len(rows), 'l.path,l.chunk',
+                                  chunk_range=(quota, None), skip_seen=True))
+            return rows
+        finally:
+            connection.execute('DROP TABLE qa_seen_lsh_candidates')
     if policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill'):
         # Guarantee a bounded number of *early chunk indices* per source
         # before a second disjoint pass. The cap is on raw rows, not on the
@@ -304,7 +343,8 @@ def synthetic_uneven_distribution_probe() -> dict:
             _truncate_short_sources(connection, short_indices)
             results = {}
             for policy in ('current_exact_first', 'source_chunk_quota_then_fill',
-                           'source_sample_quota_fill', 'chunk_interleaved_sort',
+                           'source_sample_quota_fill', 'source_sample_quota_dedup',
+                           'chunk_interleaved_sort',
                            'one_chunk_per_source'):
                 start = time.perf_counter()
                 rows = _candidates(connection, policy, cap)
@@ -332,7 +372,8 @@ def synthetic_skew_budget_sweep() -> dict:
     sources, chunks = 90, 128
     caps = (88, 89, 90, 91, 92, 93, 100, 128, 150, 216, 217, 240)
     policies = ('current_exact_first', 'source_chunk_quota_then_fill',
-                'source_sample_quota_fill', 'chunk_interleaved_sort')
+                'source_sample_quota_fill', 'source_sample_quota_dedup',
+                'chunk_interleaved_sort')
     connection = _database(sources, chunks)
     try:
         _truncate_short_sources(connection, range(1, sources - 1))

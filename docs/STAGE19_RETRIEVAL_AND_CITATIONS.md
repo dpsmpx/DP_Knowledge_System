@@ -618,6 +618,29 @@ even if every reference and quotation passes the checks below.
     *source* but retains cosine 0.99, while chunk interleaving inspects the
     0.999 chunk. These are known recall/quality limits, **not** proof of a
     safe automatic policy. No production algorithm or model access changes.
+49. **Deduplicating sample/quota phases recovers otherwise wasted candidate
+    budget, at a measurable CPU/temporary-index cost.** The new host policy
+    and cache-only Android QA mode use a connection-local SQLite `TEMP` table
+    with `(path,chunk)` primary key; each sampled, early-quota or fill-pass
+    candidate is recorded after its cursor closes and filtered out of later
+    passes with `NOT EXISTS`. The Android diagnostic pins its SQLite connection
+    in a transaction and rolls it back on exit, so TEMP rows are never
+    committed to the real or even the synthetic persistent index. The global
+    **raw** row cap still applies; the
+    table's writes and indexing are extra work, not a free optimization. A
+    deterministic eight-source, four-chunk synthetic case (cap 32) has an
+    early cosine-0.99 match and a later cosine-0.999 match in the same exact
+    table: the old sample/quota policy inspects repeated earlier chunks and
+    misses the later best; exclusion allows all 32 distinct chunks and finds
+    it. `EMBED-QUOTA-19` now builds a *third* cache-only SQLite fixture and
+    verifies that the deduplicated path picks the later chunk with the
+    original source-byte seals intact. With 360×128 vectors and cap 45k, one
+    host run observed **44,637–44,640 unique** chunks for sample/quota versus
+    **45,000 unique** for the deduplicated version; measured one-call lookup
+    times were about **117–130 ms** versus **180–209 ms**. The added TEMP
+    table can impose memory/flash and battery costs on Android, which remain
+    unmeasured on a device. This is **experimental QA only** and is not
+    deployed to user retrieval.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -751,6 +774,7 @@ scenario; p50 is descriptive only):
 | Four indexed exact streams, four-way heap merge | 360 | Yes / Yes / Yes | 97.8 |
 | Early per-source chunk quota, then fill | 360 | Yes / Yes / Yes | 82.7 |
 | Exact source sample, chunk quota, then fill | 360 | Yes / Yes / Yes | 119.3 |
+| Exact source sample, then quota with TEMP chunk exclusion | 360 | Yes / Yes / Yes | 208.9 |
 
 The source-first option inspects only one candidate per source; quotas also
 underuse capacity and may double-count chunks between exact tables, making
@@ -764,6 +788,12 @@ These values are deliberately adversarial host measurements, not real model
 precision/recall or a production tuning recommendation. Regression tests use
 a smaller but structurally equivalent 90-source, 16-chunk fixture to protect
 the failure and tradeoff cases in CI without 46k-vector allocations.
+The TEMP dedup row above was measured separately with the same 360×128
+parameters and only one timed call per policy, so its latency is indicative,
+**not** directly comparable as a controlled same-run p50 to the two-trial
+values above. The initial host run also observed 45,000 unique of 45,000 raw
+rows after exclusion versus only 44,637 unique rows without it; the sqlite
+temporary index is created/dropped on each diagnostic query.
 
 The benchmark also emits `uneven_distribution_probe` for two independently
 generated in-memory source-length mixes. A 90-source/1,746-chunk case with
