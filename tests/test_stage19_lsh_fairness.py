@@ -3,7 +3,11 @@
 import json
 import unittest
 
-from scripts.benchmark_stage19_lsh_fairness import POLICIES, compare
+from scripts.benchmark_stage19_lsh_fairness import (
+    FOURWAY_QUERY, POLICIES, _candidates, _database, compare,
+)
+from scripts.benchmark_stage19_hybrid import MODEL_KEY
+from scripts.benchmark_stage19_retrieval import GENERATION
 
 
 class Stage19LshFairnessTests(unittest.TestCase):
@@ -17,6 +21,7 @@ class Stage19LshFairnessTests(unittest.TestCase):
         cases = self.data['cases']
         early = cases['single_late_exact_chunk']
         later = cases['late_best_among_other_exact_chunks']
+        same = cases['late_better_same_exact_bucket']
         self.assertFalse(early['current_exact_first']['late_best_retrieved_at_6'])
         self.assertFalse(later['current_exact_first']['late_best_retrieved_at_6'])
         self.assertTrue(early['one_chunk_per_source']['late_best_retrieved_at_6'])
@@ -24,6 +29,15 @@ class Stage19LshFairnessTests(unittest.TestCase):
         for policy in ('chunk_interleaved_sort', 'equal_exact_bucket_quotas'):
             self.assertTrue(early[policy]['late_best_retrieved_at_6'])
             self.assertTrue(later[policy]['late_best_retrieved_at_6'])
+        self.assertTrue(early['per_bucket_source_sample']['late_best_retrieved_at_6'])
+        self.assertTrue(later['per_bucket_source_sample']['late_best_retrieved_at_6'])
+        self.assertFalse(same['per_bucket_source_sample']['late_best_retrieved_at_6'])
+        self.assertFalse(same['equal_exact_bucket_quotas']['late_best_retrieved_at_6'])
+        self.assertFalse(same['one_chunk_per_source']['late_best_retrieved_at_6'])
+        for record in (early, later, same):
+            self.assertTrue(record['fourway_indexed_merge']['late_best_retrieved_at_6'])
+            self.assertTrue(record['chunk_interleaved_sort']['late_best_retrieved_at_6'])
+            self.assertGreater(record['fourway_indexed_merge']['additional_index_kib'], 0)
         self.assertLess(early['equal_exact_bucket_quotas']['sources_seen'],
                         early['one_chunk_per_source']['sources_seen'])
 
@@ -39,6 +53,24 @@ class Stage19LshFairnessTests(unittest.TestCase):
                 self.assertGreaterEqual(record['lookup_p50_ms'], 0)
         self.assertNotIn('.md', json.dumps(self.data))
         self.assertIn('not used in Android', ' '.join(self.data['limitations']))
+
+    def test_fourway_index_merge_matches_global_chunk_sort_without_temp_sort(self):
+        connection = _database(90, 16)
+        try:
+            expected = _candidates(connection, 'chunk_interleaved_sort', 1200)
+            connection.execute('CREATE INDEX embedding_lsh_bucket_chunk_path '
+                               'ON embedding_lsh(bucket,chunk,path)')
+            actual = _candidates(connection, 'fourway_indexed_merge', 1200)
+            self.assertEqual([(path, chunk) for path, chunk, _ in expected],
+                             [(path, chunk) for path, chunk, _ in actual])
+            self.assertLessEqual(len(actual), 1200)
+            plan = [row[3] for row in connection.execute(
+                'EXPLAIN QUERY PLAN ' + FOURWAY_QUERY,
+                (1023, MODEL_KEY, 8, GENERATION))]
+            self.assertTrue(any('embedding_lsh_bucket_chunk_path' in item for item in plan))
+            self.assertFalse(any('TEMP B-TREE' in item for item in plan))
+        finally:
+            connection.close()
 
     def test_invalid_or_unbounded_experiment_configuration_rejected(self):
         for args in ((7, 16, 1200, 1), (90, 3, 1200, 1),
