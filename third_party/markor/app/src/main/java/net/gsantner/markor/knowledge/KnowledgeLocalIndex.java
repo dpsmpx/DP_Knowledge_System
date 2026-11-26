@@ -8,6 +8,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -887,7 +888,9 @@ public final class KnowledgeLocalIndex {
     }
 
     /** Alternative candidate selectors are reachable only from guarded QA. */
-    private enum CandidatePolicy { PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA }
+    private enum CandidatePolicy {
+        PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA, DEDUP_SAMPLE_THEN_QUOTA
+    }
 
     /** A deliberately small cap exercises adaptive SQL on disposable QA data
      * without allocating 45k vectors. Never available on the real index.
@@ -925,6 +928,18 @@ public final class KnowledgeLocalIndex {
                 CandidatePolicy.SAMPLE_THEN_QUOTA);
     }
 
+    /** Cache-only diagnostic with a temporary per-search SQLite exclusion
+     * table. Sampling, quota, and fill cannot inspect the same chunk twice.
+     * Temporary index writes have not been measured on physical Android.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchDedupSampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA);
+    }
+
     private void checkSyntheticSearchBudget(final int candidateBudget) {
         final File parent = databaseFile.getParentFile();
         if (!syntheticDatabase || parent == null
@@ -946,7 +961,14 @@ public final class KnowledgeLocalIndex {
         final int[] probes = KnowledgeEmbeddingLsh.probes(normalizedQuestion);
         final Map<String, SemanticHit> best = new HashMap<>();
         final SQLiteDatabase db = open();
+        final boolean temporaryExclusion =
+                candidatePolicy == CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA;
         try {
+            if (temporaryExclusion) {
+                // Pin all TEMP-table SQL to one Android SQLite connection
+                // even if its pool uses more than one connection.
+                db.beginTransaction();
+            }
             if (candidatePolicy != CandidatePolicy.PRODUCTION) {
                 // Deliberately experimental: test the same bounded source
                 // count / early-chunk quota as the offline SQL mirror.
@@ -966,13 +988,22 @@ public final class KnowledgeLocalIndex {
                 if (completedSources == 0) {
                     return Collections.emptyList();
                 }
+                final boolean deduplicate = temporaryExclusion;
+                if (deduplicate) {
+                    // TEMP schema belongs to this synthetic DB connection;
+                    // closing it discards the table and its private index.
+                    db.execSQL("CREATE TEMP TABLE qa_seen_lsh_candidates("
+                            + "path TEXT NOT NULL, chunk INTEGER NOT NULL, "
+                            + "PRIMARY KEY(path,chunk))");
+                }
                 int sampled = 0;
-                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA) {
+                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA || deduplicate) {
                     for (final int bucket : exact) {
                         if (sampled == candidateBudget) break;
                         final int rows = appendSemanticCandidatesRange(db,
                                 new int[]{bucket}, modelKey, normalizedQuestion,
-                                candidateBudget - sampled, null, null, null, true, best);
+                                candidateBudget - sampled, null, null, null,
+                                true, deduplicate, best);
                         if (rows < 0) return Collections.emptyList();
                         sampled += rows;
                     }
@@ -985,11 +1016,12 @@ public final class KnowledgeLocalIndex {
                 final int remaining = candidateBudget - sampled;
                 final int quota = (int) Math.max(1L, remaining / completedSources);
                 final int early = appendSemanticCandidatesRange(db, exact, modelKey,
-                        normalizedQuestion, remaining, null, null, quota, best);
+                        normalizedQuestion, remaining, null, null, quota,
+                        false, deduplicate, best);
                 if (early < 0 || (early < remaining
                         && appendSemanticCandidatesRange(db, exact, modelKey,
                                 normalizedQuestion, remaining - early,
-                                null, quota, null, best) < 0)) {
+                                null, quota, null, false, deduplicate, best) < 0)) {
                     return Collections.emptyList();
                 }
             } else {
@@ -1030,7 +1062,14 @@ public final class KnowledgeLocalIndex {
                 }
             }
         } finally {
-            db.close();
+            try {
+                if (temporaryExclusion && db.inTransaction()) {
+                    // TEMP table and candidate inserts are never committed.
+                    db.endTransaction();
+                }
+            } finally {
+                db.close();
+            }
         }
         return rankSemanticHits(best, limit);
     }
@@ -1068,7 +1107,7 @@ public final class KnowledgeLocalIndex {
                                                      final Integer maxChunk,
                                                      final Map<String, SemanticHit> best) {
         return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
-                candidateLimit, excludedBuckets, minChunk, maxChunk, false, best);
+                candidateLimit, excludedBuckets, minChunk, maxChunk, false, false, best);
     }
 
     private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
@@ -1079,6 +1118,7 @@ public final class KnowledgeLocalIndex {
                                                      final Integer minChunk,
                                                      final Integer maxChunk,
                                                      final boolean samplePerSource,
+                                                     final boolean excludePreviouslyInspected,
                                                      final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
         final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
@@ -1115,25 +1155,34 @@ public final class KnowledgeLocalIndex {
         args[argument++] = modelKey;
         args[argument++] = Integer.toString(normalizedQuestion.length);
         args[argument] = Integer.toString(candidateLimit);
-        final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size "
+        final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size"
+                + (excludePreviouslyInspected ? ", l.chunk " : " ")
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
                 + "AND n.raw_sha256=e.source_sha256 "
                 + "WHERE l.bucket IN (" + placeholders + ")" + exclusion + chunkRange
+                + (excludePreviouslyInspected
+                        ? " AND NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen "
+                                + "WHERE seen.path=l.path AND seen.chunk=l.chunk)"
+                        : "")
                 + " AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
                 + (samplePerSource ? "GROUP BY l.path LIMIT ?"
                         : "GROUP BY l.path, l.chunk LIMIT ?");
         int inspected = 0;
+        final List<String[]> selected = excludePreviouslyInspected ? new ArrayList<>() : null;
         try (Cursor c = db.rawQuery(sql, args)) {
             while (c.moveToNext()) {
                 if (Thread.currentThread().isInterrupted()) {
                     return -1;
                 }
                 inspected++;
+                if (selected != null) {
+                    selected.add(new String[]{c.getString(0), Integer.toString(c.getInt(7))});
+                }
                 final double score = KnowledgeEmbeddingVectors.similarity(normalizedQuestion,
                         c.getBlob(4));
                 if (!Double.isFinite(score)) {
@@ -1145,6 +1194,20 @@ public final class KnowledgeLocalIndex {
                     best.put(path, new SemanticHit(path, c.getString(1), c.getInt(2),
                             c.getInt(3), score, c.getLong(5), c.getLong(6)));
                 }
+            }
+        }
+        if (selected != null && !selected.isEmpty()) {
+            final SQLiteStatement insert = db.compileStatement(
+                    "INSERT OR IGNORE INTO qa_seen_lsh_candidates(path,chunk) VALUES(?,?)");
+            try {
+                for (final String[] pair : selected) {
+                    insert.clearBindings();
+                    insert.bindString(1, pair[0]);
+                    insert.bindLong(2, Integer.parseInt(pair[1]));
+                    insert.executeInsert();
+                }
+            } finally {
+                insert.close();
             }
         }
         return inspected;
