@@ -51,12 +51,15 @@ final class KnowledgeModelPackageStore {
         final int externalReferencesUnresolved;
         final int externalRangesOutOfBounds;
         final int externalComponentsUnused;
+        final KnowledgeSentencePieceProbe.Result sentencePiece;
+        final int sentencePieceRejected;
 
         Audit(final long bytes, final long millis, final int companionCount,
               final int checked, final int skipped, final int invalid,
               final KnowledgeModelContainerProbe.Result preflight,
               final int matched, final int unresolved, final int outOfBounds,
-              final int unused) {
+              final int unused, final KnowledgeSentencePieceProbe.Result tokenizer,
+              final int rejectedTokenizers) {
             verifiedBytes = bytes;
             elapsedMillis = millis;
             companionFiles = companionCount;
@@ -68,6 +71,8 @@ final class KnowledgeModelPackageStore {
             externalReferencesUnresolved = unresolved;
             externalRangesOutOfBounds = outOfBounds;
             externalComponentsUnused = unused;
+            sentencePiece = tokenizer;
+            sentencePieceRejected = rejectedTokenizers;
         }
 
         boolean integrityPassed() { return true; } // Otherwise audit throws.
@@ -75,6 +80,7 @@ final class KnowledgeModelPackageStore {
         // has not passed even the limited syntax preflight. Fail closed for
         // diagnostic status and explicit ONNX staging, never claim readiness.
         boolean jsonPreflightPassed() { return jsonInvalid == 0 && jsonNotInspected == 0; }
+        boolean tokenizerPreflightPassed() { return sentencePieceRejected == 0; }
         boolean externalDataPreflightPassed() {
             return container.detailState == KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ
                     && externalReferencesUnresolved == 0 && externalRangesOutOfBounds == 0
@@ -182,6 +188,8 @@ final class KnowledgeModelPackageStore {
         int checked = 0;
         int skipped = 0;
         int invalid = 0;
+        KnowledgeSentencePieceProbe.Result sentencePiece = null;
+        int rejectedTokenizers = 0;
         final String weightHash;
         try (InputStream source = new FileInputStream(weight)) {
             weightHash = digest(source, entry.bytes, progress, 0, null, totalBytes);
@@ -217,6 +225,21 @@ final class KnowledgeModelPackageStore {
                     skipped++;
                 }
             }
+            if (manifest.role == KnowledgeModelPolicy.Role.EMBEDDING
+                    && component.kind == KnowledgeModelPackageManifest.Kind.TOKENIZER
+                    && component.name.endsWith(".model")) {
+                if (sentencePiece != null) {
+                    rejectedTokenizers++;
+                } else {
+                    try {
+                        sentencePiece = KnowledgeSentencePieceProbe.inspect(part, component.bytes);
+                    } catch (InterruptedIOException cancelled) {
+                        throw cancelled;
+                    } catch (IOException invalidTokenizer) {
+                        rejectedTokenizers++;
+                    }
+                }
+            }
         }
         final KnowledgeModelContainerProbe.Result container =
                 KnowledgeModelContainerProbe.inspect(weight, entry.format);
@@ -244,7 +267,8 @@ final class KnowledgeModelPackageStore {
                 container.externalDataTensorsDeclared - matched - outOfBounds);
         return new Audit(verified, Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
                 manifest.components.size() - 1, checked, skipped, invalid, container,
-                matched, unresolved, outOfBounds, externalFiles.size() - usedExternal.size());
+                matched, unresolved, outOfBounds, externalFiles.size() - usedExternal.size(),
+                sentencePiece, rejectedTokenizers);
     }
 
     /**
@@ -261,7 +285,8 @@ final class KnowledgeModelPackageStore {
         }
         final Audit verified = audit(entry, null);
         if (verified.container.state != KnowledgeModelContainerProbe.State.METADATA_HINTS
-                || !verified.jsonPreflightPassed() || !verified.externalDataPreflightPassed()) {
+                || !verified.jsonPreflightPassed() || !verified.tokenizerPreflightPassed()
+                || !verified.externalDataPreflightPassed()) {
             throw new IOException("ONNX package preflight is incomplete");
         }
         final KnowledgeModelPackageManifest manifest = installed(entry);
@@ -384,7 +409,8 @@ final class KnowledgeModelPackageStore {
             total += component.bytes;
         }
         final Audit audit = audit(entry, null);
-        if (!audit.jsonPreflightPassed() || !audit.externalDataPreflightPassed()) {
+        if (!audit.jsonPreflightPassed() || !audit.tokenizerPreflightPassed()
+                || !audit.externalDataPreflightPassed()) {
             throw new IOException("ONNX package audit did not pass");
         }
         KnowledgeOnnxSessionGate.requireEligible(entry, audit.container);
