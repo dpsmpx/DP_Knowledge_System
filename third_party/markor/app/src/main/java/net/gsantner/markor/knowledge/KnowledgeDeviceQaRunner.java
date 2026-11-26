@@ -1063,16 +1063,21 @@ public final class KnowledgeDeviceQaRunner {
                 "«Amber violet is true.» [1][2]", sources);
         final KnowledgeLlmCitationAudit.Review unicodeFake = KnowledgeLlmCitationAudit.inspect(
                 "«Amber violet is true.» [１][١][𝟙]", sources);
+        final KnowledgeLlmCitationAudit.Review contrastiveQuote =
+                KnowledgeLlmCitationAudit.inspect(
+                        "«Amber violet is true.», однако a different invented claim [1].",
+                        sources);
         if (correct.unverifiedQuotes != 0 || correct.mismatchedQuoteCitations != 0
                 || laundered.unverifiedQuotes != 1 || laundered.mismatchedQuoteCitations != 1
                 || mixed.unverifiedQuotes != 0 || mixed.mismatchedQuoteCitations != 1
                 || unicodeFake.referenceCount != 0 || unicodeFake.invalidReferences != 3
-                || unicodeFake.unverifiedQuotes != 1) {
+                || unicodeFake.unverifiedQuotes != 1
+                || contrastiveQuote.unverifiedQuotes != 1) {
             throw new SyntheticMismatch("verdict=LOCAL_CITATION_ATTRIBUTION_MISMATCH");
         }
         return "syntheticSources=2, localQuotesVerified=true, "
                 + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true, "
-                + "unicodeDigitSpoofRejected=true; "
+                + "unicodeDigitSpoofRejected=true, quoteContrastLaunderingRejected=true; "
                 + "no model request or selected vault access";
     }
 
@@ -1105,6 +1110,13 @@ public final class KnowledgeDeviceQaRunner {
         final KnowledgeLlmCitationAudit.Review actualCode =
                 KnowledgeLlmCitationAudit.inspect(
                         "Amber violet is true `[2] \\` [2]` then [1].", sources);
+        final KnowledgeLlmCitationAudit.Review contrasting =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true [1], но an invented unrelated conclusion is certain.",
+                        sources);
+        final KnowledgeLlmCitationAudit.Review simpleComma =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true [1], and the example merely continues.", sources);
         if (covered.uncitedProseSpans != 0 || uncited.uncitedProseSpans != 1
                 || !uncited.hasValidReferences() || spoofed.hasValidReferences()
                 || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1
@@ -1113,13 +1125,15 @@ public final class KnowledgeDeviceQaRunner {
                 || htmlVisible.referenceCount != 1 || htmlVisible.invalidReferences != 0
                 || htmlVisible.uncitedProseSpans != 0
                 || wrappedReference.referenceCount != 0 || wrappedReference.invalidReferences != 0
-                || escapedBacktick.referenceCount != 2 || actualCode.referenceCount != 1) {
+                || escapedBacktick.referenceCount != 2 || actualCode.referenceCount != 1
+                || contrasting.uncitedProseSpans != 1 || simpleComma.uncitedProseSpans != 0) {
             throw new SyntheticMismatch("verdict=UNCITED_CLAIM_OR_CODE_REFERENCE_LAUNDERING");
         }
         return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
                 + "codeFenceCitationsExcluded=true, htmlNonProseExcluded=true, "
                 + "htmlVisibleTextPreserved=true, heuristicNotSemanticProof=true; "
                 + "softWrappedReferenceExcluded=true, escapedBacktickHandled=true, "
+                + "contrastiveClauseIsolation=true, ordinaryCommaPreserved=true, "
                 + "no network or selected vault access";
     }
 

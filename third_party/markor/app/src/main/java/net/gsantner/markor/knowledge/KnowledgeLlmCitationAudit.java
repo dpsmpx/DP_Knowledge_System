@@ -43,6 +43,10 @@ public final class KnowledgeLlmCitationAudit {
                     "этого", "этому", "этой", "также", "когда", "которые",
                     "который", "которая", "которое", "своего", "этими", "если", "чтобы")));
     private static final int MAX_LOCAL_CITATION_GAP = 180;
+    /** Narrow contrastive conjunctions, not a general clause/sentence parser. */
+    private static final String[] CONTRASTIVE_CONNECTORS = {
+            "but", "however", "однако", "но"
+    };
     private static final int MIN_PROSE_LETTERS = 16;
     private static final int MIN_PROSE_WORDS = 3;
     public static final int MAX_FLAG_DETAILS = 8;
@@ -609,7 +613,7 @@ public final class KnowledgeLlmCitationAudit {
             if (!isMarkdownAtxHeading(trimmed)) {
                 int spanStart = lineStart;
                 for (int i = lineStart; i < lineEnd; i++) {
-                    if (isSentenceTerminator(visible.charAt(i))) {
+                    if (isProseBoundary(visible, i, lineEnd)) {
                         final int end = sentenceBoundaryEnd(visible, i, lineEnd, markers);
                         if (end > i) {
                             if (uncitedSubstantiveSpan(visible, spanStart, end, markers)) uncited++;
@@ -630,6 +634,31 @@ public final class KnowledgeLlmCitationAudit {
                 || ch == '。' || ch == '！' || ch == '？' || ch == '；';
     }
 
+    /** A citation before ", but" or ", однако" cannot cover the following
+     * independent claim. Require a full connective token after a comma;
+     * ordinary lists, decimal commas and "butter" must not split spans.
+     * Limit skipped spaces to avoid an unbounded natural-language parser.
+     */
+    private static boolean isContrastiveClauseSeparator(final String text, final int comma,
+                                                         final int end) {
+        if (text.charAt(comma) != ',' && text.charAt(comma) != '،') return false;
+        int next = comma + 1;
+        final int limit = Math.min(end, next + 32);
+        while (next < limit && (text.charAt(next) == ' ' || text.charAt(next) == '\t')) next++;
+        for (final String connective : CONTRASTIVE_CONNECTORS) {
+            final int after = next + connective.length();
+            if (after < end && text.regionMatches(true, next, connective, 0,
+                    connective.length()) && !Character.isLetterOrDigit(text.charAt(after))
+                    && text.charAt(after) != '_') return true;
+        }
+        return false;
+    }
+
+    private static boolean isProseBoundary(final String text, final int at, final int end) {
+        return isSentenceTerminator(text.charAt(at))
+                || isContrastiveClauseSeparator(text, at, end);
+    }
+
     /** Only # through ###### followed by whitespace are ATX headings. Seven
      * hashes are plain Markdown text and must retain coverage warnings.
      */
@@ -646,6 +675,7 @@ public final class KnowledgeLlmCitationAudit {
      */
     private static int sentenceBoundaryEnd(final String text, final int punctuation,
                                            final int lineEnd, final List<Citation> markers) {
+        if (isContrastiveClauseSeparator(text, punctuation, lineEnd)) return punctuation + 1;
         int next = punctuation + 1;
         while (next < lineEnd && Character.isWhitespace(text.charAt(next))) next++;
         if (next == lineEnd) return punctuation + 1;
@@ -724,7 +754,7 @@ public final class KnowledgeLlmCitationAudit {
             if (!isMarkdownAtxHeading(trimmed)) {
                 int start = lineStart;
                 for (int i = lineStart; i < lineEnd; i++) {
-                    if (!isSentenceTerminator(visible.charAt(i))) continue;
+                    if (!isProseBoundary(visible, i, lineEnd)) continue;
                     final int end = sentenceBoundaryEnd(visible, i, lineEnd, markers);
                     if (end > i) {
                         inspectOneAttributedSpan(visible, start, end, markers, sources, result);
@@ -959,6 +989,7 @@ public final class KnowledgeLlmCitationAudit {
 
     private static boolean containsSentenceBreak(final String text, final int from, final int to) {
         for (int i = from; i < to; i++) {
+            if (isContrastiveClauseSeparator(text, i, to)) return true;
             switch (text.charAt(i)) {
                 case '.': case '!': case '?': case ';': case '\r': case '\n':
                 case '。': case '！': case '？': case '；': case 0x0085:
