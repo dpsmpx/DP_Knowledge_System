@@ -38,6 +38,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Python 3.10 for the DPKS native SentencePiece wheel
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
 
@@ -45,7 +50,7 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Test the knowledge core
-        run: python -m unittest discover -s tests -t .
+        run: python3.11 -m unittest discover -s tests -t .
 
       - name: Build and test isolated Android preview package
         working-directory: third_party/markor
