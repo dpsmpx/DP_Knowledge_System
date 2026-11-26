@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URL;
 import java.nio.file.Files;
 import java.security.MessageDigest;
@@ -20,6 +21,9 @@ import static org.junit.Assert.*;
 public class KnowledgeModelDownloadTest {
     private static final String FILE_URL =
             "https://huggingface.co/example/weights/resolve/main/q4.gguf?download=true";
+    private static final KnowledgeModelDownload.AddressResolver PUBLIC_DNS = host ->
+            new InetAddress[]{InetAddress.getByAddress(new byte[]{(byte) 93, (byte) 184,
+                    (byte) 216, 34})};
 
     @Test public void onlyPublicDirectHttpsWeightLinksAreAccepted() throws Exception {
         assertEquals("q4.gguf", KnowledgeModelDownload.parseSource(FILE_URL).filename);
@@ -41,6 +45,68 @@ public class KnowledgeModelDownloadTest {
         }
     }
 
+    @Test public void resolvedDnsAddressesMustAllBePublic() throws Exception {
+        for (final String address : Arrays.asList(
+                "127.0.0.1", "10.3.4.5", "172.31.0.9", "192.168.1.1",
+                "169.254.169.254", "100.64.2.1", "0.1.2.3", "192.0.2.5",
+                "198.18.1.1", "198.51.100.8", "203.0.113.9",
+                "224.0.0.1", "255.255.255.255", "::1", "fc00::1",
+                "fe80::1", "2001:db8::1", "2001::1", "2002::1")) {
+            assertFalse(address, KnowledgeModelDownload.isPublicAddress(
+                    InetAddress.getByName(address)));
+        }
+        for (final String address : Arrays.asList("93.184.216.34", "8.8.8.8",
+                "2606:4700:4700::1111")) {
+            assertTrue(address, KnowledgeModelDownload.isPublicAddress(
+                    InetAddress.getByName(address)));
+        }
+        assertFalse(KnowledgeModelDownload.isPublicAddress(null));
+
+        final File root = Files.createTempDirectory("dpks-dns-refuse").toFile();
+        try {
+            final KnowledgeModelFiles shelf = new KnowledgeModelFiles(root);
+            final int[] opened = {0};
+            for (final KnowledgeModelDownload.AddressResolver resolver :
+                    Arrays.<KnowledgeModelDownload.AddressResolver>asList(
+                    host -> new InetAddress[0],
+                    host -> new InetAddress[]{InetAddress.getByName("192.168.1.2")},
+                    host -> new InetAddress[]{InetAddress.getByName("8.8.8.8"),
+                            InetAddress.getByName("127.0.0.1")})) {
+                try {
+                    KnowledgeModelDownload.download(FILE_URL,
+                            KnowledgeModelPolicy.Role.GENERATION, "", shelf, null,
+                            url -> { opened[0]++; return new FakeConnection(200, null, gguf(), 64); },
+                            resolver);
+                    fail("Accepted DNS reply with no fully public destination");
+                } catch (IOException expected) { }
+            }
+            assertEquals("DNS must be checked before connection", 0, opened[0]);
+            assertTrue(shelf.installed().isEmpty());
+        } finally { cleanup(root); }
+    }
+
+    @Test public void redirectDestinationMustPassItsOwnDnsCheck() throws Exception {
+        final File root = Files.createTempDirectory("dpks-dns-redirect").toFile();
+        try {
+            final int[] opened = {0};
+            final KnowledgeModelDownload.AddressResolver resolver = host ->
+                    new InetAddress[]{InetAddress.getByName(host.equals("huggingface.co")
+                            ? "8.8.8.8" : "10.10.10.10")};
+            final KnowledgeModelFiles shelf = new KnowledgeModelFiles(root);
+            try {
+                KnowledgeModelDownload.download(FILE_URL, KnowledgeModelPolicy.Role.GENERATION,
+                        "", shelf, null, url -> {
+                            opened[0]++;
+                            return new FakeConnection(302,
+                                    "https://cdn.example.org/blob", null, -1);
+                        }, resolver);
+                fail("Redirect to an internal DNS target was followed");
+            } catch (IOException expected) { }
+            assertEquals("Only the initial public redirect may be opened", 1, opened[0]);
+            assertTrue(shelf.installed().isEmpty());
+        } finally { cleanup(root); }
+    }
+
     @Test public void redirectsStayOnHttpsAndInstallOnlyCompleteModelBytes() throws Exception {
         final File root = Files.createTempDirectory("dpks-downloader").toFile();
         try {
@@ -54,7 +120,7 @@ public class KnowledgeModelDownloadTest {
             final KnowledgeModelFiles.Entry model = KnowledgeModelDownload.download(
                     FILE_URL, KnowledgeModelPolicy.Role.GENERATION, "", shelf,
                     (n, length) -> { copied[0] = n; total[0] = length; },
-                    url -> responses.remove());
+                    url -> responses.remove(), PUBLIC_DNS);
             assertEquals(64, model.bytes);
             assertEquals(64, copied[0]);
             assertEquals(64, total[0]);
@@ -95,7 +161,7 @@ public class KnowledgeModelDownloadTest {
             final KnowledgeModelFiles.Entry entry = KnowledgeModelDownload.download(
                     FILE_URL, KnowledgeModelPolicy.Role.GENERATION, digest, shelf,
                     (copied, total) -> { progress[0] = copied; assertEquals(64, total); },
-                    url -> resumed);
+                    url -> resumed, PUBLIC_DNS);
             assertEquals("bytes=20-", resumed.getRequestProperty("Range"));
             assertEquals(64, progress[0]);
             assertEquals(digest, entry.sha256);
@@ -137,7 +203,7 @@ public class KnowledgeModelDownloadTest {
             final FakeConnection ignoredRange = new FakeConnection(200, null, bytes, bytes.length);
             final KnowledgeModelFiles.Entry entry = KnowledgeModelDownload.download(
                     FILE_URL, KnowledgeModelPolicy.Role.GENERATION, digest, shelf,
-                    null, url -> ignoredRange);
+                null, url -> ignoredRange, PUBLIC_DNS);
             assertEquals("bytes=16-", ignoredRange.getRequestProperty("Range"));
             assertEquals(digest, entry.sha256);
             assertEquals(0, shelf.resumeBytes(digest, "q4.gguf"));
@@ -158,7 +224,7 @@ public class KnowledgeModelDownloadTest {
         final int original = shelf.installed().size();
         try {
             KnowledgeModelDownload.download(FILE_URL, KnowledgeModelPolicy.Role.GENERATION,
-                    expectedSha, shelf, null, url -> response);
+                    expectedSha, shelf, null, url -> response, PUBLIC_DNS);
             fail("Failed to reject incomplete or mismatched model response");
         } catch (IOException expected) { }
         assertEquals("Failed transfer must not register another model", original,
@@ -182,7 +248,7 @@ public class KnowledgeModelDownloadTest {
                                                      final FakeConnection response) throws Exception {
         try {
             KnowledgeModelDownload.download(FILE_URL, KnowledgeModelPolicy.Role.GENERATION,
-                    "", shelf, null, url -> response);
+                    "", shelf, null, url -> response, PUBLIC_DNS);
             fail("Failed to reject unsafe or incomplete download");
         } catch (IOException expected) { }
         assertTrue(shelf.installed().isEmpty());
@@ -208,13 +274,13 @@ public class KnowledgeModelDownloadTest {
         private final String contentRange;
 
         FakeConnection(final int statusCode, final String redirect,
-                       final byte[] body, final long announcedSize) throws Exception {
+                       final byte[] body, final long announcedSize) throws IOException {
             this(statusCode, redirect, body, announcedSize, null);
         }
 
         FakeConnection(final int statusCode, final String redirect,
                        final byte[] body, final long announcedSize,
-                       final String announcedRange) throws Exception {
+                       final String announcedRange) throws IOException {
             super(new URL(FILE_URL));
             status = statusCode;
             location = redirect;
