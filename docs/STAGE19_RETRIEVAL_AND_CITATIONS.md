@@ -537,6 +537,31 @@ even if every reference and quotation passes the checks below.
     **host-only experiments**; production Android SQL is unchanged, pending
     evidence about representative relevance, available memory and device
     p50/p95 under overloaded 20k-note multi-chunk indexing.
+43. **Index-ordered four-way merge removes global SQLite sorting in a host
+    experiment, but is not yet a production win.** Four separate exact-bucket
+    cursors use an additional disposable `(bucket,chunk,path)` covering index
+    and `ORDER BY chunk,path`, then a four-element heap merges the streams,
+    deduplicating cross-table chunks. The 90×16 regression verifies that its
+    bounded candidate sequence exactly matches the expensive globally sorted
+    SQL, and `EXPLAIN QUERY PLAN` shows index traversal with no temporary
+    `ORDER BY` B-tree. The 360×128 host probe retrieves the late best source
+    in all three adversarial cases while inspecting no more than 45k unique
+    chunks. Yet observed lookup p50 was around 104–105 ms, comparable to the
+    global sort, and the auxiliary index consumed approximately **5,968 KiB**
+    for only 46,080 chunks, with another ~75–83 ms to build in memory. Index
+    maintenance during writes, migration and the much larger 20k-note storage
+    envelope have not been measured on Android. **Do not add this index or
+    merge path to the shipping app without device and model-quality evidence.**
+44. **Source sampling across four exact buckets is insufficient as a general
+    replacement.** One candidate per source *per bucket* visits all 360
+    sources and recovers a later perfect vector when it is visible in another
+    exact bucket, with only 360–363 raw rows. A third synthetic case changes
+    the later vector to cosine 0.999 so it shares the same sole exact bucket
+    as an earlier cosine-0.99 chunk. Source-sampling and fixed bucket quotas
+    then lose the relevant late vector despite the small SQL time; the
+    interleaved strategies still recover it. This exposes a concrete recall
+    cost from arbitrary `GROUP BY path` selections and is now regression
+    tested without model or device calls.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -653,23 +678,30 @@ index lives in memory and has 46,080 generated vectors. Unlike the ordinary
 so the initial exact pass alone exceeds its candidate cap. A follow-up
 scenario changes the late source's other chunks to weaker exact-colliding
 vectors, so selecting an arbitrary first chunk per source can miss its best
-one. The original Android-style exact-first SQL is a cross-checked baseline.
+one. A third case keeps the later best chunk in the *same sole exact bucket*
+as an earlier weaker chunk. The original Android-style exact-first SQL is a
+cross-checked baseline.
 
 One observed host run on 26 Nov 2026 (two measured calls per policy per
 scenario; p50 is descriptive only):
 
-| Experimental SQL policy | Unique sources seen (of 360) | Late perfect source at top 6: only later chunk exact / earlier weaker exact too | Lookup p50, ms (two scenarios) |
+| Experimental SQL policy | Unique sources seen (of 360) | Late best source at top 6: lone exact / prior weaker exact / same exact bucket | Lookup p50, ms (first case) |
 | --- | ---: | --- | ---: |
-| Current exact-first `GROUP BY path,chunk` | 352 | No / No | 71.5 / 72.5 |
-| One arbitrary candidate `GROUP BY path` | 360 | Yes / No | 44.4 / 45.2 |
-| Interleaved `ORDER BY chunk,path` | 360 | Yes / Yes | 104.5 / 105.5 |
-| Equal quotas for four exact buckets | 89 | Yes / Yes | 15.5 / 17.2 |
+| Current exact-first `GROUP BY path,chunk` | 352 | No / No / No | 83.7 |
+| One arbitrary candidate `GROUP BY path` | 360 | Yes / No / No | 45.2 |
+| Interleaved `ORDER BY chunk,path` | 360 | Yes / Yes / Yes | 105.4 |
+| Equal quotas for four exact buckets | 88–89 | Yes / Yes / No | 19.2 |
+| One candidate per source per exact bucket | 360 | Yes / Yes / No | 37.6 |
+| Four indexed exact streams, four-way heap merge | 360 | Yes / Yes / Yes | 104.1 |
 
 The source-first option inspects only one candidate per source; quotas also
 underuse capacity and may double-count chunks between exact tables, making
 their apparently lower CPU times incomparable to the full-cap baseline.
-Interleaving sorts far more candidates and can be costly for Android SQLite;
-the portable query plan and device memory cost have **not** been accepted.
+Interleaving sorts far more candidates and can be costly for Android SQLite.
+The four-way merge instead uses a small cursor heap and an additional covering
+index, but on this host its lookup time was not convincingly better, even
+before index maintenance and storage costs. The portable Android query plan,
+insertion overhead and device memory cost have **not** been accepted.
 These values are deliberately adversarial host measurements, not real model
 precision/recall or a production tuning recommendation. Regression tests use
 a smaller but structurally equivalent 90-source, 16-chunk fixture to protect
