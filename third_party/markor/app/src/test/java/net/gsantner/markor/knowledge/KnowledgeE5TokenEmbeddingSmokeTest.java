@@ -50,6 +50,29 @@ public final class KnowledgeE5TokenEmbeddingSmokeTest {
         for (int i = 0; i < 384; i++) assertEquals(independent[i], pooled[i], 0.000001f);
     }
 
+    @Test public void twoInputTwoOutputFixtureHasOptionalPoolerSignature()
+            throws Exception {
+        final byte[] fixture = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final File file = File.createTempFile("dpks-e5-optional-pooler-", ".onnx");
+        try {
+            Files.write(file.toPath(), fixture);
+            final KnowledgeE5ConfigProfile.Result config = KnowledgeE5ConfigProfile.parse(
+                    KnowledgeE5ConfigProfileTest.model(), null);
+            final KnowledgeE5OnnxMetadataProbe.Report result =
+                    KnowledgeE5OnnxMetadataProbe.inspect(file, fixture.length, config);
+            assertEquals(2, result.inputs);
+            assertEquals(2, result.outputs);
+            assertEquals(0, result.dynamicAxes);
+            assertFalse(result.inputSignature.containsKey("token_type_ids"));
+            assertTrue(result.outputSignature.containsKey("last_hidden_state"));
+            assertTrue(result.outputSignature.containsKey("pooler_output"));
+            final KnowledgeModelContainerProbe.Result container =
+                    KnowledgeModelContainerProbe.inspect(file,
+                            KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(4, container.graphNodes);
+        } finally { assertTrue(file.delete()); }
+    }
+
     @Test public void fixtureRejectsUnknownLengthsAndIds() {
         for (final int length : new int[]{0, 2, 513}) {
             try {

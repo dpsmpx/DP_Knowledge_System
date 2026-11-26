@@ -122,10 +122,99 @@ public final class KnowledgeE5TokenEmbeddingPipelineInstrumentedTest {
                             }
                         }
                     }
+
+                    // The reusable, name-aware runner must independently
+                    // produce the same result and close its native tensors.
+                    final float[] throughRunner = KnowledgeE5OrtTensorRunner.run(
+                            environment, session, batch, profile);
+                    final float[] reference = KnowledgeE5TokenEmbeddingSmoke.expectedVector(batch);
+                    for (int i = 0; i < reference.length; i++) {
+                        assertEquals("Named E5 runner component " + i,
+                                reference[i], throughRunner[i], 0.00001f);
+                    }
                 }
             }
         } finally {
             assertTrue("Toy SentencePiece fixture was not removed", file.delete());
         }
+    }
+
+    @Test public void optionalTokenTypesAndPoolerOutputDoNotAffectEmbedding() throws Exception {
+        final KnowledgeEmbeddingTensorContract.Inputs batch =
+                KnowledgeEmbeddingTensorContract.fromTokenizer(
+                        new int[]{0, 3, 5, 2, 1, 1}, new int[]{1, 1, 1, 1, 0, 0},
+                        1, 0, 2, false);
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(
+                batch.sequenceLength(), false, true);
+        final KnowledgeE5ConfigProfile.Result profile =
+                KnowledgeE5OnnxMetadataInstrumentedTest.profile();
+        final OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+            options.setIntraOpNumThreads(1);
+            options.setInterOpNumThreads(1);
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
+            try (OrtSession session = environment.createSession(graph, options)) {
+                assertEquals(2, session.getNumInputs());
+                assertEquals(2, session.getNumOutputs());
+                KnowledgeE5OnnxSignature.requireE5Small(
+                        KnowledgeOnnxCpuBackend.signature(session.getInputInfo()),
+                        KnowledgeOnnxCpuBackend.signature(session.getOutputInfo()), profile);
+                final float[] actual = KnowledgeE5OrtTensorRunner.run(
+                        environment, session, batch, profile);
+                final float[] expected = KnowledgeE5TokenEmbeddingSmoke.expectedVector(batch);
+                for (int i = 0; i < expected.length; i++) {
+                    assertEquals("Two-input E5 component " + i,
+                            expected[i], actual[i], 0.00001f);
+                }
+            }
+        }
+    }
+
+    @Test public void runnerRejectsShapeAndTokenizerErrorsBeforeNativeRun() throws Exception {
+        final OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        final KnowledgeE5ConfigProfile.Result profile =
+                KnowledgeE5OnnxMetadataInstrumentedTest.profile();
+        try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+            options.setIntraOpNumThreads(1);
+            options.setInterOpNumThreads(1);
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
+            try (OrtSession session = environment.createSession(
+                    KnowledgeE5TokenEmbeddingSmoke.graph(5), options)) {
+                final KnowledgeEmbeddingTensorContract.Inputs wrongLength =
+                        KnowledgeEmbeddingTensorContract.fromTokenizer(
+                                new int[]{0, 3, 5, 2, 1, 1}, new int[]{1, 1, 1, 1, 0, 0},
+                                1, 0, 2, false);
+                expectRunnerRefusal(environment, session, wrongLength, profile);
+
+                final KnowledgeEmbeddingTensorContract.Inputs wrongBos =
+                        KnowledgeEmbeddingTensorContract.fromTokenizer(
+                                new int[]{4, 3, 5, 6, 1}, new int[]{1, 1, 1, 1, 0},
+                                1, 4, 6, false);
+                expectRunnerRefusal(environment, session, wrongBos, profile);
+
+                final KnowledgeEmbeddingTensorContract.Inputs excessiveId =
+                        KnowledgeEmbeddingTensorContract.fromTokenizer(
+                                new int[]{0, KnowledgeE5ConfigProfile.VOCAB_SIZE, 2, 1, 1},
+                                new int[]{1, 1, 1, 0, 0}, 1, 0, 2, false);
+                expectRunnerRefusal(environment, session, excessiveId, profile);
+
+                final KnowledgeEmbeddingTensorContract.Inputs truncated =
+                        KnowledgeEmbeddingTensorContract.fromTokenizer(
+                                new int[]{0, 5, 2, 1, 1}, new int[]{1, 1, 1, 0, 0},
+                                1, 0, 2, true);
+                expectRunnerRefusal(environment, session, truncated, profile);
+            }
+        }
+    }
+
+    private static void expectRunnerRefusal(final OrtEnvironment environment,
+                                            final OrtSession session,
+                                            final KnowledgeEmbeddingTensorContract.Inputs batch,
+                                            final KnowledgeE5ConfigProfile.Result profile)
+            throws Exception {
+        try {
+            KnowledgeE5OrtTensorRunner.run(environment, session, batch, profile);
+            fail("Invalid E5 batch was passed to native ORT");
+        } catch (IllegalArgumentException expected) { }
     }
 }

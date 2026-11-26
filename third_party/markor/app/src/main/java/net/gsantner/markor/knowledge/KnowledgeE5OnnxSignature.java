@@ -20,6 +20,9 @@ final class KnowledgeE5OnnxSignature {
             this.type = type;
             this.shape = Arrays.copyOf(shape, shape.length);
         }
+
+        /** Immutable snapshot for native execution's fixed-axis preflight. */
+        long[] shape() { return Arrays.copyOf(shape, shape.length); }
     }
 
     private KnowledgeE5OnnxSignature() { }
