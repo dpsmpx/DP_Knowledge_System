@@ -626,18 +626,18 @@ final class KnowledgeModelSettingsDialog {
                         storageComparison(row.storage), ramComparison(row))
                 + (lowSpace ? "\n\n" + context.getString(R.string.knowledge_models_space_warning) : "")
                 + "\n\n" + context.getString(R.string.knowledge_models_imported_not_runnable);
-        final AlertDialog.Builder dialog = new AlertDialog.Builder(context)
+        final AlertDialog.Builder builder = new AlertDialog.Builder(context)
                 .setTitle(artifact.title)
                 .setMessage(message);
         if (row.installedEntry != null) {
-            dialog.setPositiveButton(R.string.knowledge_models_compare_manage_installed,
+            builder.setPositiveButton(R.string.knowledge_models_compare_manage_installed,
                     (choice, which) -> showDetails(row.installedEntry));
         } else {
-            dialog.setPositiveButton(R.string.knowledge_models_download_confirm_action,
+            builder.setPositiveButton(R.string.knowledge_models_download_confirm_action,
                     (choice, which) -> beginTrustedDownload(artifact.role,
                             artifact.downloadUrl, artifact.expectedSha256, artifact.filename));
         }
-        dialog
+        builder
                 .setNeutralButton(R.string.knowledge_models_catalog_open_source,
                         (dialog, which) -> {
                             try {
