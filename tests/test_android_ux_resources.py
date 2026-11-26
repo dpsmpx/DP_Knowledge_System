@@ -101,22 +101,26 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         index = (folder / "KnowledgeLocalIndex.java").read_text()
         qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
-        self.assertIn('MAX_SEMANTIC_CANDIDATES, false)', index)
+        self.assertIn('MAX_SEMANTIC_CANDIDATES, CandidatePolicy.PRODUCTION)', index)
         self.assertIn('syntheticSemanticSearchWithBudget(final String modelKey,', index)
-        self.assertIn('candidateBudget, false)', index)
+        self.assertIn('CandidatePolicy.PRODUCTION)', index)
         self.assertIn('syntheticSemanticSearchQuotaWithBudget(final String modelKey,', index)
         self.assertIn('checkSyntheticSearchBudget(candidateBudget)', index)
-        self.assertIn('candidateBudget, true)', index)
+        self.assertIn('CandidatePolicy.SOURCE_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchSampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.SAMPLE_THEN_QUOTA)', index)
         for marker in ('!syntheticDatabase', 'dpks-device-qa-',
                        'databaseFile.getName().startsWith("qa-")',
                        'SELECT COUNT(*) FROM embedding_notes e',
                        'e.completed=e.chunks AND n.oversized=0',
                        'n.raw_sha256=e.source_sha256',
                        'n.generation=(SELECT value FROM meta',
-                       'final int quota = (int) Math.max(1L, candidateBudget / completedSources)',
+                       'final int quota = (int) Math.max(1L, remaining / completedSources)',
+                       'new int[]{bucket}', 'candidateBudget - sampled',
+                       'samplePerSource ? "GROUP BY l.path LIMIT ?"',
                        'chunkRange.append(" AND l.chunk>=?")',
                        'chunkRange.append(" AND l.chunk<?")',
-                       'candidateBudget - early'):
+                       'remaining - early'):
             self.assertIn(marker, index)
         self.assertIn('step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget)', qa)
         start = qa.index('private String checkSyntheticSourceQuotaBudget()')
@@ -128,8 +132,11 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'testIndex.beginEmbedding(paths[i]', 'testIndex.appendEmbeddingBatch(paths[i]',
                        'syntheticSemanticSearchWithBudget(model, exact, 8, budget)',
                        'syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1)',
                        'quota.get(0).excerptStart', 'matchesIndexedEvidenceSource(paths[i]',
                        'uniformLateExactRecovered=true', 'skewLateOnlyStillMissed=true',
+                       'sampleThenQuotaSkewRecovered=true', 'tightSampleBudgetBounded=true',
                        'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
             self.assertIn(marker, fixture)
         self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
@@ -137,6 +144,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertNotIn('notebook.', fixture)
         jvm = (ROOT.parent / 'test/java/net/gsantner/markor/knowledge/KnowledgeEmbeddingTest.java')
         self.assertIn('sourceQuotaQaFixtureHasOneNearExactBucketAndLateOnlyTarget',
+                      jvm.read_text())
+        self.assertIn('laterBetterSameBucketFixtureCannotBeResolvedBySourceSamplingAlone',
                       jvm.read_text())
 
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):

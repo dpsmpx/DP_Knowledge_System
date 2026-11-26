@@ -883,8 +883,11 @@ public final class KnowledgeLocalIndex {
                                                           final float[] normalizedQuestion,
                                                           final int limit) {
         return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,
-                MAX_SEMANTIC_CANDIDATES, false);
+                MAX_SEMANTIC_CANDIDATES, CandidatePolicy.PRODUCTION);
     }
+
+    /** Alternative candidate selectors are reachable only from guarded QA. */
+    private enum CandidatePolicy { PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA }
 
     /** A deliberately small cap exercises adaptive SQL on disposable QA data
      * without allocating 45k vectors. Never available on the real index.
@@ -894,7 +897,8 @@ public final class KnowledgeLocalIndex {
                                                                      final int limit,
                                                                      final int candidateBudget) {
         checkSyntheticSearchBudget(candidateBudget);
-        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget, false);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.PRODUCTION);
     }
 
     /** Only the isolated cache-only QA can exercise the unshipped early-chunk
@@ -905,7 +909,20 @@ public final class KnowledgeLocalIndex {
                                                                           final int limit,
                                                                           final int candidateBudget) {
         checkSyntheticSearchBudget(candidateBudget);
-        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget, true);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.SOURCE_QUOTA);
+    }
+
+    /** Per-exact-table source sampling followed by disjoint early/late chunk
+     * quotas. Duplicate raw candidates across phases still consume the cap;
+     * this is diagnostic, not a production source-diversity promise.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchSampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.SAMPLE_THEN_QUOTA);
     }
 
     private void checkSyntheticSearchBudget(final int candidateBudget) {
@@ -922,7 +939,7 @@ public final class KnowledgeLocalIndex {
                                                        final float[] normalizedQuestion,
                                                        final int limit,
                                                        final int candidateBudget,
-                                                       final boolean syntheticSourceQuota) {
+                                                       final CandidatePolicy candidatePolicy) {
         if (limit < 1 || limit > 40) {
             throw new IllegalArgumentException("Invalid result limit");
         }
@@ -930,7 +947,7 @@ public final class KnowledgeLocalIndex {
         final Map<String, SemanticHit> best = new HashMap<>();
         final SQLiteDatabase db = open();
         try {
-            if (syntheticSourceQuota) {
+            if (candidatePolicy != CandidatePolicy.PRODUCTION) {
                 // Deliberately experimental: test the same bounded source
                 // count / early-chunk quota as the offline SQL mirror.
                 // Only the cache-only QA entry point can reach this branch.
@@ -949,12 +966,29 @@ public final class KnowledgeLocalIndex {
                 if (completedSources == 0) {
                     return Collections.emptyList();
                 }
-                final int quota = (int) Math.max(1L, candidateBudget / completedSources);
+                int sampled = 0;
+                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA) {
+                    for (final int bucket : exact) {
+                        if (sampled == candidateBudget) break;
+                        final int rows = appendSemanticCandidatesRange(db,
+                                new int[]{bucket}, modelKey, normalizedQuestion,
+                                candidateBudget - sampled, null, null, null, true, best);
+                        if (rows < 0) return Collections.emptyList();
+                        sampled += rows;
+                    }
+                }
+                if (sampled == candidateBudget) {
+                    // The diagnostic source sample has already spent the
+                    // raw-row cap; do not run additional candidate SQL.
+                    return rankSemanticHits(best, limit);
+                }
+                final int remaining = candidateBudget - sampled;
+                final int quota = (int) Math.max(1L, remaining / completedSources);
                 final int early = appendSemanticCandidatesRange(db, exact, modelKey,
-                        normalizedQuestion, candidateBudget, null, null, quota, best);
-                if (early < 0 || (early < candidateBudget
+                        normalizedQuestion, remaining, null, null, quota, best);
+                if (early < 0 || (early < remaining
                         && appendSemanticCandidatesRange(db, exact, modelKey,
-                                normalizedQuestion, candidateBudget - early,
+                                normalizedQuestion, remaining - early,
                                 null, quota, null, best) < 0)) {
                     return Collections.emptyList();
                 }
@@ -998,17 +1032,22 @@ public final class KnowledgeLocalIndex {
         } finally {
             db.close();
         }
+        return rankSemanticHits(best, limit);
+    }
+
+    private static List<SemanticHit> rankSemanticHits(final Map<String, SemanticHit> best,
+                                                      final int limit) {
         final List<SemanticHit> ranked = new ArrayList<>(best.values());
         ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
                 .thenComparing(hit -> hit.relativePath));
         return ranked.subList(0, Math.min(ranked.size(), limit));
     }
 
-    /** Return the number of distinct path/chunk candidates inspected, or -1
-     * if interrupted. The caller owns the SQLite connection and the final
-     * per-source cosine ranking. The optional exact buckets exclude chunks
-     * that were already inspected in the first pass; both passes together
-     * inspect <=45k distinct chunks when no query is interrupted.
+    /** Return the number of grouped SQL rows inspected in this pass, or -1
+     * if interrupted. The caller owns the connection and cosine ranking.
+     * Optional exact-bucket exclusion avoids overlap in production's two
+     * passes. Synthetic sample/quota phases may revisit a chunk, but every
+     * row still consumes their shared raw-candidate budget.
      */
     private static int appendSemanticCandidates(final SQLiteDatabase db, final int[] buckets,
                                                 final String modelKey,
@@ -1027,6 +1066,19 @@ public final class KnowledgeLocalIndex {
                                                      final int[] excludedBuckets,
                                                      final Integer minChunk,
                                                      final Integer maxChunk,
+                                                     final Map<String, SemanticHit> best) {
+        return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
+                candidateLimit, excludedBuckets, minChunk, maxChunk, false, best);
+    }
+
+    private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
+                                                     final int[] buckets, final String modelKey,
+                                                     final float[] normalizedQuestion,
+                                                     final int candidateLimit,
+                                                     final int[] excludedBuckets,
+                                                     final Integer minChunk,
+                                                     final Integer maxChunk,
+                                                     final boolean samplePerSource,
                                                      final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
         final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
@@ -1073,7 +1125,8 @@ public final class KnowledgeLocalIndex {
                 + " AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
-                + "GROUP BY l.path, l.chunk LIMIT ?";
+                + (samplePerSource ? "GROUP BY l.path LIMIT ?"
+                        : "GROUP BY l.path, l.chunk LIMIT ?");
         int inspected = 0;
         try (Cursor c = db.rawQuery(sql, args)) {
             while (c.moveToNext()) {

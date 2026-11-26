@@ -197,6 +197,34 @@ public class KnowledgeEmbeddingTest {
     }
 
     @Test
+    public void laterBetterSameBucketFixtureCannotBeResolvedBySourceSamplingAlone() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] early = KnowledgeEmbeddingVectors.normalize(
+                new float[]{.99f, (float) Math.sqrt(1 - .99 * .99), 0, 0, 0, 0, 0, 0});
+        final float[] late = KnowledgeEmbeddingVectors.normalize(
+                new float[]{.999f, (float) Math.sqrt(1 - .999 * .999), 0, 0, 0, 0, 0, 0});
+        int earlyExact = 0;
+        int lateExact = 0;
+        for (final int exact : KnowledgeEmbeddingLsh.buckets(query)) {
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(early)) {
+                if (bucket == exact) earlyExact++;
+            }
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(late)) {
+                if (bucket == exact) lateExact++;
+            }
+        }
+        assertEquals(1, earlyExact);
+        assertEquals(1, lateExact);
+        assertEquals(KnowledgeEmbeddingLsh.buckets(early)[0],
+                KnowledgeEmbeddingLsh.buckets(late)[0]);
+        assertTrue(KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(late))
+                > KnowledgeEmbeddingVectors.similarity(query,
+                        KnowledgeEmbeddingVectors.encode(early)));
+    }
+
+    @Test
     public void cosineSearchRanksSemanticVectorsAndRejectsInvalidBuffers() {
         final float[] direction = new float[]{3, 4, 0, 0, 0, 0, 0, 0};
         final float[] query = KnowledgeEmbeddingVectors.normalize(direction);

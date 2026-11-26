@@ -604,6 +604,20 @@ even if every reference and quotation passes the checks below.
     through the guarded synthetic QA entry point; normal `semanticSearch()`
     retains the previous exact-first/neighbor behavior and 45k cap. CI builds
     this test but does **not** constitute an executed physical-device QA run.
+48. **Sample-before-quota also has a guarded Android QA path and a budget
+    sensitivity regression.** The `SAMPLE_THEN_QUOTA` diagnostic samples at
+    most one grouped candidate per source in each exact LSH table, counting
+    every raw row against the cap, then spends only the remainder on disjoint
+    early/late chunk-index ranges. `EMBED-QUOTA-19` checks that this restores
+    the late-only hit in its five-source skew case, while a one-row candidate
+    cap cannot leak later sources. Repeated rows *across sampling and quota*
+    still cost budget, and `GROUP BY path` can select a weaker chunk.
+    The host-only sweep tests four exact-hit positions and twelve caps on a
+    synthetic 90-source index, plus a later 0.999-scoring chunk sharing one
+    exact table with a 0.99 earlier chunk. At cap 100, sample/quota sees the
+    *source* but retains cosine 0.99, while chunk interleaving inspects the
+    0.999 chunk. These are known recall/quality limits, **not** proof of a
+    safe automatic policy. No production algorithm or model access changes.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -760,6 +774,26 @@ chunks, cap 100), the quota policy visits 89/90 but *misses* the late exact
 chunk; source sampling plus quota and global interleaving recover it. No
 private path or note text is printed. The new regression tests cover both
 scenarios, quota-pass nonoverlap and bounded total raw candidates.
+
+The new `skew_budget_sweep` fixes 88 single-chunk sources and two 128-chunk
+sources (344 artificial chunks total), moves the last source's sole exact hit
+between offsets, and measures twelve budgets from 88 to 240. The first tested
+cap that actually *inspects the exact target chunk* is:
+
+| Target chunk index | Current exact-first | Early quota + fill | Source sample + quota | Global chunk interleaving |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 217 | 90 | 90 | 90 |
+| 1 | 217 | 216 | 90 | 91 |
+| 3 | 217 | 217 | 90 | 93 |
+| 127 | 217 | 217 | 90 | 217 |
+
+The table reports **first passing cap among the twelve measured values**,
+not a general model-performance threshold. It also makes a distinction the
+source-recall metric hides: when the target has an earlier cosine-0.99 chunk
+and a later cosine-0.999 chunk in the same exact table, both quota strategies
+return that *source* but score it only 0.99 at caps 90 and 100; global
+interleaving sees 0.999 at cap 100. The sweep records raw and unique rows
+for every policy/cap and never prints artificial source pathnames.
 
 ## Repeatable engineering acceptance
 
