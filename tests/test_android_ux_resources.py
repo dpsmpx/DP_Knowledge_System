@@ -15,6 +15,28 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_hybrid_android_sqlite_qa_joins_both_indexes_and_filters_changed_bytes(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        start = qa.index("private String checkSyntheticHybridIndex()")
+        end = qa.index("\n    private ", start + 1)
+        fixture = qa[start:end]
+        self.assertIn('step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex)', qa)
+        for marker in ("KnowledgeVaultScanner.scan(vault, 12,",
+                       "KnowledgeEmbeddingChunks.fromNote(bodies[i])",
+                       "testIndex.beginEmbedding(paths[i],",
+                       "testIndex.appendEmbeddingBatch(paths[i],",
+                       'testIndex.evidenceSearch("amber violet", 8)',
+                       "testIndex.semanticSearch(model, query, 8)",
+                       "KnowledgeHybridRanking.combine(",
+                       "KnowledgeHybridRanking.selectBalancedIndices(",
+                       "matchesIndexedEvidenceSource(",
+                       'bodies[4].replace("violet", "VIOLET")',
+                       "semanticP50us=", "semanticP95us=", "semanticTrials=21",
+                       "hybridVerifiedRecallAt4=4/4", "artificialVectorsOnly=true"):
+            self.assertIn(marker, fixture)
+        self.assertIn("removeSandbox(sandbox)", fixture)
+        self.assertNotIn("KnowledgeEmbeddingClient.embed", fixture)
+
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         ranking = (folder / "KnowledgeHybridRanking.java").read_text()
