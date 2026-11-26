@@ -925,7 +925,7 @@ public final class KnowledgeLocalIndex {
             }
             if (!canTruncate) {
                 if (appendSemanticCandidates(db, probes, modelKey, normalizedQuestion,
-                        candidateBudget, best) < 0) {
+                        candidateBudget, null, best) < 0) {
                     return Collections.emptyList();
                 }
             } else {
@@ -945,10 +945,10 @@ public final class KnowledgeLocalIndex {
                     }
                 }
                 final int exactRows = appendSemanticCandidates(db, exact, modelKey,
-                        normalizedQuestion, candidateBudget, best);
+                        normalizedQuestion, candidateBudget, null, best);
                 if (exactRows < 0 || (exactRows < candidateBudget
                         && appendSemanticCandidates(db, neighbors, modelKey,
-                                normalizedQuestion, candidateBudget - exactRows,
+                                normalizedQuestion, candidateBudget - exactRows, exact,
                                 best) < 0)) {
                     return Collections.emptyList();
                 }
@@ -964,15 +964,19 @@ public final class KnowledgeLocalIndex {
 
     /** Return the number of distinct path/chunk candidates inspected, or -1
      * if interrupted. The caller owns the SQLite connection and the final
-     * per-source cosine ranking. Both passes together inspect <=45k chunks.
+     * per-source cosine ranking. The optional exact buckets exclude chunks
+     * that were already inspected in the first pass; both passes together
+     * inspect <=45k distinct chunks when no query is interrupted.
      */
     private static int appendSemanticCandidates(final SQLiteDatabase db, final int[] buckets,
                                                 final String modelKey,
                                                 final float[] normalizedQuestion,
                                                 final int candidateLimit,
+                                                final int[] excludedBuckets,
                                                 final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
-        final String[] args = new String[buckets.length + 3];
+        final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
+        final String[] args = new String[buckets.length + excluded + 3];
         for (int i = 0; i < buckets.length; i++) {
             if (i > 0) {
                 placeholders.append(',');
@@ -980,16 +984,27 @@ public final class KnowledgeLocalIndex {
             placeholders.append('?');
             args[i] = Integer.toString(buckets[i]);
         }
-        args[buckets.length] = modelKey;
-        args[buckets.length + 1] = Integer.toString(normalizedQuestion.length);
-        args[buckets.length + 2] = Integer.toString(candidateLimit);
+        final StringBuilder exclusion = new StringBuilder();
+        if (excluded > 0) {
+            exclusion.append(" AND NOT EXISTS (SELECT 1 FROM embedding_lsh prior "
+                    + "WHERE prior.path=l.path AND prior.chunk=l.chunk AND prior.bucket IN (");
+            for (int i = 0; i < excluded; i++) {
+                if (i > 0) exclusion.append(',');
+                exclusion.append('?');
+                args[buckets.length + i] = Integer.toString(excludedBuckets[i]);
+            }
+            exclusion.append("))");
+        }
+        args[buckets.length + excluded] = modelKey;
+        args[buckets.length + excluded + 1] = Integer.toString(normalizedQuestion.length);
+        args[buckets.length + excluded + 2] = Integer.toString(candidateLimit);
         final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size "
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
                 + "AND n.raw_sha256=e.source_sha256 "
-                + "WHERE l.bucket IN (" + placeholders + ") AND e.model_key=? "
+                + "WHERE l.bucket IN (" + placeholders + ")" + exclusion + " AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
                 + "GROUP BY l.path, l.chunk LIMIT ?";

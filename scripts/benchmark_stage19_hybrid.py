@@ -154,22 +154,30 @@ def search_semantic_mirror(connection: sqlite3.Connection,
         total_chunks = connection.execute('SELECT COUNT(*) FROM embedding_chunks').fetchone()[0]
         policy = 'exact_first' if total_chunks > candidate_cap else 'legacy'
 
-    def query_rows(buckets: tuple[int, ...], cap: int):
+    def query_rows(buckets: tuple[int, ...], cap: int,
+                   excluded_exact: tuple[int, ...] = ()):
+        exclusion = ''
+        if excluded_exact:
+            exclusion = (' AND NOT EXISTS (SELECT 1 FROM embedding_lsh prior '
+                         'WHERE prior.path=l.path AND prior.chunk=l.chunk '
+                         'AND prior.bucket IN (' + ','.join('?' for _ in excluded_exact)
+                         + '))')
         return connection.execute('''
             SELECT e.path, v.vector FROM embedding_lsh l
             JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
             JOIN embedding_notes e ON e.path=v.path
             JOIN notes n ON n.path=e.path
-            WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ''')
-              AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+            WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')'
+            + exclusion + ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
               AND n.generation=? AND n.oversized=0
             GROUP BY l.path,l.chunk LIMIT ?
-        ''', (*buckets, MODEL_KEY, DIMENSIONS, GENERATION, cap))
+        ''', (*buckets, *excluded_exact, MODEL_KEY, DIMENSIONS, GENERATION, cap))
 
     best = {}
-    def collect(buckets: tuple[int, ...], cap: int) -> int:
+    def collect(buckets: tuple[int, ...], cap: int,
+                excluded_exact: tuple[int, ...] = ()) -> int:
         count = 0
-        for path, raw in query_rows(buckets, cap):
+        for path, raw in query_rows(buckets, cap, excluded_exact):
             count += 1
             vector = struct.unpack('<8f', raw)
             score = sum(a * b for a, b in zip(query, vector))
@@ -186,7 +194,7 @@ def search_semantic_mirror(connection: sqlite3.Connection,
                           if i % (LSH_BITS + 1) != 0)
         used = collect(exact, candidate_cap)
         if used < candidate_cap:
-            collect(neighbors, candidate_cap - used)
+            collect(neighbors, candidate_cap - used, exact)
     return sorted(best, key=lambda path: (-best[path], path))[:limit]
 
 
