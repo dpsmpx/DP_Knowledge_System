@@ -1,15 +1,18 @@
 """Regression for the offline, deterministic 20k Android LSH/RRF SQL mirror."""
 
 import json
+import math
 from pathlib import Path
 import sqlite3
+import struct
 import unittest
 
 from scripts.benchmark_stage19_hybrid import (
     DIMENSIONS, LSH_BITS, LSH_SAMPLES, LSH_TABLES,
     MAX_SEMANTIC_CANDIDATES, NEGATIVE_CASE, RRF_K, SYNONYM_CASE,
     basis, benchmark, build_synthetic_embeddings, lsh_buckets, lsh_probes,
-    rrf_combine, search_semantic_mirror,
+    rrf_combine, search_semantic_mirror, synthetic_angular_noise_probe,
+    synthetic_multichunk_cap_probe,
 )
 from scripts.benchmark_stage19_retrieval import build_synthetic_index
 
@@ -79,11 +82,60 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
             for limit in (0, 41):
                 with self.assertRaises(ValueError):
                     search_semantic_mirror(connection, basis(0), limit)
+            for candidate_cap in (0, 60_001):
+                with self.assertRaises(ValueError):
+                    search_semantic_mirror(connection, basis(0), 8, candidate_cap)
+
+    def test_multichunk_sql_deduplicates_by_path_and_excludes_partial_checkpoints(self):
+        with sqlite3.connect(':memory:') as connection:
+            labels = build_synthetic_index(connection, 512)
+            build_synthetic_embeddings(connection, 512, labels)
+            target = sorted(labels[0])[0]
+            near = (0.9, math.sqrt(1 - 0.9 ** 2), 0., 0., 0., 0., 0., 0.)
+            connection.execute('UPDATE embedding_chunks SET vector=? WHERE path=? AND chunk=0',
+                               (struct.pack('<8f', *near), target))
+            connection.execute('DELETE FROM embedding_lsh WHERE path=? AND chunk=0',
+                               (target,))
+            connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,0)',
+                                   ((bucket, target) for bucket in lsh_buckets(near)))
+            connection.execute('INSERT INTO embedding_chunks VALUES (?,?,?)',
+                               (target, 1, struct.pack('<8f', *basis(0))))
+            connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,1)',
+                                   ((bucket, target) for bucket in lsh_buckets(basis(0))))
+            connection.execute('UPDATE embedding_notes SET chunks=2,completed=1 WHERE path=?',
+                               (target,))
+            self.assertNotIn(target, search_semantic_mirror(connection, basis(0)))
+            connection.execute('UPDATE embedding_notes SET completed=2 WHERE path=?',
+                               (target,))
+            ranked = search_semantic_mirror(connection, basis(0))
+            self.assertEqual(1, ranked.count(target))
+            self.assertEqual(6, len(ranked))
+
+    def test_chunk_candidate_cap_can_hide_late_highest_cosine_note(self):
+        probe = synthetic_multichunk_cap_probe()
+        self.assertEqual(360, probe['synthetic_sources'])
+        self.assertEqual(128, probe['chunks_per_source'])
+        self.assertEqual(46_080, probe['total_chunks'])
+        self.assertEqual(MAX_SEMANTIC_CANDIDATES, probe['production_candidate_cap'])
+        self.assertFalse(probe['exact_target_retrieved_at_6_with_cap'])
+        self.assertTrue(probe['exact_target_retrieved_at_6_without_cap'])
+        self.assertNotIn('.md', str(probe))
+
+    def test_noisy_vector_can_leave_all_lsh_probes_while_cosine_still_positive(self):
+        angles = synthetic_angular_noise_probe()
+        self.assertEqual([1.0, 0.99, 0.95, 0.9, 0.8],
+                         [item['assigned_cosine'] for item in angles])
+        self.assertEqual([4, 2, 1, 2, 0],
+                         [item['tables_reaching_query_probes'] for item in angles])
+        self.assertTrue(all(item['candidate_reachable'] for item in angles[:-1]))
+        self.assertFalse(angles[-1]['candidate_reachable'])
 
     def test_labeled_diverse_queries_expose_gain_and_false_positive_cost(self):
         data = benchmark(512, 2)
         self.assertEqual(512, data['embeddings'])
         self.assertEqual(7, len(data['queries']))
+        self.assertEqual(synthetic_multichunk_cap_probe(), data['multichunk_cap_probe'])
+        self.assertEqual(synthetic_angular_noise_probe(), data['angular_noise_probe'])
         self.assertEqual(data['mode'], 'synthetic_android_lsh_rrf_sql_mirror_not_model_or_device')
         for record in data['queries'][:5]:
             self.assertEqual(4, record['known_relevant'])

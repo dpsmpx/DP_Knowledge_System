@@ -9,6 +9,7 @@ No user vault, network, provider, app database or filesystem writes.
 
 import argparse
 import json
+import math
 import sqlite3
 import statistics
 import struct
@@ -131,14 +132,19 @@ def build_synthetic_embeddings(connection: sqlite3.Connection, notes: int,
 
 
 def search_semantic_mirror(connection: sqlite3.Connection,
-                           query: tuple[float, ...], limit: int = 24) -> list[str]:
+                           query: tuple[float, ...], limit: int = 24,
+                           candidate_cap: int = MAX_SEMANTIC_CANDIDATES) -> list[str]:
     """Same 44 LSH probes, 45k candidate cap, cosine and path ties as Android.
 
     Host schema omits actual note byte seals: Android checks these separately.
-    The fixture has one vector chunk per note (Android handles multiple).
+    Multiple chunks are deduplicated using each path's best cosine score.
+    A larger diagnostic candidate_cap may be used only by the cap probe;
+    the benchmark itself uses the production 45k cap.
     """
     if not 1 <= limit <= 40:
         raise ValueError('Semantic limit must be 1..40')
+    if not 1 <= candidate_cap <= 60_000:
+        raise ValueError('Synthetic diagnostic cap must be 1..60000')
     probes = lsh_probes(query)
     rows = connection.execute('''
         SELECT e.path, v.vector FROM embedding_lsh l
@@ -149,14 +155,90 @@ def search_semantic_mirror(connection: sqlite3.Connection,
           AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
           AND n.generation=? AND n.oversized=0
         GROUP BY l.path,l.chunk LIMIT ?
-    ''', (*probes, MODEL_KEY, DIMENSIONS, GENERATION, MAX_SEMANTIC_CANDIDATES))
-    ranked = []
+    ''', (*probes, MODEL_KEY, DIMENSIONS, GENERATION, candidate_cap))
+    best = {}
     for path, raw in rows:
         vector = struct.unpack('<8f', raw)
         score = sum(a * b for a, b in zip(query, vector))
-        ranked.append((path, score))
-    ranked.sort(key=lambda pair: (-pair[1], pair[0]))
-    return [path for path, _ in ranked[:limit]]
+        if path not in best or score > best[path]:
+            best[path] = score
+    return sorted(best, key=lambda path: (-best[path], path))[:limit]
+
+
+def synthetic_multichunk_cap_probe() -> dict:
+    """Expose the source-diversity loss from a chunk-level 45k SQL limit.
+
+    360 small *artificial* note rows each have 128 vector chunks. All notes
+    have a near-matching chunk; the final note has the one exact match at
+    chunk 3. No Markdown files are generated and no user index is opened.
+    """
+    notes, chunks_per_note = 360, 128
+    near = (0.9, math.sqrt(1.0 - 0.9 ** 2), 0., 0., 0., 0., 0., 0.)
+    exact = basis(0)
+    packed_near = struct.pack('<8f', *near)
+    packed_exact = struct.pack('<8f', *exact)
+    near_buckets = lsh_buckets(near)
+    exact_buckets = lsh_buckets(exact)
+    target = 'z-late-target.md'
+    with sqlite3.connect(':memory:') as connection:
+        connection.executescript('''
+            CREATE TABLE notes(path TEXT PRIMARY KEY, generation TEXT, oversized INTEGER);
+            CREATE TABLE embedding_notes(path TEXT PRIMARY KEY, model_key TEXT,
+                                         dimension INTEGER, chunks INTEGER, completed INTEGER);
+            CREATE TABLE embedding_chunks(path TEXT, chunk INTEGER, vector BLOB,
+                                          PRIMARY KEY(path,chunk));
+            CREATE TABLE embedding_lsh(bucket INTEGER, path TEXT, chunk INTEGER,
+                                       PRIMARY KEY(bucket,path,chunk));
+        ''')
+        with connection:
+            for number in range(notes):
+                path = target if number == notes - 1 else f'a-{number:04d}.md'
+                connection.execute('INSERT INTO notes VALUES (?,?,0)', (path, GENERATION))
+                connection.execute('INSERT INTO embedding_notes VALUES (?,?,?,?,?)',
+                                   (path, MODEL_KEY, DIMENSIONS,
+                                    chunks_per_note, chunks_per_note))
+                connection.executemany('INSERT INTO embedding_chunks VALUES (?,?,?)',
+                                       ((path, chunk, packed_exact if path == target and chunk == 3
+                                         else packed_near)
+                                        for chunk in range(chunks_per_note)))
+                connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,?)',
+                                       ((bucket, path, chunk)
+                                        for chunk in range(chunks_per_note)
+                                        for bucket in (exact_buckets if path == target and chunk == 3
+                                                       else near_buckets)))
+        limited = search_semantic_mirror(connection, exact, 6)
+        unlimited_diagnostic = search_semantic_mirror(connection, exact, 6,
+                                                     notes * chunks_per_note)
+        return {
+            'synthetic_sources': notes,
+            'chunks_per_source': chunks_per_note,
+            'total_chunks': notes * chunks_per_note,
+            'production_candidate_cap': MAX_SEMANTIC_CANDIDATES,
+            'exact_target_retrieved_at_6_with_cap': target in limited,
+            'exact_target_retrieved_at_6_without_cap': target in unlimited_diagnostic,
+            'warning': 'candidate GROUP BY/LIMIT has no guaranteed order; '
+                       'observed outcome applies only to this SQLite build',
+        }
+
+
+def synthetic_angular_noise_probe() -> list[dict]:
+    """Deterministic LSH collision visibility as an artificial vector rotates.
+
+    Candidate membership is discrete and can vanish before cosine is small.
+    These are manually chosen directions, never actual noisy model outputs.
+    """
+    query = basis(0)
+    probes = set(lsh_probes(query))
+    result = []
+    for cosine in (1.0, 0.99, 0.95, 0.90, 0.80):
+        vector = (cosine, math.sqrt(1.0 - cosine * cosine), 0., 0., 0., 0., 0., 0.)
+        overlap = len(probes.intersection(lsh_buckets(vector)))
+        result.append({
+            'assigned_cosine': cosine,
+            'tables_reaching_query_probes': overlap,
+            'candidate_reachable': overlap > 0,
+        })
+    return result
 
 
 def rrf_combine(lexical: list[str], semantic: list[str], limit: int = 24) -> list[str]:
@@ -245,6 +327,8 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             'vector_dimension': DIMENSIONS,
             'embeddings': notes,
             'queries': output,
+            'multichunk_cap_probe': synthetic_multichunk_cap_probe(),
+            'angular_noise_probe': synthetic_angular_noise_probe(),
             'repetitions_per_query': repeats,
             'index_build_ms': round(index_ms, 2),
             'lexical_lookup': _timing_ms(lexical_times),
@@ -253,8 +337,10 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             'limitations': [
                 'all relevance labels and vectors manually constructed; not a model evaluation',
                 'not device latency, memory consumption, battery or Android SQLite version',
-                'does not simulate source-byte seals, OCR, multi-chunk notes or model quality',
+                'does not simulate source-byte seals, OCR or model quality',
+                'multi-chunk cap probe uses its own tiny artificial index, not Android I/O',
                 'one-hot vectors hide real embedding noise and cross-language ambiguity',
+                'angular noise probe is artificial LSH collision geometry, not provider output',
                 'synthetic positive and negative labels are not representative of user notes',
                 'ranking never proves a claim, citation, synonym or semantic entailment',
             ],
