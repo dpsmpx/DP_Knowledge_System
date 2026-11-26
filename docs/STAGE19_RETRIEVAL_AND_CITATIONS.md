@@ -440,6 +440,24 @@ even if every reference and quotation passes the checks below.
     access to the selected real vault. Artificial equal/opposite vectors
     **do not measure embedding quality, real semantic recall, energy use or
     performance on a physical device**; `RET-15` remains open.
+38. **A second host-only 20k benchmark compares FTS4, approximate LSH/cosine
+    and RRF on the *same* synthetic notes.** The Java 4-table/10-bit/24-sample
+    hash, 44 one-bit probes, 45k candidate limit, complete-note/model/generation
+    gates and K=60 unique-source RRF are mirrored with 8-dimensional
+    **manually assigned one-hot vectors**. A cross-language golden signature
+    runs in JVM and Python regression tests. Five artificial topics have
+    four labeled sources each (including opposing statements) and two
+    deliberately mislabeled vector hits. Two extra cases expose both a
+    *potential* gain (the synthetic vector maps `sofa` to a note containing
+    `couch` where FTS4 has zero recall) and a serious risk (a no-relevant-
+    document query returns two false vector positives). Labels, not model
+    semantics, decide the result. SQL tests also exclude obsolete scan
+    generations, oversized notes, incomplete checkpoints and wrong models.
+    This host schema has one chunk per note and does **not** mirror the
+    Android raw-byte seal: `HYBRID-INDEX-19` tests that separately. The
+    benchmark logs distinct lexical, LSH/cosine and fusion p50/p95 timings
+    but cannot establish on-device performance, real synonym quality,
+    provider reliability or the broader `RET-15` acceptance gate.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -489,6 +507,32 @@ The deliberately adversarial corpus is not a
 representative search evaluation, and this measures a Python SQL mirror,
 **not** Android, embeddings, battery/RAM, provider quality or semantic
 grounding. Device and broader human-labeled benchmarks remain open.
+
+### Experimental host hybrid/LSH benchmark (artificial vectors only)
+
+Run `python scripts/benchmark_stage19_hybrid.py --notes 20000 --repeats 5`.
+Both the lexical and approximate vector channels query one in-memory SQLite
+fixture, followed by source-level RRF fusion. Every query is warmed up twice;
+the report contains only per-case counts and aggregate timing, not file paths.
+The synthetic vector assignments are intentionally transparent and
+unrealistic, so reported "semantic" recall is **fixture plumbing recall**,
+**not** learned relevance.
+
+On the Linux host on 26 Nov 2026 (SQLite 3.53.1), all five artificial
+two-word topics attained recall@6 = 4/4 and precision@6 = 4/6 in each of
+the three channels. For the hand-coded `sofa`→`couch` case, FTS4 scored
+recall@6 = 0/1; the vector and fused channels each scored 1/1, with **two
+false positives**. For the query with zero labeled relevant documents,
+FTS4 returned nothing but vectors and fusion each returned **two false
+positives**, with recall deliberately reported as undefined (`null`).
+Across 35 timed host queries, the approximate p50/p95 was **0.63/1.49 ms**
+for FTS4, **7.35/10.85 ms** for LSH/SQLite + cosine and **0.018/0.025 ms**
+for RRF alone. These are separate, unpaired host timings, sensitive to
+machine, cache and corpus; no latency threshold is claimed. They should
+**never** be used to claim a real embedding model handles synonyms or is
+fast on Android. Device acceptance, 20k real embedding storage behavior,
+multi-chunk retrieval and representative human-labeled precision/recall
+remain open.
 
 ## Repeatable engineering acceptance
 

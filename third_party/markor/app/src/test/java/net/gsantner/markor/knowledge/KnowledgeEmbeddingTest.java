@@ -112,6 +112,10 @@ public class KnowledgeEmbeddingTest {
                 new float[]{1, 0, 0, 0, 0, 0, 0, 0});
         final float[] opposite = KnowledgeEmbeddingVectors.normalize(
                 new float[]{-1, 0, 0, 0, 0, 0, 0, 0});
+        // Shared with scripts/benchmark_stage19_hybrid.py: a golden LSH
+        // signature catches drift between the host SQL mirror and Android.
+        assertArrayEquals(new int[]{1023, 1723, 3022, 3807},
+                KnowledgeEmbeddingLsh.buckets(query));
         final int[] queryProbes = KnowledgeEmbeddingLsh.probes(query);
         final int[] oppositeBuckets = KnowledgeEmbeddingLsh.buckets(opposite);
         for (final int bucket : oppositeBuckets) {
