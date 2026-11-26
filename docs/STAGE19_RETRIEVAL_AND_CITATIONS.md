@@ -521,6 +521,22 @@ even if every reference and quotation passes the checks below.
     consume the entire cap, and a zero-collision true neighbor remains
     unreachable. Device/OEM multi-chunk latency and broader human-labeled
     retrieval quality remain acceptance debts.
+42. **Exact-bucket saturation is now measured before selecting a fairer
+    production policy.** `scripts/benchmark_stage19_lsh_fairness.py` creates a
+    distinct, in-memory corpus in which 359 sources each have 128 weaker but
+    exact-bucket-colliding chunks and a late 360th source contains the perfect
+    query vector. At 45k candidates, the current exact-first policy still
+    misses it (352/360 sources visited on this host SQLite build). The
+    comparison measures one-chunk-per-source grouping, chunk-number ordering,
+    and equal exact-bucket quotas with the *same* raw 45k ceiling. A second
+    scenario gives the late source an earlier weaker exact-bucket chunk:
+    grouping once per source then fails to retain the better later chunk,
+    whereas chunk-number ordering recovers it. Equal bucket quotas reach the
+    target but see only 89/360 sources in this fixture, so an apparent speed
+    improvement is not a fair comparison. These alternative SQL queries are
+    **host-only experiments**; production Android SQL is unchanged, pending
+    evidence about representative relevance, available memory and device
+    p50/p95 under overloaded 20k-note multi-chunk indexing.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -627,6 +643,37 @@ and adaptive policy had semantic lookup p50/p95 of **8.20/10.23 ms** and
 uses the fast path for this corpus because 20k is below its 45k chunk cap;
 the difference is measurement noise, **not** a speedup claim. Android/OEM
 testing and overloaded 20k multi-chunk latency remain an explicit gate.
+
+### Experimental exact-bucket saturation and source diversity
+
+Run `python scripts/benchmark_stage19_lsh_fairness.py --sources 360 --chunks 128
+--cap 45000 --trials 2` (the command may be entered on one line). The entire
+index lives in memory and has 46,080 generated vectors. Unlike the ordinary
+20k benchmark, **all earlier sources collide with an exact LSH signature**,
+so the initial exact pass alone exceeds its candidate cap. A follow-up
+scenario changes the late source's other chunks to weaker exact-colliding
+vectors, so selecting an arbitrary first chunk per source can miss its best
+one. The original Android-style exact-first SQL is a cross-checked baseline.
+
+One observed host run on 26 Nov 2026 (two measured calls per policy per
+scenario; p50 is descriptive only):
+
+| Experimental SQL policy | Unique sources seen (of 360) | Late perfect source at top 6: only later chunk exact / earlier weaker exact too | Lookup p50, ms (two scenarios) |
+| --- | ---: | --- | ---: |
+| Current exact-first `GROUP BY path,chunk` | 352 | No / No | 71.5 / 72.5 |
+| One arbitrary candidate `GROUP BY path` | 360 | Yes / No | 44.4 / 45.2 |
+| Interleaved `ORDER BY chunk,path` | 360 | Yes / Yes | 104.5 / 105.5 |
+| Equal quotas for four exact buckets | 89 | Yes / Yes | 15.5 / 17.2 |
+
+The source-first option inspects only one candidate per source; quotas also
+underuse capacity and may double-count chunks between exact tables, making
+their apparently lower CPU times incomparable to the full-cap baseline.
+Interleaving sorts far more candidates and can be costly for Android SQLite;
+the portable query plan and device memory cost have **not** been accepted.
+These values are deliberately adversarial host measurements, not real model
+precision/recall or a production tuning recommendation. Regression tests use
+a smaller but structurally equivalent 90-source, 16-chunk fixture to protect
+the failure and tradeoff cases in CI without 46k-vector allocations.
 
 ## Repeatable engineering acceptance
 
