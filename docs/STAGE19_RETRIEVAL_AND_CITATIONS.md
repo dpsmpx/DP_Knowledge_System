@@ -404,6 +404,21 @@ even if every reference and quotation passes the checks below.
     `CITE-LOCAL-19`/`CITE-COVER-19` device checks mirror both failure modes.
     It does **not** parse every clause, infer truth or reject an answer; it
     extends only the existing conservative source-format warnings.
+36. **RRF scoring now uses each unique source's rank**, not the raw position
+    inflated by earlier repeated rows or rejected empty/null paths. Previously,
+    a duplicate was correctly prevented from casting a second vote but still
+    pushed later unique sources down the rank denominator; a stable path-order
+    tie could flip. Inserting or removing duplicates now leaves the fused
+    ranking unchanged. The existing K=60, 40-entry input gates, 24-hit output
+    bound, deterministic tie-break, six-source approval and byte-verification
+    rules are untouched. An independent **five-entry-per-channel artificial
+    ranking fixture** labels two shared opposing sources, one lexical-only
+    and one semantic-only source as relevant. Its union has **recall@6 = 4/4**
+    and **precision@6 = 4/6**, versus 3/4 labeled recall for either separate
+    list. JVM cases assert repeated/invalid-row invariance; cache-only
+    `HYBRID-BALANCE-19` QA asserts the same properties and top-two retention.
+    These are hand-crafted source rankings, **not actual embeddings, a model
+    comparison, semantic relevance labels or representative RET-15 evidence**.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -457,6 +472,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
+  unique-rank invariance under duplicate/empty results and complementary
+  synthetic lexical/semantic source labels (including opposing statements);
   post-consent raw-byte source revision and missing approval seals;
   valid, fabricated, malformed and missing citation numbers; exact vs invented
   quotation, clause-local attribution, mixed valid/invalid source labels,

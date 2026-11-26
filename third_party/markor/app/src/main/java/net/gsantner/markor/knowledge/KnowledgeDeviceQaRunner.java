@@ -1195,6 +1195,18 @@ public final class KnowledgeDeviceQaRunner {
                 Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md", "semantic.md"),
                 Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md"),
                 Arrays.asList("semantic.md"), 3);
+        final List<String> lexicalRanks = Arrays.asList("decoy-lex-a.md", "truth-support.md",
+                "truth-refute.md", "lexical-only-true.md", "decoy-lex-b.md");
+        final List<String> semanticRanks = Arrays.asList("decoy-sem-a.md", "truth-support.md",
+                "truth-refute.md", "semantic-only-true.md", "decoy-sem-b.md");
+        final List<String> fused = KnowledgeHybridRanking.combine(lexicalRanks, semanticRanks, 6);
+        final List<String> duplicated = KnowledgeHybridRanking.combine(Arrays.asList(
+                "decoy-lex-a.md", "decoy-lex-a.md", "truth-support.md", "truth-refute.md",
+                "truth-refute.md", "lexical-only-true.md", "decoy-lex-b.md"), semanticRanks, 6);
+        final List<String> gold = Arrays.asList("truth-support.md", "truth-refute.md",
+                "lexical-only-true.md", "semantic-only-true.md");
+        int recovered = 0;
+        for (final String path : fused) if (gold.contains(path)) recovered++;
         final String source = "Amber violet is the actual artificial observation.\n"
                 + new String(new char[1100]).replace('\0', 'x')
                 + "\nThis distant vector passage concerns an unrelated synthetic item.";
@@ -1205,6 +1217,10 @@ public final class KnowledgeDeviceQaRunner {
                 "amber violet", lexical, vector);
         final String strongVector = "Amber and violet appear in this vector passage.";
         if (!selected.equals(Arrays.asList(0, 1, 3))
+                || !fused.equals(duplicated) || fused.size() != 6 || recovered != 4
+                || !fused.subList(0, 2).equals(Arrays.asList("truth-support.md", "truth-refute.md"))
+                || !KnowledgeHybridRanking.selectBalancedIndices(fused,
+                        lexicalRanks, semanticRanks, 6).equals(Arrays.asList(0, 1, 2, 3, 4, 5))
                 || !chosen.equals(lexical) || !chosen.contains("Amber violet is the actual")
                 || !strongVector.equals(KnowledgeLlmEvidence.chooseHybridExcerpt(
                         "amber violet", "Only amber is mentioned.", strongVector))
@@ -1216,6 +1232,8 @@ public final class KnowledgeDeviceQaRunner {
         }
         return "syntheticCandidates=4, originalTopTwoPreserved=true, "
                 + "semanticRepresentativeIncluded=true, boundedAndReadOnly=true, "
+                + "duplicateRankInvariant=true, syntheticFusionRecallAt6=4/4, "
+                + "sharedOpposingSourcesTopTwo=true, "
                 + "sharedSourceLexicalPhraseVisible=true, strongerVectorRetained=true, "
                 + "russianPrefixPassageSupported=true, "
                 + "noModelCall=true, selectedVaultUntouched=true";
