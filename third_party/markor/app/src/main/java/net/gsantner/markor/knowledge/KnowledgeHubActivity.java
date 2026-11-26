@@ -185,6 +185,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private KnowledgeModelPolicy.Role pendingModelImportRole;
     private String pendingModelPackageKey;
     private boolean modelImportActive;
+    private boolean modelBenchmarkActive;
     private Button analysisButton;
     private Button auditButton;
     private Button embeddingButton;
@@ -295,7 +296,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::pickModelFile, this::pickModelPackage,
                         this::downloadModel, this::auditModelPackage,
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
-                        this::runOnnxFdSmoke,
+                        this::runOnnxFdSmoke, this::runSyntheticModelBenchmark,
                         this::inspectOnnxCpuSession).show();
             }
         });
@@ -831,6 +832,54 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
+    /** Explicit, cancellable CPU-only microbenchmark; no weight or note IO. */
+    private void runSyntheticModelBenchmark(final KnowledgeModelPolicy.Role role) {
+        if (modelImportActive || role == null) return;
+        modelImportActive = true;
+        modelBenchmarkActive = true;
+        final Button button = findViewById(R.id.knowledge_models_open);
+        button.setText(R.string.knowledge_models_synthetic_cancel);
+        button.setContentDescription(getString(R.string.knowledge_models_synthetic_cancel));
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_synthetic_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final KnowledgeModelSyntheticBenchmark.Report result =
+                        KnowledgeModelSyntheticBenchmark.run(role);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        modelBenchmarkActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_synthetic_completed);
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle(R.string.knowledge_models_synthetic_title)
+                                .setMessage(getString(R.string.knowledge_models_synthetic_report,
+                                        result.trials, result.unitsPerTrial,
+                                        result.medianNanos / 1000L, result.p95Nanos / 1000L,
+                                        KnowledgeModelSettingsDialog.formatSize(result.heapBeforeBytes),
+                                        KnowledgeModelSettingsDialog.formatSize(result.maxObservedHeapBytes),
+                                        KnowledgeModelSettingsDialog.formatSize(result.heapAfterBytes),
+                                        Integer.toHexString(result.checksum)))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                });
+            } catch (IOException | RuntimeException failed) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()
+                            && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        modelBenchmarkActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_synthetic_failed);
+                    }
+                });
+            }
+        });
+    }
+
     /** PSS samples and kernel self RSS high-water are distinct memory measurements. */
     private String formatWorkerMemory(final KnowledgeOnnxMemoryTrace memory,
                                       final long rssHighWaterKiB) {
@@ -1178,13 +1227,16 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     }
 
     private void cancelModelImport() {
+        final boolean wasBenchmark = modelBenchmarkActive;
         modelGeneration.incrementAndGet();
         if (onnxSmokeClient != null) onnxSmokeClient.cancel();
         if (onnxSessionClient != null) onnxSessionClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         modelImportActive = false;
+        modelBenchmarkActive = false;
         restoreModelButton();
-        modelStatus.setText(R.string.knowledge_models_import_cancelled);
+        modelStatus.setText(wasBenchmark ? R.string.knowledge_models_synthetic_cancelled
+                : R.string.knowledge_models_import_cancelled);
     }
 
     /** Switch destinations without recreating the activity or its active workers. */
