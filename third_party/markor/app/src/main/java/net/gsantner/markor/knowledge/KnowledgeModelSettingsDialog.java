@@ -32,6 +32,7 @@ final class KnowledgeModelSettingsDialog {
     interface SessionRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
     interface FdSmokeRequest { void run(); }
+    interface BenchmarkRequest { void run(KnowledgeModelPolicy.Role role); }
     interface DownloadRequest {
         void start(KnowledgeModelPolicy.Role role, String url, String expectedSha256);
     }
@@ -47,6 +48,7 @@ final class KnowledgeModelSettingsDialog {
     private final SessionRequest sessionInspector;
     private final SmokeRequest smokeTester;
     private final FdSmokeRequest fdSmokeTester;
+    private final BenchmarkRequest benchmarkRunner;
     private final DownloadRequest downloader;
     private final SharedPreferences preferences;
 
@@ -56,6 +58,7 @@ final class KnowledgeModelSettingsDialog {
                                  final DownloadRequest download, final AuditRequest audit,
                                  final PrepareRequest prepare, final SmokeRequest smoke,
                                  final FdSmokeRequest fdSmoke,
+                                 final BenchmarkRequest benchmark,
                                  final SessionRequest sessionInspect) {
         context = activity;
         files = modelFiles;
@@ -67,6 +70,7 @@ final class KnowledgeModelSettingsDialog {
         sessionInspector = sessionInspect;
         smokeTester = smoke;
         fdSmokeTester = fdSmoke;
+        benchmarkRunner = benchmark;
         downloader = download;
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -135,7 +139,7 @@ final class KnowledgeModelSettingsDialog {
             return;
         }
         final String selected = preferences.getString(role.name(), "");
-        final String[] labels = new String[entries.size() + 2];
+        final String[] labels = new String[entries.size() + 3];
         labels[0] = (selected.isEmpty() ? "✓ " : "")
                 + context.getString(R.string.knowledge_models_disabled);
         for (int i = 0; i < entries.size(); i++) {
@@ -143,7 +147,8 @@ final class KnowledgeModelSettingsDialog {
             labels[i + 1] = (selected.equals(model.sha256) ? "✓ " : "")
                     + model.name + " · " + formatSize(model.bytes);
         }
-        labels[labels.length - 1] = context.getString(R.string.knowledge_models_download_url);
+        labels[labels.length - 2] = context.getString(R.string.knowledge_models_download_url);
+        labels[labels.length - 1] = context.getString(R.string.knowledge_models_synthetic_start);
         new AlertDialog.Builder(context)
                 .setTitle(roleName(role))
                 .setMessage(R.string.knowledge_models_imported_not_runnable)
@@ -151,8 +156,10 @@ final class KnowledgeModelSettingsDialog {
                     if (which == 0) {
                         preferences.edit().remove(role.name()).apply();
                         showRole(role);
-                    } else if (which == labels.length - 1) {
+                    } else if (which == labels.length - 2) {
                         showDownloadPrompt(role);
+                    } else if (which == labels.length - 1) {
+                        confirmSyntheticBenchmark(role);
                     } else {
                         showDetails(entries.get(which - 1));
                     }
@@ -162,6 +169,17 @@ final class KnowledgeModelSettingsDialog {
                 .setNeutralButton(R.string.knowledge_models_catalog, (dialog, which) ->
                         showCatalog(role))
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> show())
+                .show();
+    }
+
+    private void confirmSyntheticBenchmark(final KnowledgeModelPolicy.Role role) {
+        new AlertDialog.Builder(context)
+                .setTitle(roleName(role))
+                .setMessage(R.string.knowledge_models_synthetic_warning)
+                .setPositiveButton(R.string.knowledge_models_synthetic_confirm,
+                        (choice, which) -> benchmarkRunner.run(role))
+                .setNegativeButton(R.string.knowledge_models_back,
+                        (choice, which) -> showRole(role))
                 .show();
     }
 
