@@ -204,6 +204,42 @@ class Stage19LshFairnessTests(unittest.TestCase):
         self.assertTrue(probe['requires_additional_sql_reads'])
         self.assertTrue(probe['creates_no_sqlite_temp_table'])
 
+    def test_chunk_length_profiles_keep_source_recall_distinct_from_sql_cost(self):
+        profiles = self.data['chunk_length_profiles']
+        expected = {
+            'uniform_24': (2160, 0, 0, 3),
+            'alternating_72_short_18_long': (2376, 72, 18, 3),
+            'ascending_1_to_128': (5761, 1, 45, 3),
+            'two_long_88_short_late_tail': (344, 88, 2, 127),
+        }
+        self.assertEqual(set(expected), set(profiles))
+        for name, (chunks, short, long, target) in expected.items():
+            record = profiles[name]
+            self.assertEqual((90, chunks, short, long, target),
+                             (record['sources'], record['total_chunks'],
+                              record['single_chunk_sources'],
+                              record['long_64_plus_sources'],
+                              record['target_exact_chunk']))
+            for cap in (100, 1200):
+                cases = record['caps'][str(cap)]
+                if cap == 100:
+                    self.assertFalse(cases['current_exact_first']['target_exact_chunk_seen'])
+                self.assertTrue(cases['memory_dedup']['target_exact_chunk_seen'])
+                self.assertTrue(cases['source_sample_quota_dedup']
+                                ['target_exact_chunk_seen'])
+                self.assertEqual(cases['memory_dedup']['unique_candidates'],
+                                 cases['source_sample_quota_dedup']['unique_candidates'])
+                for policy, values in cases.items():
+                    self.assertLessEqual(values['unique_candidates'], cap)
+                    self.assertLessEqual(values['unique_candidates'],
+                                         values['sql_rows_scanned'])
+                    self.assertLessEqual(values['sql_rows_scanned'],
+                                         cap + (min(cap, 4096) if policy == 'memory_dedup' else 0))
+                    self.assertGreaterEqual(values['one_call_ms'], 0)
+            self.assertEqual(192, record['caps']['100']['memory_dedup']
+                             ['sql_rows_scanned'])
+        self.assertNotIn('.md', json.dumps(profiles))
+
     def test_fourway_index_merge_matches_global_chunk_sort_without_temp_sort(self):
         connection = _database(90, 16)
         try:

@@ -157,6 +157,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'sampleThenQuotaSkewRecovered=true', 'tightSampleBudgetBounded=true',
                        'syntheticScenarios=3', 'dedupLateBestRecovered=true',
                        'memoryDedupLateBestRecovered=true',
+                       'overlapTimingTrials=21', 'overlapSampleP50us=',
+                       'overlapSampleP95us=', 'overlapTempP50us=',
+                       'overlapTempP95us=', 'overlapMemoryP50us=',
+                       'overlapMemoryP95us=',
+                       'SystemClock.elapsedRealtimeNanos()',
+                       'Arrays.sort(microseconds[policy])',
+                       'timingsNotRepresentative20k=true',
                        'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
             self.assertIn(marker, fixture)
         self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)

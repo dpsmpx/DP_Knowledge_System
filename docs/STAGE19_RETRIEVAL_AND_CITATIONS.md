@@ -663,6 +663,27 @@ even if every reference and quotation passes the checks below.
     scenarios, including the late best-chunk offset and raw-byte source seal.
     Its RAM, read amplification and battery costs remain unmeasured; no
     automatic runtime selection is enabled.
+51. **Source-length profiles and Android microtimings now expose costs before
+    any production policy switch.** A new host-only `chunk_length_profiles`
+    probe builds four in-memory 90-source distributions: uniform 24 chunks
+    (2,160 total), 72 one-chunk plus 18 long sources (2,376 total), ascending
+    lengths 1–128 (5,761 total), and two 128-chunk plus 88 short sources
+    (344 total). Each repeats six candidate policies at raw/unique budgets
+    of 100 and 1,200, recording source coverage, exact target-chunk recall,
+    unique candidates, *returned* SQL rows and one-call latency. On all four
+    artificial mixes at unique cap 100, the in-memory candidate path recovers
+    the target but returns **192 SQL rows** for 100 unique; TEMP exclusion
+    returns 100 SQL rows for 100 unique. This is an explicit read-amplification
+    cost, not evidence that the in-memory method always wins. Sources still
+    share deliberately adversarial synthetic LSH vectors; these distributions
+    are not representative learned model-quality data. The cache-only Android
+    `EMBED-QUOTA-19` scenario now records three separate 21-trial p50/p95
+    timings in microseconds (sample/quota, TEMP exclusion, and in-memory
+    exclusion) after two untimed warmups, on the *same* eight-source fixture.
+    It verifies target identity on every timed call, supports cancellation,
+    and emits no note text/path/model traffic. **No measured Android result
+    exists yet**: the new fields are instrumentation for a later consented
+    synthetic device QA run and must not be extrapolated to 20k-note latency.
 
 ## Reproducible synthetic retrieval benchmark
 
