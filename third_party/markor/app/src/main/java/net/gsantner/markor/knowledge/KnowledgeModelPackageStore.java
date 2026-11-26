@@ -259,6 +259,37 @@ final class KnowledgeModelPackageStore {
     }
 
     /**
+     * Explicit E5 graph-I/O check for large ONNX weights. Full SHA audit first;
+     * the subsequent parser seeks over weights without loading or executing them.
+     */
+    synchronized KnowledgeE5OnnxMetadataProbe.Report e5OnnxMetadata(
+            final KnowledgeModelFiles.Entry entry) throws IOException {
+        final KnowledgeE5ConfigProfile.Result config = e5Config(entry);
+        final Audit verified = audit(entry, null);
+        final KnowledgeModelContainerProbe.Result model = verified.container;
+        if (!verified.jsonPreflightPassed() || !verified.tokenizerPreflightPassed()
+                || !verified.externalDataPreflightPassed()
+                || model.state != KnowledgeModelContainerProbe.State.METADATA_HINTS
+                || model.detailState != KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ
+                || !model.graphDeclared || model.graphNodes < 1
+                || model.opsetDeclarations < 1 || model.localFunctionDeclarations != 0
+                || model.customDomainNodes != 0 || model.undecodedOperatorNodes != 0
+                || model.sparseInitializersSkipped != 0) {
+            throw new IOException("E5 graph preflight is incomplete or unsupported");
+        }
+        final File file = weightFile(entry);
+        if (!safeChild(directory, file) || file.length() != entry.bytes) {
+            throw new IOException("E5 weight file changed after audit");
+        }
+        final KnowledgeE5OnnxMetadataProbe.Report signature =
+                KnowledgeE5OnnxMetadataProbe.inspect(file, entry.bytes, config);
+        if (model.graphInputs != signature.inputs || model.graphOutputs != signature.outputs) {
+            throw new IOException("E5 graph I/O counts disagree between metadata readers");
+        }
+        return signature;
+    }
+
+    /**
      * Rehash every saved byte on a user-requested worker thread. Previously
      * imported files may have been modified or damaged; their name and length
      * cannot prove present-day integrity. JSON checks are strictly preliminary:

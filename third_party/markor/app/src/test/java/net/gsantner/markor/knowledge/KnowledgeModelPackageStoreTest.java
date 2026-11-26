@@ -367,6 +367,42 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void e5OnnxMetadataUsesWholePackageAuditAndRejectsTamperedWeights()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-e5-graph-audit").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final byte[] graph = KnowledgeE5OnnxMetadataProbeTest.model(384, false, false);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(graph), "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] tokenizer = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            final byte[] modelConfig = KnowledgeE5ConfigProfileTest.model();
+            final JSONObject manifest = new JSONObject(new String(manifest(entry,
+                    "sentencepiece.bpe.model", tokenizer, "config.json", modelConfig),
+                    StandardCharsets.UTF_8));
+            manifest.put("source_id", "intfloat/multilingual-e5-small");
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    companions("sentencepiece.bpe.model", tokenizer, "config.json", modelConfig),
+                    entry);
+            final KnowledgeE5OnnxMetadataProbe.Report report = packages.e5OnnxMetadata(entry);
+            assertEquals(2, report.inputs);
+            assertEquals(1, report.outputs);
+            assertEquals(graph.length, report.modelBytes);
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+
+            final File file = new File(directory, entry.sha256 + ".onnx");
+            final byte[] changed = Arrays.copyOf(graph, graph.length);
+            changed[changed.length - 1] ^= 1;
+            Files.write(file.toPath(), changed);
+            try {
+                packages.e5OnnxMetadata(entry);
+                fail("Graph metadata read without first rehashing the pinned model");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
     @Test public void invalidButHashMatchingSentencePieceIsACompatibilityWarning()
             throws Exception {
         final File directory = Files.createTempDirectory("dpks-package-bad-sp").toFile();
