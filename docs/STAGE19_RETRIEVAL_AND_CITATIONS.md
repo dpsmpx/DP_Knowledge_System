@@ -589,6 +589,21 @@ even if every reference and quotation passes the checks below.
     revisits some candidates across the sampling/quota passes. No automatic
     source-count heuristic or Android runtime choice is made: calibration
     against real vector distributions, memory and battery is still missing.
+47. **Android cache-only QA now executes the experimental source quota through
+    real SQLite joins, without enabling it for users.** `EMBED-QUOTA-19` creates
+    and removes two completely artificial indexes under the device cache.
+    In the four-source, 16-chunk balanced case, a twelve-row exact-bucket
+    budget misses the late perfect source under the shipping exact-first
+    query, while an early-chunk quota of three per source retrieves its exact
+    third chunk. A five-source, eleven-chunk uneven case with a six-row cap
+    demonstrates the opposite limit: the target's only exact signature is in
+    its second chunk, and the quota/fill policy misses it. Both cases verify
+    fully completed model checkpoints and matching raw Markdown byte seals,
+    without invoking a model, reading the selected vault or publishing source
+    paths. The source-count and disjoint chunk-range SQL is accessible only
+    through the guarded synthetic QA entry point; normal `semanticSearch()`
+    retains the previous exact-first/neighbor behavior and 45k cap. CI builds
+    this test but does **not** constitute an executed physical-device QA run.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -793,7 +808,8 @@ scenarios, quota-pass nonoverlap and bounded total raw candidates.
   embedded core checks. No external LLM credentials, personal vault content,
   outbound model calls or real knowledge journal are used by tests.
 - Deferred physical acceptance: run `CITE-ANCHOR-19` and
-  `HYBRID-BALANCE-19`, `HYBRID-INDEX-19` and `EMBED-CHUNKS-19` from the
+  `HYBRID-BALANCE-19`, `HYBRID-INDEX-19`, `EMBED-CHUNKS-19` and
+  `EMBED-QUOTA-19` from the
   synthetic device QA
   screen, then verify
   accessibility/scrolling, cancellation and exact consent content with a

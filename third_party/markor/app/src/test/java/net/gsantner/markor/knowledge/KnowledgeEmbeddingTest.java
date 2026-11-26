@@ -168,6 +168,35 @@ public class KnowledgeEmbeddingTest {
     }
 
     @Test
+    public void sourceQuotaQaFixtureHasOneNearExactBucketAndLateOnlyTarget() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.99f, 0.14106736f, 0, 0, 0, 0, 0, 0});
+        final float[] hidden = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.8f, 0.6f, 0, 0, 0, 0, 0, 0});
+        final int[] exact = KnowledgeEmbeddingLsh.buckets(query);
+        int nearExactMatches = 0;
+        int hiddenExactMatches = 0;
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(near)) {
+            for (final int signature : exact) if (bucket == signature) nearExactMatches++;
+        }
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(hidden)) {
+            for (final int signature : exact) if (bucket == signature) hiddenExactMatches++;
+        }
+        assertEquals(1, nearExactMatches);
+        assertEquals(0, hiddenExactMatches);
+        final List<KnowledgeEmbeddingChunks.Chunk> longChunks =
+                KnowledgeEmbeddingChunks.fromNote(
+                        new String(new char[3000]).replace('\0', 'x'));
+        assertEquals(4, longChunks.size());
+        assertEquals(770, longChunks.get(1).start);
+        assertEquals(1540, longChunks.get(2).start);
+        assertTrue(KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(query)) > .999);
+    }
+
+    @Test
     public void cosineSearchRanksSemanticVectorsAndRejectsInvalidBuffers() {
         final float[] direction = new float[]{3, 4, 0, 0, 0, 0, 0, 0};
         final float[] query = KnowledgeEmbeddingVectors.normalize(direction);

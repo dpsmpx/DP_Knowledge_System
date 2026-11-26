@@ -156,6 +156,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex);
                 step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex);
                 step("EMBED-OVERLAP-19", this::checkSyntheticLshOverlapBudget);
+                step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -1532,6 +1533,117 @@ public final class KnowledgeDeviceQaRunner {
                     + "selectedVaultUntouched=true";
         } finally {
             removeSandbox(sandbox);
+        }
+    }
+
+    /** Diagnose the unshipped source-quota candidate policy in two disposable
+     * indexes: a balanced case it fixes and a skewed case it still misses.
+     * All vectors and Markdown files are artificial; production search is not
+     * switched to this policy.
+     */
+    private String checkSyntheticSourceQuotaBudget() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create quota sandbox");
+        try {
+            checkSyntheticSourceQuotaScenario(sandbox, false);
+            checkSyntheticSourceQuotaScenario(sandbox, true);
+            return "syntheticScenarios=2, balancedNotes=4, balancedChunks=16, "
+                    + "balancedBudget=12, uniformLateExactRecovered=true, "
+                    + "skewNotes=5, skewBudget=6, skewLateOnlyStillMissed=true, "
+                    + "exactChunkOffsetVerified=true, rawByteSealVerified=true, "
+                    + "candidatePolicyUnshipped=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    private void checkSyntheticSourceQuotaScenario(final File sandbox,
+                                                   final boolean skew) throws Exception {
+        final File vault = new File(sandbox, skew ? "skew-vault" : "uniform-vault");
+        if (!vault.mkdir()) throw new IOException("Cannot create quota vault");
+        final String[] paths = skew
+                ? new String[]{"a-long.md", "b-short.md", "c-short.md",
+                        "d-short.md", "z-target.md"}
+                : new String[]{"a-0.md", "a-1.md", "a-2.md", "z-target.md"};
+        final int targetChunk = skew ? 1 : 2;
+        final int budget = skew ? 6 : 12;
+        final File[] notes = new File[paths.length];
+        final List<List<KnowledgeEmbeddingChunks.Chunk>> allChunks = new ArrayList<>();
+        final String longBody = new String(new char[3000]).replace('\0', 'x');
+        int totalChunks = 0;
+        for (int i = 0; i < paths.length; i++) {
+            notes[i] = new File(vault, paths[i]);
+            final boolean longNote = !skew || i == 0 || i == paths.length - 1;
+            final String body = longNote ? longBody : "# Synthetic short source " + i + "\n";
+            writeFixture(notes[i], body);
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(body);
+            if (chunks.size() != (longNote ? 4 : 1)) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_FIXTURE_INVALID");
+            }
+            allChunks.add(chunks);
+            totalChunks += chunks.size();
+        }
+        if (totalChunks != (skew ? 11 : 16)) {
+            throw new SyntheticMismatch("verdict=EMBED_QUOTA_CHUNK_COUNT_INVALID");
+        }
+        final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                new File(sandbox, skew ? "qa-quota-skew.sqlite" : "qa-quota-uniform.sqlite"));
+        testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 8,
+                this::isCancelled), this::isCancelled);
+        final String model = "qa-synthetic-source-quota";
+        final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.99f, 0.14106736f, 0, 0, 0, 0, 0, 0});
+        final float[] hidden = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.8f, 0.6f, 0, 0, 0, 0, 0, 0});
+        for (int i = 0; i < paths.length; i++) {
+            final File note = notes[i];
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks = allChunks.get(i);
+            final byte[] digest = sha256(note);
+            if (testIndex.beginEmbedding(paths[i], note.lastModified(), note.length(),
+                    model, chunks.size(), false, digest) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_CHECKPOINT_INVALID");
+            }
+            final float[][] vectors = new float[chunks.size()][];
+            for (int j = 0; j < chunks.size(); j++) {
+                vectors[j] = i == paths.length - 1
+                        ? (j == targetChunk ? exact : hidden) : near;
+            }
+            testIndex.appendEmbeddingBatch(paths[i], note.lastModified(), note.length(),
+                    model, chunks, 0, vectors, digest);
+            if (!testIndex.hasEmbeddings(paths[i], note.lastModified(), note.length(), model)
+                    || !testIndex.matchesIndexedEvidenceSource(paths[i],
+                            note.lastModified(), note.length(), readFixtureBytes(note))) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_SOURCE_SEAL_INVALID");
+            }
+        }
+        final List<KnowledgeLocalIndex.SemanticHit> existing =
+                testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> quota =
+                testIndex.syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget);
+        final String target = paths[paths.length - 1];
+        boolean existingContainsTarget = false;
+        boolean quotaContainsTarget = false;
+        for (final KnowledgeLocalIndex.SemanticHit hit : existing) {
+            if (target.equals(hit.relativePath)) existingContainsTarget = true;
+        }
+        for (final KnowledgeLocalIndex.SemanticHit hit : quota) {
+            if (target.equals(hit.relativePath)) quotaContainsTarget = true;
+        }
+        if (testIndex.embeddingNoteCount(model) != paths.length
+                || existingContainsTarget || quotaContainsTarget == skew
+                || (!skew && (quota.isEmpty()
+                        || !target.equals(quota.get(0).relativePath)
+                        || quota.get(0).score < 0.999
+                        || quota.get(0).excerptStart
+                                != allChunks.get(paths.length - 1).get(targetChunk).start))) {
+            throw new SyntheticMismatch(skew
+                    ? "verdict=EMBED_QUOTA_SKEW_EXPECTATION_CHANGED"
+                    : "verdict=EMBED_QUOTA_BALANCED_LATE_EXACT_LOST");
         }
     }
 

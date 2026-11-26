@@ -883,7 +883,7 @@ public final class KnowledgeLocalIndex {
                                                           final float[] normalizedQuestion,
                                                           final int limit) {
         return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,
-                MAX_SEMANTIC_CANDIDATES);
+                MAX_SEMANTIC_CANDIDATES, false);
     }
 
     /** A deliberately small cap exercises adaptive SQL on disposable QA data
@@ -893,6 +893,22 @@ public final class KnowledgeLocalIndex {
                                                                      final float[] question,
                                                                      final int limit,
                                                                      final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget, false);
+    }
+
+    /** Only the isolated cache-only QA can exercise the unshipped early-chunk
+     * quota candidate policy. Production search keeps its existing SQL.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchQuotaWithBudget(final String modelKey,
+                                                                          final float[] question,
+                                                                          final int limit,
+                                                                          final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget, true);
+    }
+
+    private void checkSyntheticSearchBudget(final int candidateBudget) {
         final File parent = databaseFile.getParentFile();
         if (!syntheticDatabase || parent == null
                 || !parent.getName().startsWith("dpks-device-qa-")
@@ -900,13 +916,13 @@ public final class KnowledgeLocalIndex {
                 || candidateBudget < 1 || candidateBudget > MAX_SEMANTIC_CANDIDATES) {
             throw new IllegalStateException("Budget override requires isolated QA database");
         }
-        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget);
     }
 
     private List<SemanticHit> semanticSearchWithBudget(final String modelKey,
                                                        final float[] normalizedQuestion,
                                                        final int limit,
-                                                       final int candidateBudget) {
+                                                       final int candidateBudget,
+                                                       final boolean syntheticSourceQuota) {
         if (limit < 1 || limit > 40) {
             throw new IllegalArgumentException("Invalid result limit");
         }
@@ -914,43 +930,69 @@ public final class KnowledgeLocalIndex {
         final Map<String, SemanticHit> best = new HashMap<>();
         final SQLiteDatabase db = open();
         try {
-            // A chunk cap cannot truncate any source while the entire
-            // disposable vector index contains no more chunks. Preserve the
-            // original, faster single SQL in this common case (including a
-            // 20k-note vault with one vector per note).
-            final boolean canTruncate;
-            try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_chunks", null)) {
-                canTruncate = c.moveToFirst()
-                        && c.getLong(0) > candidateBudget;
-            }
-            if (!canTruncate) {
-                if (appendSemanticCandidates(db, probes, modelKey, normalizedQuestion,
-                        candidateBudget, null, best) < 0) {
+            if (syntheticSourceQuota) {
+                // Deliberately experimental: test the same bounded source
+                // count / early-chunk quota as the offline SQL mirror.
+                // Only the cache-only QA entry point can reach this branch.
+                final int[] exact = KnowledgeEmbeddingLsh.buckets(normalizedQuestion);
+                final long completedSources;
+                try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_notes e "
+                                + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                                + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                                + "WHERE e.model_key=? AND e.dimension=? "
+                                + "AND e.completed=e.chunks AND n.oversized=0 "
+                                + "AND n.generation=(SELECT value FROM meta "
+                                + "WHERE key='last_scan_generation')",
+                        new String[]{modelKey, Integer.toString(normalizedQuestion.length)})) {
+                    completedSources = c.moveToFirst() ? c.getLong(0) : 0;
+                }
+                if (completedSources == 0) {
+                    return Collections.emptyList();
+                }
+                final int quota = (int) Math.max(1L, candidateBudget / completedSources);
+                final int early = appendSemanticCandidatesRange(db, exact, modelKey,
+                        normalizedQuestion, candidateBudget, null, null, quota, best);
+                if (early < 0 || (early < candidateBudget
+                        && appendSemanticCandidatesRange(db, exact, modelKey,
+                                normalizedQuestion, candidateBudget - early,
+                                null, quota, null, best) < 0)) {
                     return Collections.emptyList();
                 }
             } else {
-                // Prioritize the four exact LSH bucket signatures. A late
-                // perfect vector should not be crowded out by earlier
-                // one-bit neighbors before exact cosine reranking.
-                // Remain strictly bounded; no full-table cosine scan/sort.
-                final int stride = KnowledgeEmbeddingLsh.BITS + 1;
-                final int[] exact = new int[KnowledgeEmbeddingLsh.TABLES];
-                final int[] neighbors = new int[probes.length - exact.length];
-                int next = 0;
-                for (int i = 0; i < probes.length; i++) {
-                    if (i % stride == 0) {
-                        exact[i / stride] = probes[i];
-                    } else {
-                        neighbors[next++] = probes[i];
-                    }
+                // A chunk cap cannot truncate any source while the entire
+                // disposable vector index contains no more chunks. Preserve
+                // the original single SQL in this common case.
+                final boolean canTruncate;
+                try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_chunks", null)) {
+                    canTruncate = c.moveToFirst() && c.getLong(0) > candidateBudget;
                 }
-                final int exactRows = appendSemanticCandidates(db, exact, modelKey,
-                        normalizedQuestion, candidateBudget, null, best);
-                if (exactRows < 0 || (exactRows < candidateBudget
-                        && appendSemanticCandidates(db, neighbors, modelKey,
-                                normalizedQuestion, candidateBudget - exactRows, exact,
-                                best) < 0)) {
-                    return Collections.emptyList();
+                if (!canTruncate) {
+                    if (appendSemanticCandidates(db, probes, modelKey, normalizedQuestion,
+                            candidateBudget, null, best) < 0) {
+                        return Collections.emptyList();
+                    }
+                } else {
+                    // Prioritize exact LSH signatures before one-bit neighbors.
+                    // Keep both passes bounded without a full-vector scan.
+                    final int stride = KnowledgeEmbeddingLsh.BITS + 1;
+                    final int[] exact = new int[KnowledgeEmbeddingLsh.TABLES];
+                    final int[] neighbors = new int[probes.length - exact.length];
+                    int next = 0;
+                    for (int i = 0; i < probes.length; i++) {
+                        if (i % stride == 0) {
+                            exact[i / stride] = probes[i];
+                        } else {
+                            neighbors[next++] = probes[i];
+                        }
+                    }
+                    final int exactRows = appendSemanticCandidates(db, exact, modelKey,
+                            normalizedQuestion, candidateBudget, null, best);
+                    if (exactRows < 0 || (exactRows < candidateBudget
+                            && appendSemanticCandidates(db, neighbors, modelKey,
+                                    normalizedQuestion, candidateBudget - exactRows, exact,
+                                    best) < 0)) {
+                        return Collections.emptyList();
+                    }
                 }
             }
         } finally {
@@ -974,9 +1016,22 @@ public final class KnowledgeLocalIndex {
                                                 final int candidateLimit,
                                                 final int[] excludedBuckets,
                                                 final Map<String, SemanticHit> best) {
+        return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
+                candidateLimit, excludedBuckets, null, null, best);
+    }
+
+    private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
+                                                     final int[] buckets, final String modelKey,
+                                                     final float[] normalizedQuestion,
+                                                     final int candidateLimit,
+                                                     final int[] excludedBuckets,
+                                                     final Integer minChunk,
+                                                     final Integer maxChunk,
+                                                     final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
         final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
-        final String[] args = new String[buckets.length + excluded + 3];
+        final int ranged = (minChunk == null ? 0 : 1) + (maxChunk == null ? 0 : 1);
+        final String[] args = new String[buckets.length + excluded + ranged + 3];
         for (int i = 0; i < buckets.length; i++) {
             if (i > 0) {
                 placeholders.append(',');
@@ -995,16 +1050,27 @@ public final class KnowledgeLocalIndex {
             }
             exclusion.append("))");
         }
-        args[buckets.length + excluded] = modelKey;
-        args[buckets.length + excluded + 1] = Integer.toString(normalizedQuestion.length);
-        args[buckets.length + excluded + 2] = Integer.toString(candidateLimit);
+        final StringBuilder chunkRange = new StringBuilder();
+        int argument = buckets.length + excluded;
+        if (minChunk != null) {
+            chunkRange.append(" AND l.chunk>=?");
+            args[argument++] = Integer.toString(minChunk);
+        }
+        if (maxChunk != null) {
+            chunkRange.append(" AND l.chunk<?");
+            args[argument++] = Integer.toString(maxChunk);
+        }
+        args[argument++] = modelKey;
+        args[argument++] = Integer.toString(normalizedQuestion.length);
+        args[argument] = Integer.toString(candidateLimit);
         final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size "
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
                 + "AND n.raw_sha256=e.source_sha256 "
-                + "WHERE l.bucket IN (" + placeholders + ")" + exclusion + " AND e.model_key=? "
+                + "WHERE l.bucket IN (" + placeholders + ")" + exclusion + chunkRange
+                + " AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
                 + "GROUP BY l.path, l.chunk LIMIT ?";
