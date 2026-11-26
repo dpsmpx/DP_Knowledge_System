@@ -1548,7 +1548,7 @@ public final class KnowledgeDeviceQaRunner {
         try {
             checkSyntheticSourceQuotaScenario(sandbox, 0);
             checkSyntheticSourceQuotaScenario(sandbox, 1);
-            checkSyntheticSourceQuotaScenario(sandbox, 2);
+            final String overlapTiming = checkSyntheticSourceQuotaScenario(sandbox, 2);
             return "syntheticScenarios=3, balancedNotes=4, balancedChunks=16, "
                     + "balancedBudget=12, uniformLateExactRecovered=true, "
                     + "skewNotes=5, skewBudget=6, skewLateOnlyStillMissed=true, "
@@ -1557,14 +1557,14 @@ public final class KnowledgeDeviceQaRunner {
                     + "memoryDedupLateBestRecovered=true, memoryRawRetryCap=4096, "
                     + "exactChunkOffsetVerified=true, rawByteSealVerified=true, "
                     + "candidatePolicyUnshipped=true, noModelCall=true, "
-                    + "selectedVaultUntouched=true";
+                    + "selectedVaultUntouched=true, " + overlapTiming;
         } finally {
             removeSandbox(sandbox);
         }
     }
 
-    private void checkSyntheticSourceQuotaScenario(final File sandbox,
-                                                   final int scenario) throws Exception {
+    private String checkSyntheticSourceQuotaScenario(final File sandbox,
+                                                     final int scenario) throws Exception {
         final boolean skew = scenario == 1;
         final boolean overlap = scenario == 2;
         final File vault = new File(sandbox, overlap ? "overlap-vault"
@@ -1693,6 +1693,42 @@ public final class KnowledgeDeviceQaRunner {
                     ? "verdict=EMBED_QUOTA_SKEW_EXPECTATION_CHANGED"
                     : "verdict=EMBED_QUOTA_BALANCED_LATE_EXACT_LOST");
         }
+        if (!overlap) return "";
+        // Small artificial-vector microtimings only, never a 20k-vault
+        // latency claim. Warm each policy twice before 21 measured calls.
+        final long[][] microseconds = new long[3][21];
+        for (int policy = 0; policy < microseconds.length; policy++) {
+            for (int attempt = -2; attempt < microseconds[policy].length; attempt++) {
+                if (isCancelled()) {
+                    throw new InterruptedIOException("Synthetic quota QA cancelled");
+                }
+                final long started = SystemClock.elapsedRealtimeNanos();
+                final List<KnowledgeLocalIndex.SemanticHit> timed = policy == 0
+                        ? testIndex.syntheticSemanticSearchSampleQuotaWithBudget(
+                                model, exact, 8, budget)
+                        : policy == 1
+                                ? testIndex.syntheticSemanticSearchDedupSampleQuotaWithBudget(
+                                        model, exact, 8, budget)
+                                : testIndex.syntheticSemanticSearchMemorySampleQuotaWithBudget(
+                                        model, exact, 8, budget);
+                final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+                if (timed.isEmpty() || !target.equals(timed.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=EMBED_QUOTA_TIMING_RESULT_CHANGED");
+                }
+                if (attempt >= 0) {
+                    microseconds[policy][attempt] = Math.max(0, elapsed / 1_000L);
+                }
+            }
+            Arrays.sort(microseconds[policy]);
+        }
+        return "overlapTimingNotes=8, overlapTimingTrials=21, "
+                + "overlapSampleP50us=" + microseconds[0][10]
+                + ", overlapSampleP95us=" + microseconds[0][19]
+                + ", overlapTempP50us=" + microseconds[1][10]
+                + ", overlapTempP95us=" + microseconds[1][19]
+                + ", overlapMemoryP50us=" + microseconds[2][10]
+                + ", overlapMemoryP95us=" + microseconds[2][19]
+                + ", timingsNotRepresentative20k=true";
     }
 
     /** Synthetic cache-only post-approval mutation; no LLM call is made. */

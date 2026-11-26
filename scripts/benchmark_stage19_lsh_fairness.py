@@ -536,6 +536,73 @@ def synthetic_memory_dedup_probe() -> dict:
         connection.close()
 
 
+def synthetic_chunk_length_profiles() -> dict:
+    """Cross-check four deterministic source-size distributions without vaults.
+
+    These are artificial adversarial shapes, not samples from user notebooks.
+    Each policy is timed once per budget; the values are descriptive only.
+    """
+    profiles = {
+        'uniform_24': ([24] * 90, 3),
+        'alternating_72_short_18_long':
+            ([128 if i % 5 == 4 else 1 for i in range(90)], 3),
+        'ascending_1_to_128': ([1 + (i * 127) // 89 for i in range(90)], 3),
+        'two_long_88_short_late_tail': ([128 if i in (0, 89) else 1
+                                         for i in range(90)], 127),
+    }
+    policies = ('current_exact_first', 'source_chunk_quota_then_fill',
+                'source_sample_quota_fill', 'source_sample_quota_dedup',
+                'memory_dedup', 'chunk_interleaved_sort')
+    output = {}
+    for profile, (lengths, target_chunk) in profiles.items():
+        connection = _database(90, 128)
+        try:
+            with connection:
+                for i, length in enumerate(lengths):
+                    path = TARGET if i == 89 else f'a-synthetic-{i:04d}.md'
+                    connection.execute('DELETE FROM embedding_lsh '
+                                       'WHERE path=? AND chunk>=?', (path, length))
+                    connection.execute('DELETE FROM embedding_chunks '
+                                       'WHERE path=? AND chunk>=?', (path, length))
+                    connection.execute('UPDATE embedding_notes SET chunks=?, completed=? '
+                                       'WHERE path=?', (length, length, path))
+            if target_chunk != 3:
+                _relocate_single_target_exact_chunk(connection, 128, target_chunk)
+            cases = {}
+            for cap in (100, 1200):
+                records = {}
+                for policy in policies:
+                    start = time.perf_counter()
+                    if policy == 'memory_dedup':
+                        rows, raw_rows = memory_dedup_candidates(connection, cap)
+                    else:
+                        rows = _candidates(connection, policy, cap)
+                        raw_rows = len(rows)
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    records[policy] = {
+                        'sql_rows_scanned': raw_rows,
+                        'unique_candidates': len({(path, chunk) for path, chunk, _ in rows}),
+                        'sources_seen': len({path for path, _, _ in rows}),
+                        'target_exact_chunk_seen': any(path == TARGET and chunk == target_chunk
+                                                       for path, chunk, _ in rows),
+                        'one_call_ms': round(elapsed_ms, 3),
+                    }
+                    if (raw_rows > (cap + min(cap, 4096) if policy == 'memory_dedup'
+                                    else cap)):
+                        raise AssertionError('Chunk profile exceeded SQL row cap')
+                cases[str(cap)] = records
+            output[profile] = {
+                'sources': 90, 'total_chunks': sum(lengths),
+                'single_chunk_sources': sum(length == 1 for length in lengths),
+                'long_64_plus_sources': sum(length >= 64 for length in lengths),
+                'target_exact_chunk': target_chunk,
+                'caps': cases,
+            }
+        finally:
+            connection.close()
+    return output
+
+
 def compare(sources: int = 360, chunks: int = 128,
             cap: int = MAX_SEMANTIC_CANDIDATES,
             trials: int = 2) -> dict:
@@ -606,6 +673,7 @@ def compare(sources: int = 360, chunks: int = 128,
             'uneven_distribution_probe': synthetic_uneven_distribution_probe(),
             'skew_budget_sweep': synthetic_skew_budget_sweep(),
             'memory_dedup_probe': synthetic_memory_dedup_probe(),
+            'chunk_length_profiles': synthetic_chunk_length_profiles(),
             'limitations': [
                 'alternative SQL is diagnostic only and is not used in Android',
                 'one-chunk sampling can miss a later better chunk in the same source',
@@ -626,6 +694,8 @@ def compare(sources: int = 360, chunks: int = 128,
                 'in-memory dedup has extra cursor traffic and has no Android timing',
                 'heterogeneous host-only fixtures are not a representative '
                 'distribution of actual Android vault chunk counts',
+                'single-call timings across artificial chunk-length profiles '
+                'are descriptive, not statistically stable Android p50/p95',
                 'chunk interleaving may require an expensive temporary ORDER BY sort',
                 'no representative model, real vault or physical-device latency/energy',
                 'observed GROUP BY row choice is SQLite-plan-dependent',
