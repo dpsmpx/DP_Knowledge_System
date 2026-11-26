@@ -1554,6 +1554,7 @@ public final class KnowledgeDeviceQaRunner {
                     + "skewNotes=5, skewBudget=6, skewLateOnlyStillMissed=true, "
                     + "sampleThenQuotaSkewRecovered=true, tightSampleBudgetBounded=true, "
                     + "overlapNotes=8, overlapBudget=32, dedupLateBestRecovered=true, "
+                    + "memoryDedupLateBestRecovered=true, memoryRawRetryCap=4096, "
                     + "exactChunkOffsetVerified=true, rawByteSealVerified=true, "
                     + "candidatePolicyUnshipped=true, noModelCall=true, "
                     + "selectedVaultUntouched=true";
@@ -1643,6 +1644,9 @@ public final class KnowledgeDeviceQaRunner {
         final List<KnowledgeLocalIndex.SemanticHit> deduplicated =
                 testIndex.syntheticSemanticSearchDedupSampleQuotaWithBudget(
                         model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> inMemory =
+                testIndex.syntheticSemanticSearchMemorySampleQuotaWithBudget(
+                        model, exact, 8, budget);
         final List<KnowledgeLocalIndex.SemanticHit> tightSample =
                 testIndex.syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1);
         final String target = paths[paths.length - 1];
@@ -1655,7 +1659,7 @@ public final class KnowledgeDeviceQaRunner {
             if (target.equals(hit.relativePath)) quotaContainsTarget = true;
         }
         if (testIndex.embeddingNoteCount(model) != paths.length
-                || sampled.isEmpty() || deduplicated.isEmpty()
+                || sampled.isEmpty() || deduplicated.isEmpty() || inMemory.isEmpty()
                 || tightSample.size() != 1
                 || !paths[0].equals(tightSample.get(0).relativePath)) {
             throw new SyntheticMismatch("verdict=EMBED_QUOTA_GENERAL_CHECK_FAILED");
@@ -1665,7 +1669,10 @@ public final class KnowledgeDeviceQaRunner {
             if (!target.equals(deduplicated.get(0).relativePath)
                     || deduplicated.get(0).score < .998
                     || deduplicated.get(0).excerptStart != expectedOffset
-                    || deduplicated.get(0).score < sampled.get(0).score) {
+                    || deduplicated.get(0).score < sampled.get(0).score
+                    || !target.equals(inMemory.get(0).relativePath)
+                    || inMemory.get(0).score < .998
+                    || inMemory.get(0).excerptStart != expectedOffset) {
                 throw new SyntheticMismatch("verdict=EMBED_QUOTA_DEDUP_LATE_BEST_LOST");
             }
         } else if (existingContainsTarget || quotaContainsTarget == skew
@@ -1675,6 +1682,9 @@ public final class KnowledgeDeviceQaRunner {
                 || !target.equals(deduplicated.get(0).relativePath)
                 || deduplicated.get(0).score < .999
                 || deduplicated.get(0).excerptStart != expectedOffset
+                || !target.equals(inMemory.get(0).relativePath)
+                || inMemory.get(0).score < .999
+                || inMemory.get(0).excerptStart != expectedOffset
                 || (!skew && (quota.isEmpty()
                         || !target.equals(quota.get(0).relativePath)
                         || quota.get(0).score < .999

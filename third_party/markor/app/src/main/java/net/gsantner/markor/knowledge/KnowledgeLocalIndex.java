@@ -889,7 +889,8 @@ public final class KnowledgeLocalIndex {
 
     /** Alternative candidate selectors are reachable only from guarded QA. */
     private enum CandidatePolicy {
-        PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA, DEDUP_SAMPLE_THEN_QUOTA
+        PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA, DEDUP_SAMPLE_THEN_QUOTA,
+        MEMORY_DEDUP_SAMPLE_QUOTA
     }
 
     /** A deliberately small cap exercises adaptive SQL on disposable QA data
@@ -938,6 +939,18 @@ public final class KnowledgeLocalIndex {
         checkSyntheticSearchBudget(candidateBudget);
         return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
                 CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA);
+    }
+
+    /** Only cache-generated QA sources may use bounded in-memory candidate
+     * exclusion. Allows at most 4096 additional grouped SQLite rows to
+     * reclaim wasted duplicate candidates; no TEMP table or index writes.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchMemorySampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA);
     }
 
     private void checkSyntheticSearchBudget(final int candidateBudget) {
@@ -989,6 +1002,11 @@ public final class KnowledgeLocalIndex {
                     return Collections.emptyList();
                 }
                 final boolean deduplicate = temporaryExclusion;
+                final boolean memoryDedup =
+                        candidatePolicy == CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA;
+                final Set<String> inMemorySeen = memoryDedup ? new HashSet<>() : null;
+                final int rawScanLimit = memoryDedup
+                        ? candidateBudget + Math.min(candidateBudget, 4096) : candidateBudget;
                 if (deduplicate) {
                     // TEMP schema belongs to this synthetic DB connection;
                     // closing it discards the table and its private index.
@@ -997,31 +1015,42 @@ public final class KnowledgeLocalIndex {
                             + "PRIMARY KEY(path,chunk))");
                 }
                 int sampled = 0;
-                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA || deduplicate) {
+                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA
+                        || deduplicate || memoryDedup) {
                     for (final int bucket : exact) {
-                        if (sampled == candidateBudget) break;
+                        if (sampled == rawScanLimit
+                                || (memoryDedup && inMemorySeen.size() == candidateBudget)) {
+                            break;
+                        }
                         final int rows = appendSemanticCandidatesRange(db,
                                 new int[]{bucket}, modelKey, normalizedQuestion,
-                                candidateBudget - sampled, null, null, null,
-                                true, deduplicate, best);
+                                rawScanLimit - sampled, null, null, null,
+                                true, deduplicate, inMemorySeen, candidateBudget, best);
                         if (rows < 0) return Collections.emptyList();
                         sampled += rows;
                     }
                 }
-                if (sampled == candidateBudget) {
-                    // The diagnostic source sample has already spent the
-                    // raw-row cap; do not run additional candidate SQL.
+                final int accepted = memoryDedup ? inMemorySeen.size() : sampled;
+                if (sampled == rawScanLimit || accepted == candidateBudget) {
+                    // The raw scan or distinct-candidate limit is spent.
                     return rankSemanticHits(best, limit);
                 }
-                final int remaining = candidateBudget - sampled;
+                final int remaining = candidateBudget - accepted;
                 final int quota = (int) Math.max(1L, remaining / completedSources);
                 final int early = appendSemanticCandidatesRange(db, exact, modelKey,
-                        normalizedQuestion, remaining, null, null, quota,
-                        false, deduplicate, best);
-                if (early < 0 || (early < remaining
+                        normalizedQuestion, rawScanLimit - sampled, null, null, quota,
+                        false, deduplicate, inMemorySeen, candidateBudget, best);
+                if (early < 0) {
+                    return Collections.emptyList();
+                }
+                sampled += early;
+                if (sampled < rawScanLimit
+                        && (memoryDedup ? inMemorySeen.size() < candidateBudget
+                                : early < remaining)
                         && appendSemanticCandidatesRange(db, exact, modelKey,
-                                normalizedQuestion, remaining - early,
-                                null, quota, null, false, deduplicate, best) < 0)) {
+                                normalizedQuestion, rawScanLimit - sampled,
+                                null, quota, null, false, deduplicate,
+                                inMemorySeen, candidateBudget, best) < 0) {
                     return Collections.emptyList();
                 }
             } else {
@@ -1107,7 +1136,8 @@ public final class KnowledgeLocalIndex {
                                                      final Integer maxChunk,
                                                      final Map<String, SemanticHit> best) {
         return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
-                candidateLimit, excludedBuckets, minChunk, maxChunk, false, false, best);
+                candidateLimit, excludedBuckets, minChunk, maxChunk, false, false,
+                null, 0, best);
     }
 
     private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
@@ -1119,6 +1149,8 @@ public final class KnowledgeLocalIndex {
                                                      final Integer maxChunk,
                                                      final boolean samplePerSource,
                                                      final boolean excludePreviouslyInspected,
+                                                     final Set<String> inMemorySeen,
+                                                     final int uniqueCap,
                                                      final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
         final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
@@ -1156,7 +1188,7 @@ public final class KnowledgeLocalIndex {
         args[argument++] = Integer.toString(normalizedQuestion.length);
         args[argument] = Integer.toString(candidateLimit);
         final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size"
-                + (excludePreviouslyInspected ? ", l.chunk " : " ")
+                + (excludePreviouslyInspected || inMemorySeen != null ? ", l.chunk " : " ")
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
@@ -1183,9 +1215,19 @@ public final class KnowledgeLocalIndex {
                 if (selected != null) {
                     selected.add(new String[]{c.getString(0), Integer.toString(c.getInt(7))});
                 }
+                boolean reachedUniqueCap = false;
+                if (inMemorySeen != null) {
+                    final String path = c.getString(0);
+                    final String key = path.length() + ":" + path + ":" + c.getInt(7);
+                    if (!inMemorySeen.add(key)) {
+                        continue;
+                    }
+                    reachedUniqueCap = inMemorySeen.size() == uniqueCap;
+                }
                 final double score = KnowledgeEmbeddingVectors.similarity(normalizedQuestion,
                         c.getBlob(4));
                 if (!Double.isFinite(score)) {
+                    if (reachedUniqueCap) break;
                     continue;
                 }
                 final String path = c.getString(0);
@@ -1194,6 +1236,7 @@ public final class KnowledgeLocalIndex {
                     best.put(path, new SemanticHit(path, c.getString(1), c.getInt(2),
                             c.getInt(3), score, c.getLong(5), c.getLong(6)));
                 }
+                if (reachedUniqueCap) break;
             }
         }
         if (selected != null && !selected.isEmpty()) {

@@ -7,6 +7,7 @@ from scripts.benchmark_stage19_lsh_fairness import (
     FOURWAY_QUERY, POLICIES, TARGET, _candidates, _database,
     _make_target_earlier_chunks_exact_reachable,
     _make_target_best_only_within_same_exact_bucket, compare,
+    memory_dedup_candidates,
 )
 from scripts.benchmark_stage19_hybrid import MODEL_KEY
 from scripts.benchmark_stage19_retrieval import GENERATION
@@ -148,6 +149,60 @@ class Stage19LshFairnessTests(unittest.TestCase):
                 .fetchall())
         finally:
             connection.close()
+
+    def test_memory_dedup_recovers_late_best_with_separately_capped_extra_sql_rows(self):
+        connection = _database(8, 4)
+        try:
+            _make_target_earlier_chunks_exact_reachable(connection, 4)
+            _make_target_best_only_within_same_exact_bucket(connection)
+            rows, scanned = memory_dedup_candidates(connection, 32)
+            self.assertEqual(32, len(rows))
+            self.assertEqual(32, len({(path, chunk) for path, chunk, _ in rows}))
+            self.assertEqual(40, scanned)
+            self.assertTrue(any(path == TARGET and chunk == 3 for path, chunk, _ in rows))
+            # With no read allowance for duplicates, the same SQL plan has
+            # insufficient raw-row capacity despite spare unique slots.
+            limited, scanned = memory_dedup_candidates(connection, 32, raw_scan_cap=32)
+            self.assertEqual(32, scanned)
+            self.assertLess(len(limited), 32)
+            self.assertFalse(any(path == TARGET and chunk == 3
+                                 for path, chunk, _ in limited))
+            self.assertEqual([], connection.execute(
+                "SELECT name FROM sqlite_temp_master WHERE name='qa_seen_lsh_candidates'")
+                .fetchall())
+        finally:
+            connection.close()
+
+    def test_memory_dedup_unique_cap_and_sql_scan_cap_are_independent(self):
+        connection = _database(90, 16)
+        try:
+            rows, scanned = memory_dedup_candidates(connection, 1200)
+            self.assertEqual(1200, len(rows))
+            self.assertEqual(1200, len({(path, chunk) for path, chunk, _ in rows}))
+            self.assertGreater(scanned, 1200)
+            self.assertLessEqual(scanned, 2400)
+            for cap, raw in ((0, None), (45001, None), (32, 31), (32, 65)):
+                with self.subTest(cap=cap, raw=raw), self.assertRaises(ValueError):
+                    memory_dedup_candidates(connection, cap, raw)
+            with self.assertRaises(ValueError):
+                memory_dedup_candidates(connection, 45_000, 49_097)
+        finally:
+            connection.close()
+
+    def test_aggregate_memory_probe_documents_raw_read_amplification(self):
+        probe = self.data['memory_dedup_probe']
+        self.assertEqual((8, 32, 32, 64, 40),
+                         (probe['sources'], probe['chunks'], probe['unique_cap'],
+                          probe['raw_scan_cap'], probe['memory_sql_rows_scanned']))
+        self.assertEqual(32, probe['memory_unique_rows'])
+        self.assertTrue(probe['memory_late_best_seen'])
+        self.assertTrue(probe['temp_late_best_seen'])
+        self.assertFalse(probe['repeating_sample_late_best_seen'])
+        self.assertFalse(probe['without_retry_late_best_seen'])
+        self.assertEqual((32, 24), (probe['without_retry_sql_rows_scanned'],
+                                    probe['without_retry_unique_rows']))
+        self.assertTrue(probe['requires_additional_sql_reads'])
+        self.assertTrue(probe['creates_no_sqlite_temp_table'])
 
     def test_fourway_index_merge_matches_global_chunk_sort_without_temp_sort(self):
         connection = _database(90, 16)

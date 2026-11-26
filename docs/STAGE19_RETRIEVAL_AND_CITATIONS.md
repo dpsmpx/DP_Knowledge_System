@@ -641,6 +641,28 @@ even if every reference and quotation passes the checks below.
     table can impose memory/flash and battery costs on Android, which remain
     unmeasured on a device. This is **experimental QA only** and is not
     deployed to user retrieval.
+50. **Bounded in-memory deduplication avoids the temporary SQLite index but
+    uses a *separate* raw-read allowance.** A new host cursor-streaming probe
+    and guarded Android `MEMORY_DEDUP_SAMPLE_QUOTA` QA mode track inspected
+    `(path,chunk)` pairs in memory and skip repeated cosine calculations.
+    Ranking still accepts at most **45,000 unique** candidates, while the
+    number of *returned SQLite rows* is capped separately at
+    `candidateBudget + min(candidateBudget, 4096)` (at most 49,096 in a fully
+    saturated production-size experiment). Neither cap is unbounded; the
+    raw allowance includes duplicates, which can exhaust it before the unique
+    cap is filled. The original production path still inspects at most 45k
+    rows and has neither this hash set nor extra reads. In the synthetic
+    eight-source, 32-chunk regression, 40 raw rows deliver all 32 unique
+    chunks and the late cosine-0.999 match; a strict 32-raw-row allowance
+    misses it. The 360×128 / 45k host-only single-call comparison observed
+    about **45,363 raw / 45,000 unique rows in 139 ms** in memory, versus
+    **45,000 raw / 45,000 unique in 168 ms** with the TEMP exclusion and
+    **45,000 raw / 44,637 unique in 127 ms** with repeated sampling. These
+    are machine- and workload-dependent timings, **not Android acceptance**.
+    The Android QA now verifies the in-memory path in all three artificial
+    scenarios, including the late best-chunk offset and raw-byte source seal.
+    Its RAM, read amplification and battery costs remain unmeasured; no
+    automatic runtime selection is enabled.
 
 ## Reproducible synthetic retrieval benchmark
 
