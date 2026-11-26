@@ -47,12 +47,32 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'new float[][]{near}', 'new float[][]{exact}',
                        'testIndex.hasEmbeddings("multi.md",',
                        'testIndex.semanticSearch(model, exact, 8)',
+                       'testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 1)',
+                       'exactBucketAtOneChunkBudget=true',
                        'hits.get(0).excerptStart != chunks.get(1).start',
                        'testIndex.matchesIndexedEvidenceSource(',
                        'incompleteExcluded=true', 'bestLaterChunkSelected=true',
                        'perPathDeduplicated=true', 'removeSandbox(sandbox)'):
             self.assertIn(marker, fixture)
         self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+
+    def test_semantic_cap_uses_fast_path_until_exact_lsh_priority_is_necessary(self):
+        index = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeLocalIndex.java").read_text()
+        for marker in ('SELECT COUNT(*) FROM embedding_chunks',
+                       'c.getLong(0) > candidateBudget',
+                       'KnowledgeEmbeddingLsh.BITS + 1',
+                       'appendSemanticCandidates(db, exact, modelKey,',
+                       'appendSemanticCandidates(db, neighbors, modelKey,',
+                       'MAX_SEMANTIC_CANDIDATES - exactRows'):
+            if marker == 'MAX_SEMANTIC_CANDIDATES - exactRows':
+                self.assertNotIn(marker, index)  # budget also bounds synthetic QA
+            else:
+                self.assertIn(marker, index)
+        self.assertIn('candidateBudget - exactRows', index)
+        self.assertIn('!syntheticDatabase', index)
+        self.assertIn('parent.getName().startsWith("dpks-device-qa-")', index)
+        self.assertIn('return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,',
+                      index)
 
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
