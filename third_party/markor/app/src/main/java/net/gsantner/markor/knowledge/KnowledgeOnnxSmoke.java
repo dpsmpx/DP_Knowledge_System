@@ -57,12 +57,18 @@ final class KnowledgeOnnxSmoke {
     }
 
     private static byte[] valueInfo(final String name) {
-        final ByteArrayOutputStream dimension = new ByteArrayOutputStream();
-        uint(dimension, 1, 1);
+        return valueInfo(name, 1, 1);
+    }
+
+    static byte[] valueInfo(final String name, final int elementType, final long... dimensions) {
         final ByteArrayOutputStream shape = new ByteArrayOutputStream();
-        bytes(shape, 1, dimension.toByteArray());
+        for (final long value : dimensions) {
+            final ByteArrayOutputStream dimension = new ByteArrayOutputStream();
+            uint(dimension, 1, value);
+            bytes(shape, 1, dimension.toByteArray());
+        }
         final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
-        uint(tensor, 1, 1); // FLOAT
+        uint(tensor, 1, elementType);
         bytes(tensor, 2, shape.toByteArray());
         final ByteArrayOutputStream type = new ByteArrayOutputStream();
         bytes(type, 1, tensor.toByteArray());
@@ -72,17 +78,17 @@ final class KnowledgeOnnxSmoke {
         return value.toByteArray();
     }
 
-    private static void uint(final ByteArrayOutputStream out, final int field, final long value) {
+    static void uint(final ByteArrayOutputStream out, final int field, final long value) {
         varint(out, (long) field << 3);
         varint(out, value);
     }
 
-    private static void string(final ByteArrayOutputStream out,
+    static void string(final ByteArrayOutputStream out,
                                final int field, final String value) {
         bytes(out, field, value.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static void bytes(final ByteArrayOutputStream out,
+    static void bytes(final ByteArrayOutputStream out,
                               final int field, final byte[] value) {
         varint(out, ((long) field << 3) | 2);
         varint(out, value.length);
