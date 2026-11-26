@@ -17,6 +17,12 @@ final class KnowledgeE5TokenEmbeddingSmoke {
     private KnowledgeE5TokenEmbeddingSmoke() { }
 
     static byte[] graph(final int sequenceLength) {
+        return graph(sequenceLength, true, false);
+    }
+
+    /** E5 exports may omit token_type_ids and include an unused pooler_output. */
+    static byte[] graph(final int sequenceLength, final boolean tokenTypeInput,
+                        final boolean poolerOutput) {
         if (sequenceLength < 3 || sequenceLength > KnowledgeEmbeddingTensorContract.MAX_SEQUENCE_LENGTH) {
             throw new IllegalArgumentException("Synthetic E5 sequence outside tensor contract");
         }
@@ -28,12 +34,15 @@ final class KnowledgeE5TokenEmbeddingSmoke {
         KnowledgeOnnxSmoke.bytes(model, 8, opset.toByteArray());
 
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
-        // All three external inputs matter; zero token types and a binary
-        // mask must preserve the token IDs before the synthetic Gather.
+        // The mask cancels arithmetically and optional zero token types
+        // preserve the IDs before the synthetic Gather.
         operation(graph, "Sub", "zero_mask", "attention_mask", "attention_mask");
         operation(graph, "Add", "masked_ids", "input_ids", "zero_mask");
-        operation(graph, "Add", "ids_with_types", "masked_ids", "token_type_ids");
-        operation(graph, "Gather", "last_hidden_state", "arithmetic_table", "ids_with_types");
+        if (tokenTypeInput) {
+            operation(graph, "Add", "ids_with_types", "masked_ids", "token_type_ids");
+        }
+        operation(graph, "Gather", "last_hidden_state", "arithmetic_table",
+                tokenTypeInput ? "ids_with_types" : "masked_ids");
         KnowledgeOnnxSmoke.string(graph, 2, "dpks_e5_token_pipeline");
 
         final ByteArrayOutputStream table = new ByteArrayOutputStream();
@@ -51,15 +60,37 @@ final class KnowledgeE5TokenEmbeddingSmoke {
         KnowledgeOnnxSmoke.bytes(table, 9, floats.array());
         KnowledgeOnnxSmoke.bytes(graph, 5, table.toByteArray());
 
+        if (poolerOutput) {
+            // Deliberately unrelated diagnostic output. A named tensor runner
+            // must ignore it rather than selecting result index zero.
+            operation(graph, "Identity", "pooler_output", "pooler_seed");
+            final ByteArrayOutputStream pooler = new ByteArrayOutputStream();
+            KnowledgeOnnxSmoke.uint(pooler, 1, 1);
+            KnowledgeOnnxSmoke.uint(pooler, 1, DIMENSIONS);
+            KnowledgeOnnxSmoke.uint(pooler, 2, 1);
+            KnowledgeOnnxSmoke.string(pooler, 8, "pooler_seed");
+            final ByteBuffer placeholder = ByteBuffer.allocate(DIMENSIONS * Float.BYTES)
+                    .order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < DIMENSIONS; i++) placeholder.putFloat(Float.NaN);
+            KnowledgeOnnxSmoke.bytes(pooler, 9, placeholder.array());
+            KnowledgeOnnxSmoke.bytes(graph, 5, pooler.toByteArray());
+        }
+
         KnowledgeOnnxSmoke.bytes(graph, 11,
                 KnowledgeOnnxSmoke.valueInfo("input_ids", 7, 1, sequenceLength));
         KnowledgeOnnxSmoke.bytes(graph, 11,
                 KnowledgeOnnxSmoke.valueInfo("attention_mask", 7, 1, sequenceLength));
-        KnowledgeOnnxSmoke.bytes(graph, 11,
-                KnowledgeOnnxSmoke.valueInfo("token_type_ids", 7, 1, sequenceLength));
+        if (tokenTypeInput) {
+            KnowledgeOnnxSmoke.bytes(graph, 11,
+                    KnowledgeOnnxSmoke.valueInfo("token_type_ids", 7, 1, sequenceLength));
+        }
         KnowledgeOnnxSmoke.bytes(graph, 12,
                 KnowledgeOnnxSmoke.valueInfo("last_hidden_state", 1, 1,
                         sequenceLength, DIMENSIONS));
+        if (poolerOutput) {
+            KnowledgeOnnxSmoke.bytes(graph, 12,
+                    KnowledgeOnnxSmoke.valueInfo("pooler_output", 1, 1, DIMENSIONS));
+        }
         KnowledgeOnnxSmoke.bytes(model, 7, graph.toByteArray());
         return model.toByteArray();
     }
