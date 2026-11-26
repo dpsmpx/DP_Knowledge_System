@@ -668,6 +668,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                 ? R.string.knowledge_models_container_invalid
                                 : !result.jsonPreflightPassed()
                                         ? R.string.knowledge_models_package_audit_json_warning
+                                        : !result.tokenizerPreflightPassed()
+                                        ? R.string.knowledge_models_package_audit_sentencepiece_warning
                                         : result.container.externalDataTensorsDeclared > 0
                                                 && !result.externalDataPreflightPassed()
                                                 ? R.string.knowledge_models_package_audit_external_warning
@@ -689,7 +691,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                                 result.externalComponentsUnused,
                                                 result.container.invalidExternalDataRanges)
                                         + "\n\n"
-                                        + containerPreflightLabel(result.container))
+                                        + containerPreflightLabel(result.container)
+                                        + (result.sentencePiece == null ? "" : "\n\n"
+                                                + getString(R.string.knowledge_models_package_audit_sentencepiece_report,
+                                                        result.sentencePiece.looksLikeBpe() ? "BPE" : "Unigram",
+                                                        result.sentencePiece.pieces,
+                                                        result.sentencePiece.normalizerName,
+                                                        result.sentencePiece.charsMapBytes,
+                                                        result.sentencePiece.unknownPieceId,
+                                                        result.sentencePiece.bosPieceId,
+                                                        result.sentencePiece.eosPieceId,
+                                                        result.sentencePiece.padPieceId))
+                                        + (result.sentencePieceRejected == 0 ? "" : "\n\n"
+                                                + getString(R.string.knowledge_models_package_audit_sentencepiece_warning)))
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
                     }

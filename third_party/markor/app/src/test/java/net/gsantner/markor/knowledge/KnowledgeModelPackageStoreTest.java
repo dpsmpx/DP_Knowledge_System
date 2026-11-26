@@ -205,6 +205,51 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void manualAuditInspectsSentencePieceBpeWithoutClaimingTokenizerParity()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-sentencepiece").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] tokenizer = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            packages.install(manifest(entry, "sentencepiece.bpe.model", tokenizer,
+                    "config.json", CONFIG), companions("sentencepiece.bpe.model", tokenizer,
+                    "config.json", CONFIG), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertTrue(audit.integrityPassed());
+            assertTrue(audit.tokenizerPreflightPassed());
+            assertEquals(0, audit.sentencePieceRejected);
+            assertNotNull(audit.sentencePiece);
+            assertTrue(audit.sentencePiece.looksLikeBpe());
+            assertEquals("nmt_nfkc", audit.sentencePiece.normalizerName);
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void invalidButHashMatchingSentencePieceIsACompatibilityWarning()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-package-bad-sp").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] invalid = "not a sentencepiece model".getBytes(StandardCharsets.UTF_8);
+            packages.install(manifest(entry, "sentencepiece.bpe.model", invalid,
+                    "config.json", CONFIG), companions("sentencepiece.bpe.model", invalid,
+                    "config.json", CONFIG), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertTrue("SHA agreement is separate from the parser", audit.integrityPassed());
+            assertFalse(audit.tokenizerPreflightPassed());
+            assertEquals(1, audit.sentencePieceRejected);
+            assertNull(audit.sentencePiece);
+            assertTrue(audit.jsonPreflightPassed());
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
     @Test public void sameSizePostInstallDamageIsDetectedByExplicitAudit() throws Exception {
         final File directory = Files.createTempDirectory("dpks-package-audit-damage").toFile();
         try {
