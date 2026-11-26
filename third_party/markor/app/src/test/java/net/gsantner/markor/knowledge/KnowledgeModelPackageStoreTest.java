@@ -287,6 +287,86 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void e5ConfigRehashesPinnedCanonicalModelAndOptionalTokenizerConfig()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-e5-config-integrity").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] model = KnowledgeE5ConfigProfileTest.model();
+            final byte[] tokenizerConfig = KnowledgeE5ConfigProfileTest.tokenizer();
+            final byte[] tokenizer = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            final JSONObject manifest = new JSONObject(new String(manifest(entry,
+                    "sentencepiece.bpe.model", tokenizer, "config.json", model),
+                    StandardCharsets.UTF_8));
+            manifest.put("source_id", "intfloat/multilingual-e5-small");
+            manifest.getJSONArray("files").put(component("MODEL_CONFIG",
+                    "tokenizer_config.json", sha256(tokenizerConfig), tokenizerConfig.length));
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8), Arrays.asList(
+                    new KnowledgeModelPackageStore.Source("sentencepiece.bpe.model",
+                            () -> new ByteArrayInputStream(tokenizer)),
+                    new KnowledgeModelPackageStore.Source("config.json",
+                            () -> new ByteArrayInputStream(model)),
+                    new KnowledgeModelPackageStore.Source("tokenizer_config.json",
+                            () -> new ByteArrayInputStream(tokenizerConfig))), entry);
+            assertTrue(packages.e5Config(entry).tokenizerConfigChecked);
+
+            final File folder = new File(directory,
+                    "package-" + entry.sha256 + "-EMBEDDING");
+            final File optional = new File(folder, sha256(tokenizerConfig) + ".sidecar");
+            final byte[] changed = Arrays.copyOf(tokenizerConfig, tokenizerConfig.length);
+            changed[changed.length - 1] ^= 1;
+            Files.write(optional.toPath(), changed); // Same size, wrong hash.
+            try {
+                packages.e5Config(entry);
+                fail("Tampered tokenizer_config.json was accepted");
+            } catch (IOException expected) { }
+            Files.write(optional.toPath(), tokenizerConfig);
+            final File main = new File(folder, sha256(model) + ".sidecar");
+            final byte[] mainChanged = Arrays.copyOf(model, model.length);
+            mainChanged[mainChanged.length - 1] ^= 1;
+            Files.write(main.toPath(), mainChanged);
+            try {
+                packages.e5Config(entry);
+                fail("Tampered config.json was accepted");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void e5ConfigRejectsMismatchedOrMissingCanonicalModelConfig()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-e5-config-invalid").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] tokenizer = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            final JSONObject bad = new JSONObject(new String(KnowledgeE5ConfigProfileTest.model(),
+                    StandardCharsets.UTF_8)).put("vocab_size", 250002);
+            final byte[] invalid = bad.toString().getBytes(StandardCharsets.UTF_8);
+            final JSONObject manifest = new JSONObject(new String(manifest(entry,
+                    "sentencepiece.bpe.model", tokenizer, "config.json", invalid),
+                    StandardCharsets.UTF_8)).put("source_id", "intfloat/multilingual-e5-small");
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    companions("sentencepiece.bpe.model", tokenizer, "config.json", invalid), entry);
+            try {
+                packages.e5Config(entry);
+                fail("E5 model with incompatible dimensions was accepted");
+            } catch (IOException expected) { }
+            packages.forget(entry);
+
+            // A model config with a different pinned name is not canonical.
+            manifest.getJSONArray("files").getJSONObject(2).put("name", "other.json");
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    companions("sentencepiece.bpe.model", tokenizer, "other.json", invalid), entry);
+            try {
+                packages.e5Config(entry);
+                fail("E5 package without config.json was accepted");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
     @Test public void invalidButHashMatchingSentencePieceIsACompatibilityWarning()
             throws Exception {
         final File directory = Files.createTempDirectory("dpks-package-bad-sp").toFile();

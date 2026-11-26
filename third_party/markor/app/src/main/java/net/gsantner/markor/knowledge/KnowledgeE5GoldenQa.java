@@ -44,6 +44,9 @@ final class KnowledgeE5GoldenQa {
                       final KnowledgeModelFiles.Entry entry) throws IOException {
         if (context == null || packages == null) throw new IOException("Missing QA context");
         final KnowledgeModelPackageStore.E5TokenizerFile tokenizer = packages.e5Tokenizer(entry);
+        // A matching tokenizer alone is insufficient: require canonical E5
+        // BERT/XLM-R config fields from separately rehashed installed JSON.
+        packages.e5Config(entry);
         final int[][] ids = new int[NAMES.length][];
         final int[] lengths = new int[NAMES.length];
         final long start = System.nanoTime();

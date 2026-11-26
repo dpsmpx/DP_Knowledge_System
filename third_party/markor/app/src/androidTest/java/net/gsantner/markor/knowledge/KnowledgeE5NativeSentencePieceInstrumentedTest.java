@@ -120,7 +120,32 @@ public final class KnowledgeE5NativeSentencePieceInstrumentedTest {
         try {
             final byte[] weight = new byte[48]; // Never a real ONNX model.
             final byte[] tokenizer = syntheticBpe();
-            final byte[] config = "{\"hidden_size\":8}".getBytes(StandardCharsets.UTF_8);
+            // Canonical metadata paired with toy weights/tokenizer: tests the gate,
+            // never claims that this tiny synthetic tokenizer is real E5.
+            final byte[] config = new JSONObject()
+                    .put("model_type", "bert")
+                    .put("tokenizer_class", "XLMRobertaTokenizer")
+                    .put("position_embedding_type", "absolute")
+                    .put("hidden_act", "gelu")
+                    .put("hidden_size", 384)
+                    .put("max_position_embeddings", 512)
+                    .put("vocab_size", 250037)
+                    .put("num_hidden_layers", 12)
+                    .put("num_attention_heads", 12)
+                    .put("intermediate_size", 1536)
+                    .put("type_vocab_size", 2)
+                    .put("pad_token_id", 0).toString().getBytes(StandardCharsets.UTF_8);
+            final byte[] tokenizerConfig = new JSONObject()
+                    .put("tokenizer_class", "XLMRobertaTokenizer")
+                    .put("bos_token", "<s>")
+                    .put("cls_token", "<s>")
+                    .put("eos_token", "</s>")
+                    .put("sep_token", "</s>")
+                    .put("pad_token", "<pad>")
+                    .put("unk_token", "<unk>")
+                    .put("model_max_length", 512)
+                    .put("sp_model_kwargs", new JSONObject())
+                    .toString().getBytes(StandardCharsets.UTF_8);
             entry = files.importFile(new ByteArrayInputStream(weight), "model.onnx",
                     KnowledgeModelPolicy.Role.EMBEDDING);
             final JSONObject manifest = new JSONObject()
@@ -141,13 +166,18 @@ public final class KnowledgeE5NativeSentencePieceInstrumentedTest {
             companions.put(new JSONObject().put("kind", "MODEL_CONFIG")
                     .put("name", "config.json").put("sha256", sha256(config))
                     .put("bytes", config.length));
+            companions.put(new JSONObject().put("kind", "MODEL_CONFIG")
+                    .put("name", "tokenizer_config.json").put("sha256", sha256(tokenizerConfig))
+                    .put("bytes", tokenizerConfig.length));
             manifest.put("files", companions);
             packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
                     Arrays.asList(
                             new KnowledgeModelPackageStore.Source("sentencepiece.bpe.model",
                                     () -> new ByteArrayInputStream(tokenizer)),
                             new KnowledgeModelPackageStore.Source("config.json",
-                                    () -> new ByteArrayInputStream(config))), entry);
+                                    () -> new ByteArrayInputStream(config)),
+                            new KnowledgeModelPackageStore.Source("tokenizer_config.json",
+                                    () -> new ByteArrayInputStream(tokenizerConfig))), entry);
             final KnowledgeE5GoldenQa.Report result = KnowledgeE5GoldenQa.run(
                     getInstrumentation().getTargetContext(), packages, entry);
             assertEquals(sha256(tokenizer), result.modelSha256);

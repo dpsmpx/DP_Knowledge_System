@@ -202,6 +202,62 @@ final class KnowledgeModelPackageStore {
         return chosen;
     }
 
+    /** Inspect only SHA-verified small config sidecars; ONNX bytes are untouched. */
+    synchronized KnowledgeE5ConfigProfile.Result e5Config(final KnowledgeModelFiles.Entry entry)
+            throws IOException {
+        // Reuse all E5 source, role, and installed package identity gates.
+        e5Tokenizer(entry);
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null) throw new IOException("Missing installed E5 package");
+        KnowledgeModelPackageManifest.Component config = null;
+        KnowledgeModelPackageManifest.Component tokenizerConfig = null;
+        for (final KnowledgeModelPackageManifest.Component part : manifest.components) {
+            if (part.kind == KnowledgeModelPackageManifest.Kind.MODEL_CONFIG
+                    && "config.json".equals(part.name)) {
+                if (config != null) {
+                    throw new IOException("Ambiguous E5 config.json companion");
+                }
+                config = part;
+            }
+            if ((part.kind == KnowledgeModelPackageManifest.Kind.TOKENIZER
+                    || part.kind == KnowledgeModelPackageManifest.Kind.MODEL_CONFIG)
+                    && "tokenizer_config.json".equals(part.name)) {
+                if (tokenizerConfig != null) {
+                    throw new IOException("Ambiguous E5 tokenizer configuration");
+                }
+                tokenizerConfig = part;
+            }
+        }
+        if (config == null) throw new IOException("E5 model config.json is required");
+        final File folder = bundle(entry);
+        final byte[] main = readPinnedE5Config(folder, config);
+        final byte[] tokenizer = tokenizerConfig == null ? null
+                : readPinnedE5Config(folder, tokenizerConfig);
+        return KnowledgeE5ConfigProfile.parse(main, tokenizer);
+    }
+
+    private static byte[] readPinnedE5Config(final File folder,
+                                              final KnowledgeModelPackageManifest.Component component)
+            throws IOException {
+        if (component.bytes < 2 || component.bytes > KnowledgeE5ConfigProfile.MAX_CONFIG_BYTES) {
+            throw new IOException("E5 configuration size outside bounds");
+        }
+        final File file = new File(folder, component.sha256 + ".sidecar");
+        if (!safeChild(folder, file) || !file.isFile()
+                || file.length() != component.bytes) {
+            throw new IOException("E5 configuration file changed");
+        }
+        final ByteArrayOutputStream captured = new ByteArrayOutputStream((int) component.bytes);
+        final String hash;
+        try (InputStream source = new FileInputStream(file)) {
+            hash = digest(source, component.bytes, null, 0, captured, component.bytes);
+        }
+        if (!component.sha256.equals(hash)) {
+            throw new IOException("E5 configuration SHA-256 differs from package manifest");
+        }
+        return captured.toByteArray();
+    }
+
     /**
      * Rehash every saved byte on a user-requested worker thread. Previously
      * imported files may have been modified or damaged; their name and length
