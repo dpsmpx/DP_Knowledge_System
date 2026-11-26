@@ -36,6 +36,9 @@ final class KnowledgeEmbeddingTensorContract {
         long[][] inputIds() { return new long[][]{Arrays.copyOf(tokenIds, tokenIds.length)}; }
 
         long[][] attentionMask() { return new long[][]{Arrays.copyOf(mask, mask.length)}; }
+
+        /** Single-sequence BERT-family ONNX exports may also require this. */
+        long[][] tokenTypeIds() { return new long[][]{new long[tokenIds.length]}; }
     }
 
     private KnowledgeEmbeddingTensorContract() { }

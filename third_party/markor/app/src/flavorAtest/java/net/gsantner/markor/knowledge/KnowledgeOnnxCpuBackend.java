@@ -9,6 +9,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import ai.onnxruntime.NodeInfo;
@@ -163,6 +164,10 @@ final class KnowledgeOnnxCpuBackend {
                     }
                 }
             }
+            // One more all-synthetic path exercises INT64 named inputs,
+            // rank-three FLOAT output and the shared masked-mean aggregator.
+            // It never opens installed model files or note content.
+            smokeEmbeddingTensors(environment, options, memory);
         }
         // Count AFTER the session, options, result and input tensor have closed.
         // This is a diagnostic native-heap delta, NOT peak RSS or model RAM.
@@ -171,5 +176,78 @@ final class KnowledgeOnnxCpuBackend {
         return new KnowledgeOnnxSmoke.Report(environment.getVersion(),
                 initMillis, runMicros, nativeDelta, memory.result(),
                 KnowledgeOnnxRssHighWater.readSelf());
+    }
+
+    private static void smokeEmbeddingTensors(final OrtEnvironment environment,
+                                              final OrtSession.SessionOptions options,
+                                              final KnowledgeOnnxMemoryTrace.Recorder memory)
+            throws Exception {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("Synthetic embedding smoke cancelled");
+        }
+        final KnowledgeEmbeddingTensorContract.Inputs batch =
+                KnowledgeEmbeddingTensorContract.fromTokenizer(
+                        KnowledgeOnnxEmbeddingSmoke.IDS, KnowledgeOnnxEmbeddingSmoke.MASK,
+                        1, 0, 2, false);
+        try (OrtSession session = environment.createSession(
+                KnowledgeOnnxEmbeddingSmoke.gatherModel(), options)) {
+            KnowledgeE5OnnxSignature.require(signature(session.getInputInfo()),
+                    signature(session.getOutputInfo()), KnowledgeOnnxEmbeddingSmoke.DIMENSIONS);
+            memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
+            try (OnnxTensor ids = OnnxTensor.createTensor(environment, batch.inputIds());
+                 OnnxTensor mask = OnnxTensor.createTensor(environment, batch.attentionMask());
+                 OnnxTensor types = OnnxTensor.createTensor(environment, batch.tokenTypeIds())) {
+                final Map<String, OnnxTensor> inputs = new LinkedHashMap<>();
+                inputs.put("input_ids", ids);
+                inputs.put("attention_mask", mask);
+                if (session.getInputInfo().containsKey("token_type_ids")) {
+                    inputs.put("token_type_ids", types);
+                }
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException("Synthetic embedding smoke cancelled");
+                }
+                try (OrtSession.Result result = session.run(inputs)) {
+                    if (result.size() != 1 || !(result.get(0).getValue() instanceof float[][][])) {
+                        throw new IOException("Synthetic embedding output has unexpected rank/type");
+                    }
+                    final float[] vector = KnowledgeEmbeddingTensorContract.poolAndNormalize(
+                            (float[][][]) result.get(0).getValue(), batch,
+                            KnowledgeOnnxEmbeddingSmoke.DIMENSIONS);
+                    if (Math.abs(vector[0] - KnowledgeOnnxEmbeddingSmoke.EXPECTED_0) > .00001f
+                            || Math.abs(vector[1] - KnowledgeOnnxEmbeddingSmoke.EXPECTED_1) > .00001f) {
+                        throw new IOException("Synthetic embedding masked pooling mismatch");
+                    }
+                    for (int i = 2; i < vector.length; i++) {
+                        if (Math.abs(vector[i]) > .00001f) {
+                            throw new IOException("Unexpected synthetic embedding component");
+                        }
+                    }
+                }
+            }
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("Synthetic embedding smoke cancelled");
+        }
+    }
+
+    private static Map<String, KnowledgeE5OnnxSignature.Tensor> signature(
+            final Map<String, NodeInfo> nodes) throws IOException {
+        if (nodes == null || nodes.size() > KnowledgeOnnxIoSummary.MAX_IO) {
+            throw new IOException("Invalid ONNX synthetic graph I/O");
+        }
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> results = new LinkedHashMap<>();
+        for (final Map.Entry<String, NodeInfo> node : nodes.entrySet()) {
+            if (node.getValue() == null || !(node.getValue().getInfo() instanceof TensorInfo)) {
+                throw new IOException("Non-tensor ONNX synthetic graph I/O");
+            }
+            final TensorInfo tensor = (TensorInfo) node.getValue().getInfo();
+            results.put(node.getKey(), new KnowledgeE5OnnxSignature.Tensor(
+                    tensor.type == OnnxJavaType.INT64 ? KnowledgeE5OnnxSignature.DataType.INT64
+                            : tensor.type == OnnxJavaType.FLOAT
+                            ? KnowledgeE5OnnxSignature.DataType.FLOAT32
+                            : KnowledgeE5OnnxSignature.DataType.OTHER,
+                    tensor.getShape()));
+        }
+        return results;
     }
 }
