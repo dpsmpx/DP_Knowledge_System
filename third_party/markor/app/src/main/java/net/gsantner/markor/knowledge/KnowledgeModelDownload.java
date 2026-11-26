@@ -6,6 +6,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -27,6 +30,7 @@ final class KnowledgeModelDownload {
 
     interface Progress { void onBytes(long copied, long announcedTotal); }
     interface ConnectionFactory { HttpURLConnection open(URL url) throws IOException; }
+    interface AddressResolver { InetAddress[] resolve(String host) throws IOException; }
 
     static final class Source {
         final URI uri;
@@ -83,13 +87,66 @@ final class KnowledgeModelDownload {
         return labels[labels.length - 1].length() >= 2;
     }
 
+    /**
+     * Refuse a public-looking DNS name that currently resolves to a private or
+     * reserved destination. All answers must pass, including dual-stack and
+     * round-robin answers. This is a preconnect guard, not DNS pinning: a DNS
+     * rebinding between this lookup and HttpURLConnection remains possible.
+     */
+    private static void requirePublicAddresses(final URI uri, final AddressResolver resolver)
+            throws IOException {
+        final InetAddress[] resolved = resolver.resolve(uri.getHost());
+        if (resolved == null || resolved.length == 0) {
+            throw new IOException("Model download host has no public DNS addresses");
+        }
+        for (final InetAddress address : resolved) {
+            if (!isPublicAddress(address)) {
+                throw new IOException("Model download host resolves to a non-public address");
+            }
+        }
+    }
+
+    static boolean isPublicAddress(final InetAddress address) {
+        if (address == null || address.isAnyLocalAddress() || address.isLoopbackAddress()
+                || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                || address.isMulticastAddress()) return false;
+        final byte[] bytes = address.getAddress();
+        if (address instanceof Inet4Address) {
+            final int a = bytes[0] & 255;
+            final int b = bytes[1] & 255;
+            final int c = bytes[2] & 255;
+            // Also exclude CGNAT, protocol assignments, benchmark and example
+            // ranges which java.net's site-local test does not cover.
+            return a != 0 && a != 10 && a != 127 && a < 224
+                    && !(a == 100 && b >= 64 && b <= 127)
+                    && !(a == 169 && b == 254)
+                    && !(a == 172 && b >= 16 && b <= 31)
+                    && !(a == 192 && (b == 168 || (b == 0 && (c == 0 || c == 2))
+                            || (b == 88 && c == 99)))
+                    && !(a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                    && !(a == 203 && b == 0 && c == 113);
+        }
+        if (address instanceof Inet6Address) {
+            final int a = bytes[0] & 255;
+            final int b = bytes[1] & 255;
+            return (a & 0xfe) != 0xfc // IPv6 unique-local fc00::/7
+                    && !(a == 0xfe && (b & 0xc0) == 0x80) // link-local fe80::/10
+                    && !(a == 0x20 && b == 0x01 && bytes[2] == 0
+                            && bytes[3] == 0) // Teredo 2001:0000::/32
+                    && !(a == 0x20 && b == 0x01 && (bytes[2] & 255) == 0x0d
+                            && (bytes[3] & 255) == 0xb8) // docs 2001:db8::/32
+                    && !(a == 0x20 && b == 0x02); // 6to4 2002::/16
+        }
+        return false;
+    }
+
     static KnowledgeModelFiles.Entry download(final String rawUrl,
                                                final KnowledgeModelPolicy.Role role,
                                                final String expectedSha256,
                                                final KnowledgeModelFiles files,
                                                final Progress progress) throws IOException {
         return download(rawUrl, role, expectedSha256, files, progress,
-                url -> (HttpURLConnection) url.openConnection());
+                url -> (HttpURLConnection) url.openConnection(), InetAddress::getAllByName);
     }
 
     static KnowledgeModelFiles.Entry download(final String rawUrl,
@@ -98,6 +155,18 @@ final class KnowledgeModelDownload {
                                                final KnowledgeModelFiles files,
                                                final Progress progress,
                                                final ConnectionFactory factory) throws IOException {
+        return download(rawUrl, role, expectedSha256, files, progress, factory,
+                InetAddress::getAllByName);
+    }
+
+    /** The injected resolver is used by offline JVM tests only. */
+    static KnowledgeModelFiles.Entry download(final String rawUrl,
+                                               final KnowledgeModelPolicy.Role role,
+                                               final String expectedSha256,
+                                               final KnowledgeModelFiles files,
+                                               final Progress progress,
+                                               final ConnectionFactory factory,
+                                               final AddressResolver resolver) throws IOException {
         final Source source = parseSource(rawUrl);
         final boolean trustedResume = expectedSha256 != null && !expectedSha256.isEmpty();
         final long checkpoint = trustedResume
@@ -107,6 +176,7 @@ final class KnowledgeModelDownload {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedIOException("Model download cancelled");
             }
+            requirePublicAddresses(current, resolver);
             final HttpURLConnection connection = factory.open(current.toURL());
             try {
                 connection.setInstanceFollowRedirects(false);
