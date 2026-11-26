@@ -98,6 +98,19 @@ final class KnowledgeModelPackageStore {
         }
     }
 
+    /** One manifest-pinned local E5 tokenizer; not permission to execute weights. */
+    static final class E5TokenizerFile {
+        final File file;
+        final long bytes;
+        final String sha256;
+
+        E5TokenizerFile(final File source, final long length, final String digest) {
+            file = source;
+            bytes = length;
+            sha256 = digest;
+        }
+    }
+
     /**
      * One explicitly prepared, transient ONNX directory. No inference engine
      * is started. Call close() even if a future runtime rejects the model.
@@ -158,6 +171,35 @@ final class KnowledgeModelPackageStore {
             }
         }
         return manifest;
+    }
+
+    /** Resolve, without opening ONNX weights, exactly one E5 SentencePiece model. */
+    synchronized E5TokenizerFile e5Tokenizer(final KnowledgeModelFiles.Entry entry)
+            throws IOException {
+        if (entry == null || entry.role != KnowledgeModelPolicy.Role.EMBEDDING
+                || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
+                || !registered(entry)) {
+            throw new IOException("An installed ONNX embedding model is required");
+        }
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null || !"intfloat/multilingual-e5-small".equals(manifest.sourceId)) {
+            throw new IOException("Package does not assert the supported E5 source");
+        }
+        E5TokenizerFile chosen = null;
+        final File folder = bundle(entry);
+        for (final KnowledgeModelPackageManifest.Component item : manifest.components) {
+            if (item.kind != KnowledgeModelPackageManifest.Kind.TOKENIZER
+                    || !item.name.endsWith(".model")) continue;
+            if (chosen != null) throw new IOException("Ambiguous E5 SentencePiece sidecars");
+            final File file = new File(folder, item.sha256 + ".sidecar");
+            if (!safeChild(folder, file) || !file.isFile()
+                    || file.length() != item.bytes) {
+                throw new IOException("E5 tokenizer sidecar no longer matches manifest size");
+            }
+            chosen = new E5TokenizerFile(file, item.bytes, item.sha256);
+        }
+        if (chosen == null) throw new IOException("E5 SentencePiece .model is missing");
+        return chosen;
     }
 
     /**

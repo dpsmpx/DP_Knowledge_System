@@ -763,6 +763,14 @@
     <string name="knowledge_models_package_help">How to import</string>
     <string name="knowledge_models_package_import">Import manifest + companions</string>
     <string name="knowledge_models_package_audit">Verify package SHA-256</string>
+    <string name="knowledge_models_e5_qa">Test E5 tokenizer</string>
+    <string name="knowledge_models_e5_qa_missing">The selected ONNX embedding package must assert intfloat/multilingual-e5-small and contain exactly one locally installed, SHA-pinned SentencePiece .model. Import the companions manually first. No weights were run.</string>
+    <string name="knowledge_models_e5_qa_warning">Manually run native SentencePiece on four fixed synthetic E5 strings (English, Russian, Chinese, emoji)? The local .model is re-read and checked against its manifest SHA-256 for every sample. No notes, weights, ONNX inference or network are used. This may consume CPU/RAM. The resulting fingerprint can be compared with the offline Python reference for the SAME file; this test alone does not establish parity or model readiness. Manage cancels a pending task.</string>
+    <string name="knowledge_models_e5_qa_running">Checking pinned SentencePiece bytes and encoding four fixed E5 samples locally. Tap Manage to request cancellation. No notes or inference.</string>
+    <string name="knowledge_models_e5_qa_passed">Native E5 tokenizer QA completed. Compare the fingerprint with the independently generated Python reference; inference remains disabled.</string>
+    <string name="knowledge_models_e5_qa_failed">E5 tokenizer QA failed, was cancelled, or the installed package is incompatible. No inference ran.</string>
+    <string name="knowledge_models_e5_qa_copy">Copy fingerprint</string>
+    <string name="knowledge_models_e5_qa_report">Native SentencePiece encoded four synthetic E5 samples.\n\nPinned tokenizer SHA-256:\n%1$s\n\nGolden token-ID fingerprint SHA-256:\n%2$s\n\nToken counts (including BOS/EOS): emoji %3$d, English %4$d, Russian %5$d, Chinese %6$d.\nElapsed %7$d ms (not a benchmark).\n\nCompare this fingerprint with golden_fingerprint_sha256 from the offline scripts/e5_sentencepiece_reference.py using Transformers 4.57.1 and the SAME SHA-pinned .model. This is NOT a claim of real E5 parity, weights compatibility, model speed or ONNX inference readiness.</string>
     <string name="knowledge_models_package_audit_starting">Reading installed model and companions to recheck their SHA-256. Tap Manage to cancel. No inference or network request.</string>
     <string name="knowledge_models_package_audit_progress">Verifying bytes: %1$s / %2$s (local file reading only)</string>
     <string name="knowledge_models_package_audit_passed">Package file digests match. This does NOT mean the model is runnable.</string>
