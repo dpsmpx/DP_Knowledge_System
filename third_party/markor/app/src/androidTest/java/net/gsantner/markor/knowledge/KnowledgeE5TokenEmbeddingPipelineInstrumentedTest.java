@@ -11,6 +11,7 @@ import org.junit.runner.RunWith;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InterruptedIOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -203,6 +204,39 @@ public final class KnowledgeE5TokenEmbeddingPipelineInstrumentedTest {
                                 new int[]{0, 5, 2, 1, 1}, new int[]{1, 1, 1, 0, 0},
                                 1, 0, 2, true);
                 expectRunnerRefusal(environment, session, truncated, profile);
+            }
+        }
+    }
+
+    @Test public void nativeRunCancellationIsOneShotAndDoesNotRequireModelFiles()
+            throws Exception {
+        final KnowledgeE5OrtTensorRunner.StopSignal stop =
+                new KnowledgeE5OrtTensorRunner.StopSignal();
+        try (OrtSession.RunOptions options = new OrtSession.RunOptions()) {
+            stop.attach(options);
+            final Thread caller = new Thread(stop::cancel, "dpks-test-e5-cancel");
+            caller.start();
+            caller.join(2000);
+            assertFalse("Cancellation thread did not finish", caller.isAlive());
+            assertTrue(stop.isCancelled());
+            stop.detach(options);
+        }
+
+        final KnowledgeEmbeddingTensorContract.Inputs batch =
+                KnowledgeEmbeddingTensorContract.fromTokenizer(
+                        new int[]{0, 3, 2}, new int[]{1, 1, 1}, 1, 0, 2, false);
+        final OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+            options.setIntraOpNumThreads(1);
+            options.setInterOpNumThreads(1);
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
+            try (OrtSession session = environment.createSession(
+                    KnowledgeE5TokenEmbeddingSmoke.graph(3), options)) {
+                try {
+                    KnowledgeE5OrtTensorRunner.run(environment, session, batch,
+                            KnowledgeE5OnnxMetadataInstrumentedTest.profile(), stop);
+                    fail("A cancelled E5 Run reached native execution");
+                } catch (InterruptedIOException expected) { }
             }
         }
     }
