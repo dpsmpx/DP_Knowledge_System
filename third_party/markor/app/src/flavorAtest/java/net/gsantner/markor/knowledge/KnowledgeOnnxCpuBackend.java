@@ -1,6 +1,7 @@
 /* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
 package net.gsantner.markor.knowledge;
 
+import android.content.Context;
 import android.os.Debug;
 
 import java.io.IOException;
@@ -114,7 +115,8 @@ final class KnowledgeOnnxCpuBackend {
         return found;
     }
 
-    static KnowledgeOnnxSmoke.Report smoke(final KnowledgeOnnxMemoryTrace.Recorder memory)
+    static KnowledgeOnnxSmoke.Report smoke(final Context workerContext,
+                                           final KnowledgeOnnxMemoryTrace.Recorder memory)
             throws Exception {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("CPU smoke test cancelled");
@@ -168,6 +170,9 @@ final class KnowledgeOnnxCpuBackend {
             // rank-three FLOAT output and the shared masked-mean aggregator.
             // It never opens installed model files or note content.
             smokeEmbeddingTensors(environment, options, memory);
+            // Exercise the canonical 384-channel E5 runner inside the actual
+            // isolated service UID, not only the instrumentation process.
+            KnowledgeE5IsolatedSmoke.verify(workerContext, environment, options, memory);
         }
         // Count AFTER the session, options, result and input tensor have closed.
         // This is a diagnostic native-heap delta, NOT peak RSS or model RAM.

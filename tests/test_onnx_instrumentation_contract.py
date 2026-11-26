@@ -57,7 +57,7 @@ class IsolatedOnnxInstrumentationContract(unittest.TestCase):
         suite = (APP / "src/androidTest/java/net/gsantner/markor/knowledge/"
                  "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
         for case in ("manifestWorkerIsPrivateAndIsolated",
-                     "generatedIdentitySmokeCanRunTwiceAcrossWorkerLifecycle",
+                     "identityAnd384E5SmokesCanRunTwiceAcrossWorkerLifecycle",
                      "syntheticFdSessionUsesWorkerAndVerifiesOneInputOutput",
                      "cancellingPendingBindSilencesCallbacks",
                      "debugStallWatchdogKillsOnlyWorker",

@@ -41,7 +41,7 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("handler.postDelayed(deadline", service)
         self.assertIn("Process.killProcess(Process.myPid())", service)
         self.assertIn("KnowledgeOnnxProcessIdentity.isWorker()", service)
-        self.assertIn("KnowledgeOnnxCpuBackend.smoke(memory)", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.smoke(this, memory)", service)
         self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
         self.assertIn("KnowledgeOnnxCpuBackend.inspect(model, memory)", service)
         self.assertIn("Arrays.fill(model, (byte) 0)", service)
@@ -50,6 +50,26 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("CANCEL_AND_EXIT", client)
         self.assertIn("onnxSmokeClient.start(", activity)
         self.assertNotIn("final KnowledgeOnnxSmoke.Report report = KnowledgeOnnxCpuBackend.smoke()", activity)
+
+    def test_384_e5_synthetic_run_is_inside_isolated_uid_and_never_opens_weight_paths(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        backend = (APP / "flavorAtest" / base / "KnowledgeOnnxCpuBackend.java").read_text()
+        smoke = (APP / "flavorAtest" / base / "KnowledgeE5IsolatedSmoke.java").read_text()
+        suite = (APP / "androidTest" / base /
+                 "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("KnowledgeE5IsolatedSmoke.verify(workerContext, environment, options, memory)",
+                      backend)
+        self.assertIn("KnowledgeOnnxProcessIdentity.isWorker()", smoke)
+        self.assertIn("KnowledgeOnnxWorkerMemory.requireAvailable(context, false)", smoke)
+        self.assertIn("KnowledgeOnnxWorkerMemory.snapshot(context)", smoke)
+        self.assertIn("KnowledgeE5ResourceEstimate.assess(", smoke)
+        self.assertIn("KnowledgeE5TokenEmbeddingSmoke.graph(", smoke)
+        self.assertIn("KnowledgeE5OrtTensorRunner.run(", smoke)
+        self.assertIn("KnowledgeE5TokenEmbeddingSmoke.expectedVector(batch)", smoke)
+        self.assertIn("Arrays.fill(syntheticModel, (byte) 0)", smoke)
+        self.assertIn("identityAnd384E5SmokesCanRunTwiceAcrossWorkerLifecycle", suite)
+        self.assertNotIn("KnowledgeModelPackageStore", smoke)
+        self.assertNotIn("model.onnx", smoke)
 
     def test_isolated_process_identity_uses_no_forbidden_activity_manager_call(self):
         folder = APP / "main/java/net/gsantner/markor"
