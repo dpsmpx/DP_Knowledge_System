@@ -11,6 +11,7 @@ import java.util.Optional;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 /**
@@ -24,14 +25,57 @@ final class KnowledgeE5OrtTensorRunner {
 
     private KnowledgeE5OrtTensorRunner() { }
 
+    /**
+     * One-shot cooperative/native cancellation signal. The caller retains
+     * ownership and may invoke cancel() from another thread during ORT Run.
+     * A separate isolated-process watchdog remains mandatory for native
+     * calls that do not respond to setTerminate(). Never reuse this signal.
+     */
+    static final class StopSignal {
+        private boolean cancelled;
+        private OrtSession.RunOptions active;
+
+        synchronized void cancel() {
+            cancelled = true;
+            if (active != null) {
+                try {
+                    active.setTerminate(true);
+                } catch (OrtException ignored) {
+                    // Process watchdog is the hard fallback for native failures.
+                }
+            }
+        }
+
+        synchronized boolean isCancelled() { return cancelled; }
+
+        synchronized void attach(final OrtSession.RunOptions options) throws OrtException {
+            if (active != null || options == null) {
+                throw new IllegalStateException("E5 StopSignal already has an active Run");
+            }
+            if (cancelled) options.setTerminate(true);
+            active = options;
+        }
+
+        synchronized void detach(final OrtSession.RunOptions options) {
+            if (active == options) active = null;
+        }
+    }
+
     static float[] run(final OrtEnvironment environment, final OrtSession session,
                        final KnowledgeEmbeddingTensorContract.Inputs batch,
                        final KnowledgeE5ConfigProfile.Result profile) throws Exception {
+        return run(environment, session, batch, profile, new StopSignal());
+    }
+
+    static float[] run(final OrtEnvironment environment, final OrtSession session,
+                       final KnowledgeEmbeddingTensorContract.Inputs batch,
+                       final KnowledgeE5ConfigProfile.Result profile,
+                       final StopSignal cancellation) throws Exception {
         if (environment == null || session == null || batch == null
-                || batch.tokenizerTruncated) {
+                || batch.tokenizerTruncated || cancellation == null) {
             throw new IllegalArgumentException("Missing E5 runtime input or truncated tokens");
         }
-        checkCancelled();
+        checkCancelled(cancellation);
         final Map<String, KnowledgeE5OnnxSignature.Tensor> inputs =
                 KnowledgeOnnxCpuBackend.signature(session.getInputInfo());
         final Map<String, KnowledgeE5OnnxSignature.Tensor> outputs =
@@ -51,19 +95,37 @@ final class KnowledgeE5OrtTensorRunner {
             named.put("input_ids", ids);
             named.put("attention_mask", mask);
             if (types != null) named.put("token_type_ids", types);
-            checkCancelled();
+            checkCancelled(cancellation);
             // Optional pooler_output must not be used for embeddings or
             // transferred back to Java; ask ORT for the named hidden state only.
-            try (OrtSession.Result result = session.run(named, Collections.singleton(HIDDEN))) {
-                final Optional<OnnxValue> value = result.get(HIDDEN);
-                if (result.size() != 1 || !value.isPresent()
-                        || !(value.get().getValue() instanceof float[][][])) {
-                    throw new IOException("E5 hidden-state output has unexpected rank/type");
+            try (OrtSession.RunOptions options = new OrtSession.RunOptions()) {
+                cancellation.attach(options);
+                try {
+                    checkCancelled(cancellation);
+                    try (OrtSession.Result result = session.run(named,
+                            Collections.singleton(HIDDEN), options)) {
+                        checkCancelled(cancellation);
+                        final Optional<OnnxValue> value = result.get(HIDDEN);
+                        if (result.size() != 1 || !value.isPresent()
+                                || !(value.get().getValue() instanceof float[][][])) {
+                            throw new IOException("E5 hidden-state output has unexpected rank/type");
+                        }
+                        final float[] vector = KnowledgeEmbeddingTensorContract.poolAndNormalize(
+                                (float[][][]) value.get().getValue(), batch, profile.hiddenSize);
+                        checkCancelled(cancellation);
+                        return vector;
+                    }
+                } catch (OrtException nativeFailure) {
+                    if (cancellation.isCancelled()) {
+                        final InterruptedIOException cancelled = new InterruptedIOException(
+                                "E5 native ONNX Run terminated by caller");
+                        cancelled.initCause(nativeFailure);
+                        throw cancelled;
+                    }
+                    throw nativeFailure;
+                } finally {
+                    cancellation.detach(options);
                 }
-                final float[] vector = KnowledgeEmbeddingTensorContract.poolAndNormalize(
-                        (float[][][]) value.get().getValue(), batch, profile.hiddenSize);
-                checkCancelled();
-                return vector;
             }
         }
     }
@@ -97,8 +159,9 @@ final class KnowledgeE5OrtTensorRunner {
         }
     }
 
-    private static void checkCancelled() throws InterruptedIOException {
-        if (Thread.currentThread().isInterrupted()) {
+    private static void checkCancelled(final StopSignal cancellation)
+            throws InterruptedIOException {
+        if (cancellation.isCancelled() || Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("Synthetic E5 ONNX run cancelled");
         }
     }
