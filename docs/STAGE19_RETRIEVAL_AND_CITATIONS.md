@@ -562,6 +562,33 @@ even if every reference and quotation passes the checks below.
     interleaved strategies still recover it. This exposes a concrete recall
     cost from arbitrary `GROUP BY path` selections and is now regression
     tested without model or device calls.
+45. **A two-pass per-source chunk quota can improve source coverage without
+    another SQLite index or global sort, but remains experimental.** Count
+    completed vector sources for the synthetic model, allocate an initial
+    `floor(45k / source_count)` early chunk-index quota per source, then spend
+    the remaining raw-row budget on disjoint higher chunk indices. Both SQL
+    passes enforce the existing model, checkpoint and scan predicates; their
+    chunk index ranges cannot overlap, and the raw-row sum never exceeds
+    45k. On the 360×128 host fixture this visits all 360 sources and retrieves
+    the late best source in all three cases, with p50 around **80–87 ms**
+    versus **107–121 ms** for globally ordered candidates across host runs.
+    A smaller 90×24
+    mixed index containing 18 one-chunk and 72 long sources also recovers
+    the target. However, an extreme 90-source fixture with **two 128-chunk
+    notes and 88 one-chunk notes**, capped at 100 rows, shows the danger:
+    source quota inspects 89/90 sources but misses the late-only exact chunk
+    in the second long note. The global sort finds it. This is a research
+    comparison, **not a production change or a completeness guarantee**.
+46. **Sampling before quota filling restores that pathological source but
+    costs more on dense indices.** A diagnostic combination first samples
+    at most one source candidate per exact bucket, then uses the remaining
+    cap for early chunk quotas and disjoint later chunks. It recovers the
+    target in all three 360×128 cases and in the uneven 90-source fixture,
+    but its measured saturated-host p50 rises to roughly **119–142 ms**
+    across runs. It also
+    revisits some candidates across the sampling/quota passes. No automatic
+    source-count heuristic or Android runtime choice is made: calibration
+    against real vector distributions, memory and battery is still missing.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -687,12 +714,14 @@ scenario; p50 is descriptive only):
 
 | Experimental SQL policy | Unique sources seen (of 360) | Late best source at top 6: lone exact / prior weaker exact / same exact bucket | Lookup p50, ms (first case) |
 | --- | ---: | --- | ---: |
-| Current exact-first `GROUP BY path,chunk` | 352 | No / No / No | 83.7 |
-| One arbitrary candidate `GROUP BY path` | 360 | Yes / No / No | 45.2 |
-| Interleaved `ORDER BY chunk,path` | 360 | Yes / Yes / Yes | 105.4 |
-| Equal quotas for four exact buckets | 88–89 | Yes / Yes / No | 19.2 |
-| One candidate per source per exact bucket | 360 | Yes / Yes / No | 37.6 |
-| Four indexed exact streams, four-way heap merge | 360 | Yes / Yes / Yes | 104.1 |
+| Current exact-first `GROUP BY path,chunk` | 352 | No / No / No | 89.3 |
+| One arbitrary candidate `GROUP BY path` | 360 | Yes / No / No | 47.6 |
+| Interleaved `ORDER BY chunk,path` | 360 | Yes / Yes / Yes | 106.6 |
+| Equal quotas for four exact buckets | 88–89 | Yes / Yes / No | 21.0 |
+| One candidate per source per exact bucket | 360 | Yes / Yes / No | 34.4 |
+| Four indexed exact streams, four-way heap merge | 360 | Yes / Yes / Yes | 97.8 |
+| Early per-source chunk quota, then fill | 360 | Yes / Yes / Yes | 82.7 |
+| Exact source sample, chunk quota, then fill | 360 | Yes / Yes / Yes | 119.3 |
 
 The source-first option inspects only one candidate per source; quotas also
 underuse capacity and may double-count chunks between exact tables, making
@@ -706,6 +735,16 @@ These values are deliberately adversarial host measurements, not real model
 precision/recall or a production tuning recommendation. Regression tests use
 a smaller but structurally equivalent 90-source, 16-chunk fixture to protect
 the failure and tradeoff cases in CI without 46k-vector allocations.
+
+The benchmark also emits `uneven_distribution_probe` for two independently
+generated in-memory source-length mixes. A 90-source/1,746-chunk case with
+18 short and 72 long notes (cap 1,200) improves from 63/90 sources in the
+current exact-first pass to 90/90 with the quota policy, recovering the late
+source. Conversely, with 88 short sources and two 128-chunk sources (344
+chunks, cap 100), the quota policy visits 89/90 but *misses* the late exact
+chunk; source sampling plus quota and global interleaving recover it. No
+private path or note text is printed. The new regression tests cover both
+scenarios, quota-pass nonoverlap and bounded total raw candidates.
 
 ## Repeatable engineering acceptance
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host-only LSH candidate-fairness experiment; never a production search path.
 
-Compares four bounded SQL policies on a disposable in-memory multi-chunk index.
+Compares bounded SQL policies on a disposable in-memory multi-chunk index.
 All vectors, paths and labels are artificial. No model, vault, network or APK.
 The output contains aggregate counts/timing only, not fixture paths.
 """
@@ -32,7 +32,8 @@ else:
 TARGET = 'z-synthetic-late-source.md'
 POLICIES = ('current_exact_first', 'one_chunk_per_source',
             'chunk_interleaved_sort', 'equal_exact_bucket_quotas',
-            'per_bucket_source_sample', 'fourway_indexed_merge')
+            'per_bucket_source_sample', 'fourway_indexed_merge',
+            'source_chunk_quota_then_fill', 'source_sample_quota_fill')
 
 FOURWAY_QUERY = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
                    INDEXED BY embedding_lsh_bucket_chunk_path
@@ -125,16 +126,31 @@ def _candidates(connection: sqlite3.Connection, policy: str,
     exact = lsh_buckets(basis(0))
 
     def fetch(buckets: tuple[int, ...], maximum: int,
-              grouping: str, order: str = '') -> list[tuple[str, int, bytes]]:
+              grouping: str, order: str = '',
+              chunk_range: tuple[int | None, int | None] | None = None
+              ) -> list[tuple[str, int, bytes]]:
+        # The same model/checkpoint/scan filters apply to each bounded pass.
+        # A split by chunk number uses the *existing* (bucket,path,chunk)
+        # index; no new production SQLite index is assumed.
+        chunk_sql = ''
+        range_args = []
+        if chunk_range is not None:
+            low, high = chunk_range
+            if low is not None:
+                chunk_sql += ' AND l.chunk>=?'
+                range_args.append(low)
+            if high is not None:
+                chunk_sql += ' AND l.chunk<?'
+                range_args.append(high)
         sql = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
                  JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
                  JOIN embedding_notes e ON e.path=v.path
                  JOIN notes n ON n.path=e.path
-                 WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ''')
-                   AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+                 WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')'
+        sql += chunk_sql + ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
                    AND n.generation=? AND n.oversized=0
                  GROUP BY ''' + grouping + order + ' LIMIT ?'
-        return list(connection.execute(sql, (*buckets, MODEL_KEY, DIMENSIONS,
+        return list(connection.execute(sql, (*buckets, *range_args, MODEL_KEY, DIMENSIONS,
                                              GENERATION, maximum)))
 
     if policy == 'current_exact_first':
@@ -162,6 +178,25 @@ def _candidates(connection: sqlite3.Connection, policy: str,
                 break
             rows.extend(fetch((bucket,), remaining, 'l.path'))
         return rows
+    if policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill'):
+        # Guarantee a bounded number of *early chunk indices* per source
+        # before a second disjoint pass. The cap is on raw rows, not on the
+        # number of sources, and best-in-source retrieval remains approximate.
+        source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+            WHERE model_key=? AND dimension=? AND completed=chunks''',
+            (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+        if source_count == 0:
+            return []
+        sampled = (_candidates(connection, 'per_bucket_source_sample', cap)
+                   if policy == 'source_sample_quota_fill' else [])
+        remaining = cap - len(sampled)
+        if remaining == 0:
+            return sampled
+        quota = max(1, remaining // source_count)
+        first = fetch(exact, remaining, 'l.path,l.chunk', chunk_range=(None, quota))
+        remaining -= len(first)
+        return sampled + first + (fetch(exact, remaining, 'l.path,l.chunk',
+                                         chunk_range=(quota, None)) if remaining else [])
     if policy == 'fourway_indexed_merge':
         # The *extra* (bucket,chunk,path) index is created only while timing
         # this host experiment. The production app does not have this index.
@@ -210,6 +245,53 @@ def _evaluate(rows: list[tuple[str, int, bytes]],
         'lookup_p50_ms': round(statistics.median(elapsed), 3),
         'lookup_max_ms': round(max(elapsed), 3),
     }
+
+
+def synthetic_uneven_distribution_probe() -> dict:
+    """Contrast a mixed index and a pathological pair of long sources.
+
+    Both fixtures stay small and live exclusively in RAM. Source quotas
+    sample early chunks by index, so a late-only hit in a long tail can still
+    be lost when a different long source consumes the remaining budget.
+    """
+    probes = {}
+    for name, sources, chunks, cap in (
+            ('mixed_18_short_72_long', 90, 24, 1200),
+            ('two_long_88_short', 90, 128, 100)):
+        connection = _database(sources, chunks)
+        try:
+            if name == 'mixed_18_short_72_long':
+                short_indices = range(0, sources - 1, 5)
+            else:
+                short_indices = range(1, sources - 1)
+            with connection:
+                for number in short_indices:
+                    path = f'a-synthetic-{number:04d}.md'
+                    connection.execute('DELETE FROM embedding_lsh '
+                                       'WHERE path=? AND chunk>0', (path,))
+                    connection.execute('DELETE FROM embedding_chunks '
+                                       'WHERE path=? AND chunk>0', (path,))
+                    connection.execute('UPDATE embedding_notes SET chunks=1, completed=1 '
+                                       'WHERE path=?', (path,))
+            results = {}
+            for policy in ('current_exact_first', 'source_chunk_quota_then_fill',
+                           'source_sample_quota_fill', 'chunk_interleaved_sort',
+                           'one_chunk_per_source'):
+                start = time.perf_counter()
+                rows = _candidates(connection, policy, cap)
+                elapsed = (time.perf_counter() - start) * 1000
+                results[policy] = _evaluate(rows, [elapsed])
+            probes[name] = {
+                'sources': sources,
+                'short_sources': len(short_indices),
+                'total_chunks': connection.execute(
+                    'SELECT COUNT(*) FROM embedding_chunks').fetchone()[0],
+                'candidate_cap': cap,
+                'policies': results,
+            }
+        finally:
+            connection.close()
+    return probes
 
 
 def compare(sources: int = 360, chunks: int = 128,
@@ -279,6 +361,7 @@ def compare(sources: int = 360, chunks: int = 128,
             'total_chunks': sources * chunks,
             'candidate_cap': cap, 'measured_trials': trials,
             'cases': cases,
+            'uneven_distribution_probe': synthetic_uneven_distribution_probe(),
             'limitations': [
                 'alternative SQL is diagnostic only and is not used in Android',
                 'one-chunk sampling can miss a later better chunk in the same source',
@@ -289,6 +372,12 @@ def compare(sources: int = 360, chunks: int = 128,
                 'when it shares only the same exact table as an earlier chunk',
                 'four-way indexed merging needs an extra derived SQLite index '
                 'whose write, storage, migration and device energy costs are untested',
+                'source chunk quotas favor early offsets and can lose a late-only '
+                'relevant chunk when the first pass exhausts its budget',
+                'combining source sampling with quotas repeats some candidates '
+                'across passes and may still exhaust the cap on dense indexes',
+                'heterogeneous host-only fixtures are not a representative '
+                'distribution of actual Android vault chunk counts',
                 'chunk interleaving may require an expensive temporary ORDER BY sort',
                 'no representative model, real vault or physical-device latency/energy',
                 'observed GROUP BY row choice is SQLite-plan-dependent',

@@ -37,6 +37,8 @@ class Stage19LshFairnessTests(unittest.TestCase):
         for record in (early, later, same):
             self.assertTrue(record['fourway_indexed_merge']['late_best_retrieved_at_6'])
             self.assertTrue(record['chunk_interleaved_sort']['late_best_retrieved_at_6'])
+            self.assertTrue(record['source_chunk_quota_then_fill']['late_best_retrieved_at_6'])
+            self.assertTrue(record['source_sample_quota_fill']['late_best_retrieved_at_6'])
             self.assertGreater(record['fourway_indexed_merge']['additional_index_kib'], 0)
         self.assertLess(early['equal_exact_bucket_quotas']['sources_seen'],
                         early['one_chunk_per_source']['sources_seen'])
@@ -53,6 +55,40 @@ class Stage19LshFairnessTests(unittest.TestCase):
                 self.assertGreaterEqual(record['lookup_p50_ms'], 0)
         self.assertNotIn('.md', json.dumps(self.data))
         self.assertIn('not used in Android', ' '.join(self.data['limitations']))
+
+    def test_uneven_source_lengths_expose_quota_failure_and_sample_tradeoff(self):
+        probes = self.data['uneven_distribution_probe']
+        mixed = probes['mixed_18_short_72_long']
+        skew = probes['two_long_88_short']
+        self.assertEqual((90, 18, 1746, 1200),
+                         (mixed['sources'], mixed['short_sources'],
+                          mixed['total_chunks'], mixed['candidate_cap']))
+        self.assertEqual((90, 88, 344, 100),
+                         (skew['sources'], skew['short_sources'],
+                          skew['total_chunks'], skew['candidate_cap']))
+        self.assertFalse(mixed['policies']['current_exact_first']['late_best_retrieved_at_6'])
+        self.assertTrue(mixed['policies']['source_chunk_quota_then_fill']
+                        ['late_best_retrieved_at_6'])
+        self.assertEqual(90, mixed['policies']['source_chunk_quota_then_fill']['sources_seen'])
+        self.assertFalse(skew['policies']['source_chunk_quota_then_fill']
+                         ['late_best_retrieved_at_6'])
+        self.assertEqual(89, skew['policies']['source_chunk_quota_then_fill']['sources_seen'])
+        for policy in ('source_sample_quota_fill', 'chunk_interleaved_sort',
+                       'one_chunk_per_source'):
+            self.assertTrue(skew['policies'][policy]['late_best_retrieved_at_6'])
+        for data in probes.values():
+            for result in data['policies'].values():
+                self.assertLessEqual(result['raw_chunk_rows'], data['candidate_cap'])
+
+    def test_quota_passes_are_disjoint_even_when_the_source_index_is_saturated(self):
+        connection = _database(90, 16)
+        try:
+            rows = _candidates(connection, 'source_chunk_quota_then_fill', 1200)
+            self.assertEqual(1200, len(rows))
+            self.assertEqual(len(rows), len({(path, chunk) for path, chunk, _ in rows}))
+            self.assertEqual(90, len({path for path, _, _ in rows}))
+        finally:
+            connection.close()
 
     def test_fourway_index_merge_matches_global_chunk_sort_without_temp_sort(self):
         connection = _database(90, 16)
