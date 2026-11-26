@@ -119,6 +119,17 @@ chaquopy {
         // KnowledgeBase reads its own source for deterministic cache fingerprints.
         extractPackages('ksys')
     }
+    productFlavors {
+        getByName('flavorAtest') {
+            // The official Chaquopy Android wheels for native SentencePiece
+            // 0.2.1 currently target CPython 3.10, not CPython 3.11.
+            // Keep upstream Markor flavors on their existing Python version.
+            version = '3.10'
+            pip {
+                install 'sentencepiece==0.2.1'
+            }
+        }
+    }
     sourceSets {
         getByName('main') {
             srcDir(layout.buildDirectory.dir('generated/python').get().asFile)

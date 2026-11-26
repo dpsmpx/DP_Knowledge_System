@@ -413,7 +413,9 @@ public final class KnowledgePythonBridge {
 
     private static JSONObject invoke(final Context context, final String method,
                                      final Object... arguments) throws JSONException {
-        synchronized (KnowledgePythonBridge.class) {
+        // Shared with the optional E5 SentencePiece bridge: Chaquopy may
+        // initialize only once, even if two background tasks arrive together.
+        synchronized (Python.class) {
             if (!Python.isStarted()) {
                 Python.start(new AndroidPlatform(context.getApplicationContext()));
             }
