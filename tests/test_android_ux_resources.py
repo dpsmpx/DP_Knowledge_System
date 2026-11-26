@@ -15,6 +15,18 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_contrastive_claims_and_quotes_do_not_borrow_nearby_citations(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("isContrastiveClauseSeparator(", audit)
+        self.assertIn("CONTRASTIVE_CONNECTORS", audit)
+        self.assertIn("isProseBoundary(visible, i, lineEnd)", audit)
+        self.assertIn("isContrastiveClauseSeparator(text, i, to)", audit)
+        self.assertIn("quoteContrastLaunderingRejected=true", qa)
+        self.assertIn("contrastiveClauseIsolation=true", qa)
+        self.assertIn("ordinaryCommaPreserved=true", qa)
+
     def test_citation_numeric_warnings_check_each_claimed_value(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()

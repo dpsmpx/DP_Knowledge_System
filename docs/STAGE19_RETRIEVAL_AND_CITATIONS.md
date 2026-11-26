@@ -390,6 +390,20 @@ even if every reference and quotation passes the checks below.
     checks cover both partial overlap and compatible subsets. This is only
     a local written-number discrepancy heuristic, not unit conversion,
     arithmetic verification or a semantic truth judgment.
+35. **Contrastive clauses cannot borrow the other clause's source marker.**
+    Within a single Markdown answer line, a comma followed by the complete
+    English `but`/`however` or Russian `но`/`однако` connector starts a new
+    local claim span. Thus `Statement A [1], but unsupported statement B`
+    receives an uncited-claim warning; a quote before `, но` cannot be
+    attributed to a `[1]` appearing only after the contrasting claim.
+    Source markers explicitly supplied for both clauses continue to count.
+    The check uses a bounded 32-character whitespace look-ahead and complete
+    word boundaries, leaving ordinary comma lists, `butter` and unrelated
+    conjunctions unchanged. JVM table cases cover EN/RU variants, correctly
+    cited contrasts, ordinary commas and quotation provenance. Cache-only
+    `CITE-LOCAL-19`/`CITE-COVER-19` device checks mirror both failure modes.
+    It does **not** parse every clause, infer truth or reject an answer; it
+    extends only the existing conservative source-format warnings.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -468,6 +482,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   compact phrases, semantic tie retention and bounded EN/RU regressions;
   soft-wrapped/full-reference Markdown links and escaped inline-code backticks,
   including numeric citation cluster retention and code-span false positives;
+  EN/RU contrastive comma-clause boundaries, independent citation groups and
+  quote attribution without laundering from a later contrasting statement;
   untrusted instruction-like source content; forged delimiter,
   source-label and Unicode line-break injection. The synthetic reconciliation
   selftest now also asserts strict multi-token ranking ahead of an earlier

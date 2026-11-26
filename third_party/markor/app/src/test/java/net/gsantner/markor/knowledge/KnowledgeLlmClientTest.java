@@ -721,6 +721,53 @@ public class KnowledgeLlmClientTest {
     }
 
     @Test
+    public void contrastiveClausesCannotBorrowCitationsAcrossAnEnglishOrRussianComma() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
+        for (final String connective : Arrays.asList("but", "BUT", "however",
+                "но", "НО", "однако", "однако,")) {
+            final String answer = "The observed result was 42 [1], " + connective
+                    + " an unrelated fabricated conclusion is certain.";
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 1, review.referenceCount);
+            assertEquals(answer, 1, review.uncitedProseSpans);
+        }
+        final String bothCited = "The observed result was 42 [1], but "
+                + "the second observed result was 42 [1].";
+        assertEquals(0, KnowledgeLlmCitationAudit.inspect(
+                bothCited, sources).uncitedProseSpans);
+        // The audit is deliberately NOT a broad conjunction parser.
+        for (final String nonContrast : Arrays.asList("butter", "howevering", "and", "plus")) {
+            final String answer = "The observed result was 42 [1], " + nonContrast
+                    + " another fabricated conclusion is certain.";
+            assertEquals(answer, 0, KnowledgeLlmCitationAudit.inspect(
+                    answer, sources).uncitedProseSpans);
+        }
+    }
+
+    @Test
+    public void contrastiveClausesCannotLaunderQuotesFromPriorClause() {
+        final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
+                new KnowledgeLlmEvidence.Item("one.md", "Amber violet is true"));
+        for (final String connective : Arrays.asList("but", "однако", "но")) {
+            final String answer = "«Amber violet is true», " + connective
+                    + " a separate invented conclusion is asserted [1].";
+            final KnowledgeLlmCitationAudit.Review review =
+                    KnowledgeLlmCitationAudit.inspect(answer, sources);
+            assertEquals(answer, 1, review.referenceCount);
+            assertEquals(answer, 1, review.unverifiedQuotes);
+            assertEquals(answer, 0, review.mismatchedQuoteCitations);
+        }
+        final String quotedAndCited = "«Amber violet is true» [1], but "
+                + "a separate invented conclusion remains uncited.";
+        final KnowledgeLlmCitationAudit.Review nearby =
+                KnowledgeLlmCitationAudit.inspect(quotedAndCited, sources);
+        assertEquals(0, nearby.unverifiedQuotes);
+        assertEquals(1, nearby.uncitedProseSpans);
+    }
+
+    @Test
     public void markdownCodeAndLinkLabelsCannotLaunderCitationsOrQuotations() {
         final java.util.List<KnowledgeLlmEvidence.Item> sources = Collections.singletonList(
                 new KnowledgeLlmEvidence.Item("one.md", "The observed result was 42."));
