@@ -311,15 +311,8 @@ final class KnowledgeModelSettingsDialog {
     /** No file scan, inference or model download occurs when opening details. */
     private String resourceReport(final KnowledgeModelFiles.Entry entry,
                                   final KnowledgeModelPackageManifest manifest) {
-        long osAvailableRam = 0;
         try {
-            final ActivityManager manager = (ActivityManager)
-                    context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (manager != null) {
-                final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
-                manager.getMemoryInfo(memory);
-                osAvailableRam = memory.availMem;
-            }
+            final long osAvailableRam = availableRamBytes();
             final KnowledgeModelResourcePlan.Report report = KnowledgeModelResourcePlan.plan(
                     entry, manifest, osAvailableRam, context.getFilesDir().getUsableSpace());
             return context.getString(R.string.knowledge_models_resource_report,
@@ -500,29 +493,48 @@ final class KnowledgeModelSettingsDialog {
     }
 
     private void showCatalog(final KnowledgeModelPolicy.Role role) {
-        final List<KnowledgeModelCatalog.Artifact> artifacts =
-                KnowledgeModelCatalog.forRole(role);
+        final List<KnowledgeModelComparison.Row> compared;
+        final List<KnowledgeModelCatalog.Artifact> curated = KnowledgeModelCatalog.forRole(role);
+        final long freeBytes = context.getFilesDir().getUsableSpace();
+        final long availableRam = availableRamBytes();
+        try {
+            compared = KnowledgeModelComparison.forRole(role, files.installed(),
+                    preferences.getString(role.name(), ""), freeBytes, availableRam);
+        } catch (IOException unavailable) {
+            new AlertDialog.Builder(context).setMessage(R.string.knowledge_models_store_failed)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
         final List<KnowledgeModelPolicy.Candidate> candidates =
                 KnowledgeModelPolicy.candidates(role);
-        final String[] labels = new String[artifacts.size() + candidates.size()];
-        for (int i = 0; i < artifacts.size(); i++) {
-            final KnowledgeModelCatalog.Artifact artifact = artifacts.get(i);
-            labels[i] = context.getString(R.string.knowledge_models_catalog_file_label,
-                    artifact.title, artifact.approximateMegabytes);
+        final int compareOffset = compared.isEmpty() ? 0 : 1;
+        final String[] labels = new String[compareOffset + curated.size() + candidates.size()];
+        if (compareOffset == 1) labels[0] = context.getString(R.string.knowledge_models_compare);
+        for (int i = 0; i < curated.size(); i++) {
+            final KnowledgeModelComparison.Row row = compared.get(i);
+            labels[compareOffset + i] = (row.installed
+                    ? context.getString(R.string.knowledge_models_catalog_installed_prefix) + " " : "")
+                    + context.getString(R.string.knowledge_models_catalog_file_label,
+                    row.artifact.title, row.artifact.approximateMegabytes);
         }
         for (int i = 0; i < candidates.size(); i++) {
             final KnowledgeModelPolicy.Candidate candidate = candidates.get(i);
-            labels[artifacts.size() + i] = candidate.label + " · " + candidate.note;
+            labels[compareOffset + curated.size() + i] = candidate.label + " · " + candidate.note;
         }
         new AlertDialog.Builder(context)
                 .setTitle(R.string.knowledge_models_catalog)
                 .setMessage(R.string.knowledge_models_catalog_info)
                 .setItems(labels, (dialog, which) -> {
-                    if (which < artifacts.size()) {
-                        showArtifact(artifacts.get(which));
+                    if (compareOffset == 1 && which == 0) {
+                        showComparison(role, compared, freeBytes, availableRam);
                         return;
                     }
-                    final String url = candidates.get(which - artifacts.size()).url;
+                    final int index = which - compareOffset;
+                    if (index < curated.size()) {
+                        showArtifact(compared.get(index));
+                        return;
+                    }
+                    final String url = candidates.get(index - curated.size()).url;
                     if (!url.isEmpty()) {
                         try {
                             context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -541,24 +553,91 @@ final class KnowledgeModelSettingsDialog {
                 .show();
     }
 
-    private void showArtifact(final KnowledgeModelCatalog.Artifact artifact) {
+    private long availableRamBytes() {
+        try {
+            final ActivityManager manager = (ActivityManager)
+                    context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (manager == null) return 0;
+            final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(memory);
+            return Math.max(0, memory.availMem);
+        } catch (RuntimeException unavailable) {
+            return 0;
+        }
+    }
+
+    private String storageComparison(final KnowledgeModelComparison.Storage status) {
+        switch (status) {
+            case INSTALLED: return context.getString(R.string.knowledge_models_compare_installed);
+            case ESTIMATED_FITS: return context.getString(R.string.knowledge_models_compare_fits);
+            case MAY_NOT_FIT: return context.getString(R.string.knowledge_models_compare_low);
+            case UNKNOWN: return context.getString(R.string.knowledge_models_compare_unknown);
+            default: throw new IllegalArgumentException("Unknown model storage comparison");
+        }
+    }
+
+    private String ramComparison(final KnowledgeModelComparison.Row row) {
+        switch (row.ram) {
+            case WEIGHT_ABOVE_SNAPSHOT:
+                return context.getString(R.string.knowledge_models_compare_ram_over,
+                        row.weightPercentOfAvailableRam);
+            case WEIGHT_WITHIN_SNAPSHOT:
+                return context.getString(R.string.knowledge_models_compare_ram_within,
+                        row.weightPercentOfAvailableRam);
+            case UNKNOWN: return context.getString(R.string.knowledge_models_compare_ram_unknown);
+            default: throw new IllegalArgumentException("Unknown model RAM comparison");
+        }
+    }
+
+    private void showComparison(final KnowledgeModelPolicy.Role role,
+                                final List<KnowledgeModelComparison.Row> artifacts,
+                                final long freeBytes, final long availableRam) {
+        final StringBuilder report = new StringBuilder(context.getString(
+                R.string.knowledge_models_compare_intro,
+                freeBytes <= 0 ? context.getString(R.string.knowledge_models_space_unknown)
+                        : formatSize(freeBytes),
+                availableRam <= 0 ? context.getString(R.string.knowledge_models_space_unknown)
+                        : formatSize(availableRam)));
+        for (final KnowledgeModelComparison.Row row : artifacts) {
+            report.append("\n\n").append(context.getString(R.string.knowledge_models_compare_row,
+                    row.title
+                            + (row.preferred ? context.getString(R.string.knowledge_models_compare_preferred) : ""),
+                    formatSize(row.weightBytes), storageComparison(row.storage), ramComparison(row)));
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(roleName(role))
+                .setMessage(report.toString())
+                .setPositiveButton(R.string.knowledge_models_back,
+                        (dialog, which) -> showCatalog(role))
+                .show();
+    }
+
+    private void showArtifact(final KnowledgeModelComparison.Row row) {
+        final KnowledgeModelCatalog.Artifact artifact = row.artifact;
         final long freeBytes = context.getFilesDir().getUsableSpace();
-        final boolean lowSpace = freeBytes > 0
-                && freeBytes < (artifact.approximateMegabytes + 16L) * 1000000L;
+        final boolean lowSpace = row.storage == KnowledgeModelComparison.Storage.MAY_NOT_FIT;
         final String message = context.getString(R.string.knowledge_models_catalog_artifact_details,
                 artifact.id, artifact.approximateMegabytes, artifact.license,
                 artifact.sourcePage, artifact.expectedSha256,
                 freeBytes <= 0 ? context.getString(R.string.knowledge_models_space_unknown)
                         : formatSize(freeBytes))
+                + "\n\n" + context.getString(R.string.knowledge_models_compare_row,
+                        artifact.title, formatSize(row.weightBytes),
+                        storageComparison(row.storage), ramComparison(row))
                 + (lowSpace ? "\n\n" + context.getString(R.string.knowledge_models_space_warning) : "")
                 + "\n\n" + context.getString(R.string.knowledge_models_imported_not_runnable);
-        new AlertDialog.Builder(context)
+        final AlertDialog.Builder dialog = new AlertDialog.Builder(context)
                 .setTitle(artifact.title)
-                .setMessage(message)
-                .setPositiveButton(R.string.knowledge_models_download_confirm_action,
-                        (dialog, which) -> beginTrustedDownload(artifact.role,
-                                artifact.downloadUrl, artifact.expectedSha256,
-                                artifact.filename))
+                .setMessage(message);
+        if (row.installedEntry != null) {
+            dialog.setPositiveButton(R.string.knowledge_models_compare_manage_installed,
+                    (choice, which) -> showDetails(row.installedEntry));
+        } else {
+            dialog.setPositiveButton(R.string.knowledge_models_download_confirm_action,
+                    (choice, which) -> beginTrustedDownload(artifact.role,
+                            artifact.downloadUrl, artifact.expectedSha256, artifact.filename));
+        }
+        dialog
                 .setNeutralButton(R.string.knowledge_models_catalog_open_source,
                         (dialog, which) -> {
                             try {
