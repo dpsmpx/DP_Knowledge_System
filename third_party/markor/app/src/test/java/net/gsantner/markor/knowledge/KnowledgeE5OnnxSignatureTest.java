@@ -106,4 +106,23 @@ public final class KnowledgeE5OnnxSignatureTest {
             fail("Missing tensor type accepted");
         } catch (IllegalArgumentException expected) { }
     }
+
+    @Test public void strictSmallSignatureRequiresVerifiedConfigAnd384Channels()
+            throws Exception {
+        final KnowledgeE5ConfigProfile.Result verified = KnowledgeE5ConfigProfile.parse(
+                KnowledgeE5ConfigProfileTest.model(),
+                KnowledgeE5ConfigProfileTest.tokenizer());
+        KnowledgeE5OnnxSignature.requireE5Small(inputs(), outputs(), verified);
+        try {
+            KnowledgeE5OnnxSignature.requireE5Small(inputs(), outputs(), null);
+            fail("Unverified E5 config accepted");
+        } catch (IllegalArgumentException expected) { }
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> wrong = outputs();
+        wrong.put("last_hidden_state", t(KnowledgeE5OnnxSignature.DataType.FLOAT32,
+                1, 512, 768));
+        try {
+            KnowledgeE5OnnxSignature.requireE5Small(inputs(), wrong, verified);
+            fail("ONNX output channels differed from canonical E5 config");
+        } catch (IllegalArgumentException expected) { }
+    }
 }

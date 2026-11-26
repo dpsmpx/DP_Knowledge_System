@@ -24,6 +24,18 @@ final class KnowledgeE5OnnxSignature {
 
     private KnowledgeE5OnnxSignature() { }
 
+    /** Real E5 metadata must derive the hidden size from validated config. */
+    static void requireE5Small(final Map<String, Tensor> inputs,
+                               final Map<String, Tensor> outputs,
+                               final KnowledgeE5ConfigProfile.Result config) {
+        if (config == null || config.hiddenSize != KnowledgeE5ConfigProfile.HIDDEN_SIZE
+                || config.maxSequence != KnowledgeEmbeddingTensorContract.MAX_SEQUENCE_LENGTH
+                || config.vocabSize != KnowledgeE5ConfigProfile.VOCAB_SIZE) {
+            throw new IllegalArgumentException("Missing canonical E5 model configuration");
+        }
+        require(inputs, outputs, config.hiddenSize);
+    }
+
     static void require(final Map<String, Tensor> inputs, final Map<String, Tensor> outputs,
                         final int expectedDimensions) {
         if (inputs == null || outputs == null || expectedDimensions < 8
