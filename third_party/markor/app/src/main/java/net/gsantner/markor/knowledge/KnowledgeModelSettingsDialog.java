@@ -31,6 +31,7 @@ final class KnowledgeModelSettingsDialog {
     interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
     interface SessionRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface E5QaRequest { void run(KnowledgeModelFiles.Entry entry); }
+    interface E5GraphRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
     interface FdSmokeRequest { void run(); }
     interface BenchmarkRequest { void run(KnowledgeModelPolicy.Role role); }
@@ -48,6 +49,7 @@ final class KnowledgeModelSettingsDialog {
     private final PrepareRequest preparer;
     private final SessionRequest sessionInspector;
     private final E5QaRequest e5QaRunner;
+    private final E5GraphRequest e5GraphInspector;
     private final SmokeRequest smokeTester;
     private final FdSmokeRequest fdSmokeTester;
     private final BenchmarkRequest benchmarkRunner;
@@ -62,7 +64,8 @@ final class KnowledgeModelSettingsDialog {
                                  final FdSmokeRequest fdSmoke,
                                  final BenchmarkRequest benchmark,
                                  final SessionRequest sessionInspect,
-                                 final E5QaRequest e5Qa) {
+                                 final E5QaRequest e5Qa,
+                                 final E5GraphRequest e5Graph) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
@@ -72,6 +75,7 @@ final class KnowledgeModelSettingsDialog {
         preparer = prepare;
         sessionInspector = sessionInspect;
         e5QaRunner = e5Qa;
+        e5GraphInspector = e5Graph;
         smokeTester = smoke;
         fdSmokeTester = fdSmoke;
         benchmarkRunner = benchmark;
@@ -371,12 +375,18 @@ final class KnowledgeModelSettingsDialog {
         final boolean onnx = entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED;
         final boolean cpuSession = onnx && KnowledgeOnnxCpuBackend.available();
         final boolean e5Qa = cpuSession && entry.role == KnowledgeModelPolicy.Role.EMBEDDING;
+        final boolean e5Graph = onnx && entry.role == KnowledgeModelPolicy.Role.EMBEDDING;
         final List<String> menu = new ArrayList<>();
         menu.add(context.getString(R.string.knowledge_models_package_import));
         menu.add(context.getString(R.string.knowledge_models_package_audit));
+        final int prepareIndex = onnx ? menu.size() : -1;
         if (onnx) menu.add(context.getString(R.string.knowledge_models_onnx_prepare));
+        final int sessionIndex = cpuSession ? menu.size() : -1;
         if (cpuSession) menu.add(context.getString(R.string.knowledge_models_onnx_session));
+        final int e5QaIndex = e5Qa ? menu.size() : -1;
         if (e5Qa) menu.add(context.getString(R.string.knowledge_models_e5_qa));
+        final int e5GraphIndex = e5Graph ? menu.size() : -1;
+        if (e5Graph) menu.add(context.getString(R.string.knowledge_models_e5_graph));
         final int removeIndex = menu.size();
         menu.add(context.getString(R.string.knowledge_models_package_remove));
         menu.add(context.getString(R.string.knowledge_models_delete));
@@ -386,9 +396,10 @@ final class KnowledgeModelSettingsDialog {
                 .setItems(actions, (dialog, which) -> {
                     if (which == 0) packageImporter.pick(entry);
                     else if (which == 1) auditor.verify(entry);
-                    else if (onnx && which == 2) confirmPrepareOnnx(entry);
-                    else if (cpuSession && which == 3) confirmOnnxSession(entry);
-                    else if (e5Qa && which == 4) confirmE5Qa(entry);
+                    else if (which == prepareIndex) confirmPrepareOnnx(entry);
+                    else if (which == sessionIndex) confirmOnnxSession(entry);
+                    else if (which == e5QaIndex) confirmE5Qa(entry);
+                    else if (which == e5GraphIndex) confirmE5Graph(entry);
                     else if (which == removeIndex) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
@@ -419,6 +430,26 @@ final class KnowledgeModelSettingsDialog {
                 .setPositiveButton(R.string.knowledge_models_e5_qa,
                         (dialog, which) -> e5QaRunner.run(entry))
                 .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmE5Graph(final KnowledgeModelFiles.Entry entry) {
+        try {
+            // The synchronous UI path only checks the installed package identity.
+            // The user-approved background action rehashes every byte.
+            packages.e5Tokenizer(entry);
+        } catch (IOException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_e5_qa_missing)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_e5_graph)
+                .setMessage(R.string.knowledge_models_e5_graph_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_e5_graph,
+                        (dialog, which) -> e5GraphInspector.inspect(entry))
                 .show();
     }
 

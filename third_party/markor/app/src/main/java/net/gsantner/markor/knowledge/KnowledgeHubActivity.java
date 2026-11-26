@@ -297,7 +297,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::downloadModel, this::auditModelPackage,
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
                         this::runOnnxFdSmoke, this::runSyntheticModelBenchmark,
-                        this::inspectOnnxCpuSession, this::runE5TokenizerGoldenQa).show();
+                        this::inspectOnnxCpuSession, this::runE5TokenizerGoldenQa,
+                        this::runE5OnnxMetadataCheck).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -837,6 +838,42 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         modelImportActive = false;
                         restoreModelButton();
                         modelStatus.setText(R.string.knowledge_models_e5_qa_failed);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Explicit, read-only ONNX protobuf metadata scan, even for models over 16 MiB. */
+    private void runE5OnnxMetadataCheck(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null
+                || entry.role != KnowledgeModelPolicy.Role.EMBEDDING
+                || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_e5_graph_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final long started = System.nanoTime();
+                final KnowledgeE5OnnxMetadataProbe.Report result =
+                        modelPackages.e5OnnxMetadata(entry);
+                final long millis = Math.max(0L, (System.nanoTime() - started) / 1_000_000L);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || modelGeneration.get() != operation) return;
+                    modelImportActive = false;
+                    restoreModelButton();
+                    modelStatus.setText(getString(R.string.knowledge_models_e5_graph_passed,
+                            result.inputs, result.outputs, result.dynamicAxes,
+                            result.modelBytes, millis));
+                });
+            } catch (IOException | RuntimeException invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_e5_graph_failed);
                     }
                 });
             }
