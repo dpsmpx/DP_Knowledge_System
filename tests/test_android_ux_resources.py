@@ -111,6 +111,8 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn('CandidatePolicy.SAMPLE_THEN_QUOTA)', index)
         self.assertIn('syntheticSemanticSearchDedupSampleQuotaWithBudget(', index)
         self.assertIn('CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchMemorySampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA)', index)
         for marker in ('!syntheticDatabase', 'dpks-device-qa-',
                        'databaseFile.getName().startsWith("qa-")',
                        'SELECT COUNT(*) FROM embedding_notes e',
@@ -118,7 +120,7 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'n.raw_sha256=e.source_sha256',
                        'n.generation=(SELECT value FROM meta',
                        'final int quota = (int) Math.max(1L, remaining / completedSources)',
-                       'new int[]{bucket}', 'candidateBudget - sampled',
+                       'new int[]{bucket}', 'candidateBudget - accepted',
                        'samplePerSource ? "GROUP BY l.path LIMIT ?"',
                        'CREATE TEMP TABLE qa_seen_lsh_candidates(',
                        'if (temporaryExclusion && db.inTransaction())',
@@ -127,9 +129,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'selected.add(new String[]{c.getString(0)',
                        'INSERT OR IGNORE INTO qa_seen_lsh_candidates(path,chunk)',
                        'insert.executeInsert()',
+                       'candidateBudget + Math.min(candidateBudget, 4096)',
+                       'final Set<String> inMemorySeen = memoryDedup ? new HashSet<>()',
+                       'if (!inMemorySeen.add(key))',
+                       'rawScanLimit - sampled',
                        'chunkRange.append(" AND l.chunk>=?")',
                        'chunkRange.append(" AND l.chunk<?")',
-                       'remaining - early'):
+                       'false, deduplicate, inMemorySeen, candidateBudget, best'):
             self.assertIn(marker, index)
         self.assertIn('step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget)', qa)
         start = qa.index('private String checkSyntheticSourceQuotaBudget()')
@@ -144,11 +150,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                        'syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget)',
                        'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget)',
                        'syntheticSemanticSearchDedupSampleQuotaWithBudget(',
+                       'syntheticSemanticSearchMemorySampleQuotaWithBudget(',
                        'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1)',
                        'quota.get(0).excerptStart', 'matchesIndexedEvidenceSource(paths[i]',
                        'uniformLateExactRecovered=true', 'skewLateOnlyStillMissed=true',
                        'sampleThenQuotaSkewRecovered=true', 'tightSampleBudgetBounded=true',
                        'syntheticScenarios=3', 'dedupLateBestRecovered=true',
+                       'memoryDedupLateBestRecovered=true',
                        'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
             self.assertIn(marker, fixture)
         self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)

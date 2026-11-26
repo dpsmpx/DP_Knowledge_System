@@ -303,6 +303,81 @@ def _candidates(connection: sqlite3.Connection, policy: str,
     raise ValueError('Unsupported experimental policy')
 
 
+def memory_dedup_candidates(connection: sqlite3.Connection,
+                            unique_cap: int,
+                            raw_scan_cap: int | None = None
+                            ) -> tuple[list[tuple[str, int, bytes]], int]:
+    """Bounded *host-only* cursor streaming with a Python (path,chunk) set.
+
+    Unlike the TEMP-SQL strategy, repeated rows still cross SQLite/Python and
+    count against a distinct capped scan allowance. Cosine reranking receives
+    at most `unique_cap` unique rows. No schema/index creation or model access.
+    """
+    if not 1 <= unique_cap <= MAX_SEMANTIC_CANDIDATES:
+        raise ValueError('Invalid unique candidate cap')
+    maximum_scan_cap = unique_cap + min(unique_cap, 4096)
+    if raw_scan_cap is None:
+        raw_scan_cap = maximum_scan_cap
+    if not unique_cap <= raw_scan_cap <= maximum_scan_cap:
+        raise ValueError('Raw SQLite rows exceed fixed 4096-row retry allowance')
+    exact = lsh_buckets(basis(0))
+    source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+        WHERE model_key=? AND dimension=? AND completed=chunks''',
+        (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+    if source_count == 0:
+        return [], 0
+    selected: list[tuple[str, int, bytes]] = []
+    seen: set[tuple[str, int]] = set()
+    raw_rows = 0
+
+    def inspect(buckets: tuple[int, ...], group_by_source: bool,
+                lower: int | None = None, upper: int | None = None) -> None:
+        nonlocal raw_rows
+        if len(selected) == unique_cap or raw_rows == raw_scan_cap:
+            return
+        bounds = ''
+        bounds_args = []
+        if lower is not None:
+            bounds += ' AND l.chunk>=?'
+            bounds_args.append(lower)
+        if upper is not None:
+            bounds += ' AND l.chunk<?'
+            bounds_args.append(upper)
+        sql = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
+                 JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
+                 JOIN embedding_notes e ON e.path=v.path
+                 JOIN notes n ON n.path=e.path
+                 WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')' + bounds
+        sql += ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+                   AND n.generation=? AND n.oversized=0 GROUP BY l.path'''
+        if not group_by_source:
+            sql += ',l.chunk'
+        sql += ' LIMIT ?'
+        args = (*buckets, *bounds_args, MODEL_KEY, DIMENSIONS,
+                GENERATION, raw_scan_cap - raw_rows)
+        cursor = connection.execute(sql, args)
+        try:
+            for path, chunk, packed in cursor:
+                raw_rows += 1
+                key = (path, chunk)
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append((path, chunk, packed))
+                if len(selected) == unique_cap:
+                    break
+        finally:
+            cursor.close()
+
+    for bucket in exact:
+        inspect((bucket,), True)
+    if len(selected) < unique_cap and raw_rows < raw_scan_cap:
+        quota = max(1, (unique_cap - len(selected)) // source_count)
+        inspect(exact, False, upper=quota)
+        inspect(exact, False, lower=quota)
+    return selected, raw_rows
+
+
 def _evaluate(rows: list[tuple[str, int, bytes]],
               elapsed: list[float]) -> dict:
     best: dict[str, float] = {}
@@ -428,6 +503,39 @@ def synthetic_skew_budget_sweep() -> dict:
         connection.close()
 
 
+def synthetic_memory_dedup_probe() -> dict:
+    """Contrast unique rank budget with distinct SQLite rows scanned."""
+    connection = _database(8, 4)
+    try:
+        _make_target_earlier_chunks_exact_reachable(connection, 4)
+        _make_target_best_only_within_same_exact_bucket(connection)
+        old = _candidates(connection, 'source_sample_quota_fill', 32)
+        temp = _candidates(connection, 'source_sample_quota_dedup', 32)
+        memory, raw = memory_dedup_candidates(connection, 32)
+        limited, limited_raw = memory_dedup_candidates(connection, 32, 32)
+
+        def late_best(rows: list[tuple[str, int, bytes]]) -> bool:
+            return any(path == TARGET and chunk == 3 for path, chunk, _ in rows)
+
+        return {
+            'sources': 8, 'chunks': 32, 'unique_cap': 32,
+            'raw_scan_cap': 64, 'memory_sql_rows_scanned': raw,
+            'memory_unique_rows': len(memory),
+            'memory_late_best_seen': late_best(memory),
+            'temp_late_best_seen': late_best(temp),
+            'repeating_sample_late_best_seen': late_best(old),
+            'without_retry_sql_rows_scanned': limited_raw,
+            'without_retry_unique_rows': len(limited),
+            'without_retry_late_best_seen': late_best(limited),
+            'requires_additional_sql_reads': raw > 32,
+            'creates_no_sqlite_temp_table': not bool(connection.execute(
+                "SELECT name FROM sqlite_temp_master WHERE name='qa_seen_lsh_candidates'")
+                .fetchone()),
+        }
+    finally:
+        connection.close()
+
+
 def compare(sources: int = 360, chunks: int = 128,
             cap: int = MAX_SEMANTIC_CANDIDATES,
             trials: int = 2) -> dict:
@@ -497,6 +605,7 @@ def compare(sources: int = 360, chunks: int = 128,
             'cases': cases,
             'uneven_distribution_probe': synthetic_uneven_distribution_probe(),
             'skew_budget_sweep': synthetic_skew_budget_sweep(),
+            'memory_dedup_probe': synthetic_memory_dedup_probe(),
             'limitations': [
                 'alternative SQL is diagnostic only and is not used in Android',
                 'one-chunk sampling can miss a later better chunk in the same source',
@@ -511,6 +620,10 @@ def compare(sources: int = 360, chunks: int = 128,
                 'relevant chunk when the first pass exhausts its budget',
                 'combining source sampling with quotas repeats some candidates '
                 'across passes and may still exhaust the cap on dense indexes',
+                'in-memory deduplication can reclaim candidate slots but may return '
+                'up to 4096 extra SQLite rows and retain up to 45k chunk IDs in RAM',
+                'temporary SQL dedup uses a private transactional index, while '
+                'in-memory dedup has extra cursor traffic and has no Android timing',
                 'heterogeneous host-only fixtures are not a representative '
                 'distribution of actual Android vault chunk counts',
                 'chunk interleaving may require an expensive temporary ORDER BY sort',
