@@ -154,6 +154,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("CITE-ANCHOR-19", this::checkSyntheticClaimAnchors);
                 step("HYBRID-BALANCE-19", this::checkSyntheticHybridBalance);
                 step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex);
+                step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -1382,6 +1383,74 @@ public final class KnowledgeDeviceQaRunner {
                     + "semanticTrials=21, semanticP50us=" + microseconds[10]
                     + ", semanticP95us=" + microseconds[19]
                     + ", artificialVectorsOnly=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Verify that a later chunk can win cosine ranking and that a partial
+     * embedding upload never becomes retrievable. No external model is called.
+     */
+    private String checkSyntheticMultichunkIndex() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create chunk sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Cannot create chunk vault");
+            final File note = new File(vault, "multi.md");
+            final String body = "# Artificial multi-chunk note\n"
+                    + new String(new char[920]).replace('\0', 'x')
+                    + "\nThe late artificial chunk is the exact vector match.\n";
+            writeFixture(note, body);
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(body);
+            if (chunks.size() != 2 || chunks.get(1).start <= chunks.get(0).start
+                    || !chunks.get(1).text.contains("late artificial chunk")) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_FIXTURE_INVALID");
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-multichunk.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 4,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-synthetic-two-chunks";
+            final byte[] digest = sha256(note);
+            final long modified = note.lastModified();
+            final long size = note.length();
+            final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            final float[] near = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{0.9f, 0.4358899f, 0, 0, 0, 0, 0, 0});
+            if (testIndex.beginEmbedding("multi.md", modified, size,
+                    model, chunks.size(), false, digest) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_CHECKPOINT_INVALID");
+            }
+            testIndex.appendEmbeddingBatch("multi.md", modified, size, model,
+                    chunks, 0, new float[][]{near}, digest);
+            if (testIndex.hasEmbeddings("multi.md", modified, size, model)
+                    || !testIndex.semanticSearch(model, exact, 8).isEmpty()) {
+                throw new SyntheticMismatch("verdict=EMBED_PARTIAL_CHUNK_DISCLOSED");
+            }
+            testIndex.appendEmbeddingBatch("multi.md", modified, size, model,
+                    chunks, 1, new float[][]{exact}, digest);
+            final List<KnowledgeLocalIndex.SemanticHit> hits =
+                    testIndex.semanticSearch(model, exact, 8);
+            if (!testIndex.hasEmbeddings("multi.md", modified, size, model)
+                    || testIndex.embeddingNoteCount(model) != 1 || hits.size() != 1
+                    || !"multi.md".equals(hits.get(0).relativePath)
+                    || hits.get(0).score < 0.999
+                    || hits.get(0).excerptStart != chunks.get(1).start
+                    || hits.get(0).excerptLength != chunks.get(1).text.length()
+                    || !KnowledgeEmbeddingChunks.atOffset(body, hits.get(0).excerptStart,
+                            hits.get(0).excerptLength).contains("late artificial chunk")
+                    || !testIndex.matchesIndexedEvidenceSource(
+                            "multi.md", modified, size, readFixtureBytes(note))) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_BEST_SOURCE_LOST");
+            }
+            return "syntheticNotes=1, chunks=2, incompleteExcluded=true, "
+                    + "bestLaterChunkSelected=true, perPathDeduplicated=true, "
+                    + "rawByteSealVerified=true, noModelCall=true, "
                     + "selectedVaultUntouched=true";
         } finally {
             removeSandbox(sandbox);

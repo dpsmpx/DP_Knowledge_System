@@ -117,6 +117,16 @@ public class KnowledgeEmbeddingTest {
         assertArrayEquals(new int[]{1023, 1723, 3022, 3807},
                 KnowledgeEmbeddingLsh.buckets(query));
         final int[] queryProbes = KnowledgeEmbeddingLsh.probes(query);
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.9f, 0.4358899f, 0, 0, 0, 0, 0, 0});
+        boolean nearCandidateSeen = false;
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(near)) {
+            for (final int probe : queryProbes) {
+                if (bucket == probe) nearCandidateSeen = true;
+            }
+        }
+        assertTrue("The two-chunk Android fixture must expose its weaker first chunk",
+                nearCandidateSeen);
         final int[] oppositeBuckets = KnowledgeEmbeddingLsh.buckets(opposite);
         for (final int bucket : oppositeBuckets) {
             for (final int probe : queryProbes) {

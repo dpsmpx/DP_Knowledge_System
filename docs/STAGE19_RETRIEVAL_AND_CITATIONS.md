@@ -458,6 +458,32 @@ even if every reference and quotation passes the checks below.
     benchmark logs distinct lexical, LSH/cosine and fusion p50/p95 timings
     but cannot establish on-device performance, real synonym quality,
     provider reliability or the broader `RET-15` acceptance gate.
+39. **Multi-chunk and candidate-cap regressions are now explicit.** The
+    isolated Android `EMBED-CHUNKS-19` QA inserts two chunks through the
+    production checkpoint path: one weaker but LSH-visible vector and one
+    later exact-match vector. A partially written embedding must produce
+    **no** results; once both vectors are committed, the note must appear
+    exactly once, with the better later excerpt offset and a valid source
+    byte seal. A separate host SQL probe generates **360 artificial notes ×
+    128 chunks = 46,080** chunk vectors (184,320 LSH posting rows). Under
+    the current 45,000-*chunk* query
+    cap and an observed path-first SQLite grouping order, an artificial
+    exact-match note near the end **is absent**, although it ranks first
+    when the cap is lifted in the diagnostic comparison. This exposes a
+    bounded-retrieval recall risk: 45k chunks are **not** 45k distinct notes,
+    and grouping without an explicit sort does not guarantee stable source
+    diversity. The host SQL mirror now correctly deduplicates by note and
+    retains only its best cosine score. **No automatic SQL reorder or cap
+    increase** is made yet: sorting millions of candidate chunks could
+    be prohibitively expensive on-device. A bounded, fair candidate policy
+    with a 20k physical-device performance envelope remains an explicit
+    Stage 19 optimization debt.
+    An additional deterministic angular-noise probe rotates a fabricated
+    8D vector from cosine 1.00 to 0.80 against the query: exact/one-bit
+    LSH probes cover four, two, one, two and finally **zero** tables,
+    respectively. The non-monotonic bucket count and total dropout at
+    still-positive cosine 0.80 show why approximate candidate retrieval
+    cannot promise nearest-neighbor recall, even before RRF ranking.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -534,6 +560,20 @@ fast on Android. Device acceptance, 20k real embedding storage behavior,
 multi-chunk retrieval and representative human-labeled precision/recall
 remain open.
 
+The same hybrid benchmark also prints `multichunk_cap_probe`: 360 sources,
+128 chunks each, 46,080 total artificial vector chunks. On the 26 Nov 2026
+host SQLite build, the late exact-match source is **not retrieved at six**
+under the production 45k candidate cap but **is retrieved at six** when the
+probe raises the cap to 46,080. This is a reproducible counterexample to
+assuming complete top-k recall under a chunk-first cap, **not** an observed
+Android timing or a universal SQLite ordering guarantee. Android QA covers
+the simpler two-chunk best-offset and incomplete-checkpoint behavior; both
+checks use cache-only/generated data and no model provider.
+The `angular_noise_probe` similarly reports the five artificial cosine
+values and which (if any) of the four LSH tables still reach a query probe.
+It is a fixed geometry probe, not a claim about real model noise or a
+calibrated relevance threshold.
+
 ## Repeatable engineering acceptance
 
 - JVM tests: RRF tie/duplicate/empty/bounds; changed source metadata;
@@ -581,7 +621,8 @@ remain open.
   embedded core checks. No external LLM credentials, personal vault content,
   outbound model calls or real knowledge journal are used by tests.
 - Deferred physical acceptance: run `CITE-ANCHOR-19` and
-  `HYBRID-BALANCE-19` and `HYBRID-INDEX-19` from the synthetic device QA
+  `HYBRID-BALANCE-19`, `HYBRID-INDEX-19` and `EMBED-CHUNKS-19` from the
+  synthetic device QA
   screen, then verify
   accessibility/scrolling, cancellation and exact consent content with a
   synthetic local library. Compare lexical and hybrid preview p50/p95,

@@ -37,6 +37,23 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
         self.assertIn("removeSandbox(sandbox)", fixture)
         self.assertNotIn("KnowledgeEmbeddingClient.embed", fixture)
 
+    def test_embedding_multichunk_android_qa_requires_complete_sealed_best_chunk(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        start = qa.index("private String checkSyntheticMultichunkIndex()")
+        end = qa.index("\n    private ", start + 1)
+        fixture = qa[start:end]
+        self.assertIn('step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex)', qa)
+        for marker in ('chunks.size() != 2', 'testIndex.beginEmbedding("multi.md",',
+                       'new float[][]{near}', 'new float[][]{exact}',
+                       'testIndex.hasEmbeddings("multi.md",',
+                       'testIndex.semanticSearch(model, exact, 8)',
+                       'hits.get(0).excerptStart != chunks.get(1).start',
+                       'testIndex.matchesIndexedEvidenceSource(',
+                       'incompleteExcluded=true', 'bestLaterChunkSelected=true',
+                       'perPathDeduplicated=true', 'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+
     def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         ranking = (folder / "KnowledgeHybridRanking.java").read_text()
