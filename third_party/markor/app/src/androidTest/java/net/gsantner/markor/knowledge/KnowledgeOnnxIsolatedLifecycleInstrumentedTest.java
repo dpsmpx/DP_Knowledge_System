@@ -63,7 +63,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         assertTrue(service.processName.endsWith(":dpks_onnx_cpu"));
     }
 
-    @Test public void generatedIdentitySmokeCanRunTwiceAcrossWorkerLifecycle()
+    @Test public void identityAnd384E5SmokesCanRunTwiceAcrossWorkerLifecycle()
             throws Exception {
         final KnowledgeOnnxIsolatedClient client = new KnowledgeOnnxIsolatedClient(context);
         try {
@@ -81,7 +81,9 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                 })));
                 assertTrue("Synthetic worker bind failed", bound.get());
                 assertTrue("Synthetic worker did not respond", complete.await(40, TimeUnit.SECONDS));
-                assertNotNull("Generated Identity CPU test failed", report.get());
+                // A successful worker report now also implies two independent
+                // 384-channel E5 synthetic variants completed inside this UID.
+                assertNotNull("Generated Identity/E5 CPU worker test failed", report.get());
                 assertTrue(report.get().sessionInitMillis >= 0);
                 assertTrue(report.get().inferenceMicros >= 0);
                 assertWorkerPssSnapshots(report.get().workerMemory);

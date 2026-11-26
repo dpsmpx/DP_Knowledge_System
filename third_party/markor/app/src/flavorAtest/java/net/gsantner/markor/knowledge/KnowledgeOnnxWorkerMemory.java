@@ -13,20 +13,41 @@ final class KnowledgeOnnxWorkerMemory {
         Denied() { super("Worker memory snapshot unavailable or below safe limit"); }
     }
 
+    static final class Snapshot {
+        final long availableBytes;
+        final boolean lowMemory;
+
+        Snapshot(final long available, final boolean low) {
+            availableBytes = available;
+            lowMemory = low;
+        }
+    }
+
     private KnowledgeOnnxWorkerMemory() { }
 
     static void requireAvailable(final Context context, final boolean debugSimulateLowMemory)
             throws Denied {
+        try {
+            final Snapshot memory = snapshot(context);
+            KnowledgeOnnxSessionGate.requireAvailableMemory(
+                    debugSimulateLowMemory ? 0L : memory.availableBytes,
+                    debugSimulateLowMemory || memory.lowMemory);
+        } catch (IOException | RuntimeException blocked) {
+            throw new Denied();
+        }
+    }
+
+    /** Same worker-UID snapshot also feeds the E5 advisory resource plan. */
+    static Snapshot snapshot(final Context context) throws Denied {
         try {
             final ActivityManager manager = (ActivityManager)
                     context.getSystemService(Context.ACTIVITY_SERVICE);
             if (manager == null) throw new Denied();
             final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
             manager.getMemoryInfo(memory);
-            KnowledgeOnnxSessionGate.requireAvailableMemory(
-                    debugSimulateLowMemory ? 0L : memory.availMem,
-                    debugSimulateLowMemory || memory.lowMemory);
-        } catch (IOException | RuntimeException blocked) {
+            if (memory.availMem < 0) throw new Denied();
+            return new Snapshot(memory.availMem, memory.lowMemory);
+        } catch (RuntimeException blocked) {
             throw new Denied();
         }
     }

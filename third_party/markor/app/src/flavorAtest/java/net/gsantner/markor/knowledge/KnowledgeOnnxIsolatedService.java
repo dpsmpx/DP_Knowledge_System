@@ -151,7 +151,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     }
                 } else {
                     KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
-                    smoke = KnowledgeOnnxCpuBackend.smoke(memory);
+                    smoke = KnowledgeOnnxCpuBackend.smoke(this, memory);
                     if (!KnowledgeOnnxIsolatedProtocol.validTimings(
                             smoke.sessionInitMillis, smoke.inferenceMicros)) smoke = null;
                 }
