@@ -80,6 +80,37 @@ class Stage19LshFairnessTests(unittest.TestCase):
             for result in data['policies'].values():
                 self.assertLessEqual(result['raw_chunk_rows'], data['candidate_cap'])
 
+    def test_skewed_budget_sweep_exposes_early_offset_bias_and_late_chunk_limit(self):
+        sweep = self.data['skew_budget_sweep']
+        self.assertEqual((90, 88, 344), (sweep['sources'],
+                                         sweep['short_sources'], sweep['total_chunks']))
+        expected_first_hits = {
+            '0': (217, 90, 90, 90),
+            '1': (217, 216, 90, 91),
+            '3': (217, 217, 90, 93),
+            '127': (217, 217, 90, 217),
+        }
+        for offset, expected in expected_first_hits.items():
+            outcomes = sweep['single_exact_chunk'][offset]
+            for policy, first_cap in zip(sweep['policies'], expected):
+                observed = next((cap for cap in sweep['candidate_caps']
+                                 if outcomes[str(cap)][policy]['exact_chunk_seen']), None)
+                self.assertEqual(first_cap, observed, (offset, policy))
+            for cap in sweep['candidate_caps']:
+                for record in outcomes[str(cap)].values():
+                    self.assertLessEqual(record['raw_rows'], cap)
+                    self.assertLessEqual(record['unique_rows'], record['raw_rows'])
+
+    def test_recovering_source_is_not_recovering_its_later_best_chunk(self):
+        same = self.data['skew_budget_sweep']['late_better_same_bucket']
+        for policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill'):
+            self.assertTrue(same['90'][policy]['source_seen'])
+            self.assertEqual(.99, same['90'][policy]['best_cosine'])
+            self.assertEqual(.99, same['100'][policy]['best_cosine'])
+        self.assertEqual(.999, same['100']['chunk_interleaved_sort']['best_cosine'])
+        self.assertFalse(same['90']['current_exact_first']['source_seen'])
+        self.assertNotIn('.md', json.dumps(self.data['skew_budget_sweep']))
+
     def test_quota_passes_are_disjoint_even_when_the_source_index_is_saturated(self):
         connection = _database(90, 16)
         try:

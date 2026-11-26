@@ -1536,8 +1536,8 @@ public final class KnowledgeDeviceQaRunner {
         }
     }
 
-    /** Diagnose the unshipped source-quota candidate policy in two disposable
-     * indexes: a balanced case it fixes and a skewed case it still misses.
+    /** Diagnose both unshipped quota candidate policies in two disposable
+     * indexes: a balanced case and a skewed case where sampling is necessary.
      * All vectors and Markdown files are artificial; production search is not
      * switched to this policy.
      */
@@ -1551,6 +1551,7 @@ public final class KnowledgeDeviceQaRunner {
             return "syntheticScenarios=2, balancedNotes=4, balancedChunks=16, "
                     + "balancedBudget=12, uniformLateExactRecovered=true, "
                     + "skewNotes=5, skewBudget=6, skewLateOnlyStillMissed=true, "
+                    + "sampleThenQuotaSkewRecovered=true, tightSampleBudgetBounded=true, "
                     + "exactChunkOffsetVerified=true, rawByteSealVerified=true, "
                     + "candidatePolicyUnshipped=true, noModelCall=true, "
                     + "selectedVaultUntouched=true";
@@ -1625,6 +1626,10 @@ public final class KnowledgeDeviceQaRunner {
                 testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, budget);
         final List<KnowledgeLocalIndex.SemanticHit> quota =
                 testIndex.syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> sampled =
+                testIndex.syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> tightSample =
+                testIndex.syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1);
         final String target = paths[paths.length - 1];
         boolean existingContainsTarget = false;
         boolean quotaContainsTarget = false;
@@ -1636,6 +1641,12 @@ public final class KnowledgeDeviceQaRunner {
         }
         if (testIndex.embeddingNoteCount(model) != paths.length
                 || existingContainsTarget || quotaContainsTarget == skew
+                || sampled.isEmpty() || !target.equals(sampled.get(0).relativePath)
+                || sampled.get(0).score < 0.999
+                || sampled.get(0).excerptStart
+                        != allChunks.get(paths.length - 1).get(targetChunk).start
+                || tightSample.size() != 1
+                || !paths[0].equals(tightSample.get(0).relativePath)
                 || (!skew && (quota.isEmpty()
                         || !target.equals(quota.get(0).relativePath)
                         || quota.get(0).score < 0.999

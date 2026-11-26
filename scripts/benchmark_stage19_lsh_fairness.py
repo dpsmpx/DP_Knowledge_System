@@ -121,6 +121,43 @@ def _make_target_best_only_within_same_exact_bucket(connection: sqlite3.Connecti
                                ((bucket, TARGET) for bucket in lsh_buckets(better)))
 
 
+def _relocate_single_target_exact_chunk(connection: sqlite3.Connection,
+                                        chunks: int, target_chunk: int) -> None:
+    """Place the only target exact hit at a chosen offset; all others are hidden."""
+    if not 0 <= target_chunk < chunks:
+        raise ValueError('Target chunk outside the artificial source')
+    packed_hidden = struct.pack('<8f', *_vector(.80))
+    packed_exact = struct.pack('<8f', *basis(0))
+    hidden_buckets = lsh_buckets(_vector(.80))
+    exact_buckets = lsh_buckets(basis(0))
+    with connection:
+        connection.execute('DELETE FROM embedding_lsh WHERE path=?', (TARGET,))
+        connection.execute('UPDATE embedding_chunks SET vector=? WHERE path=?',
+                           (packed_hidden, TARGET))
+        connection.execute('UPDATE embedding_chunks SET vector=? '
+                           'WHERE path=? AND chunk=?',
+                           (packed_exact, TARGET, target_chunk))
+        connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,?)',
+                               ((bucket, TARGET, chunk)
+                                for chunk in range(chunks)
+                                for bucket in (exact_buckets if chunk == target_chunk
+                                               else hidden_buckets)))
+
+
+def _truncate_short_sources(connection: sqlite3.Connection,
+                            indices: range) -> None:
+    """Keep exactly one artificial vector in each selected early source."""
+    with connection:
+        for number in indices:
+            path = f'a-synthetic-{number:04d}.md'
+            connection.execute('DELETE FROM embedding_lsh WHERE path=? AND chunk>0',
+                               (path,))
+            connection.execute('DELETE FROM embedding_chunks WHERE path=? AND chunk>0',
+                               (path,))
+            connection.execute('UPDATE embedding_notes SET chunks=1, completed=1 '
+                               'WHERE path=?', (path,))
+
+
 def _candidates(connection: sqlite3.Connection, policy: str,
                 cap: int) -> list[tuple[str, int, bytes]]:
     exact = lsh_buckets(basis(0))
@@ -264,15 +301,7 @@ def synthetic_uneven_distribution_probe() -> dict:
                 short_indices = range(0, sources - 1, 5)
             else:
                 short_indices = range(1, sources - 1)
-            with connection:
-                for number in short_indices:
-                    path = f'a-synthetic-{number:04d}.md'
-                    connection.execute('DELETE FROM embedding_lsh '
-                                       'WHERE path=? AND chunk>0', (path,))
-                    connection.execute('DELETE FROM embedding_chunks '
-                                       'WHERE path=? AND chunk>0', (path,))
-                    connection.execute('UPDATE embedding_notes SET chunks=1, completed=1 '
-                                       'WHERE path=?', (path,))
+            _truncate_short_sources(connection, short_indices)
             results = {}
             for policy in ('current_exact_first', 'source_chunk_quota_then_fill',
                            'source_sample_quota_fill', 'chunk_interleaved_sort',
@@ -292,6 +321,70 @@ def synthetic_uneven_distribution_probe() -> dict:
         finally:
             connection.close()
     return probes
+
+
+def synthetic_skew_budget_sweep() -> dict:
+    """Expose tested budget thresholds for an unbalanced 90-source index.
+
+    Four target offsets and a same-bucket stronger-late case distinguish
+    recovering the *source* from inspecting its highest-scoring chunk.
+    """
+    sources, chunks = 90, 128
+    caps = (88, 89, 90, 91, 92, 93, 100, 128, 150, 216, 217, 240)
+    policies = ('current_exact_first', 'source_chunk_quota_then_fill',
+                'source_sample_quota_fill', 'chunk_interleaved_sort')
+    connection = _database(sources, chunks)
+    try:
+        _truncate_short_sources(connection, range(1, sources - 1))
+        outcomes = {}
+        for target_chunk in (0, 1, 3, 127):
+            _relocate_single_target_exact_chunk(connection, chunks, target_chunk)
+            runs = {}
+            for cap in caps:
+                records = {}
+                for policy in policies:
+                    rows = _candidates(connection, policy, cap)
+                    matches = [(chunk, struct.unpack('<8f', packed)[0])
+                               for path, chunk, packed in rows if path == TARGET]
+                    records[policy] = {
+                        'target_best_cosine': round(max((x[1] for x in matches),
+                                                        default=-1), 3),
+                        'exact_chunk_seen': any(chunk == target_chunk
+                                                for chunk, _ in matches),
+                        'raw_rows': len(rows),
+                        'unique_rows': len({(path, chunk) for path, chunk, _ in rows}),
+                    }
+                    if len(rows) > cap:
+                        raise AssertionError('Synthetic candidate budget exceeded')
+                runs[str(cap)] = records
+            outcomes[str(target_chunk)] = runs
+        # The source is present in a one-row-per-source sample, but the
+        # later, better 0.999 chunk shares only its first exact table with
+        # the early 0.99 chunks. A tiny cap is insufficient for reranking.
+        _make_target_earlier_chunks_exact_reachable(connection, chunks)
+        _make_target_best_only_within_same_exact_bucket(connection)
+        late_with_early = {}
+        for cap in (90, 100):
+            late_with_early[str(cap)] = {}
+            for policy in policies:
+                rows = _candidates(connection, policy, cap)
+                scores = [struct.unpack('<8f', packed)[0] for path, _, packed in rows
+                          if path == TARGET]
+                late_with_early[str(cap)][policy] = {
+                    'source_seen': bool(scores),
+                    'best_cosine': round(max(scores, default=-1), 3),
+                    'raw_rows': len(rows),
+                }
+        return {
+            'sources': sources, 'short_sources': sources - 2,
+            'total_chunks': 2 * chunks + sources - 2,
+            'candidate_caps': list(caps), 'target_chunk_offsets': [0, 1, 3, 127],
+            'policies': list(policies), 'single_exact_chunk': outcomes,
+            'late_better_same_bucket': late_with_early,
+            'only_synthetic_vectors': True,
+        }
+    finally:
+        connection.close()
 
 
 def compare(sources: int = 360, chunks: int = 128,
@@ -362,6 +455,7 @@ def compare(sources: int = 360, chunks: int = 128,
             'candidate_cap': cap, 'measured_trials': trials,
             'cases': cases,
             'uneven_distribution_probe': synthetic_uneven_distribution_probe(),
+            'skew_budget_sweep': synthetic_skew_budget_sweep(),
             'limitations': [
                 'alternative SQL is diagnostic only and is not used in Android',
                 'one-chunk sampling can miss a later better chunk in the same source',
