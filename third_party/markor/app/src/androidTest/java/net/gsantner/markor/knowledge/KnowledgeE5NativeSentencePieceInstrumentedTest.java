@@ -8,11 +8,16 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /** No user downloads, weights, private notes or network; native Android SP integration. */
 @RunWith(AndroidJUnit4.class)
@@ -102,5 +107,71 @@ public final class KnowledgeE5NativeSentencePieceInstrumentedTest {
         } finally {
             assertTrue(file.delete());
         }
+    }
+
+    @Test public void manualGoldenQaUsesOnlyManifestPinnedSyntheticTokenizer() throws Exception {
+        final File directory = File.createTempFile("dpks-golden-qa-", ".temp",
+                getInstrumentation().getTargetContext().getCacheDir());
+        assertTrue(directory.delete());
+        assertTrue(directory.mkdir());
+        final KnowledgeModelFiles files = new KnowledgeModelFiles(directory);
+        final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, files);
+        KnowledgeModelFiles.Entry entry = null;
+        try {
+            final byte[] weight = new byte[48]; // Never a real ONNX model.
+            final byte[] tokenizer = syntheticBpe();
+            final byte[] config = "{\"hidden_size\":8}".getBytes(StandardCharsets.UTF_8);
+            entry = files.importFile(new ByteArrayInputStream(weight), "model.onnx",
+                    KnowledgeModelPolicy.Role.EMBEDDING);
+            final JSONObject manifest = new JSONObject()
+                    .put("schema_version", 1)
+                    .put("role", "EMBEDDING")
+                    .put("format", "ONNX_UNVERIFIED")
+                    .put("weight_sha256", entry.sha256)
+                    .put("source_id", "intfloat/multilingual-e5-small")
+                    .put("revision", "sha256:" + entry.sha256)
+                    .put("license", "MIT");
+            final JSONArray companions = new JSONArray();
+            companions.put(new JSONObject().put("kind", "WEIGHTS")
+                    .put("name", "model.onnx").put("sha256", entry.sha256)
+                    .put("bytes", entry.bytes));
+            companions.put(new JSONObject().put("kind", "TOKENIZER")
+                    .put("name", "sentencepiece.bpe.model")
+                    .put("sha256", sha256(tokenizer)).put("bytes", tokenizer.length));
+            companions.put(new JSONObject().put("kind", "MODEL_CONFIG")
+                    .put("name", "config.json").put("sha256", sha256(config))
+                    .put("bytes", config.length));
+            manifest.put("files", companions);
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    Arrays.asList(
+                            new KnowledgeModelPackageStore.Source("sentencepiece.bpe.model",
+                                    () -> new ByteArrayInputStream(tokenizer)),
+                            new KnowledgeModelPackageStore.Source("config.json",
+                                    () -> new ByteArrayInputStream(config))), entry);
+            final KnowledgeE5GoldenQa.Report result = KnowledgeE5GoldenQa.run(
+                    getInstrumentation().getTargetContext(), packages, entry);
+            assertEquals(sha256(tokenizer), result.modelSha256);
+            assertEquals(64, result.fingerprintSha256.length());
+            assertEquals(4, result.counts.length);
+            for (final int tokens : result.counts) assertTrue(tokens >= 3);
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+        } finally {
+            if (entry != null) {
+                packages.forget(entry);
+                files.delete(entry);
+            }
+            assertTrue(directory.delete());
+        }
+    }
+
+    private static String sha256(final byte[] bytes) throws Exception {
+        final byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
+        final StringBuilder hex = new StringBuilder();
+        for (final byte item : hash) {
+            hex.append(Character.forDigit((item >>> 4) & 15, 16));
+            hex.append(Character.forDigit(item & 15, 16));
+        }
+        return hex.toString();
     }
 }

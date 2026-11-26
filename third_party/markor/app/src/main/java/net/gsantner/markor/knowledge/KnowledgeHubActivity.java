@@ -297,7 +297,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::downloadModel, this::auditModelPackage,
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
                         this::runOnnxFdSmoke, this::runSyntheticModelBenchmark,
-                        this::inspectOnnxCpuSession).show();
+                        this::inspectOnnxCpuSession, this::runE5TokenizerGoldenQa).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -793,6 +793,54 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             restoreModelButton();
             modelStatus.setText(R.string.knowledge_models_onnx_smoke_failed);
         }
+    }
+
+    /** User-requested E5 tokenizer-only golden fingerprint over four fixed texts. */
+    private void runE5TokenizerGoldenQa(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null
+                || entry.role != KnowledgeModelPolicy.Role.EMBEDDING) return;
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_e5_qa_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                final KnowledgeE5GoldenQa.Report report =
+                        KnowledgeE5GoldenQa.run(this, modelPackages, entry);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || modelGeneration.get() != operation) return;
+                    modelImportActive = false;
+                    restoreModelButton();
+                    modelStatus.setText(R.string.knowledge_models_e5_qa_passed);
+                    final String message = getString(R.string.knowledge_models_e5_qa_report,
+                            report.modelSha256, report.fingerprintSha256,
+                            report.counts[0], report.counts[1], report.counts[2],
+                            report.counts[3], report.elapsedMillis);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_models_e5_qa)
+                            .setMessage(message)
+                            .setNeutralButton(R.string.knowledge_models_e5_qa_copy,
+                                    (dialog, button) -> {
+                                        final ClipboardManager clipboard = (ClipboardManager)
+                                                getSystemService(Context.CLIPBOARD_SERVICE);
+                                        if (clipboard != null) clipboard.setPrimaryClip(
+                                                ClipData.newPlainText("DPKS E5 golden fingerprint",
+                                                        report.fingerprintSha256));
+                                    })
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                });
+            } catch (IOException | RuntimeException invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_e5_qa_failed);
+                    }
+                });
+            }
+        });
     }
 
     /** Manual synthetic end-to-end FD transport + isolated session, never a user model. */

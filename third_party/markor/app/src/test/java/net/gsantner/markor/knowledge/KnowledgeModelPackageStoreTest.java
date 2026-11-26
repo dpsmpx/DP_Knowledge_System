@@ -228,6 +228,65 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void e5GoldenQaResolvesOnlyOnePinnedManifestSidecar() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-e5-package-selection").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] tokenizer = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            final JSONObject manifest = new JSONObject(new String(manifest(entry,
+                    "sentencepiece.bpe.model", tokenizer, "config.json", CONFIG),
+                    StandardCharsets.UTF_8));
+            // A user assertion isn't a verified upstream revision, but the
+            // E5-specific adapter must reject unrelated manifest identities.
+            try {
+                packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                        companions("sentencepiece.bpe.model", tokenizer, "config.json", CONFIG), entry);
+                packages.e5Tokenizer(entry);
+                fail("Unrelated model identity accepted as E5");
+            } catch (IOException expected) { }
+            manifest.put("source_id", "intfloat/multilingual-e5-small");
+            packages.forget(entry);
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8),
+                    companions("sentencepiece.bpe.model", tokenizer, "config.json", CONFIG), entry);
+            final KnowledgeModelPackageStore.E5TokenizerFile input = packages.e5Tokenizer(entry);
+            assertEquals(sha256(tokenizer), input.sha256);
+            assertEquals(tokenizer.length, input.bytes);
+            assertArrayEquals(tokenizer, Files.readAllBytes(input.file.toPath()));
+            assertFalse(KnowledgeModelPackageContract.inspect(entry, packages.installed(entry)).runnable());
+        } finally { removeTree(directory); }
+    }
+
+    @Test public void e5GoldenQaRejectsDuplicateModelSidecars() throws Exception {
+        final File directory = Files.createTempDirectory("dpks-e5-ambiguous").toFile();
+        try {
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = installWeight(weights);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            final byte[] first = KnowledgeSentencePieceProbeTest.model(2, 1, true, false);
+            final byte[] second = KnowledgeSentencePieceProbeTest.model(1, 1, true, false);
+            final JSONObject manifest = new JSONObject(new String(manifest(entry,
+                    "sentencepiece.bpe.model", first, "config.json", CONFIG),
+                    StandardCharsets.UTF_8));
+            manifest.put("source_id", "intfloat/multilingual-e5-small");
+            manifest.getJSONArray("files").put(component("TOKENIZER",
+                    "another.model", sha256(second), second.length));
+            final List<KnowledgeModelPackageStore.Source> sidecars = Arrays.asList(
+                    new KnowledgeModelPackageStore.Source("sentencepiece.bpe.model",
+                            () -> new ByteArrayInputStream(first)),
+                    new KnowledgeModelPackageStore.Source("another.model",
+                            () -> new ByteArrayInputStream(second)),
+                    new KnowledgeModelPackageStore.Source("config.json",
+                            () -> new ByteArrayInputStream(CONFIG)));
+            packages.install(manifest.toString().getBytes(StandardCharsets.UTF_8), sidecars, entry);
+            try {
+                packages.e5Tokenizer(entry);
+                fail("Ambiguous local E5 tokenizers accepted");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
     @Test public void invalidButHashMatchingSentencePieceIsACompatibilityWarning()
             throws Exception {
         final File directory = Files.createTempDirectory("dpks-package-bad-sp").toFile();

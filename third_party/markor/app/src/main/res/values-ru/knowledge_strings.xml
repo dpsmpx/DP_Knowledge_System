@@ -763,6 +763,14 @@
     <string name="knowledge_models_package_help">Как импортировать</string>
     <string name="knowledge_models_package_import">Импортировать манифест и файлы</string>
     <string name="knowledge_models_package_audit">Проверить SHA-256 комплекта</string>
+    <string name="knowledge_models_e5_qa">Проверить токенизатор E5</string>
+    <string name="knowledge_models_e5_qa_missing">Комплект эмбеддингов ONNX должен заявлять источник intfloat/multilingual-e5-small и содержать ровно один локально установленный SentencePiece .model с SHA-256 в манифесте. Сначала вручную импортируйте сопутствующие файлы. Веса не запускались.</string>
+    <string name="knowledge_models_e5_qa_warning">Вручную запустить нативный SentencePiece на четырёх фиксированных синтетических строках E5 (английский, русский, китайский, эмодзи)? Локальный .model перечитывается и проверяется по SHA-256 манифеста для каждого примера. Заметки, веса, ONNX-инференс и сеть не используются. Возможна нагрузка CPU/RAM. Полученный отпечаток можно сравнить с автономным Python-эталоном ТОГО ЖЕ файла; сам тест не доказывает совпадение и готовность модели. Кнопка управления запрашивает отмену.</string>
+    <string name="knowledge_models_e5_qa_running">Проверяю закреплённые по SHA-256 байты SentencePiece и токенизирую четыре фиксированных примера E5. Кнопка «Управление» запрашивает отмену. Без заметок и инференса.</string>
+    <string name="knowledge_models_e5_qa_passed">Нативный тест токенизатора E5 завершён. Сравните отпечаток с независимо созданным Python-эталоном; инференс по-прежнему отключён.</string>
+    <string name="knowledge_models_e5_qa_failed">Тест токенизатора E5 завершился ошибкой, был отменён либо комплект несовместим. Инференс не выполнялся.</string>
+    <string name="knowledge_models_e5_qa_copy">Копировать отпечаток</string>
+    <string name="knowledge_models_e5_qa_report">Нативный SentencePiece обработал четыре синтетических примера E5.\n\nSHA-256 закреплённого токенизатора:\n%1$s\n\nSHA-256 отпечатка token ID:\n%2$s\n\nЧисло токенов (с BOS/EOS): эмодзи %3$d, английский %4$d, русский %5$d, китайский %6$d.\nВремя %7$d мс (не бенчмарк).\n\nСравните отпечаток с полем golden_fingerprint_sha256 автономного скрипта scripts/e5_sentencepiece_reference.py на Transformers 4.57.1 и ТОЧНО ТОМ ЖЕ .model. Результат НЕ доказывает совпадение с реальной E5, совместимость весов, скорость модели или готовность ONNX-инференса.</string>
     <string name="knowledge_models_package_audit_starting">Повторная проверка SHA-256 весов и сопутствующих файлов. Нажмите управление ещё раз для отмены. ИИ и сеть не используются.</string>
     <string name="knowledge_models_package_audit_progress">Проверено: %1$s / %2$s (только чтение файлов)</string>
     <string name="knowledge_models_package_audit_passed">Контрольные суммы файлов совпали. Это НЕ означает готовность модели к запуску.</string>

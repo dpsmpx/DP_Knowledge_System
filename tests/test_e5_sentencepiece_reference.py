@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.e5_sentencepiece_reference import SAMPLES, checksum, reference
+from scripts.e5_sentencepiece_reference import (
+    SAMPLES, checksum, golden_fingerprint, reference,
+)
 
 
 class DummyTokenizer:
@@ -36,6 +38,21 @@ class E5ReferenceTest(unittest.TestCase):
         self.assertEqual([0, 11 + len(SAMPLES["en_query"]), 2],
                          result["samples"]["en_query"]["ids"])
         self.assertEqual([1, 1, 1], result["samples"]["ru_query"]["attention_mask"])
+        self.assertEqual(golden_fingerprint("a" * 64, result["samples"]),
+                         result["golden_fingerprint_sha256"])
+
+    def test_cross_language_fingerprint_fixture(self):
+        samples = {name: {"ids": [0, 10 + index, 2],
+                          "attention_mask": [1, 1, 1]}
+                   for index, name in enumerate(sorted(SAMPLES))}
+        self.assertEqual(
+            "212e27cf4da57fe4795cfedcb37c7e208810e8063953dfefab92bbb651110d4c",
+            golden_fingerprint("a" * 64, samples))
+        samples["ru_query"]["attention_mask"][0] = 0
+        with self.assertRaisesRegex(ValueError, "golden token"):
+            golden_fingerprint("a" * 64, samples)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            golden_fingerprint("wrong", samples)
 
     def test_wrong_special_ids_are_rejected(self):
         fake = DummyTokenizer()

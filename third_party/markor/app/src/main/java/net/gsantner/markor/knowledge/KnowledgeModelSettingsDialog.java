@@ -30,6 +30,7 @@ final class KnowledgeModelSettingsDialog {
     interface AuditRequest { void verify(KnowledgeModelFiles.Entry entry); }
     interface PrepareRequest { void prepare(KnowledgeModelFiles.Entry entry); }
     interface SessionRequest { void inspect(KnowledgeModelFiles.Entry entry); }
+    interface E5QaRequest { void run(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
     interface FdSmokeRequest { void run(); }
     interface BenchmarkRequest { void run(KnowledgeModelPolicy.Role role); }
@@ -46,6 +47,7 @@ final class KnowledgeModelSettingsDialog {
     private final AuditRequest auditor;
     private final PrepareRequest preparer;
     private final SessionRequest sessionInspector;
+    private final E5QaRequest e5QaRunner;
     private final SmokeRequest smokeTester;
     private final FdSmokeRequest fdSmokeTester;
     private final BenchmarkRequest benchmarkRunner;
@@ -59,7 +61,8 @@ final class KnowledgeModelSettingsDialog {
                                  final PrepareRequest prepare, final SmokeRequest smoke,
                                  final FdSmokeRequest fdSmoke,
                                  final BenchmarkRequest benchmark,
-                                 final SessionRequest sessionInspect) {
+                                 final SessionRequest sessionInspect,
+                                 final E5QaRequest e5Qa) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
@@ -68,6 +71,7 @@ final class KnowledgeModelSettingsDialog {
         auditor = audit;
         preparer = prepare;
         sessionInspector = sessionInspect;
+        e5QaRunner = e5Qa;
         smokeTester = smoke;
         fdSmokeTester = fdSmoke;
         benchmarkRunner = benchmark;
@@ -366,11 +370,14 @@ final class KnowledgeModelSettingsDialog {
     private void showPackageActions(final KnowledgeModelFiles.Entry entry) {
         final boolean onnx = entry.format == KnowledgeModelFiles.Format.ONNX_UNVERIFIED;
         final boolean cpuSession = onnx && KnowledgeOnnxCpuBackend.available();
+        final boolean e5Qa = cpuSession && entry.role == KnowledgeModelPolicy.Role.EMBEDDING;
         final List<String> menu = new ArrayList<>();
         menu.add(context.getString(R.string.knowledge_models_package_import));
         menu.add(context.getString(R.string.knowledge_models_package_audit));
         if (onnx) menu.add(context.getString(R.string.knowledge_models_onnx_prepare));
         if (cpuSession) menu.add(context.getString(R.string.knowledge_models_onnx_session));
+        if (e5Qa) menu.add(context.getString(R.string.knowledge_models_e5_qa));
+        final int removeIndex = menu.size();
         menu.add(context.getString(R.string.knowledge_models_package_remove));
         menu.add(context.getString(R.string.knowledge_models_delete));
         final String[] actions = menu.toArray(new String[0]);
@@ -381,7 +388,8 @@ final class KnowledgeModelSettingsDialog {
                     else if (which == 1) auditor.verify(entry);
                     else if (onnx && which == 2) confirmPrepareOnnx(entry);
                     else if (cpuSession && which == 3) confirmOnnxSession(entry);
-                    else if (which == (onnx ? (cpuSession ? 4 : 3) : 2)) confirmRemovePackage(entry);
+                    else if (e5Qa && which == 4) confirmE5Qa(entry);
+                    else if (which == removeIndex) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
                 .setNeutralButton(R.string.knowledge_models_package_help, (dialog, which) ->
@@ -391,6 +399,26 @@ final class KnowledgeModelSettingsDialog {
                                         showPackageActions(entry)).show())
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
+                .show();
+    }
+
+    private void confirmE5Qa(final KnowledgeModelFiles.Entry entry) {
+        try {
+            // Lightweight manifest lookup only. Hashing and native loading are
+            // deferred to the user-approved background task.
+            packages.e5Tokenizer(entry);
+        } catch (IOException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_e5_qa_missing)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_e5_qa)
+                .setMessage(R.string.knowledge_models_e5_qa_warning)
+                .setPositiveButton(R.string.knowledge_models_e5_qa,
+                        (dialog, which) -> e5QaRunner.run(entry))
+                .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
