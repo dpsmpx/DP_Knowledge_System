@@ -1436,10 +1436,16 @@ public final class KnowledgeDeviceQaRunner {
                     chunks, 1, new float[][]{exact}, digest);
             final List<KnowledgeLocalIndex.SemanticHit> hits =
                     testIndex.semanticSearch(model, exact, 8);
+            // At a one-chunk budget the unprioritized grouped SQL could read
+            // the earlier near-match and never inspect the exact second chunk.
+            final List<KnowledgeLocalIndex.SemanticHit> tinyBudget =
+                    testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 1);
             if (!testIndex.hasEmbeddings("multi.md", modified, size, model)
                     || testIndex.embeddingNoteCount(model) != 1 || hits.size() != 1
                     || !"multi.md".equals(hits.get(0).relativePath)
                     || hits.get(0).score < 0.999
+                    || tinyBudget.size() != 1 || tinyBudget.get(0).score < 0.999
+                    || tinyBudget.get(0).excerptStart != chunks.get(1).start
                     || hits.get(0).excerptStart != chunks.get(1).start
                     || hits.get(0).excerptLength != chunks.get(1).text.length()
                     || !KnowledgeEmbeddingChunks.atOffset(body, hits.get(0).excerptStart,
@@ -1450,6 +1456,7 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "syntheticNotes=1, chunks=2, incompleteExcluded=true, "
                     + "bestLaterChunkSelected=true, perPathDeduplicated=true, "
+                    + "exactBucketAtOneChunkBudget=true, "
                     + "rawByteSealVerified=true, noModelCall=true, "
                     + "selectedVaultUntouched=true";
         } finally {

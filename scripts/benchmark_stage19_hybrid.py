@@ -133,35 +133,60 @@ def build_synthetic_embeddings(connection: sqlite3.Connection, notes: int,
 
 def search_semantic_mirror(connection: sqlite3.Connection,
                            query: tuple[float, ...], limit: int = 24,
-                           candidate_cap: int = MAX_SEMANTIC_CANDIDATES) -> list[str]:
+                           candidate_cap: int = MAX_SEMANTIC_CANDIDATES,
+                           policy: str = 'adaptive') -> list[str]:
     """Same 44 LSH probes, 45k candidate cap, cosine and path ties as Android.
 
     Host schema omits actual note byte seals: Android checks these separately.
     Multiple chunks are deduplicated using each path's best cosine score.
     A larger diagnostic candidate_cap may be used only by the cap probe;
-    the benchmark itself uses the production 45k cap.
+    the benchmark itself uses the production 45k cap. The legacy comparison
+    uses one unprioritized 44-bucket SQL query; production tries exact bucket
+    hits first, then fills remaining chunk slots with one-bit neighbors.
     """
     if not 1 <= limit <= 40:
         raise ValueError('Semantic limit must be 1..40')
     if not 1 <= candidate_cap <= 60_000:
         raise ValueError('Synthetic diagnostic cap must be 1..60000')
-    probes = lsh_probes(query)
-    rows = connection.execute('''
-        SELECT e.path, v.vector FROM embedding_lsh l
-        JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
-        JOIN embedding_notes e ON e.path=v.path
-        JOIN notes n ON n.path=e.path
-        WHERE l.bucket IN (''' + ','.join('?' for _ in probes) + ''')
-          AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
-          AND n.generation=? AND n.oversized=0
-        GROUP BY l.path,l.chunk LIMIT ?
-    ''', (*probes, MODEL_KEY, DIMENSIONS, GENERATION, candidate_cap))
+    if policy not in ('legacy', 'exact_first', 'adaptive'):
+        raise ValueError('Unsupported synthetic candidate policy')
+    if policy == 'adaptive':
+        total_chunks = connection.execute('SELECT COUNT(*) FROM embedding_chunks').fetchone()[0]
+        policy = 'exact_first' if total_chunks > candidate_cap else 'legacy'
+
+    def query_rows(buckets: tuple[int, ...], cap: int):
+        return connection.execute('''
+            SELECT e.path, v.vector FROM embedding_lsh l
+            JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
+            JOIN embedding_notes e ON e.path=v.path
+            JOIN notes n ON n.path=e.path
+            WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ''')
+              AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+              AND n.generation=? AND n.oversized=0
+            GROUP BY l.path,l.chunk LIMIT ?
+        ''', (*buckets, MODEL_KEY, DIMENSIONS, GENERATION, cap))
+
     best = {}
-    for path, raw in rows:
-        vector = struct.unpack('<8f', raw)
-        score = sum(a * b for a, b in zip(query, vector))
-        if path not in best or score > best[path]:
-            best[path] = score
+    def collect(buckets: tuple[int, ...], cap: int) -> int:
+        count = 0
+        for path, raw in query_rows(buckets, cap):
+            count += 1
+            vector = struct.unpack('<8f', raw)
+            score = sum(a * b for a, b in zip(query, vector))
+            if path not in best or score > best[path]:
+                best[path] = score
+        return count
+
+    probes = lsh_probes(query)
+    if policy == 'legacy':
+        collect(probes, candidate_cap)
+    else:
+        exact = tuple(probes[index * (LSH_BITS + 1)] for index in range(LSH_TABLES))
+        neighbors = tuple(bucket for i, bucket in enumerate(probes)
+                          if i % (LSH_BITS + 1) != 0)
+        used = collect(exact, candidate_cap)
+        if used < candidate_cap:
+            collect(neighbors, candidate_cap - used)
     return sorted(best, key=lambda path: (-best[path], path))[:limit]
 
 
@@ -206,15 +231,19 @@ def synthetic_multichunk_cap_probe() -> dict:
                                         for chunk in range(chunks_per_note)
                                         for bucket in (exact_buckets if path == target and chunk == 3
                                                        else near_buckets)))
+        legacy = search_semantic_mirror(connection, exact, 6, policy='legacy')
         limited = search_semantic_mirror(connection, exact, 6)
         unlimited_diagnostic = search_semantic_mirror(connection, exact, 6,
-                                                     notes * chunks_per_note)
+                                                     notes * chunks_per_note,
+                                                     policy='legacy')
         return {
             'synthetic_sources': notes,
             'chunks_per_source': chunks_per_note,
             'total_chunks': notes * chunks_per_note,
             'production_candidate_cap': MAX_SEMANTIC_CANDIDATES,
-            'exact_target_retrieved_at_6_with_cap': target in limited,
+            'adaptive_policy_triggered': True,
+            'exact_target_retrieved_at_6_legacy_cap': target in legacy,
+            'exact_target_retrieved_at_6_exact_first_cap': target in limited,
             'exact_target_retrieved_at_6_without_cap': target in unlimited_diagnostic,
             'warning': 'candidate GROUP BY/LIMIT has no guaranteed order; '
                        'observed outcome applies only to this SQLite build',
@@ -292,7 +321,7 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             (SYNONYM_CASE, 'sofa', basis(5), more_labels['synonym']),
             (NEGATIVE_CASE, 'phosphor titanium', basis(6), more_labels['negative']),
         ))
-        lexical_times, semantic_times, fusion_times = [], [], []
+        lexical_times, legacy_semantic_times, semantic_times, fusion_times = [], [], [], []
         output = []
         for name, question, vector, gold in queries:
             for attempt in range(-2, repeats):
@@ -300,28 +329,35 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
                 lexical = search_production_lexical_mirror(connection, question, 24)
                 lexical_ms = (time.perf_counter() - start) * 1000
                 start = time.perf_counter()
+                legacy_semantic = search_semantic_mirror(
+                    connection, vector, 24, policy='legacy')
+                legacy_semantic_ms = (time.perf_counter() - start) * 1000
+                start = time.perf_counter()
                 semantic = search_semantic_mirror(connection, vector, 24)
                 semantic_ms = (time.perf_counter() - start) * 1000
                 start = time.perf_counter()
                 fused = rrf_combine(lexical, semantic, 24)
                 fusion_ms = (time.perf_counter() - start) * 1000
                 if attempt == -2:
-                    first = (lexical, semantic, fused)
-                elif (lexical, semantic, fused) != first:
+                    first = (lexical, legacy_semantic, semantic, fused)
+                elif (lexical, legacy_semantic, semantic, fused) != first:
                     raise AssertionError('Hybrid index ranking became nondeterministic')
                 if attempt >= 0:
                     lexical_times.append(lexical_ms)
+                    legacy_semantic_times.append(legacy_semantic_ms)
                     semantic_times.append(semantic_ms)
                     fusion_times.append(fusion_ms)
             output.append({
                 'case': name,
                 'known_relevant': len(gold),
                 'lexical': _quality(lexical, gold),
+                'legacy_semantic': _quality(legacy_semantic, gold),
                 'synthetic_semantic': _quality(semantic, gold),
                 'rrf_hybrid': _quality(fused, gold),
             })
         return {
-            'mode': 'synthetic_android_lsh_rrf_sql_mirror_not_model_or_device',
+            'mode': 'synthetic_android_adaptive_lsh_rrf_sql_mirror_not_model_or_device',
+            'candidate_policy': 'adaptive_exact_first_if_total_chunks_exceed_45000',
             'sqlite_version': sqlite3.sqlite_version,
             'synthetic_notes': notes,
             'vector_dimension': DIMENSIONS,
@@ -332,6 +368,7 @@ def benchmark(notes: int = 20_000, repeats: int = 5) -> dict:
             'repetitions_per_query': repeats,
             'index_build_ms': round(index_ms, 2),
             'lexical_lookup': _timing_ms(lexical_times),
+            'legacy_semantic_lookup': _timing_ms(legacy_semantic_times),
             'semantic_lookup': _timing_ms(semantic_times),
             'rrf_fusion': _timing_ms(fusion_times),
             'limitations': [

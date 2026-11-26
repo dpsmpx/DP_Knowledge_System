@@ -466,24 +466,42 @@ even if every reference and quotation passes the checks below.
     exactly once, with the better later excerpt offset and a valid source
     byte seal. A separate host SQL probe generates **360 artificial notes ×
     128 chunks = 46,080** chunk vectors (184,320 LSH posting rows). Under
-    the current 45,000-*chunk* query
+    the original 45,000-*chunk* query
     cap and an observed path-first SQLite grouping order, an artificial
     exact-match note near the end **is absent**, although it ranks first
     when the cap is lifted in the diagnostic comparison. This exposes a
     bounded-retrieval recall risk: 45k chunks are **not** 45k distinct notes,
     and grouping without an explicit sort does not guarantee stable source
     diversity. The host SQL mirror now correctly deduplicates by note and
-    retains only its best cosine score. **No automatic SQL reorder or cap
-    increase** is made yet: sorting millions of candidate chunks could
-    be prohibitively expensive on-device. A bounded, fair candidate policy
-    with a 20k physical-device performance envelope remains an explicit
-    Stage 19 optimization debt.
+    retains only its best cosine score. This baseline is preserved as an
+    adversarial comparison for the adaptive candidate policy below.
     An additional deterministic angular-noise probe rotates a fabricated
     8D vector from cosine 1.00 to 0.80 against the query: exact/one-bit
     LSH probes cover four, two, one, two and finally **zero** tables,
     respectively. The non-monotonic bucket count and total dropout at
     still-positive cosine 0.80 show why approximate candidate retrieval
     cannot promise nearest-neighbor recall, even before RRF ranking.
+40. **Adaptive exact-bucket-first retrieval mitigates cap starvation without
+    penalizing the common small index.** Before searching, Android uses a
+    read-only `COUNT(*)` of its disposable vector chunks. When the *whole*
+    index has at most 45,000 chunks, it keeps the original single 44-bucket
+    SQL: the cap cannot truncate a complete candidate set. Otherwise it
+    queries the **four exact signature buckets first**, then uses the
+    remaining portion of the same 45,000-chunk budget to query the **40
+    one-bit neighbor buckets**. Java keeps the best cosine hit per document
+    across both passes and the original deterministic final path tie-break;
+    source SHA-256, scan generation, model and completed-checkpoint gates
+    remain in *both* SQL queries. A package-private budget override is
+    restricted to isolated `dpks-device-qa-*` SQLite fixtures, allowing
+    `EMBED-CHUNKS-19` to verify that the later exact-match chunk wins even
+    under a **one-chunk test budget**. The 46,080-chunk host counterexample
+    now recovers the late exact source within 45k while the historical
+    single-pass SQL still loses it. No global vector scan, expensive SQL
+    `ORDER BY` on millions of chunks, cap increase, model call or vault write
+    is added. This is a **best-effort approximation, not source fairness or
+    nearest-neighbor completeness**: many exact-bucket chunks can still
+    monopolize the budget. Device RAM/latency and a broader human-labeled
+    retrieval benchmark remain outstanding.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -561,18 +579,26 @@ multi-chunk retrieval and representative human-labeled precision/recall
 remain open.
 
 The same hybrid benchmark also prints `multichunk_cap_probe`: 360 sources,
-128 chunks each, 46,080 total artificial vector chunks. On the 26 Nov 2026
-host SQLite build, the late exact-match source is **not retrieved at six**
-under the production 45k candidate cap but **is retrieved at six** when the
-probe raises the cap to 46,080. This is a reproducible counterexample to
-assuming complete top-k recall under a chunk-first cap, **not** an observed
-Android timing or a universal SQLite ordering guarantee. Android QA covers
-the simpler two-chunk best-offset and incomplete-checkpoint behavior; both
-checks use cache-only/generated data and no model provider.
+128 chunks each, 46,080 total artificial vector chunks. In the **original
+single-pass SQL**, the late exact-match source is absent at six when the
+query is capped at 45k; it is present with the cap lifted. The **adaptive
+exact-first policy now recovers it at the unchanged 45k cap**. This is an
+observed host regression improvement, **not** Android timing or a universal
+SQLite ordering guarantee. The Android `EMBED-CHUNKS-19` QA separately
+exercises the later exact chunk at a one-chunk synthetic budget and ensures
+incomplete checkpoints remain excluded. All inputs are generated and
+model-free.
 The `angular_noise_probe` similarly reports the five artificial cosine
 values and which (if any) of the four LSH tables still reach a query probe.
 It is a fixed geometry probe, not a claim about real model noise or a
 calibrated relevance threshold.
+
+In the updated paired 20k one-chunk host test on 26 Nov 2026, the old SQL
+and adaptive policy had semantic lookup p50/p95 of **8.20/10.23 ms** and
+**8.12/10.18 ms**, respectively (35 timed calls each). The adaptive policy
+uses the fast path for this corpus because 20k is below its 45k chunk cap;
+the difference is measurement noise, **not** a speedup claim. Android/OEM
+testing and overloaded 20k multi-chunk latency remain an explicit gate.
 
 ## Repeatable engineering acceptance
 

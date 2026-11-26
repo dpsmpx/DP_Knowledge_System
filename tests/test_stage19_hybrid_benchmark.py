@@ -63,6 +63,8 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
             expected = extra['synonym'].pop()
             self.assertEqual(3, len(search_semantic_mirror(connection, basis(5))))
             self.assertIn(expected, search_semantic_mirror(connection, basis(5)))
+            self.assertEqual(search_semantic_mirror(connection, basis(5)),
+                             search_semantic_mirror(connection, basis(5), policy='legacy'))
             connection.execute("UPDATE notes SET generation='stale' WHERE path=?",
                                (expected,))
             self.assertNotIn(expected, search_semantic_mirror(connection, basis(5)))
@@ -85,6 +87,8 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
             for candidate_cap in (0, 60_001):
                 with self.assertRaises(ValueError):
                     search_semantic_mirror(connection, basis(0), 8, candidate_cap)
+            with self.assertRaises(ValueError):
+                search_semantic_mirror(connection, basis(0), policy='unsupported')
 
     def test_multichunk_sql_deduplicates_by_path_and_excludes_partial_checkpoints(self):
         with sqlite3.connect(':memory:') as connection:
@@ -117,7 +121,9 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
         self.assertEqual(128, probe['chunks_per_source'])
         self.assertEqual(46_080, probe['total_chunks'])
         self.assertEqual(MAX_SEMANTIC_CANDIDATES, probe['production_candidate_cap'])
-        self.assertFalse(probe['exact_target_retrieved_at_6_with_cap'])
+        self.assertTrue(probe['adaptive_policy_triggered'])
+        self.assertFalse(probe['exact_target_retrieved_at_6_legacy_cap'])
+        self.assertTrue(probe['exact_target_retrieved_at_6_exact_first_cap'])
         self.assertTrue(probe['exact_target_retrieved_at_6_without_cap'])
         self.assertNotIn('.md', str(probe))
 
@@ -136,10 +142,14 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
         self.assertEqual(7, len(data['queries']))
         self.assertEqual(synthetic_multichunk_cap_probe(), data['multichunk_cap_probe'])
         self.assertEqual(synthetic_angular_noise_probe(), data['angular_noise_probe'])
-        self.assertEqual(data['mode'], 'synthetic_android_lsh_rrf_sql_mirror_not_model_or_device')
+        self.assertEqual(data['mode'],
+                         'synthetic_android_adaptive_lsh_rrf_sql_mirror_not_model_or_device')
+        self.assertEqual(data['candidate_policy'],
+                         'adaptive_exact_first_if_total_chunks_exceed_45000')
         for record in data['queries'][:5]:
             self.assertEqual(4, record['known_relevant'])
-            for channel in ('lexical', 'synthetic_semantic', 'rrf_hybrid'):
+            for channel in ('lexical', 'legacy_semantic',
+                            'synthetic_semantic', 'rrf_hybrid'):
                 self.assertEqual(1, record[channel]['recall_at_6'])
                 self.assertEqual(2, record[channel]['false_positive_at_6'])
         by_case = {item['case']: item for item in data['queries']}
@@ -155,7 +165,8 @@ class Stage19HybridBenchmarkTests(unittest.TestCase):
         self.assertEqual(0, negative['lexical']['retrieved_at_6'])
         self.assertNotIn('.md', json.dumps(data))  # no synthetic note paths in output
         self.assertIn('not a model evaluation', ' '.join(data['limitations']))
-        for stage in ('lexical_lookup', 'semantic_lookup', 'rrf_fusion'):
+        for stage in ('lexical_lookup', 'legacy_semantic_lookup',
+                      'semantic_lookup', 'rrf_fusion'):
             self.assertGreaterEqual(data[stage]['p95_ms'], data[stage]['p50_ms'])
 
     def test_large_corpus_preserves_labels_without_real_vectors_or_external_io(self):

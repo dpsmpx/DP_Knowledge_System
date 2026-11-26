@@ -882,10 +882,95 @@ public final class KnowledgeLocalIndex {
     public synchronized List<SemanticHit> semanticSearch(final String modelKey,
                                                           final float[] normalizedQuestion,
                                                           final int limit) {
+        return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,
+                MAX_SEMANTIC_CANDIDATES);
+    }
+
+    /** A deliberately small cap exercises adaptive SQL on disposable QA data
+     * without allocating 45k vectors. Never available on the real index.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchWithBudget(final String modelKey,
+                                                                     final float[] question,
+                                                                     final int limit,
+                                                                     final int candidateBudget) {
+        final File parent = databaseFile.getParentFile();
+        if (!syntheticDatabase || parent == null
+                || !parent.getName().startsWith("dpks-device-qa-")
+                || !databaseFile.getName().startsWith("qa-")
+                || candidateBudget < 1 || candidateBudget > MAX_SEMANTIC_CANDIDATES) {
+            throw new IllegalStateException("Budget override requires isolated QA database");
+        }
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget);
+    }
+
+    private List<SemanticHit> semanticSearchWithBudget(final String modelKey,
+                                                       final float[] normalizedQuestion,
+                                                       final int limit,
+                                                       final int candidateBudget) {
         if (limit < 1 || limit > 40) {
             throw new IllegalArgumentException("Invalid result limit");
         }
-        final int[] buckets = KnowledgeEmbeddingLsh.probes(normalizedQuestion);
+        final int[] probes = KnowledgeEmbeddingLsh.probes(normalizedQuestion);
+        final Map<String, SemanticHit> best = new HashMap<>();
+        final SQLiteDatabase db = open();
+        try {
+            // A chunk cap cannot truncate any source while the entire
+            // disposable vector index contains no more chunks. Preserve the
+            // original, faster single SQL in this common case (including a
+            // 20k-note vault with one vector per note).
+            final boolean canTruncate;
+            try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_chunks", null)) {
+                canTruncate = c.moveToFirst()
+                        && c.getLong(0) > candidateBudget;
+            }
+            if (!canTruncate) {
+                if (appendSemanticCandidates(db, probes, modelKey, normalizedQuestion,
+                        candidateBudget, best) < 0) {
+                    return Collections.emptyList();
+                }
+            } else {
+                // Prioritize the four exact LSH bucket signatures. A late
+                // perfect vector should not be crowded out by earlier
+                // one-bit neighbors before exact cosine reranking.
+                // Remain strictly bounded; no full-table cosine scan/sort.
+                final int stride = KnowledgeEmbeddingLsh.BITS + 1;
+                final int[] exact = new int[KnowledgeEmbeddingLsh.TABLES];
+                final int[] neighbors = new int[probes.length - exact.length];
+                int next = 0;
+                for (int i = 0; i < probes.length; i++) {
+                    if (i % stride == 0) {
+                        exact[i / stride] = probes[i];
+                    } else {
+                        neighbors[next++] = probes[i];
+                    }
+                }
+                final int exactRows = appendSemanticCandidates(db, exact, modelKey,
+                        normalizedQuestion, candidateBudget, best);
+                if (exactRows < 0 || (exactRows < candidateBudget
+                        && appendSemanticCandidates(db, neighbors, modelKey,
+                                normalizedQuestion, candidateBudget - exactRows,
+                                best) < 0)) {
+                    return Collections.emptyList();
+                }
+            }
+        } finally {
+            db.close();
+        }
+        final List<SemanticHit> ranked = new ArrayList<>(best.values());
+        ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
+                .thenComparing(hit -> hit.relativePath));
+        return ranked.subList(0, Math.min(ranked.size(), limit));
+    }
+
+    /** Return the number of distinct path/chunk candidates inspected, or -1
+     * if interrupted. The caller owns the SQLite connection and the final
+     * per-source cosine ranking. Both passes together inspect <=45k chunks.
+     */
+    private static int appendSemanticCandidates(final SQLiteDatabase db, final int[] buckets,
+                                                final String modelKey,
+                                                final float[] normalizedQuestion,
+                                                final int candidateLimit,
+                                                final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
         final String[] args = new String[buckets.length + 3];
         for (int i = 0; i < buckets.length; i++) {
@@ -897,7 +982,7 @@ public final class KnowledgeLocalIndex {
         }
         args[buckets.length] = modelKey;
         args[buckets.length + 1] = Integer.toString(normalizedQuestion.length);
-        args[buckets.length + 2] = Integer.toString(MAX_SEMANTIC_CANDIDATES);
+        args[buckets.length + 2] = Integer.toString(candidateLimit);
         final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size "
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
@@ -908,13 +993,13 @@ public final class KnowledgeLocalIndex {
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
                 + "GROUP BY l.path, l.chunk LIMIT ?";
-        final Map<String, SemanticHit> best = new HashMap<>();
-        final SQLiteDatabase db = open();
+        int inspected = 0;
         try (Cursor c = db.rawQuery(sql, args)) {
             while (c.moveToNext()) {
                 if (Thread.currentThread().isInterrupted()) {
-                    return Collections.emptyList();
+                    return -1;
                 }
+                inspected++;
                 final double score = KnowledgeEmbeddingVectors.similarity(normalizedQuestion,
                         c.getBlob(4));
                 if (!Double.isFinite(score)) {
@@ -927,13 +1012,8 @@ public final class KnowledgeLocalIndex {
                             c.getInt(3), score, c.getLong(5), c.getLong(6)));
                 }
             }
-        } finally {
-            db.close();
         }
-        final List<SemanticHit> ranked = new ArrayList<>(best.values());
-        ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
-                .thenComparing(hit -> hit.relativePath));
-        return ranked.subList(0, Math.min(ranked.size(), limit));
+        return inspected;
     }
 
     public synchronized void clearEmbeddings() {
