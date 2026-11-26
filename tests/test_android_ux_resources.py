@@ -15,6 +15,16 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        ranking = (folder / "KnowledgeHybridRanking.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("int uniqueRank = 0;", ranking)
+        self.assertIn("RRF_K + uniqueRank", ranking)
+        self.assertIn("duplicateRankInvariant=true", qa)
+        self.assertIn("syntheticFusionRecallAt6=4/4", qa)
+        self.assertIn("sharedOpposingSourcesTopTwo=true", qa)
+
     def test_contrastive_claims_and_quotes_do_not_borrow_nearby_citations(self):
         folder = ROOT / "java/net/gsantner/markor/knowledge"
         audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()

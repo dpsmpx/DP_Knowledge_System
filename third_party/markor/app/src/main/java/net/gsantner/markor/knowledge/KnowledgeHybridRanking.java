@@ -100,10 +100,14 @@ public final class KnowledgeHybridRanking {
 
     private static void addRank(final Map<String, Double> scores, final List<String> rows) {
         final Set<String> seen = new HashSet<>();
-        for (int i = 0; i < rows.size(); i++) {
-            final String path = rows.get(i);
+        int uniqueRank = 0;
+        for (final String path : rows) {
             if (path == null || path.isEmpty() || !seen.add(path)) continue;
-            scores.put(path, scores.getOrDefault(path, 0.0) + 1.0 / (RRF_K + i + 1));
+            // A duplicate (e.g. several embedding chunks from one note) must
+            // neither add a second vote NOR demote all later unique sources.
+            // Likewise, rejected null/empty paths cannot consume rank slots.
+            uniqueRank++;
+            scores.put(path, scores.getOrDefault(path, 0.0) + 1.0 / (RRF_K + uniqueRank));
         }
     }
 }

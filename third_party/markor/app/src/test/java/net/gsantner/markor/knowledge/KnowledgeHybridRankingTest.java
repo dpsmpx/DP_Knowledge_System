@@ -22,6 +22,53 @@ public class KnowledgeHybridRankingTest {
     }
 
     @Test
+    public void duplicateAndRejectedRowsCannotShiftTheRankOfLaterUniqueSources() {
+        final List<String> semantic = Arrays.asList("c.md", "shared.md", "d.md");
+        final List<String> baseline = KnowledgeHybridRanking.combine(
+                Arrays.asList("b.md", "shared.md", "a.md"), semantic, 6);
+        assertEquals(Arrays.asList("shared.md", "b.md", "c.md", "a.md", "d.md"), baseline);
+        assertEquals(baseline, KnowledgeHybridRanking.combine(
+                Arrays.asList("b.md", "shared.md", "b.md", "a.md"), semantic, 6));
+        assertEquals(baseline, KnowledgeHybridRanking.combine(
+                Arrays.asList("", null, "b.md", "shared.md", "a.md"), semantic, 6));
+        assertEquals(baseline, KnowledgeHybridRanking.combine(
+                Arrays.asList("b.md", "shared.md", "a.md"),
+                Arrays.asList("c.md", "c.md", "shared.md", "d.md"), 6));
+    }
+
+    @Test
+    public void labeledSyntheticComplementaryListsRetainOpposingAndChannelOnlySources() {
+        final List<String> lexical = Arrays.asList(
+                "decoy-lex-a.md", "truth-support.md", "truth-refute.md",
+                "lexical-only-true.md", "decoy-lex-b.md");
+        final List<String> semantic = Arrays.asList(
+                "decoy-sem-a.md", "truth-support.md", "truth-refute.md",
+                "semantic-only-true.md", "decoy-sem-b.md");
+        final List<String> fused = KnowledgeHybridRanking.combine(lexical, semantic, 6);
+        assertEquals(6, fused.size());
+        assertEquals(Arrays.asList("truth-support.md", "truth-refute.md"), fused.subList(0, 2));
+        final List<String> gold = Arrays.asList("truth-support.md", "truth-refute.md",
+                "lexical-only-true.md", "semantic-only-true.md");
+        assertEquals(3, commonCount(lexical, gold));
+        assertEquals(3, commonCount(semantic, gold));
+        assertEquals(4, commonCount(fused, gold)); // synthetic recall@6 = 4/4
+        final List<Integer> selected = KnowledgeHybridRanking.selectBalancedIndices(
+                fused, lexical, semantic, 6);
+        assertEquals(Arrays.asList(0, 1, 2, 3, 4, 5), selected);
+        assertEquals(4, commonCount(fused, gold)); // selected precision@6 = 4/6
+        final List<String> lexicalWithDuplicates = Arrays.asList(
+                "decoy-lex-a.md", "decoy-lex-a.md", "truth-support.md", "truth-refute.md",
+                "truth-refute.md", "lexical-only-true.md", "decoy-lex-b.md");
+        assertEquals(fused, KnowledgeHybridRanking.combine(lexicalWithDuplicates, semantic, 6));
+    }
+
+    private static int commonCount(final List<String> ranked, final List<String> gold) {
+        int count = 0;
+        for (final String path : ranked) if (gold.contains(path)) count++;
+        return count;
+    }
+
+    @Test
     public void deterministicTieAndMissingModelFallback() {
         assertEquals(Arrays.asList("a.md", "z.md"), KnowledgeHybridRanking.combine(
                 Collections.singletonList("z.md"), Collections.singletonList("a.md"), 2));
