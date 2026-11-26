@@ -107,6 +107,26 @@ public class KnowledgeEmbeddingTest {
     }
 
     @Test
+    public void androidHybridFixtureOppositeVectorsCannotLeakIntoLshProbeSet() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] opposite = KnowledgeEmbeddingVectors.normalize(
+                new float[]{-1, 0, 0, 0, 0, 0, 0, 0});
+        final int[] queryProbes = KnowledgeEmbeddingLsh.probes(query);
+        final int[] oppositeBuckets = KnowledgeEmbeddingLsh.buckets(opposite);
+        for (final int bucket : oppositeBuckets) {
+            for (final int probe : queryProbes) {
+                assertNotEquals("The QA lexical-only vector must stay outside the query LSH",
+                        bucket, probe);
+            }
+        }
+        assertEquals(1, KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(query)), .00001);
+        assertEquals(-1, KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(opposite)), .00001);
+    }
+
+    @Test
     public void cosineSearchRanksSemanticVectorsAndRejectsInvalidBuffers() {
         final float[] direction = new float[]{3, 4, 0, 0, 0, 0, 0, 0};
         final float[] query = KnowledgeEmbeddingVectors.normalize(direction);

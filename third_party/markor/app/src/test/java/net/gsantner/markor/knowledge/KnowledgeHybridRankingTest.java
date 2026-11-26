@@ -62,6 +62,21 @@ public class KnowledgeHybridRankingTest {
         assertEquals(fused, KnowledgeHybridRanking.combine(lexicalWithDuplicates, semantic, 6));
     }
 
+    @Test
+    public void androidSqliteFixtureFusionRetainsAllFourAfterStaleSourceIsRemoved() {
+        final List<String> lexical = Arrays.asList("lexical-only.md", "refute.md",
+                "support.md", "tampered.md", "decoy.md");
+        final List<String> semantic = Arrays.asList("refute.md", "semantic-only.md",
+                "support.md", "tampered.md");
+        final List<String> fused = KnowledgeHybridRanking.combine(lexical, semantic, 8);
+        assertEquals(Arrays.asList("refute.md", "support.md", "tampered.md",
+                "lexical-only.md", "semantic-only.md", "decoy.md"), fused);
+        final List<String> verified = Arrays.asList("refute.md", "support.md",
+                "lexical-only.md", "semantic-only.md", "decoy.md");
+        assertEquals(Arrays.asList(0, 1, 2, 3),
+                KnowledgeHybridRanking.selectBalancedIndices(verified, lexical, semantic, 4));
+    }
+
     private static int commonCount(final List<String> ranked, final List<String> gold) {
         int count = 0;
         for (final String path : ranked) if (gold.contains(path)) count++;

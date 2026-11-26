@@ -28,10 +28,13 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -150,6 +153,7 @@ public final class KnowledgeDeviceQaRunner {
                 step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
                 step("CITE-ANCHOR-19", this::checkSyntheticClaimAnchors);
                 step("HYBRID-BALANCE-19", this::checkSyntheticHybridBalance);
+                step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex);
                 step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
                 step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
@@ -1239,6 +1243,151 @@ public final class KnowledgeDeviceQaRunner {
                 + "noModelCall=true, selectedVaultUntouched=true";
     }
 
+    /** End-to-end Android SQLite retrieval and RRF on disposable, labeled bytes.
+     * Hand-assigned vectors test index integration, not an embedding provider.
+     */
+    private String checkSyntheticHybridIndex() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Could not create hybrid sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Could not create hybrid fixture vault");
+            final String[] paths = {"lexical-only.md", "refute.md", "semantic-only.md",
+                    "support.md", "tampered.md", "decoy.md"};
+            final String[] bodies = {
+                    "# Lexical only\nAmber violet appears in a purely lexical clue.\n",
+                    "# Refutation\nAmber violet is false in this artificial report.\n",
+                    "# Semantic only\nThe fabricated reference concerns a hidden item.\n",
+                    "# Support\nAmber violet is true in this artificial report.\n",
+                    "# Tampered\nAmber violet was noted in a stale test.\n",
+                    "# Decoy\nAmber appears with a different token in this decoy.\n"
+            };
+            for (int i = 0; i < paths.length; i++) {
+                ensureRunning();
+                writeFixture(new File(vault, paths[i]), bodies[i]);
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-hybrid.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 12,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-synthetic-hybrid-vectors";
+            final float[] query = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            final float[] opposite = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{-1, 0, 0, 0, 0, 0, 0, 0});
+            for (int i = 0; i < paths.length; i++) {
+                ensureRunning();
+                final File file = new File(vault, paths[i]);
+                final byte[] sourceHash = sha256(file);
+                final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                        KnowledgeEmbeddingChunks.fromNote(bodies[i]);
+                if (chunks.size() != 1 || testIndex.beginEmbedding(paths[i],
+                        file.lastModified(), file.length(), model, 1, false, sourceHash) != 0) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_CHECKPOINT_MISMATCH");
+                }
+                final float[] vector = i == 0 || i == 5 ? opposite : query;
+                testIndex.appendEmbeddingBatch(paths[i], file.lastModified(), file.length(),
+                        model, chunks, 0, new float[][]{vector}, sourceHash);
+            }
+            final File stale = new File(vault, "tampered.md");
+            final long indexedModified = stale.lastModified();
+            final long indexedSize = stale.length();
+            writeFixture(stale, bodies[4].replace("violet", "VIOLET"));
+            if (stale.length() != indexedSize || !stale.setLastModified(indexedModified)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(
+                            stale, indexedModified, indexedSize)
+                    || testIndex.matchesIndexedEvidenceSource("tampered.md",
+                            indexedModified, indexedSize, readFixtureBytes(stale))) {
+                throw new SyntheticMismatch("verdict=HYBRID_STALE_BYTES_ACCEPTED");
+            }
+
+            final List<KnowledgeLocalIndex.Hit> lexical =
+                    testIndex.evidenceSearch("amber violet", 8);
+            final List<KnowledgeLocalIndex.SemanticHit> semantic =
+                    testIndex.semanticSearch(model, query, 8);
+            final List<String> lexicalPaths = new ArrayList<>();
+            final List<String> semanticPaths = new ArrayList<>();
+            final Map<String, KnowledgeLocalIndex.Hit> lexicalByPath = new HashMap<>();
+            final Map<String, KnowledgeLocalIndex.SemanticHit> semanticByPath = new HashMap<>();
+            for (final KnowledgeLocalIndex.Hit hit : lexical) {
+                lexicalPaths.add(hit.relativePath);
+                lexicalByPath.put(hit.relativePath, hit);
+            }
+            for (final KnowledgeLocalIndex.SemanticHit hit : semantic) {
+                semanticPaths.add(hit.relativePath);
+                semanticByPath.put(hit.relativePath, hit);
+            }
+            if (!lexicalPaths.equals(Arrays.asList("lexical-only.md", "refute.md",
+                    "support.md", "tampered.md", "decoy.md"))
+                    || !semanticPaths.equals(Arrays.asList("refute.md", "semantic-only.md",
+                            "support.md", "tampered.md"))) {
+                throw new SyntheticMismatch("verdict=HYBRID_INDEX_CHANNEL_RANKS");
+            }
+            final List<String> fused = KnowledgeHybridRanking.combine(
+                    lexicalPaths, semanticPaths, 8);
+            final List<String> verified = new ArrayList<>();
+            for (final String path : fused) {
+                ensureRunning();
+                final KnowledgeLocalIndex.SemanticHit vector = semanticByPath.get(path);
+                final KnowledgeLocalIndex.Hit text = lexicalByPath.get(path);
+                final long modified = vector != null ? vector.modifiedAtMillis : text.modifiedAtMillis;
+                final long size = vector != null ? vector.sizeBytes : text.sizeBytes;
+                final File file = new File(vault, path);
+                final byte[] currentBytes = readFixtureBytes(file);
+                if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file, modified, size)
+                        || !testIndex.matchesIndexedEvidenceSource(
+                                path, modified, size, currentBytes)) {
+                    continue;
+                }
+                if (vector != null && (vector.excerptStart < 0 || vector.excerptLength < 1
+                        || KnowledgeEmbeddingChunks.atOffset(
+                                new String(currentBytes, StandardCharsets.UTF_8),
+                                vector.excerptStart, vector.excerptLength).trim().isEmpty())) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_VECTOR_OFFSET");
+                }
+                verified.add(path);
+            }
+            final List<String> selected = new ArrayList<>();
+            for (final int index : KnowledgeHybridRanking.selectBalancedIndices(
+                    verified, lexicalPaths, semanticPaths, 4)) {
+                selected.add(verified.get(index));
+            }
+            final List<String> gold = Arrays.asList("refute.md", "support.md",
+                    "lexical-only.md", "semantic-only.md");
+            if (fused.size() != 6 || verified.size() != 5 || selected.size() != 4
+                    || !selected.containsAll(gold) || selected.contains("tampered.md")
+                    || !selected.subList(0, 2).containsAll(gold.subList(0, 2))) {
+                throw new SyntheticMismatch("verdict=HYBRID_INDEX_FUSION_RECALL");
+            }
+
+            final long[] microseconds = new long[21];
+            for (int attempt = -2; attempt < microseconds.length; attempt++) {
+                ensureRunning();
+                final long started = SystemClock.elapsedRealtimeNanos();
+                final List<KnowledgeLocalIndex.SemanticHit> ranked =
+                        testIndex.semanticSearch(model, query, 8);
+                final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+                if (ranked.size() != semantic.size()
+                        || !ranked.get(0).relativePath.equals(semantic.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_TIMED_RANK_MISMATCH");
+                }
+                if (attempt >= 0) microseconds[attempt] = Math.max(0, elapsed / 1_000L);
+            }
+            Arrays.sort(microseconds);
+            return "syntheticNotes=6, indexedVectors=6, lexicalCandidates=5, "
+                    + "semanticCandidates=4, sharedOpposingSources=true, "
+                    + "lexicalOnlyRecovered=true, semanticOnlyRecovered=true, "
+                    + "hybridVerifiedRecallAt4=4/4, staleSameMetadataBytesRejected=true, "
+                    + "semanticTrials=21, semanticP50us=" + microseconds[10]
+                    + ", semanticP95us=" + microseconds[19]
+                    + ", artificialVectorsOnly=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
     /** Synthetic cache-only post-approval mutation; no LLM call is made. */
     private String checkSyntheticConsentSourceRevision() throws Exception {
         final File sandbox = new File(context.getCacheDir(),
@@ -1772,6 +1921,16 @@ public final class KnowledgeDeviceQaRunner {
     private static void writeFixture(final File destination, final String content) throws IOException {
         try (FileOutputStream out = new FileOutputStream(destination)) {
             out.write(content.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static byte[] readFixtureBytes(final File file) throws IOException {
+        try (FileInputStream in = new FileInputStream(file);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            final byte[] buffer = new byte[1024];
+            int count;
+            while ((count = in.read(buffer)) >= 0) out.write(buffer, 0, count);
+            return out.toByteArray();
         }
     }
 

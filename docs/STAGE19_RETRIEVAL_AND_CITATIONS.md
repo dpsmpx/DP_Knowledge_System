@@ -419,6 +419,27 @@ even if every reference and quotation passes the checks below.
     `HYBRID-BALANCE-19` QA asserts the same properties and top-two retention.
     These are hand-crafted source rankings, **not actual embeddings, a model
     comparison, semantic relevance labels or representative RET-15 evidence**.
+37. **Android hybrid QA now exercises the actual SQLite retrieval pipeline**
+    on six throwaway Markdown notes in the app cache. After scanning the
+    synthetic vault, it commits six source-SHA-256-bound, 8-dimensional
+    **hand-assigned** vectors through the production embedding checkpoint and
+    LSH posting-list writer. `HYBRID-INDEX-19` retrieves both real FTS4 and
+    LSH/cosine candidate lists, fuses them with production RRF, and selects
+    byte-verified preview paths through the production balance heuristic.
+    The fixture contains two shared *opposing* artificial statements, one
+    lexical-only source, one vector-only source, a partial-word distractor,
+    and a sixth source whose bytes are deliberately changed **without
+    changing its size or mtime** after indexing. The latter must be rejected
+    by the raw-byte disclosure gate despite still appearing in stale index
+    rankings. Its predetermined four-source set must achieve **verified
+    recall@4 = 4/4** after that exclusion. Semantic query latency is logged
+    as **p50/p95 in microseconds across 21 measured calls**, following two
+    warmups, without a timing pass/fail threshold; this is a tiny SQLite
+    integration fixture, not the 20k stress corpus. The QA runs in quick and
+    stress modes without network requests, provider model credentials, or
+    access to the selected real vault. Artificial equal/opposite vectors
+    **do not measure embedding quality, real semantic recall, energy use or
+    performance on a physical device**; `RET-15` remains open.
 
 ## Reproducible synthetic retrieval benchmark
 
@@ -516,7 +537,8 @@ grounding. Device and broader human-labeled benchmarks remain open.
   embedded core checks. No external LLM credentials, personal vault content,
   outbound model calls or real knowledge journal are used by tests.
 - Deferred physical acceptance: run `CITE-ANCHOR-19` and
-  `HYBRID-BALANCE-19` from the synthetic device QA screen, then verify
+  `HYBRID-BALANCE-19` and `HYBRID-INDEX-19` from the synthetic device QA
+  screen, then verify
   accessibility/scrolling, cancellation and exact consent content with a
   synthetic local library. Compare lexical and hybrid preview p50/p95,
   perceived UI responsiveness, peak RAM and battery cost before/after the
@@ -532,6 +554,10 @@ grounding. Device and broader human-labeled benchmarks remain open.
   wider `RET-15` gate: representative labeled precision/recall, synonyms,
   semantic model behavior and Android 20k latency remain unmeasured until a
   future physical run of the new synthetic lookup timing fixture.
+  The six-note Android `HYBRID-INDEX-19` fixture is a **structural regression**
+  for posting-list search, cosine ranking, RRF diversity and source-byte
+  disclosure guards; its artificial vectors and bounded-query timing must
+  not be presented as representative learned semantic quality or 20k latency.
 - Schema v4 additionally stores a **SHA-256 of the raw indexed Markdown bytes**
   in the *disposable* local index. Both lexical and hybrid LLM evidence paths
   now verify that digest against the **same bytes read for the excerpt**, as
