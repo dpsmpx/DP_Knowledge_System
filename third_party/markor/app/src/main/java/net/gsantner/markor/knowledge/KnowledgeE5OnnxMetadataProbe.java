@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.RandomAccessFile;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,12 +27,20 @@ final class KnowledgeE5OnnxMetadataProbe {
         final int outputs;
         final int dynamicAxes;
         final long modelBytes;
+        // Only expected public E5 graph names survive requireE5Small().
+        // These in-memory declarations are NEVER put into UI or Binder output.
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> inputSignature;
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> outputSignature;
 
-        private Report(final int in, final int out, final int dynamic, final long bytes) {
-            inputs = in;
-            outputs = out;
+        private Report(final Map<String, KnowledgeE5OnnxSignature.Tensor> in,
+                       final Map<String, KnowledgeE5OnnxSignature.Tensor> out,
+                       final int dynamic, final long bytes) {
+            inputs = in.size();
+            outputs = out.size();
             dynamicAxes = dynamic;
             modelBytes = bytes;
+            inputSignature = Collections.unmodifiableMap(new LinkedHashMap<>(in));
+            outputSignature = Collections.unmodifiableMap(new LinkedHashMap<>(out));
         }
     }
 
@@ -159,7 +168,7 @@ final class KnowledgeE5OnnxMetadataProbe {
             } catch (IllegalArgumentException mismatch) {
                 throw new IOException("ONNX graph signature is not E5 Small", mismatch);
             }
-            return new Report(inputs.size(), outputs.size(), dynamicAxes[0], expectedBytes);
+            return new Report(inputs, outputs, dynamicAxes[0], expectedBytes);
         }
     }
 

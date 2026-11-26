@@ -19,6 +19,14 @@ final class KnowledgeOnnxEmbeddingSmoke {
     private KnowledgeOnnxEmbeddingSmoke() { }
 
     static byte[] gatherModel() {
+        return gatherModel(DIMENSIONS);
+    }
+
+    /** Diagnostic shapes only; 384 channels emulate the E5 Small I/O contract. */
+    static byte[] gatherModel(final int dimensions) {
+        if (dimensions != DIMENSIONS && dimensions != 384 && dimensions != 768) {
+            throw new IllegalArgumentException("Unsupported synthetic tensor width");
+        }
         final ByteArrayOutputStream model = new ByteArrayOutputStream();
         KnowledgeOnnxSmoke.uint(model, 1, 9);
         KnowledgeOnnxSmoke.string(model, 2, "DPKS synthetic embedding tensor test");
@@ -38,13 +46,13 @@ final class KnowledgeOnnxEmbeddingSmoke {
 
         final ByteArrayOutputStream table = new ByteArrayOutputStream();
         KnowledgeOnnxSmoke.uint(table, 1, 4);
-        KnowledgeOnnxSmoke.uint(table, 1, DIMENSIONS);
+        KnowledgeOnnxSmoke.uint(table, 1, dimensions);
         KnowledgeOnnxSmoke.uint(table, 2, 1); // ONNX FLOAT tensor
         KnowledgeOnnxSmoke.string(table, 8, "synthetic_table");
-        final ByteBuffer values = ByteBuffer.allocate(4 * DIMENSIONS * Float.BYTES)
+        final ByteBuffer values = ByteBuffer.allocate(4 * dimensions * Float.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN);
         for (int row = 0; row < 4; row++) {
-            for (int column = 0; column < DIMENSIONS; column++) {
+            for (int column = 0; column < dimensions; column++) {
                 final float value = row == 0 && column == 0 ? 2f
                         : row == 1 && column == 0 ? 9999f
                         : (row == 2 || row == 3) && column == 1 ? 4f : 0f;
@@ -61,7 +69,7 @@ final class KnowledgeOnnxEmbeddingSmoke {
         KnowledgeOnnxSmoke.bytes(graph, 11,
                 KnowledgeOnnxSmoke.valueInfo("token_type_ids", 7, 1, 4));
         KnowledgeOnnxSmoke.bytes(graph, 12,
-                KnowledgeOnnxSmoke.valueInfo("last_hidden_state", 1, 1, 4, DIMENSIONS));
+                KnowledgeOnnxSmoke.valueInfo("last_hidden_state", 1, 1, 4, dimensions));
         KnowledgeOnnxSmoke.bytes(model, 7, graph.toByteArray());
         return model.toByteArray();
     }

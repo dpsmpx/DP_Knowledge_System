@@ -53,4 +53,21 @@ public final class KnowledgeOnnxEmbeddingSmokeTest {
         assertEquals(KnowledgeOnnxEmbeddingSmoke.EXPECTED_0, normalized[0], .000001f);
         assertEquals(KnowledgeOnnxEmbeddingSmoke.EXPECTED_1, normalized[1], .000001f);
     }
+
+    @Test public void generatedE5WidthGraphHasCanonicalReadOnlyIoSignature() throws Exception {
+        final byte[] e5Width = KnowledgeOnnxEmbeddingSmoke.gatherModel(384);
+        assertArrayEquals(e5Width, KnowledgeOnnxEmbeddingSmoke.gatherModel(384));
+        assertTrue(e5Width.length > 1024 && e5Width.length < 20 * 1024);
+        final File file = File.createTempFile("dpks-e5-width-gather-", ".onnx");
+        try {
+            Files.write(file.toPath(), e5Width);
+            final KnowledgeE5OnnxMetadataProbe.Report report =
+                    KnowledgeE5OnnxMetadataProbe.inspect(file, e5Width.length,
+                            KnowledgeE5ConfigProfile.parse(KnowledgeE5ConfigProfileTest.model(), null));
+            assertEquals(3, report.inputs);
+            assertEquals(1, report.outputs);
+            assertEquals(0, report.dynamicAxes);
+            assertEquals(e5Width.length, report.modelBytes);
+        } finally { assertTrue(file.delete()); }
+    }
 }
