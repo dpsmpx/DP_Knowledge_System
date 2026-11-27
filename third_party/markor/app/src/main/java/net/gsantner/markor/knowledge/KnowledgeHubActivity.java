@@ -1014,6 +1014,9 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                             .setTitle(R.string.knowledge_models_e5_graph)
                             .setMessage(getString(R.string.knowledge_models_e5_graph_fingerprint,
                                     result.descriptorSha256))
+                            .setNegativeButton(R.string.knowledge_models_e5_graph_compare,
+                                    (dialog, button) -> showE5OnnxReferenceComparison(
+                                            entry.sha256, result.descriptorSha256))
                             .setNeutralButton(R.string.knowledge_models_e5_qa_copy,
                                     (dialog, button) -> {
                                         final ClipboardManager clipboard = (ClipboardManager)
@@ -1035,6 +1038,71 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    /** No persistence or inference: both hashes must come from the same ONNX weight file. */
+    private void showE5OnnxReferenceComparison(final String localWeightSha,
+                                                final String localDescriptorSha) {
+        if (isFinishing() || isDestroyed()) return;
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int margin = (int) (getResources().getDisplayMetrics().density * 24f + .5f);
+        fields.setPadding(margin, margin / 2, margin, 0);
+
+        final TextView instructions = new TextView(this);
+        instructions.setText(R.string.knowledge_models_e5_graph_compare_prompt);
+        fields.addView(instructions);
+        final EditText weightsSha = new EditText(this);
+        weightsSha.setSingleLine(true);
+        weightsSha.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        weightsSha.setHint(R.string.knowledge_models_e5_graph_reference_weights);
+        fields.addView(weightsSha);
+        final EditText descriptorSha = new EditText(this);
+        descriptorSha.setSingleLine(true);
+        descriptorSha.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        descriptorSha.setHint(R.string.knowledge_models_e5_graph_reference_descriptor);
+        fields.addView(descriptorSha);
+
+        final AlertDialog comparison = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_models_e5_graph_compare)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_e5_qa_compare_action, null)
+                .create();
+        comparison.setOnShowListener(ignored -> comparison.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
+                    final String referenceWeights = weightsSha.getText().toString().trim();
+                    final String referenceDescriptor = descriptorSha.getText().toString().trim();
+                    if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceWeights)) {
+                        weightsSha.setError(getString(
+                                R.string.knowledge_models_e5_qa_reference_invalid));
+                        return;
+                    }
+                    if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceDescriptor)) {
+                        descriptorSha.setError(getString(
+                                R.string.knowledge_models_e5_qa_reference_invalid));
+                        return;
+                    }
+                    final KnowledgeE5OnnxReferenceComparison.Verdict verdict =
+                            KnowledgeE5OnnxReferenceComparison.compare(localWeightSha,
+                                    localDescriptorSha, referenceWeights, referenceDescriptor);
+                    final int messageId = verdict == KnowledgeE5OnnxReferenceComparison.Verdict.MATCH
+                            ? R.string.knowledge_models_e5_graph_reference_match
+                            : verdict == KnowledgeE5OnnxReferenceComparison.Verdict.DIFFERENT_WEIGHTS
+                            ? R.string.knowledge_models_e5_graph_reference_different_weights
+                            : R.string.knowledge_models_e5_graph_reference_different_descriptor;
+                    comparison.dismiss();
+                    if (isFinishing() || isDestroyed()) return;
+                    modelStatus.setText(messageId);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_models_e5_graph_compare)
+                            .setMessage(messageId)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                }));
+        comparison.show();
     }
 
     /** Manual synthetic end-to-end FD transport + isolated session, never a user model. */

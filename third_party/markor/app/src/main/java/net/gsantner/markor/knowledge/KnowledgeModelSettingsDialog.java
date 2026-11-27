@@ -345,10 +345,11 @@ final class KnowledgeModelSettingsDialog {
     private String resourceReport(final KnowledgeModelFiles.Entry entry,
                                   final KnowledgeModelPackageManifest manifest) {
         try {
-            final long osAvailableRam = availableRamBytes();
+            final ActivityManager.MemoryInfo memory = memorySnapshot();
+            final long osAvailableRam = memory == null ? 0 : Math.max(0, memory.availMem);
             final KnowledgeModelResourcePlan.Report report = KnowledgeModelResourcePlan.plan(
                     entry, manifest, osAvailableRam, context.getFilesDir().getUsableSpace());
-            return context.getString(R.string.knowledge_models_resource_report,
+            final String general = context.getString(R.string.knowledge_models_resource_report,
                     formatSize(report.weightBytes), formatSize(report.externalBytes),
                     report.externalFiles, formatSize(report.otherCompanionBytes),
                     formatSize(report.totalDeclaredBytes),
@@ -359,6 +360,28 @@ final class KnowledgeModelSettingsDialog {
                             ? context.getString(R.string.knowledge_models_container_unknown)
                             : formatSize(report.freeStorageBytes),
                     context.getString(resourceGateLabel(report.gate)));
+            if (manifest == null || entry.role != KnowledgeModelPolicy.Role.EMBEDDING
+                    || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
+                    || KnowledgeModelCatalog.e5Companions(entry.role, entry.sha256).isEmpty()) {
+                return general;
+            }
+            final KnowledgeE5ResourceEstimate.Plan e5 = KnowledgeE5ResourceEstimate.assess(
+                    entry.bytes, report.externalBytes,
+                    KnowledgeEmbeddingTensorContract.MAX_SEQUENCE_LENGTH, true,
+                    osAvailableRam, memory == null || memory.lowMemory);
+            final int status = memory == null || osAvailableRam == 0
+                    ? R.string.knowledge_models_e5_resource_unknown
+                    : e5.memoryDenied ? R.string.knowledge_models_e5_resource_denied
+                    : e5.memoryWarning ? R.string.knowledge_models_e5_resource_warning
+                    : R.string.knowledge_models_e5_resource_prefilter;
+            return general + "\n\n" + context.getString(
+                    R.string.knowledge_models_e5_resource_report,
+                    formatSize(e5.estimatedWorkingSetBytes),
+                    osAvailableRam == 0
+                            ? context.getString(R.string.knowledge_models_container_unknown)
+                            : formatSize(osAvailableRam),
+                    formatSize(e5.inputTensorBytes), formatSize(e5.hiddenTensorBytes),
+                    context.getString(status));
         } catch (IOException | RuntimeException invalid) {
             return context.getString(R.string.knowledge_models_resource_unavailable);
         }
@@ -725,15 +748,20 @@ final class KnowledgeModelSettingsDialog {
     }
 
     private long availableRamBytes() {
+        final ActivityManager.MemoryInfo memory = memorySnapshot();
+        return memory == null ? 0 : Math.max(0, memory.availMem);
+    }
+
+    private ActivityManager.MemoryInfo memorySnapshot() {
         try {
             final ActivityManager manager = (ActivityManager)
                     context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (manager == null) return 0;
+            if (manager == null) return null;
             final ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
             manager.getMemoryInfo(memory);
-            return Math.max(0, memory.availMem);
+            return memory;
         } catch (RuntimeException unavailable) {
-            return 0;
+            return null;
         }
     }
 
