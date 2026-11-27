@@ -64,6 +64,23 @@ final class KnowledgeOnnxIsolatedSessionClient {
 
     /** Takes ownership of bytes even when binding fails; never retains a file path. */
     boolean start(final byte[] auditedModel, final String expectedSha256, final Callback result) {
+        return startRequest(auditedModel, expectedSha256, result,
+                KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION);
+    }
+
+    /** Instrumentation-only; the worker also pins the exact generated E5 graph. */
+    boolean startDebugSyntheticE5(final byte[] generatedGraph, final String expectedSha256,
+                                  final Callback result) {
+        if (!BuildConfig.DEBUG) {
+            if (generatedGraph != null) Arrays.fill(generatedGraph, (byte) 0);
+            return false;
+        }
+        return startRequest(generatedGraph, expectedSha256, result,
+                KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD);
+    }
+
+    private boolean startRequest(final byte[] auditedModel, final String expectedSha256,
+                                 final Callback result, final int command) {
         if (auditedModel == null) return false;
         if (result == null || connection != null || auditedModel.length < 16
                 || auditedModel.length > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
@@ -101,8 +118,7 @@ final class KnowledgeOnnxIsolatedSessionClient {
                     final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
                     readPipe = pipe[0];
                     writePipe = pipe[1];
-                    final Message request = Message.obtain(null,
-                            KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION);
+                    final Message request = Message.obtain(null, command);
                     request.arg1 = requestId;
                     request.arg2 = pendingBytes.length;
                     request.replyTo = inbox;

@@ -4,6 +4,8 @@ package net.gsantner.markor.knowledge;
 import android.content.Context;
 import android.os.Debug;
 
+import net.gsantner.markor.BuildConfig;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
@@ -25,6 +27,30 @@ final class KnowledgeOnnxCpuBackend {
     private KnowledgeOnnxCpuBackend() { }
 
     static boolean available() { return true; }
+
+    /** Debug-only inference. The callee must pin received bytes before createSession(). */
+    static KnowledgeOnnxSessionGate.Report runPinnedSyntheticE5(final Context workerContext,
+                                       final byte[] received,
+                                       final KnowledgeOnnxMemoryTrace.Recorder memory)
+            throws Exception {
+        if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker()) {
+            throw new IOException("Pinned E5 FD inference is debug-worker only");
+        }
+        KnowledgeE5IsolatedSmoke.requirePinnedGraph(received);
+        // Do not invoke inspect() first: that would create a native session
+        // for untrusted bytes before the exact synthetic-fixture comparison.
+        final OrtEnvironment environment = OrtEnvironment.getEnvironment();
+        try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+            options.setIntraOpNumThreads(1);
+            options.setInterOpNumThreads(1);
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
+            KnowledgeE5IsolatedSmoke.verifyTransported(
+                    workerContext, received, environment, options, memory);
+        }
+        // All 384 output values were already checked inside the isolated UID.
+        // The Binder reply contains ONLY the existing bounded scalar I/O report.
+        return inspect(received, memory);
+    }
 
     /** Parse one user-approved, hash-verified model in memory; NEVER call run(). */
     static KnowledgeOnnxSessionGate.Report inspect(final byte[] modelBytes,
