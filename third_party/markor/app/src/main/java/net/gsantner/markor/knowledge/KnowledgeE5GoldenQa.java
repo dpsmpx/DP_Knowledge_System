@@ -23,6 +23,8 @@ final class KnowledgeE5GoldenQa {
             KnowledgeE5Text.Purpose.QUERY, KnowledgeE5Text.Purpose.PASSAGE
     };
 
+    enum ReferenceVerdict { MATCH, DIFFERENT_TOKENIZER, DIFFERENT_TOKEN_IDS }
+
     static final class Report {
         final String modelSha256;
         final String fingerprintSha256;
@@ -39,6 +41,34 @@ final class KnowledgeE5GoldenQa {
     }
 
     private KnowledgeE5GoldenQa() { }
+
+    /** Compare an independently produced offline reference, never enable inference. */
+    static ReferenceVerdict compareReference(final Report local,
+                                            final String referenceTokenizerSha,
+                                            final String referenceFingerprintSha) {
+        if (local == null || !validSha256(local.modelSha256)
+                || !validSha256(local.fingerprintSha256)
+                || !validSha256(referenceTokenizerSha)
+                || !validSha256(referenceFingerprintSha)) {
+            throw new IllegalArgumentException("Expected exact lowercase SHA-256 for both E5 fields");
+        }
+        if (!MessageDigest.isEqual(local.modelSha256.getBytes(StandardCharsets.US_ASCII),
+                referenceTokenizerSha.getBytes(StandardCharsets.US_ASCII))) {
+            return ReferenceVerdict.DIFFERENT_TOKENIZER;
+        }
+        return MessageDigest.isEqual(local.fingerprintSha256.getBytes(StandardCharsets.US_ASCII),
+                referenceFingerprintSha.getBytes(StandardCharsets.US_ASCII))
+                ? ReferenceVerdict.MATCH : ReferenceVerdict.DIFFERENT_TOKEN_IDS;
+    }
+
+    static boolean validSha256(final String sha) {
+        if (sha == null || sha.length() != 64) return false;
+        for (int i = 0; i < sha.length(); i++) {
+            final char c = sha.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        }
+        return true;
+    }
 
     static Report run(final Context context, final KnowledgeModelPackageStore packages,
                       final KnowledgeModelFiles.Entry entry) throws IOException {
