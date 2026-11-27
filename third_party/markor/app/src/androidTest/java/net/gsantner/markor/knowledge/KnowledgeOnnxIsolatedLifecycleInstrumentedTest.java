@@ -29,6 +29,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -147,6 +149,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(0, io.dynamicOutputAxes);
             assertEquals(1, io.maxInputRank);
             assertEquals(1, io.maxOutputRank);
+            assertNull("Unrelated Identity graph must not claim E5", io.e5DescriptorSha256);
             assertEquals(1, declared.floatInputs);
             assertEquals(1, declared.floatOutputs);
             assertEquals(0, declared.int64Inputs);
@@ -200,6 +203,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(2, io.floatOutputs);
             assertEquals(2, io.maxInputRank);
             assertEquals(3, io.maxOutputRank);
+            assertEquals("Two-input E5 native metadata fingerprint differs",
+                    expectedE5DescriptorSha256(false, true), io.e5DescriptorSha256);
             assertWorkerPssSnapshots(report.get().workerMemory);
             assertTrue(KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
             for (final byte wiped : graph) assertEquals("Sent E5 bytes not wiped", 0, wiped);
@@ -240,6 +245,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             assertEquals(1, io.floatOutputs);
             assertEquals(2, io.maxInputRank);
             assertEquals(3, io.maxOutputRank);
+            assertEquals("Three-input E5 native metadata fingerprint differs",
+                    expectedE5DescriptorSha256(true, false), io.e5DescriptorSha256);
             assertWorkerPssSnapshots(report.get().workerMemory);
             assertTrue(KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
             for (final byte wiped : graph) assertEquals("Sent three-input E5 bytes not wiped", 0, wiped);
@@ -649,6 +656,24 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             closePipe(pipe[1]);
             unbindWorker(connection);
         }
+    }
+
+    /** Independent expected metadata for the generated six-token E5 smoke. */
+    private static String expectedE5DescriptorSha256(final boolean tokenTypes,
+                                                     final boolean pooler) {
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> inputs = new LinkedHashMap<>();
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> outputs = new LinkedHashMap<>();
+        inputs.put("input_ids", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        inputs.put("attention_mask", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        if (tokenTypes) inputs.put("token_type_ids", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        outputs.put("last_hidden_state", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 6, 384));
+        if (pooler) outputs.put("pooler_output", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 384));
+        return KnowledgeE5OnnxSignature.descriptorSha256(inputs, outputs);
     }
 
     private static void assertWorkerPssSnapshots(final KnowledgeOnnxMemoryTrace memory) {

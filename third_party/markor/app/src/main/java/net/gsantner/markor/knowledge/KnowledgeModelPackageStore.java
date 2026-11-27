@@ -500,9 +500,16 @@ final class KnowledgeModelPackageStore {
         final long floatOutputs;
         final long int64Inputs;
         final long int64Outputs;
+        final String e5DescriptorSha256;
 
         CpuSessionInput(final byte[] verifiedBytes,
                         final KnowledgeModelContainerProbe.Result container) {
+            this(verifiedBytes, container, null);
+        }
+
+        CpuSessionInput(final byte[] verifiedBytes,
+                        final KnowledgeModelContainerProbe.Result container,
+                        final String e5DescriptorSha256) {
             bytes = verifiedBytes;
             declaredInputs = container.graphInputs;
             declaredOutputs = container.graphOutputs;
@@ -512,6 +519,7 @@ final class KnowledgeModelPackageStore {
             floatOutputs = container.floatOutputs;
             int64Inputs = container.int64Inputs;
             int64Outputs = container.int64Outputs;
+            this.e5DescriptorSha256 = e5DescriptorSha256;
         }
     }
 
@@ -570,11 +578,32 @@ final class KnowledgeModelPackageStore {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedIOException("ONNX CPU session inspection cancelled");
             }
-            final CpuSessionInput input = new CpuSessionInput(bytes, audit.container);
+            final CpuSessionInput input = new CpuSessionInput(bytes, audit.container,
+                    optionalE5DescriptorSha256(entry, manifest, audit.container));
             verified = true;
             return input;
         } finally {
             if (!verified) Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    /** Diagnostic only. A non-E5 package keeps its aggregate-only comparison. */
+    private String optionalE5DescriptorSha256(final KnowledgeModelFiles.Entry entry,
+                    final KnowledgeModelPackageManifest manifest,
+                    final KnowledgeModelContainerProbe.Result container) throws IOException {
+        if (manifest.role != KnowledgeModelPolicy.Role.EMBEDDING) return null;
+        try {
+            final KnowledgeE5ConfigProfile.Result config = e5Config(entry);
+            final KnowledgeE5OnnxMetadataProbe.Report metadata =
+                    KnowledgeE5OnnxMetadataProbe.inspect(weightFile(entry), entry.bytes, config);
+            if (metadata.inputs != container.graphInputs
+                    || metadata.outputs != container.graphOutputs) return null;
+            return KnowledgeE5OnnxSignature.descriptorSha256(
+                    metadata.inputSignature, metadata.outputSignature);
+        } catch (InterruptedIOException cancelled) {
+            throw cancelled;
+        } catch (IOException | IllegalArgumentException notCanonicalE5) {
+            return null;
         }
     }
 

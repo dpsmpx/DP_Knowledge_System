@@ -230,7 +230,8 @@ final class KnowledgeOnnxIsolatedSessionClient {
                     data.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_INPUT_AXES, -1),
                     data.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_OUTPUT_AXES, -1),
                     data.getInt(KnowledgeOnnxIsolatedProtocol.MAX_INPUT_RANK, -1),
-                    data.getInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK, -1));
+                    data.getInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK, -1),
+                    data.getString(KnowledgeOnnxIsolatedProtocol.E5_DESCRIPTOR_SHA256));
             if (millis >= 0 && millis <= KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                     && inputs >= 1 && inputs <= 32 && outputs >= 1 && outputs <= 32
                     && KnowledgeOnnxMemoryTrace.valid(before, observed, after)

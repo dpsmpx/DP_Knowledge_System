@@ -8,6 +8,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 
@@ -109,6 +111,20 @@ public final class KnowledgeE5OnnxMetadataProbeTest {
         assertEquals(2, report.inputs);
         assertEquals(1, report.outputs);
         assertEquals(6, report.dynamicAxes);
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> expectedInputs =
+                new LinkedHashMap<>();
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> expectedOutputs =
+                new LinkedHashMap<>();
+        expectedInputs.put("input_ids", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, -1, -1));
+        expectedInputs.put("attention_mask", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, -1, -1));
+        expectedOutputs.put("last_hidden_state", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.FLOAT32, -1, -1, 384));
+        assertEquals("Independent protobuf scan must retain exact E5 metadata",
+                KnowledgeE5OnnxSignature.descriptorSha256(expectedInputs, expectedOutputs),
+                KnowledgeE5OnnxSignature.descriptorSha256(
+                        report.inputSignature, report.outputSignature));
         final byte[] large = model(384, false, true);
         assertTrue(large.length > 1024 * 1024);
         assertEquals(large.length, inspect(large).modelBytes);
