@@ -128,6 +128,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private static final int REQUEST_KNOWLEDGE_NOTIFICATIONS = 40023;
     private static final int REQUEST_IMPORT_MODEL = 40024;
     private static final int REQUEST_IMPORT_MODEL_PACKAGE = 40025;
+    private static final int REQUEST_IMPORT_OFFICIAL_E5 = 40026;
     private static final String STATE_PENDING_MODEL_IMPORT = "dpks_pending_model_import";
     private static final String STATE_PENDING_MODEL_PACKAGE = "dpks_pending_model_package";
     private static final String[] AUDIT_CATEGORIES = {
@@ -298,7 +299,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
                         this::runOnnxFdSmoke, this::runSyntheticModelBenchmark,
                         this::inspectOnnxCpuSession, this::runE5TokenizerGoldenQa,
-                        this::runE5OnnxMetadataCheck).show();
+                        this::runE5OnnxMetadataCheck, this::pickOfficialE5Companions).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -556,6 +557,86 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
             pendingModelPackageKey = null;
             modelStatus.setText(R.string.knowledge_models_picker_failed);
         }
+    }
+
+    /** Assemble E5 companion metadata from three explicitly chosen SAF files. */
+    private void pickOfficialE5Companions(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null || KnowledgeModelCatalog.e5Companions(
+                entry.role, entry.sha256).isEmpty()) return;
+        pendingModelPackageKey = entry.role.name() + ":" + entry.sha256;
+        final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_OFFICIAL_E5);
+        } catch (RuntimeException unavailable) {
+            pendingModelPackageKey = null;
+            modelStatus.setText(R.string.knowledge_models_picker_failed);
+        }
+    }
+
+    private void installOfficialE5FromPicker(final Intent picker,
+                                             final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || entry == null) return;
+        final List<Uri> chosen = new ArrayList<>();
+        final ClipData clip = picker.getClipData();
+        if (clip != null) {
+            if (clip.getItemCount() != 3) {
+                modelStatus.setText(R.string.knowledge_models_e5_build_failed);
+                return;
+            }
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                chosen.add(clip.getItemAt(i).getUri());
+            }
+        } else if (picker.getData() != null) {
+            chosen.add(picker.getData());
+        }
+        if (chosen.size() != 3) {
+            modelStatus.setText(R.string.knowledge_models_e5_build_failed);
+            return;
+        }
+        final List<KnowledgeModelPackageStore.Source> sources = new ArrayList<>();
+        for (final Uri uri : chosen) {
+            if (uri == null || !"content".equals(uri.getScheme())) {
+                modelStatus.setText(R.string.knowledge_models_e5_build_failed);
+                return;
+            }
+            final String name = modelDisplayName(uri);
+            sources.add(new KnowledgeModelPackageStore.Source(name,
+                    () -> getContentResolver().openInputStream(uri)));
+        }
+        modelImportActive = true;
+        ((Button) findViewById(R.id.knowledge_models_open))
+                .setText(R.string.knowledge_models_cancel_transfer);
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_e5_build_running);
+        runningModelImport = modelWorker.submit(() -> {
+            try {
+                // Verify chosen bytes first, then atomically install by reopening
+                // and rehashing SAF sources. This never starts an ONNX session.
+                final byte[] manifest = KnowledgeE5OfficialPackage.fromSelectedFiles(entry,
+                        sources);
+                final KnowledgeModelPackageManifest installed = modelPackages.install(
+                        manifest, sources, entry);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(getString(R.string.knowledge_models_e5_build_done,
+                                installed.components.size() - 1));
+                    }
+                });
+            } catch (IOException | RuntimeException invalid) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && modelGeneration.get() == operation) {
+                        modelImportActive = false;
+                        restoreModelButton();
+                        modelStatus.setText(R.string.knowledge_models_e5_build_failed);
+                    }
+                });
+            }
+        });
     }
 
     private void importModelPackageFromPicker(final Intent picker,
@@ -5366,14 +5447,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     && data.getData() != null) {
                 importModelFromUri(data.getData(), role);
             }
-        } else if (requestCode == REQUEST_IMPORT_MODEL_PACKAGE) {
+        } else if (requestCode == REQUEST_IMPORT_MODEL_PACKAGE
+                || requestCode == REQUEST_IMPORT_OFFICIAL_E5) {
             final String key = pendingModelPackageKey;
             pendingModelPackageKey = null;
             if (key != null && resultCode == RESULT_OK && data != null) {
                 try {
                     for (final KnowledgeModelFiles.Entry entry : modelFiles.installed()) {
                         if (key.equals(entry.role.name() + ":" + entry.sha256)) {
-                            importModelPackageFromPicker(data, entry);
+                            if (requestCode == REQUEST_IMPORT_OFFICIAL_E5) {
+                                installOfficialE5FromPicker(data, entry);
+                            } else {
+                                importModelPackageFromPicker(data, entry);
+                            }
                             break;
                         }
                     }
