@@ -178,7 +178,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         final AtomicBoolean bound = new AtomicBoolean();
         try {
             instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
-                    graph, sha, new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                    graph, sha, KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
                 @Override public void success(final KnowledgeOnnxSessionGate.Report result) {
                     report.set(result);
                     finished.countDown();
@@ -207,10 +208,50 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void debugFdPinnedThreeInputE5RunsAll384ChannelsInsideWorker()
+            throws Exception {
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(context);
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, true, false);
+        final String sha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
+        final CountDownLatch finished = new CountDownLatch(1);
+        final AtomicReference<KnowledgeOnnxSessionGate.Report> report = new AtomicReference<>();
+        final AtomicBoolean bound = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
+                    graph, sha, KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report result) {
+                    report.set(result);
+                    finished.countDown();
+                }
+                @Override public void failure() { finished.countDown(); }
+            })));
+            assertTrue("Three-input E5 FD bind failed", bound.get());
+            assertTrue("Three-input E5 FD worker timed out", finished.await(40, TimeUnit.SECONDS));
+            assertNotNull("Pinned 3-input E5 failed its 384-channel worker verification",
+                    report.get());
+            assertEquals(3, report.get().inputs);
+            assertEquals(1, report.get().outputs);
+            final KnowledgeOnnxIoSummary io = report.get().ioSummary;
+            assertEquals(3, io.inputTensors);
+            assertEquals(1, io.outputTensors);
+            assertEquals(3, io.int64Inputs);
+            assertEquals(1, io.floatOutputs);
+            assertEquals(2, io.maxInputRank);
+            assertEquals(3, io.maxOutputRank);
+            assertWorkerPssSnapshots(report.get().workerMemory);
+            assertTrue(KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
+            for (final byte wiped : graph) assertEquals("Sent three-input E5 bytes not wiped", 0, wiped);
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     @Test public void debugFdE5RejectsOtherValidGraphWithItsOwnCorrectSha() throws Exception {
         final KnowledgeOnnxIsolatedSessionClient client =
                 new KnowledgeOnnxIsolatedSessionClient(context);
-        // Also a valid generated E5 ONNX graph, but NOT the sole pinned variant.
+        // Also a valid generated E5 ONNX graph, but the claimed variant is wrong.
         // A correct sender-supplied SHA alone must never authorize native Run().
         final byte[] alternate = KnowledgeE5TokenEmbeddingSmoke.graph(6, true, false);
         final String matchingSha = KnowledgeOnnxSessionPipe.sha256Hex(alternate);
@@ -219,7 +260,9 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         final AtomicBoolean bound = new AtomicBoolean();
         try {
             instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
-                    alternate, matchingSha, new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                    alternate, matchingSha,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
                 @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
                     unexpectedSuccess.set(true);
                     finished.countDown();
@@ -233,6 +276,77 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             for (final byte wiped : alternate) assertEquals("Rejected E5 bytes not wiped", 0, wiped);
         } finally {
             instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void debugFdE5RejectsMutatedSelfHashedFixtureAndInvalidVariant()
+            throws Exception {
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(context);
+        // Mutating a known fixture and recomputing its SHA cannot make it trusted.
+        final byte[] changed = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        changed[changed.length / 2] ^= 1;
+        final String recomputedSha = KnowledgeOnnxSessionPipe.sha256Hex(changed);
+        final CountDownLatch finished = new CountDownLatch(1);
+        final AtomicBoolean unexpectedSuccess = new AtomicBoolean();
+        final AtomicBoolean bound = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
+                    changed, recomputedSha,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
+                    new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
+                    unexpectedSuccess.set(true);
+                    finished.countDown();
+                }
+                @Override public void failure() { finished.countDown(); }
+            })));
+            assertTrue("Changed E5 FD bind failed", bound.get());
+            assertTrue("Changed E5 FD rejection timed out", finished.await(40, TimeUnit.SECONDS));
+            assertFalse("Mutated self-hashed graph reached native inference",
+                    unexpectedSuccess.get());
+            for (final byte wiped : changed) assertEquals("Mutated E5 bytes not wiped", 0, wiped);
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+
+        // Reject unknown or missing fixture identifiers without even binding.
+        final byte[] invalid = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final String sha = KnowledgeOnnxSessionPipe.sha256Hex(invalid);
+        final AtomicBoolean invalidAccepted = new AtomicBoolean(true);
+        instrumentation.runOnMainSync(() -> invalidAccepted.set(client.startDebugSyntheticE5(
+                invalid, sha, 999, new KnowledgeOnnxIsolatedSessionClient.Callback() {
+            @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
+                unexpectedSuccess.set(true);
+            }
+            @Override public void failure() { unexpectedSuccess.set(true); }
+        })));
+        assertFalse("Unrecognized E5 fixture identifier was accepted", invalidAccepted.get());
+        for (final byte wiped : invalid) assertEquals("Invalid fixture bytes not wiped", 0, wiped);
+        assertFalse("Invalid fixture request invoked callback", unexpectedSuccess.get());
+    }
+
+    @Test public void debugFdWorkerRejectsUnknownVariantWithoutReadingItsPipe()
+            throws Exception {
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendDebugE5(pipe[0], graph.length,
+                    KnowledgeOnnxSessionPipe.sha256Hex(graph), 999);
+            closePipe(pipe[0]);
+            // Deliberately keep the write end open and do not send any bytes.
+            // The invalid-variant response must precede even the first FD read.
+            assertTrue("Unknown variant blocked on an unread FD",
+                    connection.responded.await(5, TimeUnit.SECONDS));
+            assertEquals("Unknown variant unexpectedly reached ONNX",
+                    KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+            Arrays.fill(graph, (byte) 0);
         }
     }
 
@@ -717,6 +831,21 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
             if (debugLowMemory) data.putBoolean(
                     KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, true);
+            request.setData(data);
+            messenger.send(request);
+        }
+
+        void sendDebugE5(final ParcelFileDescriptor readPipe, final int length,
+                         final String expectedSha, final int variant) throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD);
+            request.arg1 = 1;
+            request.arg2 = length;
+            request.replyTo = reply;
+            final Bundle data = new Bundle();
+            data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
+            data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, variant);
             request.setData(data);
             messenger.send(request);
         }

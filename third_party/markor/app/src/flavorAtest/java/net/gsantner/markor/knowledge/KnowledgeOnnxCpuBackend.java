@@ -30,13 +30,13 @@ final class KnowledgeOnnxCpuBackend {
 
     /** Debug-only inference. The callee must pin received bytes before createSession(). */
     static KnowledgeOnnxSessionGate.Report runPinnedSyntheticE5(final Context workerContext,
-                                       final byte[] received,
+                                       final byte[] received, final int variant,
                                        final KnowledgeOnnxMemoryTrace.Recorder memory)
             throws Exception {
         if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker()) {
             throw new IOException("Pinned E5 FD inference is debug-worker only");
         }
-        KnowledgeE5IsolatedSmoke.requirePinnedGraph(received);
+        KnowledgeE5IsolatedSmoke.requirePinnedGraph(received, variant);
         // Do not invoke inspect() first: that would create a native session
         // for untrusted bytes before the exact synthetic-fixture comparison.
         final OrtEnvironment environment = OrtEnvironment.getEnvironment();
@@ -45,7 +45,7 @@ final class KnowledgeOnnxCpuBackend {
             options.setInterOpNumThreads(1);
             options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
             KnowledgeE5IsolatedSmoke.verifyTransported(
-                    workerContext, received, environment, options, memory);
+                    workerContext, received, variant, environment, options, memory);
         }
         // All 384 output values were already checked inside the isolated UID.
         // The Binder reply contains ONLY the existing bounded scalar I/O report.
