@@ -821,6 +821,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     new MaterialAlertDialogBuilder(this)
                             .setTitle(R.string.knowledge_models_e5_qa)
                             .setMessage(message)
+                            .setNegativeButton(R.string.knowledge_models_e5_qa_compare,
+                                    (dialog, button) -> showE5GoldenReferenceComparison(report))
                             .setNeutralButton(R.string.knowledge_models_e5_qa_copy,
                                     (dialog, button) -> {
                                         final ClipboardManager clipboard = (ClipboardManager)
@@ -842,6 +844,66 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                 });
             }
         });
+    }
+
+    /** Explicit one-shot comparison only; do not persist a trust or readiness flag. */
+    private void showE5GoldenReferenceComparison(final KnowledgeE5GoldenQa.Report report) {
+        if (isFinishing() || isDestroyed() || report == null) return;
+        final LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        final int margin = (int) (getResources().getDisplayMetrics().density * 24f + .5f);
+        fields.setPadding(margin, margin / 2, margin, 0);
+
+        final TextView instructions = new TextView(this);
+        instructions.setText(R.string.knowledge_models_e5_qa_compare_prompt);
+        fields.addView(instructions);
+        final EditText tokenizerSha = new EditText(this);
+        tokenizerSha.setSingleLine(true);
+        tokenizerSha.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        tokenizerSha.setHint(R.string.knowledge_models_e5_qa_reference_tokenizer);
+        fields.addView(tokenizerSha);
+        final EditText fingerprintSha = new EditText(this);
+        fingerprintSha.setSingleLine(true);
+        fingerprintSha.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        fingerprintSha.setHint(R.string.knowledge_models_e5_qa_reference_fingerprint);
+        fields.addView(fingerprintSha);
+
+        final AlertDialog comparison = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.knowledge_models_e5_qa_compare)
+                .setView(fields)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_e5_qa_compare_action, null)
+                .create();
+        comparison.setOnShowListener(ignored -> comparison.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
+                    final String expectedTokenizer = tokenizerSha.getText().toString().trim();
+                    final String expectedFingerprint = fingerprintSha.getText().toString().trim();
+                    if (!KnowledgeE5GoldenQa.validSha256(expectedTokenizer)) {
+                        tokenizerSha.setError(getString(R.string.knowledge_models_e5_qa_reference_invalid));
+                        return;
+                    }
+                    if (!KnowledgeE5GoldenQa.validSha256(expectedFingerprint)) {
+                        fingerprintSha.setError(getString(R.string.knowledge_models_e5_qa_reference_invalid));
+                        return;
+                    }
+                    final KnowledgeE5GoldenQa.ReferenceVerdict verdict =
+                            KnowledgeE5GoldenQa.compareReference(
+                                    report, expectedTokenizer, expectedFingerprint);
+                    final int messageId = verdict == KnowledgeE5GoldenQa.ReferenceVerdict.MATCH
+                            ? R.string.knowledge_models_e5_qa_reference_match
+                            : verdict == KnowledgeE5GoldenQa.ReferenceVerdict.DIFFERENT_TOKENIZER
+                            ? R.string.knowledge_models_e5_qa_reference_different_tokenizer
+                            : R.string.knowledge_models_e5_qa_reference_different_ids;
+                    comparison.dismiss();
+                    if (isFinishing() || isDestroyed()) return;
+                    modelStatus.setText(messageId);
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_models_e5_qa_compare)
+                            .setMessage(messageId)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                }));
+        comparison.show();
     }
 
     /** Explicit, read-only ONNX protobuf metadata scan, even for models over 16 MiB. */
