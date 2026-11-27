@@ -1001,6 +1001,135 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void verifyOnlyClientRequiresBothSenderAndWorkerSuccess()
+            throws Exception {
+        final KnowledgeE5VerifyOnlyFdClient client = new KnowledgeE5VerifyOnlyFdClient(context);
+        final CountDownLatch completed = new CountDownLatch(1);
+        final AtomicInteger passed = new AtomicInteger();
+        final AtomicInteger failed = new AtomicInteger();
+        final AtomicBoolean started = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> started.set(client.startDebugSyntheticFixture(
+                    new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                @Override public void match() {
+                    passed.incrementAndGet();
+                    completed.countDown();
+                }
+                @Override public void failure() {
+                    failed.incrementAndGet();
+                    completed.countDown();
+                }
+            })));
+            assertTrue("Verify-only client failed to bind", started.get());
+            assertTrue("Verify-only client did not finish its FD round trip",
+                    completed.await(45, TimeUnit.SECONDS));
+            assertEquals("Independent sender and receiver must both verify", 1, passed.get());
+            assertEquals("Unexpected verify-only failure callback", 0, failed.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void verifyOnlyClientTimeoutFailsOnceAndCanReconnect() throws Exception {
+        final DelayedBindContext delayed = new DelayedBindContext(context);
+        final KnowledgeE5VerifyOnlyFdClient client = new KnowledgeE5VerifyOnlyFdClient(
+                delayed, 300L);
+        final CountDownLatch firstDone = new CountDownLatch(1);
+        final AtomicInteger failures = new AtomicInteger();
+        final AtomicBoolean firstStarted = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> firstStarted.set(client.startDebugSyntheticFixture(
+                    new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                @Override public void match() { firstDone.countDown(); }
+                @Override public void failure() {
+                    failures.incrementAndGet();
+                    firstDone.countDown();
+                }
+            })));
+            assertTrue("Delayed debug bind did not start", firstStarted.get());
+            assertTrue("Verify-only bind deadline did not fail",
+                    firstDone.await(5, TimeUnit.SECONDS));
+            assertEquals("Verify-only callback ran more than once", 1, failures.get());
+            assertTrue("Timed-out bind was not unbound", delayed.firstUnbound);
+
+            instrumentation.runOnMainSync(client::restoreDefaultTimeoutForDebugTest);
+            final CountDownLatch secondDone = new CountDownLatch(1);
+            final AtomicInteger matches = new AtomicInteger();
+            final AtomicBoolean secondStarted = new AtomicBoolean();
+            instrumentation.runOnMainSync(() -> secondStarted.set(client.startDebugSyntheticFixture(
+                    new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                @Override public void match() {
+                    matches.incrementAndGet();
+                    secondDone.countDown();
+                }
+                @Override public void failure() { secondDone.countDown(); }
+            })));
+            assertTrue("Verify-only retry refused after timeout", secondStarted.get());
+            assertTrue("Verify-only retry did not respond", secondDone.await(45, TimeUnit.SECONDS));
+            assertEquals("Fresh FD request failed after timeout", 1, matches.get());
+            assertEquals("Timed-out request invoked callbacks after retry", 1, failures.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void verifyOnlyClientRejectsReceiverMatchIfSenderPostflightFailed()
+            throws Exception {
+        final KnowledgeE5VerifyOnlyFdClient client = new KnowledgeE5VerifyOnlyFdClient(context);
+        final CountDownLatch completed = new CountDownLatch(1);
+        final AtomicInteger matched = new AtomicInteger();
+        final AtomicInteger failed = new AtomicInteger();
+        final AtomicBoolean started = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> started.set(client.startDebugPostflightFailure(
+                    new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                @Override public void match() {
+                    matched.incrementAndGet();
+                    completed.countDown();
+                }
+                @Override public void failure() {
+                    failed.incrementAndGet();
+                    completed.countDown();
+                }
+            })));
+            assertTrue("Postflight rejection test failed to bind", started.get());
+            assertTrue("Postflight rejection left client hanging",
+                    completed.await(45, TimeUnit.SECONDS));
+            assertEquals("Worker match alone must NEVER authorize source", 0, matched.get());
+            assertEquals("Postflight failure must be reported once", 1, failed.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void verifyOnlyClientCancellationIgnoresLateBindAndNeverReplies()
+            throws Exception {
+        final DelayedBindContext delayed = new DelayedBindContext(context);
+        final KnowledgeE5VerifyOnlyFdClient client = new KnowledgeE5VerifyOnlyFdClient(delayed);
+        final AtomicInteger callbacks = new AtomicInteger();
+        final AtomicBoolean started = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> {
+                started.set(client.startDebugSyntheticFixture(new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                    @Override public void match() { callbacks.incrementAndGet(); }
+                    @Override public void failure() { callbacks.incrementAndGet(); }
+                }));
+                assertFalse("Concurrent verify-only request was accepted",
+                        client.startDebugSyntheticFixture(new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                    @Override public void match() { callbacks.incrementAndGet(); }
+                    @Override public void failure() { callbacks.incrementAndGet(); }
+                }));
+                client.cancel();
+            });
+            assertTrue(started.get());
+            assertTrue("Cancelled verify-only bind was not unbound", delayed.firstUnbound);
+            Thread.sleep(350);
+            assertEquals("Cancelled verify-only request invoked a callback", 0, callbacks.get());
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     private void assertRejectedSession(final byte[] transmitted, final int advertisedLength,
                                        final String expectedSha) throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
