@@ -15,9 +15,14 @@ from unittest import mock
 from scripts.e5_onnx_reference import (
     MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, _read_regular,
     _stage_pinned_tokenizer, compare_reference,
-    e5_io_descriptor_sha256, inspect_metadata, padded_input, pool_and_normalize,
+    e5_io_descriptor_sha256, inspect_metadata, local_content_set_revision,
+    padded_input, pool_and_normalize,
     preflight, require_inline_model,
     session_sequence,
+)
+from scripts.e5_package_manifest import (
+    OFFICIAL_CONFIG_SHA256, OFFICIAL_ONNX, OFFICIAL_SENTENCEPIECE_SHA256,
+    OFFICIAL_TOKENIZER_CONFIG_SHA256,
 )
 
 
@@ -183,6 +188,59 @@ class E5OnnxReferenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path, pin = package(Path(temp), tokenizer_config=False)
             self.assertEqual(pin, preflight(path, pin).manifest_sha256)
+
+    def test_android_local_content_set_revision_is_checked_not_trusted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            path, _ = package(folder)
+            original = json.loads(path.read_text())
+            revision = local_content_set_revision(original["files"])
+            self.assertIsNotNone(revision)
+            self.assertNotEqual("sha256:" + original["weight_sha256"], revision)
+            # Manifest entry order does not affect Android's canonical identity.
+            self.assertEqual(revision, local_content_set_revision(
+                list(reversed(original["files"]))))
+            pin = overwrite_manifest(path, lambda m: m.update(revision=revision))
+            self.assertEqual(pin, preflight(path, pin).manifest_sha256)
+
+            bad_revision = "sha256:" + "f" * 64
+            pin = overwrite_manifest(path, lambda m: m.update(revision=bad_revision))
+            with self.assertRaisesRegex(ValueError, "local content-set"):
+                preflight(path, pin)
+            pin = overwrite_manifest(path, lambda m: m.update(
+                revision=revision, license="Apache-2.0"))
+            with self.assertRaisesRegex(ValueError, "local content-set"):
+                preflight(path, pin)
+
+            incomplete = original["files"][:-1]
+            self.assertIsNone(local_content_set_revision(incomplete))
+            duplicate = list(original["files"])
+            duplicate[-1] = duplicate[-2]
+            self.assertIsNone(local_content_set_revision(duplicate))
+            wrong_role = json.loads(json.dumps(original["files"]))
+            wrong_role[-1]["kind"] = "MODEL_CONFIG"
+            self.assertIsNone(local_content_set_revision(wrong_role))
+
+    def test_android_jvm_local_revision_cross_language_vectors(self):
+        # The same synthetic declared lengths are used by
+        # KnowledgeE5OfficialPackageTest. These are not real model files.
+        expected = {
+            "o4": "sha256:66394f6b4b30f3cbec5aefe1b773f9863740056eea263ceacbe08b4387fcaba0",
+            "original": "sha256:8f4c66be0411d398c12e1c89072e8e3b87a859ea489f0c4f01692e34588f9028",
+        }
+        for variant, megabytes in (("o4", 235), ("original", 470)):
+            name, digest = OFFICIAL_ONNX[variant]
+            files = [
+                {"name": name, "kind": "WEIGHTS", "sha256": digest,
+                 "bytes": megabytes * 1024 * 1024},
+                {"name": "sentencepiece.bpe.model", "kind": "TOKENIZER",
+                 "sha256": OFFICIAL_SENTENCEPIECE_SHA256, "bytes": 5_070_000},
+                {"name": "config.json", "kind": "MODEL_CONFIG",
+                 "sha256": OFFICIAL_CONFIG_SHA256, "bytes": 653},
+                {"name": "tokenizer_config.json", "kind": "TOKENIZER",
+                 "sha256": OFFICIAL_TOKENIZER_CONFIG_SHA256, "bytes": 443},
+            ]
+            self.assertEqual(expected[variant], local_content_set_revision(files))
 
     def test_wrong_pin_content_and_links_fail_closed(self):
         with tempfile.TemporaryDirectory() as temp:

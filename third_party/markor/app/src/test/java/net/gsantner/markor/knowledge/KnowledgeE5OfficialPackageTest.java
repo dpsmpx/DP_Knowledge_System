@@ -59,6 +59,12 @@ public final class KnowledgeE5OfficialPackageTest {
             assertEquals("intfloat/multilingual-e5-small", parsed.sourceId);
             assertEquals("MIT", parsed.assertedLicense);
             assertTrue(parsed.assertedRevision.matches("sha256:[0-9a-f]{64}"));
+            // Cross-language fixture in tests/test_e5_onnx_reference.py.
+            // The sizes above are synthetic declarations, not real model files.
+            assertEquals(i == 0
+                    ? "sha256:66394f6b4b30f3cbec5aefe1b773f9863740056eea263ceacbe08b4387fcaba0"
+                    : "sha256:8f4c66be0411d398c12e1c89072e8e3b87a859ea489f0c4f01692e34588f9028",
+                    parsed.assertedRevision);
             assertEquals(entry.sha256, parsed.weightSha256);
             assertEquals("config.json", parsed.components.get(2).name);
             assertEquals(KnowledgeModelPackageManifest.Kind.MODEL_CONFIG,
