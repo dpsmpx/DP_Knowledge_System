@@ -53,6 +53,7 @@ final class KnowledgeE5IsolatedSmoke {
 
     /** The FD path never runs an arbitrary graph, even if its sender supplies a valid SHA. */
     static void verifyTransported(final Context workerContext, final byte[] received,
+                                  final int variant,
                                   final OrtEnvironment environment,
                                   final OrtSession.SessionOptions options,
                                   final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
@@ -60,7 +61,7 @@ final class KnowledgeE5IsolatedSmoke {
                 || !KnowledgeOnnxProcessIdentity.isWorker()) {
             throw new IOException("Transported E5 test requires isolated worker UID");
         }
-        requirePinnedGraph(received);
+        requirePinnedGraph(received, variant);
         final KnowledgeE5ConfigProfile.Result profile = KnowledgeE5ConfigProfile.parse(
                 CANONICAL_SYNTHETIC_CONFIG.getBytes(StandardCharsets.UTF_8), null);
         final KnowledgeEmbeddingTensorContract.Inputs batch =
@@ -68,14 +69,19 @@ final class KnowledgeE5IsolatedSmoke {
                         new int[]{0, 3, 5, 2, 1, 1},
                         new int[]{1, 1, 1, 1, 0, 0}, 1, 0, 2, false);
         verifyGraph(workerContext, environment, options, memory, profile, batch,
-                received, false);
+                received, variant == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT);
     }
 
     /** Called even before initializing the native runtime on the FD route. */
-    static void requirePinnedGraph(final byte[] received) throws IOException {
+    static void requirePinnedGraph(final byte[] received, final int variant) throws IOException {
+        if (!KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(variant)) {
+            throw new IOException("Unknown debug E5 fixture variant");
+        }
         // Regenerate independently in the worker. Digest/size verification of the
         // FD alone is not authorization: a sender could hash another valid graph.
-        final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final boolean tokenTypes = variant == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
+        final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(6,
+                tokenTypes, !tokenTypes);
         try {
             if (received == null || !Arrays.equals(pinned, received)) {
                 throw new IOException("FD graph is not the pinned synthetic E5 fixture");

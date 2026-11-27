@@ -84,6 +84,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         ParcelFileDescriptor pipe = null;
         String expectedSha = null;
         boolean simulatedLowMemory = false;
+        int debugVariant = 0;
         if (sessionRequest) {
             try {
                 final Bundle request = message.getData();
@@ -91,6 +92,9 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                 expectedSha = request.getString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256);
                 simulatedLowMemory = BuildConfig.DEBUG && request.getBoolean(
                         KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, false);
+                if (debugE5Fd) {
+                    debugVariant = request.getInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, 0);
+                }
             } catch (RuntimeException invalidParcel) {
                 closePipe(pipe);
                 answerSession(reply, requestId, null);
@@ -98,7 +102,8 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             }
             if (pipe == null || message.arg2 < 16
                     || message.arg2 > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
-                    || !KnowledgeOnnxSessionPipe.validSha256(expectedSha)) {
+                    || !KnowledgeOnnxSessionPipe.validSha256(expectedSha)
+                    || (debugE5Fd && !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(debugVariant))) {
                 closePipe(pipe);
                 answerSession(reply, requestId, null);
                 return true;
@@ -113,6 +118,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         final ParcelFileDescriptor inputPipe = pipe;
         final String sha = expectedSha;
         final boolean debugLowMemory = simulatedLowMemory;
+        final int variant = debugVariant;
         final int size = message.arg2;
         handler.postDelayed(deadline, KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS);
         worker.execute(() -> {
@@ -141,10 +147,11 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                         memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
                         KnowledgeOnnxWorkerMemory.requireAvailable(this, debugLowMemory);
                         // Unlike the manual model session (metadata only), the
-                        // debug FD command may run ONLY the exact worker-generated
-                        // arithmetic E5 fixture, checked before native creation.
+                        // debug FD command may run ONLY one of two exact worker-generated
+                        // arithmetic E5 fixtures, bound to the declared variant.
                         session = debugE5Fd
-                                ? KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model, memory)
+                                ? KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model,
+                                        variant, memory)
                                 : KnowledgeOnnxCpuBackend.inspect(model, memory);
                         if (session.sessionInitMillis < 0
                                 || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS

@@ -65,22 +65,23 @@ final class KnowledgeOnnxIsolatedSessionClient {
     /** Takes ownership of bytes even when binding fails; never retains a file path. */
     boolean start(final byte[] auditedModel, final String expectedSha256, final Callback result) {
         return startRequest(auditedModel, expectedSha256, result,
-                KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION);
+                KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION, 0);
     }
 
-    /** Instrumentation-only; the worker also pins the exact generated E5 graph. */
+    /** Instrumentation-only; the worker pins the exact graph for the declared variant. */
     boolean startDebugSyntheticE5(final byte[] generatedGraph, final String expectedSha256,
-                                  final Callback result) {
-        if (!BuildConfig.DEBUG) {
+                                  final int variant, final Callback result) {
+        if (!BuildConfig.DEBUG || !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(variant)) {
             if (generatedGraph != null) Arrays.fill(generatedGraph, (byte) 0);
             return false;
         }
         return startRequest(generatedGraph, expectedSha256, result,
-                KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD);
+                KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD, variant);
     }
 
     private boolean startRequest(final byte[] auditedModel, final String expectedSha256,
-                                 final Callback result, final int command) {
+                                 final Callback result, final int command,
+                                 final int debugVariant) {
         if (auditedModel == null) return false;
         if (result == null || connection != null || auditedModel.length < 16
                 || auditedModel.length > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
@@ -125,6 +126,9 @@ final class KnowledgeOnnxIsolatedSessionClient {
                     final Bundle data = new Bundle();
                     data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
                     data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha256);
+                    if (command == KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD) {
+                        data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, debugVariant);
+                    }
                     request.setData(data);
                     remote.send(request);
                     final byte[] owned = pendingBytes;

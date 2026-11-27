@@ -18,6 +18,9 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int DEBUG_SIMULATE_OOM = 11;
     // Debug-only FD transport for ONE exact, generated E5 fixture. No arbitrary inference.
     static final int RUN_DEBUG_E5_FD = 12;
+    static final int DEBUG_E5_TWO_INPUT_POOLER = 1;
+    static final int DEBUG_E5_THREE_INPUT = 2;
+    static final String DEBUG_E5_VARIANT = "debug_e5_variant";
     static final long WATCHDOG_MILLIS = 30_000L;
     static final long CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L;
     static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
@@ -47,6 +50,10 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final String MAX_OUTPUT_RANK = "max_output_rank";
 
     private KnowledgeOnnxIsolatedProtocol() { }
+
+    static boolean validDebugE5Variant(final int variant) {
+        return variant == DEBUG_E5_TWO_INPUT_POOLER || variant == DEBUG_E5_THREE_INPUT;
+    }
 
     /** Runtime metadata is not user-supplied and never needs arbitrary text. */
     static String safeVersion(final String supplied) {

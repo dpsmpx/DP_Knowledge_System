@@ -81,25 +81,34 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         tests = (APP / "androidTest" / base /
                  "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
         self.assertIn("RUN_DEBUG_E5_FD = 12", protocol)
+        self.assertIn("DEBUG_E5_TWO_INPUT_POOLER = 1", protocol)
+        self.assertIn("DEBUG_E5_THREE_INPUT = 2", protocol)
+        self.assertIn("validDebugE5Variant(final int variant)", protocol)
         self.assertIn("final boolean debugE5Fd = BuildConfig.DEBUG", service)
         self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
-        self.assertIn("KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model, memory)", service)
+        self.assertIn("KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(debugVariant)", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model,", service)
         self.assertIn("Arrays.fill(model, (byte) 0)", service)
         self.assertIn("startDebugSyntheticE5(", client)
-        self.assertIn("if (!BuildConfig.DEBUG)", client)
+        self.assertIn("if (!BuildConfig.DEBUG || !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(variant))", client)
+        self.assertIn("data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, debugVariant)", client)
         self.assertIn("if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker())", backend)
-        self.assertLess(backend.index("KnowledgeE5IsolatedSmoke.requirePinnedGraph(received)"),
+        self.assertLess(backend.index("KnowledgeE5IsolatedSmoke.requirePinnedGraph(received, variant)"),
                         backend.index("final OrtEnvironment environment = OrtEnvironment.getEnvironment()"))
         self.assertIn("KnowledgeE5IsolatedSmoke.verifyTransported(", backend)
         self.assertLess(backend.index("KnowledgeE5IsolatedSmoke.verifyTransported("),
                         backend.index("return inspect(received, memory)"))
-        self.assertIn("KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true)", smoke)
+        self.assertIn("KnowledgeE5TokenEmbeddingSmoke.graph(6,", smoke)
+        self.assertIn("tokenTypes, !tokenTypes", smoke)
         self.assertIn("!Arrays.equals(pinned, received)", smoke)
-        self.assertLess(smoke.index("requirePinnedGraph(received);"),
+        self.assertLess(smoke.index("requirePinnedGraph(received, variant);"),
                         smoke.index("verifyGraph(workerContext, environment, options, memory, profile, batch,"))
         self.assertIn("Arrays.fill(pinned, (byte) 0)", smoke)
         self.assertIn("debugFdPinnedE5RunsAll384ChannelsInsideWorker", tests)
+        self.assertIn("debugFdPinnedThreeInputE5RunsAll384ChannelsInsideWorker", tests)
         self.assertIn("debugFdE5RejectsOtherValidGraphWithItsOwnCorrectSha", tests)
+        self.assertIn("debugFdE5RejectsMutatedSelfHashedFixtureAndInvalidVariant", tests)
+        self.assertIn("debugFdWorkerRejectsUnknownVariantWithoutReadingItsPipe", tests)
         self.assertNotIn("KnowledgeModelPackageStore", smoke)
 
     def test_isolated_process_identity_uses_no_forbidden_activity_manager_call(self):
