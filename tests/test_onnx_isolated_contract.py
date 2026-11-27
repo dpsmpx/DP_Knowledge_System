@@ -197,7 +197,12 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertIn("connection.died.await(5, TimeUnit.SECONDS)", emulator)
         self.assertIn("Fatal OOM unexpectedly sent an ONNX result", emulator)
         self.assertIn("Fresh manual run invoked multiple callbacks", emulator)
-        self.assertNotIn("new byte[", emulator)
+        # The OOM regression must never allocate huge arrays to provoke a crash.
+        # Other FD tests may legitimately use a fixed 64 KiB streaming buffer.
+        oom_test = emulator.split(
+            "public void simulatedWorkerOomKillsBinderAndFreshManualRunSucceeds()", 1
+        )[1].split("@Test public void", 1)[0]
+        self.assertNotIn("new byte[", oom_test)
 
     def test_native_onnx_io_summary_is_bounded_scalar_only_and_name_free(self):
         base = "java/net/gsantner/markor/knowledge/"
