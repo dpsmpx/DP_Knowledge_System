@@ -70,7 +70,10 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             });
             return true;
         }
-        final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION;
+        final boolean debugE5Fd = BuildConfig.DEBUG
+                && message.what == KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD;
+        final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION
+                || debugE5Fd;
         final boolean debugOom = message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_SIMULATE_OOM;
         if ((debugOom && !BuildConfig.DEBUG) || (!sessionRequest
                 && message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC && !debugOom)) {
@@ -137,7 +140,12 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     try {
                         memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
                         KnowledgeOnnxWorkerMemory.requireAvailable(this, debugLowMemory);
-                        session = KnowledgeOnnxCpuBackend.inspect(model, memory);
+                        // Unlike the manual model session (metadata only), the
+                        // debug FD command may run ONLY the exact worker-generated
+                        // arithmetic E5 fixture, checked before native creation.
+                        session = debugE5Fd
+                                ? KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model, memory)
+                                : KnowledgeOnnxCpuBackend.inspect(model, memory);
                         if (session.sessionInitMillis < 0
                                 || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
                                 || session.inputs < 1 || session.inputs > 32

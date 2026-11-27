@@ -51,6 +51,40 @@ final class KnowledgeE5IsolatedSmoke {
                 true, false);
     }
 
+    /** The FD path never runs an arbitrary graph, even if its sender supplies a valid SHA. */
+    static void verifyTransported(final Context workerContext, final byte[] received,
+                                  final OrtEnvironment environment,
+                                  final OrtSession.SessionOptions options,
+                                  final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
+        if (workerContext == null || environment == null || options == null || memory == null
+                || !KnowledgeOnnxProcessIdentity.isWorker()) {
+            throw new IOException("Transported E5 test requires isolated worker UID");
+        }
+        requirePinnedGraph(received);
+        final KnowledgeE5ConfigProfile.Result profile = KnowledgeE5ConfigProfile.parse(
+                CANONICAL_SYNTHETIC_CONFIG.getBytes(StandardCharsets.UTF_8), null);
+        final KnowledgeEmbeddingTensorContract.Inputs batch =
+                KnowledgeEmbeddingTensorContract.fromTokenizer(
+                        new int[]{0, 3, 5, 2, 1, 1},
+                        new int[]{1, 1, 1, 1, 0, 0}, 1, 0, 2, false);
+        verifyGraph(workerContext, environment, options, memory, profile, batch,
+                received, false);
+    }
+
+    /** Called even before initializing the native runtime on the FD route. */
+    static void requirePinnedGraph(final byte[] received) throws IOException {
+        // Regenerate independently in the worker. Digest/size verification of the
+        // FD alone is not authorization: a sender could hash another valid graph.
+        final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        try {
+            if (received == null || !Arrays.equals(pinned, received)) {
+                throw new IOException("FD graph is not the pinned synthetic E5 fixture");
+            }
+        } finally {
+            Arrays.fill(pinned, (byte) 0);
+        }
+    }
+
     private static void verifyVariant(final Context context, final OrtEnvironment environment,
                                       final OrtSession.SessionOptions options,
                                       final KnowledgeOnnxMemoryTrace.Recorder memory,
@@ -62,38 +96,49 @@ final class KnowledgeE5IsolatedSmoke {
         final byte[] syntheticModel = KnowledgeE5TokenEmbeddingSmoke.graph(
                 batch.sequenceLength(), hasTokenTypes, poolerOutput);
         try {
-            // A fresh actual worker RAM snapshot; estimate is diagnostic, not
-            // a native allocation guarantee or a model-specific memory cap.
-            final KnowledgeOnnxWorkerMemory.Snapshot available =
-                    KnowledgeOnnxWorkerMemory.snapshot(context);
-            final KnowledgeE5ResourceEstimate.Plan estimate =
-                    KnowledgeE5ResourceEstimate.assess(syntheticModel.length, 0,
-                            batch.sequenceLength(), hasTokenTypes,
-                            available.availableBytes, available.lowMemory);
-            if (estimate.memoryDenied || estimate.hiddenTensorBytes
-                    != (long) batch.sequenceLength() * 384 * Float.BYTES) {
-                throw new KnowledgeOnnxWorkerMemory.Denied();
-            }
-            try (OrtSession session = environment.createSession(syntheticModel, options)) {
-                memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
-                final KnowledgeE5OrtTensorRunner.StopSignal stop =
-                        new KnowledgeE5OrtTensorRunner.StopSignal();
-                final float[] actual = KnowledgeE5OrtTensorRunner.run(
-                        environment, session, batch, profile, stop);
-                final float[] expected = KnowledgeE5TokenEmbeddingSmoke.expectedVector(batch);
-                if (actual.length != KnowledgeE5ConfigProfile.HIDDEN_SIZE
-                        || expected.length != actual.length || stop.isCancelled()) {
-                    throw new IOException("Isolated E5 synthetic vector outside 384-channel contract");
-                }
-                for (int i = 0; i < actual.length; i++) {
-                    if (!Float.isFinite(actual[i]) || Math.abs(actual[i] - expected[i]) > .00001f) {
-                        throw new IOException("Isolated E5 synthetic masked-mean/L2 mismatch");
-                    }
-                }
-                memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
-            }
+            verifyGraph(context, environment, options, memory, profile, batch,
+                    syntheticModel, hasTokenTypes);
         } finally {
             Arrays.fill(syntheticModel, (byte) 0);
+        }
+    }
+
+    private static void verifyGraph(final Context context, final OrtEnvironment environment,
+                                    final OrtSession.SessionOptions options,
+                                    final KnowledgeOnnxMemoryTrace.Recorder memory,
+                                    final KnowledgeE5ConfigProfile.Result profile,
+                                    final KnowledgeEmbeddingTensorContract.Inputs batch,
+                                    final byte[] syntheticModel, final boolean hasTokenTypes)
+            throws Exception {
+        // A fresh actual worker RAM snapshot; estimate is diagnostic, not
+        // a native allocation guarantee or a model-specific memory cap.
+        final KnowledgeOnnxWorkerMemory.Snapshot available =
+                KnowledgeOnnxWorkerMemory.snapshot(context);
+        final KnowledgeE5ResourceEstimate.Plan estimate =
+                KnowledgeE5ResourceEstimate.assess(syntheticModel.length, 0,
+                        batch.sequenceLength(), hasTokenTypes,
+                        available.availableBytes, available.lowMemory);
+        if (estimate.memoryDenied || estimate.hiddenTensorBytes
+                != (long) batch.sequenceLength() * 384 * Float.BYTES) {
+            throw new KnowledgeOnnxWorkerMemory.Denied();
+        }
+        try (OrtSession session = environment.createSession(syntheticModel, options)) {
+            memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
+            final KnowledgeE5OrtTensorRunner.StopSignal stop =
+                    new KnowledgeE5OrtTensorRunner.StopSignal();
+            final float[] actual = KnowledgeE5OrtTensorRunner.run(
+                    environment, session, batch, profile, stop);
+            final float[] expected = KnowledgeE5TokenEmbeddingSmoke.expectedVector(batch);
+            if (actual.length != KnowledgeE5ConfigProfile.HIDDEN_SIZE
+                    || expected.length != actual.length || stop.isCancelled()) {
+                throw new IOException("Isolated E5 synthetic vector outside 384-channel contract");
+            }
+            for (int i = 0; i < actual.length; i++) {
+                if (!Float.isFinite(actual[i]) || Math.abs(actual[i] - expected[i]) > .00001f) {
+                    throw new IOException("Isolated E5 synthetic masked-mean/L2 mismatch");
+                }
+            }
+            memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
         }
     }
 }

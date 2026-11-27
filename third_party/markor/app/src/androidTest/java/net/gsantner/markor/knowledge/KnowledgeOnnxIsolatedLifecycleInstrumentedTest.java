@@ -167,6 +167,75 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void debugFdPinnedE5RunsAll384ChannelsInsideWorker() throws Exception {
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(context);
+        // Generated arithmetic graph; no weights, installed file or note bytes.
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final String sha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
+        final CountDownLatch finished = new CountDownLatch(1);
+        final AtomicReference<KnowledgeOnnxSessionGate.Report> report = new AtomicReference<>();
+        final AtomicBoolean bound = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
+                    graph, sha, new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report result) {
+                    report.set(result);
+                    finished.countDown();
+                }
+                @Override public void failure() { finished.countDown(); }
+            })));
+            assertTrue("Generated E5 FD bind failed", bound.get());
+            assertTrue("Generated E5 FD worker timed out", finished.await(40, TimeUnit.SECONDS));
+            assertNotNull("Pinned E5 FD/ORT/masked-mean verification failed", report.get());
+            // Pooler is deliberately unrelated; the runner must select the
+            // named hidden-state output and compare each of its 384 channels.
+            assertEquals(2, report.get().inputs);
+            assertEquals(2, report.get().outputs);
+            final KnowledgeOnnxIoSummary io = report.get().ioSummary;
+            assertEquals(2, io.inputTensors);
+            assertEquals(2, io.outputTensors);
+            assertEquals(2, io.int64Inputs);
+            assertEquals(2, io.floatOutputs);
+            assertEquals(2, io.maxInputRank);
+            assertEquals(3, io.maxOutputRank);
+            assertWorkerPssSnapshots(report.get().workerMemory);
+            assertTrue(KnowledgeOnnxRssHighWater.valid(report.get().workerRssHighWaterKiB));
+            for (final byte wiped : graph) assertEquals("Sent E5 bytes not wiped", 0, wiped);
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
+    @Test public void debugFdE5RejectsOtherValidGraphWithItsOwnCorrectSha() throws Exception {
+        final KnowledgeOnnxIsolatedSessionClient client =
+                new KnowledgeOnnxIsolatedSessionClient(context);
+        // Also a valid generated E5 ONNX graph, but NOT the sole pinned variant.
+        // A correct sender-supplied SHA alone must never authorize native Run().
+        final byte[] alternate = KnowledgeE5TokenEmbeddingSmoke.graph(6, true, false);
+        final String matchingSha = KnowledgeOnnxSessionPipe.sha256Hex(alternate);
+        final CountDownLatch finished = new CountDownLatch(1);
+        final AtomicBoolean unexpectedSuccess = new AtomicBoolean();
+        final AtomicBoolean bound = new AtomicBoolean();
+        try {
+            instrumentation.runOnMainSync(() -> bound.set(client.startDebugSyntheticE5(
+                    alternate, matchingSha, new KnowledgeOnnxIsolatedSessionClient.Callback() {
+                @Override public void success(final KnowledgeOnnxSessionGate.Report ignored) {
+                    unexpectedSuccess.set(true);
+                    finished.countDown();
+                }
+                @Override public void failure() { finished.countDown(); }
+            })));
+            assertTrue("Alternate E5 FD bind failed", bound.get());
+            assertTrue("Alternate E5 FD rejection timed out", finished.await(40, TimeUnit.SECONDS));
+            assertFalse("A self-hashed but unpinned graph reached native inference",
+                    unexpectedSuccess.get());
+            for (final byte wiped : alternate) assertEquals("Rejected E5 bytes not wiped", 0, wiped);
+        } finally {
+            instrumentation.runOnMainSync(client::cancel);
+        }
+    }
+
     @Test public void simultaneousFdRequestIsRefusedWithoutBreakingActiveSession()
             throws Exception {
         final KnowledgeOnnxIsolatedSessionClient client =

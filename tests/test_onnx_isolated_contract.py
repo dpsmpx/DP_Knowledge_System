@@ -71,6 +71,37 @@ class OnnxIsolatedWorkerContract(unittest.TestCase):
         self.assertNotIn("KnowledgeModelPackageStore", smoke)
         self.assertNotIn("model.onnx", smoke)
 
+    def test_debug_fd_e5_is_pinned_before_native_run_and_has_scalar_only_reply(self):
+        base = "java/net/gsantner/markor/knowledge/"
+        protocol = (APP / "main" / base / "KnowledgeOnnxIsolatedProtocol.java").read_text()
+        service = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedService.java").read_text()
+        client = (APP / "flavorAtest" / base / "KnowledgeOnnxIsolatedSessionClient.java").read_text()
+        backend = (APP / "flavorAtest" / base / "KnowledgeOnnxCpuBackend.java").read_text()
+        smoke = (APP / "flavorAtest" / base / "KnowledgeE5IsolatedSmoke.java").read_text()
+        tests = (APP / "androidTest" / base /
+                 "KnowledgeOnnxIsolatedLifecycleInstrumentedTest.java").read_text()
+        self.assertIn("RUN_DEBUG_E5_FD = 12", protocol)
+        self.assertIn("final boolean debugE5Fd = BuildConfig.DEBUG", service)
+        self.assertIn("KnowledgeOnnxSessionPipe.readVerified(stream, size, sha)", service)
+        self.assertIn("KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model, memory)", service)
+        self.assertIn("Arrays.fill(model, (byte) 0)", service)
+        self.assertIn("startDebugSyntheticE5(", client)
+        self.assertIn("if (!BuildConfig.DEBUG)", client)
+        self.assertIn("if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker())", backend)
+        self.assertLess(backend.index("KnowledgeE5IsolatedSmoke.requirePinnedGraph(received)"),
+                        backend.index("final OrtEnvironment environment = OrtEnvironment.getEnvironment()"))
+        self.assertIn("KnowledgeE5IsolatedSmoke.verifyTransported(", backend)
+        self.assertLess(backend.index("KnowledgeE5IsolatedSmoke.verifyTransported("),
+                        backend.index("return inspect(received, memory)"))
+        self.assertIn("KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true)", smoke)
+        self.assertIn("!Arrays.equals(pinned, received)", smoke)
+        self.assertLess(smoke.index("requirePinnedGraph(received);"),
+                        smoke.index("verifyGraph(workerContext, environment, options, memory, profile, batch,"))
+        self.assertIn("Arrays.fill(pinned, (byte) 0)", smoke)
+        self.assertIn("debugFdPinnedE5RunsAll384ChannelsInsideWorker", tests)
+        self.assertIn("debugFdE5RejectsOtherValidGraphWithItsOwnCorrectSha", tests)
+        self.assertNotIn("KnowledgeModelPackageStore", smoke)
+
     def test_isolated_process_identity_uses_no_forbidden_activity_manager_call(self):
         folder = APP / "main/java/net/gsantner/markor"
         application = (folder / "ApplicationObject.java").read_text()
