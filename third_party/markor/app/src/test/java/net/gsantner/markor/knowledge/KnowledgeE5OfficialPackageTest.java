@@ -76,7 +76,7 @@ public final class KnowledgeE5OfficialPackageTest {
 
     @Test public void companionSizeAndWeightIdentityMustBeExact() throws Exception {
         final KnowledgeModelFiles.Entry original = weight(0);
-        final Map<String, Long> sizes = lengths();
+        Map<String, Long> sizes = lengths();
         for (final String name : new String[]{"config.json", "tokenizer_config.json",
                 "sentencepiece.bpe.model"}) {
             final Long value = sizes.remove(name);
