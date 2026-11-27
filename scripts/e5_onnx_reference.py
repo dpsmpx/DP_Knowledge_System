@@ -270,14 +270,17 @@ def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPack
     configs = [p for p in components.get("MODEL_CONFIG", []) if p.name == "config.json"]
     if len(tokenizers) != 1 or len(configs) != 1:
         raise ValueError("A single E5 SentencePiece and config.json are required")
+    component_pins = {item["name"]: item["sha256"] for item in files}
     config_path = configs[0]
-    _profile(_read_regular(config_path, MAX_CONFIG_BYTES), MODEL_PROFILE)
+    _profile(_read_regular(config_path, MAX_CONFIG_BYTES,
+                           component_pins[config_path.name]), MODEL_PROFILE)
     opt_config = [p for paths in components.values() for p in paths
                   if p.name == "tokenizer_config.json"]
     if len(opt_config) > 1:
         raise ValueError("Duplicate E5 tokenizer configuration")
     if opt_config:
-        _profile(_read_regular(opt_config[0], MAX_CONFIG_BYTES), TOKENIZER_PROFILE)
+        _profile(_read_regular(opt_config[0], MAX_CONFIG_BYTES,
+                               component_pins[opt_config[0].name]), TOKENIZER_PROFILE)
     weights = components["WEIGHTS"][0]
     tokenizer = tokenizers[0]
     return CheckedPackage(actual_manifest_sha256, weights, manifest["weight_sha256"],

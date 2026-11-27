@@ -12,6 +12,7 @@ import types
 import unittest
 from unittest import mock
 
+from scripts import e5_onnx_reference as reference_module
 from scripts.e5_onnx_reference import (
     MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, _read_regular,
     _stage_pinned_tokenizer, compare_reference,
@@ -175,6 +176,31 @@ class E5OnnxReferenceTest(unittest.TestCase):
             checked.model_path.symlink_to(folder / "other.onnx")
             with self.assertRaisesRegex(ValueError, "link"):
                 _read_regular(checked.model_path, 1024, checked.model_sha256)
+
+    def test_preflight_sidecar_rereads_refuse_same_length_replacements(self):
+        # Each component passes the first streaming SHA audit; the source is
+        # then replaced with a different, still-canonical JSON byte sequence.
+        # Neither sidecar may be trusted on the strength of an earlier read.
+        for target in ("config.json", "tokenizer_config.json"):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                path, pin = package(folder)
+                original = reference_module._digest_file
+
+                def swap_after_audit(component, length, digest):
+                    original(component, length, digest)
+                    if component.name == target:
+                        before = component.read_bytes()
+                        after = before.replace(b": ", b":  ", 1).replace(
+                            b", ", b",", 1)
+                        self.assertEqual(len(before), len(after))
+                        self.assertNotEqual(sha(before), sha(after))
+                        component.write_bytes(after)
+
+                with mock.patch("scripts.e5_onnx_reference._digest_file",
+                                side_effect=swap_after_audit):
+                    with self.assertRaisesRegex(ValueError, "pinned SHA-256"):
+                        preflight(path, pin)
 
     def test_pinned_package_preflight_accepts_only_local_canonical_files(self):
         with tempfile.TemporaryDirectory() as temp:
