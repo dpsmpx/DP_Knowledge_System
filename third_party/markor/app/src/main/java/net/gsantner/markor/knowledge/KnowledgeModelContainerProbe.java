@@ -745,6 +745,9 @@ final class KnowledgeModelContainerProbe {
         final long end = data.getFilePointer() + bytes;
         long fields = 0;
         long dataLocation = 0; // TensorProto.DEFAULT when absent.
+        boolean dataLocationSeen = false;
+        boolean inlineDataSeen = false;
+        boolean externalDataSeen = false;
         String location = null;
         long locationEntries = 0;
         String offsetText = null, lengthText = null;
@@ -756,9 +759,17 @@ final class KnowledgeModelContainerProbe {
             if (tag == 0) throw new BadContainer();
             final long field = tag >>> 3;
             final int wire = (int) (tag & 7);
+            if ((field == 14 && wire != 0) || (field == 13 && wire != 2)) {
+                throw new BadContainer();
+            }
             if (field == 14 && wire == 0) { // TensorProto.data_location
+                // Protobuf permits repeated singular fields (last value wins),
+                // but a security preflight must not guess which storage wins.
+                if (dataLocationSeen) throw new BadContainer();
+                dataLocationSeen = true;
                 dataLocation = readVarint(data);
             } else if (field == 13 && wire == 2) { // TensorProto.external_data
+                externalDataSeen = true;
                 if (++details.externalDataEntriesScanned > MAX_ONNX_EXTERNAL_ENTRIES) {
                     throw new ScanLimit();
                 }
@@ -775,11 +786,24 @@ final class KnowledgeModelContainerProbe {
                     lengthText = entry.value;
                 }
             } else {
+                // TensorProto's value fields are an alternative to EXTERNAL.
+                // Observe their presence without reading or allocating payloads.
+                if (field == 4 || field == 5 || field == 6 || field == 7
+                        || field == 9 || field == 10 || field == 11) {
+                    inlineDataSeen = true;
+                }
                 skipWire(data, wire); // raw_data, dimensions, typed arrays, etc.
             }
             if (data.getFilePointer() > end) throw new BadContainer();
         }
-        if (dataLocation > 1) details.invalidExternalDataLocationEnums++;
+        if ((dataLocation == 1 && inlineDataSeen)
+                || (dataLocation == 0 && externalDataSeen)) {
+            // Never silently accept contradictory inline/external storage.
+            throw new BadContainer();
+        }
+        if (dataLocation != 0 && dataLocation != 1) {
+            details.invalidExternalDataLocationEnums++;
+        }
         if (locationEntries > 1) details.externalDataDuplicateLocations++;
         if (dataLocation == 1) { // EXTERNAL
             details.externalDataTensorsDeclared++;

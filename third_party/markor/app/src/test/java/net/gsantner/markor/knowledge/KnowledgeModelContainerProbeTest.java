@@ -539,6 +539,48 @@ public final class KnowledgeModelContainerProbeTest {
         assertEquals(0, unknown.externalDataRelativeLocations);
     }
 
+    @Test public void onnxContradictoryInitializerStorageIsInvalidNotExternalReady()
+            throws Exception {
+        final ByteArrayOutputStream repeatedLocation = new ByteArrayOutputStream();
+        varint(repeatedLocation, 112); // EXTERNAL followed by DEFAULT: last-wins is unsafe.
+        varint(repeatedLocation, 1);
+        varint(repeatedLocation, 112);
+        varint(repeatedLocation, 0);
+        appendOnnxExternalEntry(repeatedLocation, "location", "weights.data");
+
+        final ByteArrayOutputStream undeclaredExternal = new ByteArrayOutputStream();
+        appendOnnxExternalEntry(undeclaredExternal, "location", "weights.data");
+
+        final ByteArrayOutputStream externalWithRaw = new ByteArrayOutputStream();
+        varint(externalWithRaw, 112);
+        varint(externalWithRaw, 1);
+        appendOnnxExternalEntry(externalWithRaw, "location", "weights.data");
+        varint(externalWithRaw, 74); // TensorProto.raw_data, field 9.
+        protobufBytes(externalWithRaw, new byte[]{1, 2, 3, 4});
+
+        final ByteArrayOutputStream externalWithTyped = new ByteArrayOutputStream();
+        varint(externalWithTyped, 112);
+        varint(externalWithTyped, 1);
+        appendOnnxExternalEntry(externalWithTyped, "location", "weights.data");
+        varint(externalWithTyped, 34); // TensorProto.float_data, packed field 4.
+        protobufBytes(externalWithTyped, new byte[]{0, 0, 0, 0});
+
+        for (final byte[] tensor : new byte[][]{
+                repeatedLocation.toByteArray(), undeclaredExternal.toByteArray(),
+                externalWithRaw.toByteArray(), externalWithTyped.toByteArray()}) {
+            final KnowledgeModelContainerProbe.Result result = probe(
+                    onnxWithInitializer(tensor), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(KnowledgeModelContainerProbe.State.INVALID, result.state);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, result.detailState);
+        }
+        final KnowledgeModelContainerProbe.Result inlineOnly = probe(
+                onnxWithExternalInitializer(0, null, false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                inlineOnly.detailState);
+        assertEquals(0, inlineOnly.externalDataTensorsDeclared);
+    }
+
     @Test public void onnxExternalOffsetAndLengthAreBoundedDeclarationsOnly() throws Exception {
         final KnowledgeModelContainerProbe.Result bounded = probe(
                 onnxWithExternalRange("weights.data", "4", "10"),
@@ -849,8 +891,10 @@ public final class KnowledgeModelContainerProbeTest {
             appendOnnxExternalEntry(tensor, "location", location);
             if (duplicateLocation) appendOnnxExternalEntry(tensor, "location", "other.data");
         }
-        varint(tensor, 74); // TensorProto.raw_data: skip without allocating bytes
-        protobufBytes(tensor, new byte[]{1, 2, 3, 4});
+        if (dataLocation != 1) { // Only DEFAULT/unknown locations can carry inline bytes.
+            varint(tensor, 74); // TensorProto.raw_data: skip without allocating bytes
+            protobufBytes(tensor, new byte[]{1, 2, 3, 4});
+        }
         varint(graph, 42); // GraphProto.initializer, field 5
         protobufBytes(graph, tensor.toByteArray());
         if (sparseInitializer) {
@@ -871,6 +915,13 @@ public final class KnowledgeModelContainerProbeTest {
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         varint(graph, 42); // GraphProto.initializer
         protobufBytes(graph, tensor.toByteArray());
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static byte[] onnxWithInitializer(final byte[] tensor) {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 42); // GraphProto.initializer
+        protobufBytes(graph, tensor);
         return onnxWithGraph(graph.toByteArray());
     }
 
