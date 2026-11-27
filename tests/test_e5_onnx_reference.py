@@ -10,7 +10,8 @@ import tempfile
 import unittest
 
 from scripts.e5_onnx_reference import (
-    MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, compare_reference,
+    MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, _read_regular,
+    _stage_pinned_tokenizer, compare_reference,
     padded_input, pool_and_normalize, preflight, require_inline_model,
     session_sequence,
 )
@@ -83,6 +84,37 @@ def session(sequence=None, token_types=False, pooler=False) -> Session:
 
 
 class E5OnnxReferenceTest(unittest.TestCase):
+    def test_native_tokenizer_uses_exact_pinned_private_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            location, pin = package(folder)
+            checked = preflight(location, pin)
+            with tempfile.TemporaryDirectory() as temp_snapshot:
+                staged = _stage_pinned_tokenizer(checked, Path(temp_snapshot))
+                original_bytes = staged.read_bytes()
+                self.assertEqual(sha(original_bytes), checked.sentencepiece_sha256)
+                # Even if the original source is later replaced, the native
+                # tokenizer receives the snapshot already verified by SHA.
+                checked.sentencepiece_path.write_bytes(b"x" * len(original_bytes))
+                self.assertEqual(original_bytes, staged.read_bytes())
+                with self.assertRaisesRegex(ValueError, "pinned SHA-256"):
+                    _stage_pinned_tokenizer(checked, folder)
+
+    def test_post_preflight_native_inputs_reject_same_size_swap_and_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            location, pin = package(folder)
+            checked = preflight(location, pin)
+            old_bytes = checked.model_path.read_bytes()
+            checked.model_path.write_bytes(b"x" * len(old_bytes))
+            with self.assertRaisesRegex(ValueError, "pinned SHA-256"):
+                _read_regular(checked.model_path, 1024, checked.model_sha256)
+            checked.model_path.write_bytes(old_bytes)
+            checked.model_path.rename(folder / "other.onnx")
+            checked.model_path.symlink_to(folder / "other.onnx")
+            with self.assertRaisesRegex(ValueError, "link"):
+                _read_regular(checked.model_path, 1024, checked.model_sha256)
+
     def test_pinned_package_preflight_accepts_only_local_canonical_files(self):
         with tempfile.TemporaryDirectory() as temp:
             path, pin = package(Path(temp))
