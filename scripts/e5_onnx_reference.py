@@ -16,10 +16,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import stat
 import struct
+import tempfile
 from typing import Any
 
 try:
@@ -80,37 +82,66 @@ def _sha(value: Any) -> bool:
     return isinstance(value, str) and HEX.fullmatch(value) is not None
 
 
-def _read_regular(path: Path, limit: int) -> bytes:
-    info = path.lstat()  # Do not follow an explicit symlink.
-    if not stat.S_ISREG(info.st_mode) or not 1 <= info.st_size <= limit:
-        raise ValueError("Required local file is not regular or exceeds the bound")
-    with path.open("rb") as stream:
+def _open_regular(path: Path):
+    """Open once with O_NOFOLLOW; never validate one path then read another."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("Host lacks safe no-follow local file access")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+    except OSError as invalid:
+        raise ValueError("Package component is a link, missing or inaccessible") from invalid
+    return os.fdopen(fd, "rb")
+
+
+def _same_file(before: os.stat_result, after: os.stat_result) -> bool:
+    return (before.st_dev, before.st_ino, before.st_mode, before.st_size,
+            before.st_mtime_ns, before.st_ctime_ns) == (
+            after.st_dev, after.st_ino, after.st_mode, after.st_size,
+            after.st_mtime_ns, after.st_ctime_ns)
+
+
+def _read_regular(path: Path, limit: int, expected_sha: str | None = None) -> bytes:
+    with _open_regular(path) as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or not 1 <= before.st_size <= limit:
+            raise ValueError("Required local file is not regular or exceeds the bound")
         data = stream.read(limit + 1)
-    if len(data) != info.st_size:
-        raise ValueError("Local file size changed during reading")
+        after = os.fstat(stream.fileno())
+    if len(data) != before.st_size or not _same_file(before, after):
+        raise ValueError("Local file changed during reading")
+    if expected_sha is not None and (not _sha(expected_sha)
+                                     or hashlib.sha256(data).hexdigest() != expected_sha):
+        raise ValueError("Local file differs from pinned SHA-256")
     return data
 
 
 def _digest_file(path: Path, expected_size: int, expected_sha: str) -> None:
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_size != expected_size:
-        raise ValueError("Package component is a link, missing or has the wrong size")
     digest = hashlib.sha256()
     total = 0
-    with path.open("rb") as stream:
+    with _open_regular(path) as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size != expected_size:
+            raise ValueError("Package component is a link, missing or has the wrong size")
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             total += len(chunk)
             if total > expected_size:
                 raise ValueError("Package component grew during hashing")
             digest.update(chunk)
+        after = os.fstat(stream.fileno())
+    if not _same_file(before, after):
+        raise ValueError("Package component metadata changed during hashing")
     if total != expected_size or digest.hexdigest() != expected_sha:
         raise ValueError("Package component differs from pinned size/SHA-256")
-    after = path.lstat()
-    if (after.st_dev, after.st_ino, after.st_mode, after.st_size,
-            after.st_mtime_ns, after.st_ctime_ns) != (
-            info.st_dev, info.st_ino, info.st_mode, info.st_size,
-            info.st_mtime_ns, info.st_ctime_ns):
-        raise ValueError("Package component metadata changed during hashing")
+
+
+def _stage_pinned_tokenizer(package: CheckedPackage, folder: Path) -> Path:
+    """Give native SentencePiece a verified private snapshot, not a mutable input path."""
+    tokenizer = _read_regular(package.sentencepiece_path, MAX_OTHER_BYTES,
+                              package.sentencepiece_sha256)
+    destination = folder / "sentencepiece.bpe.model"
+    with destination.open("xb") as output:
+        output.write(tokenizer)
+    return destination
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -385,16 +416,19 @@ def execute(package: CheckedPackage) -> dict[str, Any]:
                            "offline before running the E5 reference") from missing
     if transformers.__version__ != REFERENCE_TRANSFORMERS_VERSION:
         raise ValueError("Unexpected Transformers slow tokenizer version")
-    tokenizer = XLMRobertaTokenizer(vocab_file=str(package.sentencepiece_path),
-                                    model_max_length=512)
-    ids_reference = reference(tokenizer, package.sentencepiece_sha256,
-                              transformers.__version__)
+    # The upstream slow tokenizer accepts a *path*. A source path can change
+    # after preflight, so hand it a private snapshot of the verified bytes.
+    with tempfile.TemporaryDirectory(prefix="dpks-e5-reference-") as temporary:
+        safe_model = _stage_pinned_tokenizer(package, Path(temporary))
+        tokenizer = XLMRobertaTokenizer(vocab_file=str(safe_model),
+                                        model_max_length=512)
+        ids_reference = reference(tokenizer, package.sentencepiece_sha256,
+                                  transformers.__version__)
 
     # Bytes rather than a filesystem path prevent ONNX Runtime from using
     # external_data locations as filenames. Schema v2 is refused preflight.
-    model = _read_regular(package.model_path, MAX_INLINE_ONNX_BYTES)
-    if hashlib.sha256(model).hexdigest() != package.model_sha256:
-        raise ValueError("Model changed after preflight")
+    model = _read_regular(package.model_path, MAX_INLINE_ONNX_BYTES,
+                          package.model_sha256)
     require_inline_model(onnx.load_model_from_string(model))
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
