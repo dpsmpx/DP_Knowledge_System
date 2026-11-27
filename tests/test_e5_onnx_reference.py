@@ -17,7 +17,7 @@ from scripts.e5_onnx_reference import (
     MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, _read_regular,
     _stage_pinned_tokenizer, compare_reference,
     e5_io_descriptor_sha256, inspect_metadata, local_content_set_revision,
-    padded_input, pool_and_normalize,
+    padded_input, pool_and_normalize, require_official_onnx_pins,
     preflight, require_inline_model,
     session_sequence,
 )
@@ -267,6 +267,53 @@ class E5OnnxReferenceTest(unittest.TestCase):
                  "sha256": OFFICIAL_TOKENIZER_CONFIG_SHA256, "bytes": 443},
             ]
             self.assertEqual(expected[variant], local_content_set_revision(files))
+
+    def test_opt_in_official_file_pins_gate_rejects_other_graphs_before_native_ml(self):
+        for variant in ("original", "o4"):
+            weight_name, weight_sha = OFFICIAL_ONNX[variant]
+            manifest = {
+                "schema_version": 1, "source_id": "intfloat/multilingual-e5-small",
+                "license": "MIT", "weight_sha256": weight_sha,
+                "files": [
+                    {"kind": "WEIGHTS", "name": weight_name, "sha256": weight_sha,
+                     "bytes": 32},
+                    {"kind": "TOKENIZER", "name": "sentencepiece.bpe.model",
+                     "sha256": OFFICIAL_SENTENCEPIECE_SHA256, "bytes": 100},
+                    {"kind": "MODEL_CONFIG", "name": "config.json",
+                     "sha256": OFFICIAL_CONFIG_SHA256, "bytes": 653},
+                    {"kind": "TOKENIZER", "name": "tokenizer_config.json",
+                     "sha256": OFFICIAL_TOKENIZER_CONFIG_SHA256, "bytes": 443},
+                ],
+            }
+            require_official_onnx_pins(manifest, variant)
+            # Component order must not change the independently pinned set.
+            require_official_onnx_pins(
+                {**manifest, "files": list(reversed(manifest["files"]))}, variant)
+            mutations = [
+                lambda m: m.update(license="Apache-2.0"),
+                lambda m: m.update(weight_sha256="a" * 64),
+                lambda m: m["files"][0].update(sha256="b" * 64),
+                lambda m: m["files"][1].update(name="untrusted.model"),
+                lambda m: m["files"][2].update(bytes=652),
+                lambda m: m["files"][3].update(bytes=444),
+                lambda m: m["files"].append(m["files"][0]),
+                lambda m: m["files"][0].update(kind=["WEIGHTS"]),
+            ]
+            for mutate in mutations:
+                altered = json.loads(json.dumps(manifest))
+                mutate(altered)
+                with self.assertRaises(ValueError):
+                    require_official_onnx_pins(altered, variant)
+            with self.assertRaisesRegex(ValueError, "pinned"):
+                require_official_onnx_pins(
+                    manifest, "o4" if variant == "original" else "original")
+
+        with tempfile.TemporaryDirectory() as temp:
+            path, pin = package(Path(temp))  # Exact synthetic hashes, not official weights.
+            with mock.patch("scripts.e5_onnx_reference._digest_file") as audit:
+                with self.assertRaisesRegex(ValueError, "pinned"):
+                    preflight(path, pin, official_onnx_variant="original")
+            audit.assert_not_called()
 
     def test_wrong_pin_content_and_links_fail_closed(self):
         with tempfile.TemporaryDirectory() as temp:

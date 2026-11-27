@@ -28,9 +28,17 @@ try:
     from .e5_sentencepiece_reference import (
         REFERENCE_TRANSFORMERS_VERSION, SAMPLES, reference,
     )
+    from .e5_package_manifest import (
+        OFFICIAL_CONFIG_SHA256, OFFICIAL_ONNX, OFFICIAL_SENTENCEPIECE_SHA256,
+        OFFICIAL_TOKENIZER_CONFIG_SHA256,
+    )
 except ImportError:  # Direct `python scripts/e5_onnx_reference.py` execution.
     from e5_sentencepiece_reference import (
         REFERENCE_TRANSFORMERS_VERSION, SAMPLES, reference,
+    )
+    from e5_package_manifest import (
+        OFFICIAL_CONFIG_SHA256, OFFICIAL_ONNX, OFFICIAL_SENTENCEPIECE_SHA256,
+        OFFICIAL_TOKENIZER_CONFIG_SHA256,
     )
 
 
@@ -206,7 +214,49 @@ def local_content_set_revision(files: list[dict[str, Any]]) -> str | None:
     return "sha256:" + hashlib.sha256(identity.encode("ascii")).hexdigest()
 
 
-def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPackage:
+def require_official_onnx_pins(manifest: dict[str, Any], variant: str) -> None:
+    """Opt-in manifest-only upstream *file* pins, checked before native ML.
+
+    Manifest declarations are still authenticated by the caller's independent
+    manifest hash and later checked against real bytes by preflight. File pins
+    alone do NOT attest to a common upstream revision or publisher signature.
+    """
+    if variant not in OFFICIAL_ONNX:
+        raise ValueError("Unknown official E5 ONNX variant")
+    weight_name, weight_sha = OFFICIAL_ONNX[variant]
+    expected = {
+        ("WEIGHTS", weight_name): weight_sha,
+        ("TOKENIZER", "sentencepiece.bpe.model"): OFFICIAL_SENTENCEPIECE_SHA256,
+        ("MODEL_CONFIG", "config.json"): OFFICIAL_CONFIG_SHA256,
+        ("TOKENIZER", "tokenizer_config.json"): OFFICIAL_TOKENIZER_CONFIG_SHA256,
+    }
+    files = manifest.get("files")
+    if manifest.get("schema_version") != 1 or manifest.get("license") != "MIT" \
+            or manifest.get("source_id") != EXPECTED_SOURCE \
+            or manifest.get("weight_sha256") != weight_sha \
+            or not isinstance(files, list) or len(files) != 4:
+        raise ValueError("Official E5 ONNX package declaration differs from pinned profile")
+    seen: set[tuple[str, str]] = set()
+    for item in files:
+        if not isinstance(item, dict) or set(item) != {"kind", "name", "sha256", "bytes"}:
+            raise ValueError("Invalid official E5 ONNX component declaration")
+        if not isinstance(item["kind"], str) or not isinstance(item["name"], str) \
+                or type(item["bytes"]) is not int or item["bytes"] < 1:
+            raise ValueError("Invalid official E5 ONNX component type/length")
+        key = item["kind"], item["name"]
+        if key in seen or key not in expected or item["sha256"] != expected[key]:
+            raise ValueError("Official E5 ONNX component differs from independent file pin")
+        if (key == ("MODEL_CONFIG", "config.json") and item["bytes"] != 653) \
+                or (key == ("TOKENIZER", "tokenizer_config.json")
+                    and item["bytes"] != 443):
+            raise ValueError("Official E5 ONNX JSON length differs from file pin")
+        seen.add(key)
+    if seen != set(expected):
+        raise ValueError("Incomplete official E5 ONNX component set")
+
+
+def preflight(manifest_path: Path, expected_manifest_sha256: str,
+              official_onnx_variant: str | None = None) -> CheckedPackage:
     """Verify every declared file before importing optional native ML modules."""
     if not _sha(expected_manifest_sha256):
         raise ValueError("Expected independent manifest SHA-256 is required")
@@ -232,6 +282,8 @@ def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPack
         raise ValueError("Invalid declared E5 revision")
     if not isinstance(manifest["license"], str) or not 1 <= len(manifest["license"]) <= 128:
         raise ValueError("Missing declared license")
+    if official_onnx_variant is not None:
+        require_official_onnx_pins(manifest, official_onnx_variant)
     files = manifest["files"]
     if not isinstance(files, list) or not 3 <= len(files) <= 16:
         raise ValueError("Unexpected E5 package component count")
@@ -573,10 +625,13 @@ def main() -> int:
                         help="optional, local Android-shaped reference JSON to compare")
     parser.add_argument("--metadata-only", action="store_true",
                         help="inspect exact E5 ORT I/O only; never call Run or tokenize text")
+    parser.add_argument("--official-onnx-variant", choices=sorted(OFFICIAL_ONNX),
+                        help="opt-in independent official file SHA pins; no download or provenance proof")
     args = parser.parse_args()
     if args.metadata_only and args.compare:
         parser.error("--compare requires the full reference; cannot use --metadata-only")
-    package = preflight(args.manifest, args.expected_manifest_sha256)
+    package = preflight(args.manifest, args.expected_manifest_sha256,
+                        official_onnx_variant=args.official_onnx_variant)
     output = inspect_metadata(package) if args.metadata_only else execute(package)
     if args.compare:
         candidate = _object(_read_regular(args.compare, MAX_COMPARE_BYTES))
