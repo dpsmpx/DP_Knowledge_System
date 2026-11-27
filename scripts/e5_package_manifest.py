@@ -5,6 +5,8 @@ This tool never downloads models or dependencies, opens a note vault, or starts
 an ML runtime. The revision/license are *user assertions*, not authentication
 of an upstream repository. Every component requires an independently supplied
 expected SHA-256; no digest is silently promoted to a trusted pin.
+An opt-in upstream catalog supplies two published E5 hashes (ONNX and
+SentencePiece); it does not authenticate a Git revision or file provenance.
 """
 
 from __future__ import annotations
@@ -30,6 +32,42 @@ MAX_MANIFEST = 64 * 1024
 MAX_FILES = 16
 SOURCE = "intfloat/multilingual-e5-small"
 KINDS = {"WEIGHTS", "TOKENIZER", "MODEL_CONFIG", "ONNX_EXTERNAL_DATA"}
+
+# SHA-256 values published in the official Hugging Face file pages for
+# intfloat/multilingual-e5-small, checked on 2026-11-27. These are *file*
+# pins, not a verified full Git commit or a signature over a model release.
+# Files live in upstream's onnx/ directory; flatten them into a local package.
+# The AVX512-VNNI quantized graph is deliberately omitted: this Android-first
+# workflow does not claim its compatibility with ARM devices.
+OFFICIAL_ONNX = {
+    "original": ("model.onnx",
+                 "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"),
+    "o4": ("model_O4.onnx",
+           "4654c156f3e4171abc9c716cdb771bf9116455d15ac1aab364aeeede0e3205b0"),
+}
+OFFICIAL_SENTENCEPIECE_SHA256 = (
+    "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
+)
+
+
+def _with_official_pins(components: list[str], variant: str | None,
+                        license_id: str) -> list[str]:
+    if variant is None:
+        return components
+    if variant not in OFFICIAL_ONNX:
+        raise ValueError("Unknown official E5 ONNX variant")
+    if license_id != "MIT":
+        raise ValueError("Official E5 ONNX pins require the upstream MIT license declaration")
+    weight_name, weight_sha = OFFICIAL_ONNX[variant]
+    # Never override or silently ignore conflicting user-provided components.
+    for argument in components:
+        kind, name, _ = _component(argument)
+        if kind == "WEIGHTS" or name == "sentencepiece.bpe.model":
+            raise ValueError("Official E5 ONNX pins must not duplicate weight/"
+                             "SentencePiece --component arguments")
+    return components + [f"WEIGHTS:{weight_name}:{weight_sha}",
+                         "TOKENIZER:sentencepiece.bpe.model:"
+                         + OFFICIAL_SENTENCEPIECE_SHA256]
 
 
 def _component(argument: str) -> tuple[str, str, str]:
@@ -86,9 +124,11 @@ def _verified_size(directory_fd: int, name: str, expected_sha: str,
 
 
 def build_manifest(directory: Path, revision: str, license_id: str,
-                   components: list[str]) -> tuple[bytes, str]:
+                   components: list[str], *,
+                   official_onnx_variant: str | None = None) -> tuple[bytes, str]:
     if not REVISION.fullmatch(revision) or not LICENSE.fullmatch(license_id):
         raise ValueError("A pinned revision and declared license are required")
+    components = _with_official_pins(components, official_onnx_variant, license_id)
     if not 3 <= len(components) <= MAX_FILES:
         raise ValueError("E5 requires three to sixteen local package files")
     specs = [_component(value) for value in components]
@@ -150,14 +190,18 @@ def main() -> int:
                         help="independently pinned 40-hex commit or sha256:64-hex revision")
     parser.add_argument("--license", required=True,
                         help="declared license identifier, never a verified grant")
-    parser.add_argument("--component", action="append", required=True,
+    parser.add_argument("--component", action="append", default=[],
                         help="KIND:filename:expected_sha256; repeat for each local file")
+    parser.add_argument("--official-onnx-variant", choices=sorted(OFFICIAL_ONNX),
+                        help="opt-in published upstream ONNX + SentencePiece hashes; "
+                             "no download or provenance proof; omit their --component entries")
     parser.add_argument("--output", type=Path,
                         help="write new manifest here (refuses to overwrite); default stdout")
     args = parser.parse_args()
     try:
         manifest, manifest_sha = build_manifest(
-            args.directory, args.revision, args.license, args.component)
+            args.directory, args.revision, args.license, args.component,
+            official_onnx_variant=args.official_onnx_variant)
         if args.output is None:
             sys.stdout.buffer.write(manifest)
         else:
