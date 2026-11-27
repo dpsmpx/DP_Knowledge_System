@@ -36,6 +36,7 @@ final class KnowledgeModelSettingsDialog {
     interface E5QaRequest { void run(KnowledgeModelFiles.Entry entry); }
     interface E5GraphRequest { void inspect(KnowledgeModelFiles.Entry entry); }
     interface E5BuildRequest { void pick(KnowledgeModelFiles.Entry entry); }
+    interface E5FdVerifyRequest { void verify(KnowledgeModelFiles.Entry entry); }
     interface SmokeRequest { void run(); }
     interface FdSmokeRequest { void run(); }
     interface BenchmarkRequest { void run(KnowledgeModelPolicy.Role role); }
@@ -55,6 +56,7 @@ final class KnowledgeModelSettingsDialog {
     private final E5QaRequest e5QaRunner;
     private final E5GraphRequest e5GraphInspector;
     private final E5BuildRequest e5PackageBuilder;
+    private final E5FdVerifyRequest e5FdVerifier;
     private final SmokeRequest smokeTester;
     private final FdSmokeRequest fdSmokeTester;
     private final BenchmarkRequest benchmarkRunner;
@@ -71,7 +73,8 @@ final class KnowledgeModelSettingsDialog {
                                  final SessionRequest sessionInspect,
                                  final E5QaRequest e5Qa,
                                  final E5GraphRequest e5Graph,
-                                 final E5BuildRequest e5Build) {
+                                 final E5BuildRequest e5Build,
+                                 final E5FdVerifyRequest e5FdVerify) {
         context = activity;
         files = modelFiles;
         packages = modelPackages;
@@ -83,6 +86,7 @@ final class KnowledgeModelSettingsDialog {
         e5QaRunner = e5Qa;
         e5GraphInspector = e5Graph;
         e5PackageBuilder = e5Build;
+        e5FdVerifier = e5FdVerify;
         smokeTester = smoke;
         fdSmokeTester = fdSmoke;
         benchmarkRunner = benchmark;
@@ -428,6 +432,10 @@ final class KnowledgeModelSettingsDialog {
         if (buildE5Index >= 0) {
             menu.add(context.getString(R.string.knowledge_models_e5_build_package));
         }
+        final int verifyE5FdIndex = cpuSession && companionsIndex >= 0 ? menu.size() : -1;
+        if (verifyE5FdIndex >= 0) {
+            menu.add(context.getString(R.string.knowledge_models_e5_fd_verify));
+        }
         final int removeIndex = menu.size();
         menu.add(context.getString(R.string.knowledge_models_package_remove));
         menu.add(context.getString(R.string.knowledge_models_delete));
@@ -443,6 +451,7 @@ final class KnowledgeModelSettingsDialog {
                     else if (which == e5GraphIndex) confirmE5Graph(entry);
                     else if (which == companionsIndex) showE5Companions(entry);
                     else if (which == buildE5Index) confirmE5Build(entry);
+                    else if (which == verifyE5FdIndex) confirmE5FdVerify(entry);
                     else if (which == removeIndex) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
@@ -453,6 +462,27 @@ final class KnowledgeModelSettingsDialog {
                                         showPackageActions(entry)).show())
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
+                .show();
+    }
+
+    /** The verify-only FD route requires its own consent before any weight IO. */
+    private void confirmE5FdVerify(final KnowledgeModelFiles.Entry entry) {
+        try {
+            // A manifest lookup is cheap. The full byte-level audit runs only
+            // after the user confirms, in the sender thread.
+            if (packages.installed(entry) == null) throw new IOException("No E5 package");
+        } catch (IOException invalid) {
+            new AlertDialog.Builder(context)
+                    .setMessage(R.string.knowledge_models_onnx_session_requires_package)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_e5_fd_verify)
+                .setMessage(R.string.knowledge_models_e5_fd_verify_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.knowledge_models_e5_fd_verify,
+                        (dialog, which) -> e5FdVerifier.verify(entry))
                 .show();
     }
 
