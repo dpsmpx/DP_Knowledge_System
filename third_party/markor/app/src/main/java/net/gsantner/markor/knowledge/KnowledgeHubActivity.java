@@ -183,6 +183,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
     private KnowledgeModelPackageStore modelPackages;
     private KnowledgeOnnxIsolatedClient onnxSmokeClient;
     private KnowledgeOnnxIsolatedSessionClient onnxSessionClient;
+    private KnowledgeE5VerifyOnlyFdClient e5VerifyFdClient;
     private KnowledgeModelPolicy.Role pendingModelImportRole;
     private String pendingModelPackageKey;
     private boolean modelImportActive;
@@ -289,6 +290,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         modelStatus = findViewById(R.id.knowledge_models_status);
         onnxSmokeClient = new KnowledgeOnnxIsolatedClient(this);
         onnxSessionClient = new KnowledgeOnnxIsolatedSessionClient(this);
+        e5VerifyFdClient = new KnowledgeE5VerifyOnlyFdClient(this);
         findViewById(R.id.knowledge_models_open).setOnClickListener(view -> {
             if (modelImportActive) {
                 cancelModelImport();
@@ -299,7 +301,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         this::prepareOnnxFiles, this::runOnnxCpuSmoke,
                         this::runOnnxFdSmoke, this::runSyntheticModelBenchmark,
                         this::inspectOnnxCpuSession, this::runE5TokenizerGoldenQa,
-                        this::runE5OnnxMetadataCheck, this::pickOfficialE5Companions).show();
+                        this::runE5OnnxMetadataCheck, this::pickOfficialE5Companions,
+                        this::verifyE5FdOnly).show();
             }
         });
         final TextView root = findViewById(R.id.knowledge_root);
@@ -1371,6 +1374,47 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         });
     }
 
+    /** Manual, verify-only transport: no native session, inference or indexing. */
+    private void verifyE5FdOnly(final KnowledgeModelFiles.Entry entry) {
+        if (modelImportActive || e5VerifyFdClient == null || entry == null
+                || !KnowledgeOnnxCpuBackend.available()
+                || entry.role != KnowledgeModelPolicy.Role.EMBEDDING
+                || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
+                || KnowledgeModelCatalog.e5Companions(entry.role, entry.sha256).isEmpty()) {
+            return;
+        }
+        modelImportActive = true;
+        final Button manage = findViewById(R.id.knowledge_models_open);
+        manage.setText(R.string.knowledge_models_cancel_transfer);
+        manage.setContentDescription(getString(R.string.knowledge_models_cancel_transfer));
+        final int operation = modelGeneration.incrementAndGet();
+        modelStatus.setText(R.string.knowledge_models_e5_fd_verify_running);
+        if (!e5VerifyFdClient.start(modelPackages, entry,
+                new KnowledgeE5VerifyOnlyFdClient.Callback() {
+                    @Override public void match() {
+                        if (!isFinishing() && !isDestroyed()
+                                && modelGeneration.get() == operation) {
+                            modelImportActive = false;
+                            restoreModelButton();
+                            modelStatus.setText(R.string.knowledge_models_e5_fd_verify_passed);
+                        }
+                    }
+
+                    @Override public void failure() {
+                        if (!isFinishing() && !isDestroyed()
+                                && modelGeneration.get() == operation) {
+                            modelImportActive = false;
+                            restoreModelButton();
+                            modelStatus.setText(R.string.knowledge_models_e5_fd_verify_failed);
+                        }
+                    }
+                })) {
+            modelImportActive = false;
+            restoreModelButton();
+            modelStatus.setText(R.string.knowledge_models_e5_fd_verify_failed);
+        }
+    }
+
     private String containerPreflightLabel(final KnowledgeModelContainerProbe.Result result) {
         final String status = result.state == KnowledgeModelContainerProbe.State.METADATA_HINTS
                 ? getString(R.string.knowledge_models_container_metadata)
@@ -1571,6 +1615,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         modelGeneration.incrementAndGet();
         if (onnxSmokeClient != null) onnxSmokeClient.cancel();
         if (onnxSessionClient != null) onnxSessionClient.cancel();
+        if (e5VerifyFdClient != null) e5VerifyFdClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         modelImportActive = false;
         modelBenchmarkActive = false;
@@ -5712,6 +5757,7 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         modelGeneration.incrementAndGet();
         if (onnxSmokeClient != null) onnxSmokeClient.cancel();
         if (onnxSessionClient != null) onnxSessionClient.cancel();
+        if (e5VerifyFdClient != null) e5VerifyFdClient.cancel();
         if (runningModelImport != null) runningModelImport.cancel(true);
         scanGeneration.incrementAndGet();
         queryGeneration.incrementAndGet();
