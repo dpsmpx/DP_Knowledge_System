@@ -228,6 +228,10 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             data.putInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_OUTPUT_AXES, io.dynamicOutputAxes);
             data.putInt(KnowledgeOnnxIsolatedProtocol.MAX_INPUT_RANK, io.maxInputRank);
             data.putInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK, io.maxOutputRank);
+            if (io.e5DescriptorSha256 != null) {
+                data.putString(KnowledgeOnnxIsolatedProtocol.E5_DESCRIPTOR_SHA256,
+                        io.e5DescriptorSha256);
+            }
             putMemory(data, result.workerMemory, result.workerRssHighWaterKiB);
             reply.setData(data);
         }

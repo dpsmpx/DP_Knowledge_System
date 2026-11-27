@@ -48,6 +48,8 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final String DYNAMIC_OUTPUT_AXES = "dynamic_output_axes";
     static final String MAX_INPUT_RANK = "max_input_rank";
     static final String MAX_OUTPUT_RANK = "max_output_rank";
+    // SHA-256 of exact E5 allowlisted names/types/axes; no arbitrary labels in Binder.
+    static final String E5_DESCRIPTOR_SHA256 = "e5_io_sha256";
 
     private KnowledgeOnnxIsolatedProtocol() { }
 

@@ -37,4 +37,15 @@ public final class KnowledgeOnnxIoSummaryTest {
                 new KnowledgeOnnxIoSummary(1, 1, Integer.MAX_VALUE, 1,
                         Integer.MAX_VALUE, 0, 0, 0, 1, 1), 1, 1));
     }
+
+    @Test public void optionalE5DigestRejectsMalformedBinderMetadata() {
+        final String digest = new String(new char[64]).replace('\0', 'a');
+        assertTrue(KnowledgeOnnxIoSummary.valid(new KnowledgeOnnxIoSummary(
+                2, 1, 0, 1, 2, 0, 0, 0, 2, 3, digest), 2, 1));
+        for (final String bad : new String[]{"", digest.toUpperCase(),
+                digest.replace('a', 'z'), digest.substring(1), digest + "a"}) {
+            assertFalse(KnowledgeOnnxIoSummary.valid(new KnowledgeOnnxIoSummary(
+                    2, 1, 0, 1, 2, 0, 0, 0, 2, 3, bad), 2, 1));
+        }
+    }
 }

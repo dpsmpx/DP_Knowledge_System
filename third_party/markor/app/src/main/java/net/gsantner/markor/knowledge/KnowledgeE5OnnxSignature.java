@@ -3,6 +3,9 @@ package net.gsantner.markor.knowledge;
 
 import java.util.Arrays;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Fail-closed, name-aware E5 graph I/O gate before any real-model inference.
@@ -52,6 +55,44 @@ final class KnowledgeE5OnnxSignature {
                     || !Arrays.equals(a.shape, b.shape)) return false;
         }
         return true;
+    }
+
+    /**
+     * Exact, order-independent SHA-256 for the five allowlisted E5 I/O names,
+     * types and axes. The raw names, symbolic labels and model bytes never
+     * cross the isolated-process boundary. This is metadata agreement only.
+     */
+    static String descriptorSha256(final Map<String, Tensor> inputs,
+                                   final Map<String, Tensor> outputs) {
+        require(inputs, outputs, KnowledgeE5ConfigProfile.HIDDEN_SIZE);
+        final StringBuilder canonical = new StringBuilder("DPKS-E5-IO-v1;");
+        appendDescriptor(canonical, "I", "input_ids", inputs);
+        appendDescriptor(canonical, "I", "attention_mask", inputs);
+        appendDescriptor(canonical, "I", "token_type_ids", inputs);
+        appendDescriptor(canonical, "O", "last_hidden_state", outputs);
+        appendDescriptor(canonical, "O", "pooler_output", outputs);
+        try {
+            final byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    canonical.toString().getBytes(StandardCharsets.US_ASCII));
+            final char[] hex = new char[digest.length * 2];
+            for (int i = 0; i < digest.length; i++) {
+                hex[2 * i] = Character.forDigit((digest[i] >>> 4) & 15, 16);
+                hex[2 * i + 1] = Character.forDigit(digest[i] & 15, 16);
+            }
+            return new String(hex);
+        } catch (NoSuchAlgorithmException impossibleOnAndroid) {
+            throw new IllegalStateException("SHA-256 unavailable", impossibleOnAndroid);
+        }
+    }
+
+    private static void appendDescriptor(final StringBuilder into, final String role,
+                                         final String name, final Map<String, Tensor> descriptors) {
+        final Tensor tensor = descriptors.get(name);
+        if (tensor == null) return;
+        into.append(role).append(':').append(name).append(':').append(tensor.type)
+                .append(':').append(tensor.shape.length);
+        for (final long axis : tensor.shape) into.append(':').append(axis);
+        into.append(';');
     }
 
     static void require(final Map<String, Tensor> inputs, final Map<String, Tensor> outputs,

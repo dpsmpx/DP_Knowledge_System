@@ -1101,6 +1101,21 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         }
     }
 
+    /** Compare exact allowlisted E5 descriptors; never call this a runtime certificate. */
+    private String formatE5DescriptorAgreement(
+            final KnowledgeModelPackageStore.CpuSessionInput prepared,
+            final KnowledgeOnnxSessionGate.Report report) {
+        final String fromGraph = prepared.e5DescriptorSha256;
+        final String fromRuntime = report.ioSummary.e5DescriptorSha256;
+        if (fromGraph == null && fromRuntime == null) return "";
+        if (fromGraph == null || fromRuntime == null) {
+            return "\n" + getString(R.string.knowledge_models_e5_io_exact_incomplete);
+        }
+        return "\n" + getString(fromGraph.equals(fromRuntime)
+                ? R.string.knowledge_models_e5_io_exact_agree
+                : R.string.knowledge_models_e5_io_exact_differ);
+    }
+
     /** Fail closed on an unavailable/low OS RAM snapshot; this reserves no memory. */
     private void requireAvailableOnnxMemory() throws IOException {
         // Read a current system-wide snapshot. Neither this nor the isolated
@@ -1160,7 +1175,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                         report.runtimeVersion, report.inputs, report.outputs,
                                         report.sessionInitMillis, report.nativeHeapDeltaBytes,
                                         formatSessionDiagnostics(report) + "\n"
-                                                + formatIoAgreement(prepared, report)));
+                                                + formatIoAgreement(prepared, report)
+                                                + formatE5DescriptorAgreement(prepared, report)));
                             }
                         }
 

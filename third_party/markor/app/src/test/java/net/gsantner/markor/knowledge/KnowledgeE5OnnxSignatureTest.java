@@ -139,4 +139,38 @@ public final class KnowledgeE5OnnxSignatureTest {
         assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(first, same));
         assertFalse(KnowledgeE5OnnxSignature.sameDescriptors(null, same));
     }
+
+    @Test public void exactE5FingerprintIsOrderedByNamesAndChangesForEveryAxisOrVariant() {
+        final String baseline = KnowledgeE5OnnxSignature.descriptorSha256(inputs(), outputs());
+        assertTrue(baseline.matches("[0-9a-f]{64}"));
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> reordered = new LinkedHashMap<>();
+        reordered.put("attention_mask", inputs().get("attention_mask"));
+        reordered.put("input_ids", inputs().get("input_ids"));
+        assertEquals(baseline,
+                KnowledgeE5OnnxSignature.descriptorSha256(reordered, outputs()));
+
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> fixed = inputs();
+        fixed.put("input_ids", t(KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        fixed.put("attention_mask", t(KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> fixedOutput = outputs();
+        fixedOutput.put("last_hidden_state",
+                t(KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 6, 384));
+        final String fixedHash = KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput);
+        assertNotEquals("Matching tensor counts must not mask different axes", baseline, fixedHash);
+
+        fixed.put("token_type_ids", t(KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        assertNotEquals(fixedHash,
+                KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput));
+        fixedOutput.put("pooler_output",
+                t(KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 384));
+        assertNotEquals(fixedHash,
+                KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput));
+
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> extra = inputs();
+        extra.put("private_model_name", t(KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        try {
+            KnowledgeE5OnnxSignature.descriptorSha256(extra, outputs());
+            fail("Unknown names cannot be serialized into IPC fingerprint");
+        } catch (IllegalArgumentException expected) { }
+    }
 }

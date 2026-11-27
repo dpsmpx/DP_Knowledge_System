@@ -90,7 +90,8 @@ final class KnowledgeOnnxCpuBackend {
                 final IoCounts out = countTensors(session.getOutputInfo());
                 summary = new KnowledgeOnnxIoSummary(in.tensors, out.tensors,
                         in.floatCount, out.floatCount, in.int64Count, out.int64Count,
-                        in.dynamicAxes, out.dynamicAxes, in.maxRank, out.maxRank);
+                        in.dynamicAxes, out.dynamicAxes, in.maxRank, out.maxRank,
+                        e5DescriptorSha256(session.getInputInfo(), session.getOutputInfo()));
                 if (in.nodes != inputs || out.nodes != outputs
                         || !KnowledgeOnnxIoSummary.valid(summary, inputs, outputs)) {
                     throw new IOException("ONNX I/O metadata outside bounded diagnostic contract");
@@ -139,6 +140,43 @@ final class KnowledgeOnnxCpuBackend {
             }
         }
         return found;
+    }
+
+    /** Only the exact E5 metadata profile may generate a fingerprint for IPC. */
+    private static String e5DescriptorSha256(final Map<String, NodeInfo> inputInfo,
+                                             final Map<String, NodeInfo> outputInfo) {
+        try {
+            return KnowledgeE5OnnxSignature.descriptorSha256(
+                    e5Tensors(inputInfo), e5Tensors(outputInfo));
+        } catch (IllegalArgumentException invalidOrNonE5) {
+            // Ordinary ONNX sessions still report bounded aggregate counts.
+            return null;
+        }
+    }
+
+    private static Map<String, KnowledgeE5OnnxSignature.Tensor> e5Tensors(
+            final Map<String, NodeInfo> nodes) {
+        if (nodes == null || nodes.isEmpty() || nodes.size() > 3) {
+            throw new IllegalArgumentException("Not bounded E5 I/O");
+        }
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> descriptors =
+                new LinkedHashMap<>();
+        for (final Map.Entry<String, NodeInfo> entry : nodes.entrySet()) {
+            final NodeInfo node = entry.getValue();
+            if (node == null || !(node.getInfo() instanceof TensorInfo)) {
+                throw new IllegalArgumentException("Non-tensor E5 I/O");
+            }
+            final TensorInfo tensor = (TensorInfo) node.getInfo();
+            final KnowledgeE5OnnxSignature.DataType type =
+                    tensor.type == OnnxJavaType.INT64
+                    ? KnowledgeE5OnnxSignature.DataType.INT64
+                    : tensor.type == OnnxJavaType.FLOAT
+                            ? KnowledgeE5OnnxSignature.DataType.FLOAT32
+                            : KnowledgeE5OnnxSignature.DataType.OTHER;
+            descriptors.put(entry.getKey(),
+                    new KnowledgeE5OnnxSignature.Tensor(type, tensor.getShape()));
+        }
+        return descriptors;
     }
 
     static KnowledgeOnnxSmoke.Report smoke(final Context workerContext,
