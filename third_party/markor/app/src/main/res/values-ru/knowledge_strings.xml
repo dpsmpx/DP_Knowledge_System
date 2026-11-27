@@ -760,6 +760,11 @@
     <string name="knowledge_models_details">%1$s\nРазмер: %2$s (%3$d байт)\nФормат: %4$s (движком не проверен)\nSHA-256: %5$s</string>
     <string name="knowledge_models_package_report">Контракт комплекта v%1$d\nПроисхождение: %2$s\nЗаявленная лицензия: %3$s\nПредполагаемый движок: %4$s (НЕ ПРОВЕРЕН)\nНедостаёт для локального запуска:%5$s</string>
     <string name="knowledge_models_package_manage">Файлы комплекта</string>
+    <string name="knowledge_models_e5_companions">Официальные файлы комплекта E5</string>
+    <string name="knowledge_models_e5_companions_help">Это три сопутствующих файла официального ONNX-комплекта E5. Выберите файл, чтобы увидеть страницу источника и SHA-256. Страница открывается только по вашему нажатию; приложение ничего автоматически не скачивает, не импортирует и не запускает. Сохраните файлы вручную, затем создайте dpks-model-package.json командой scripts/e5_package_manifest.py --official-onnx-variant original|o4 (на ПК или в Termux) и импортируйте манифест со всеми сопутствующими файлами. Ревизию Git указывает сам пользователь; эти SHA не удостоверяют её.</string>
+    <string name="knowledge_models_e5_companion_details">Страница оригинального файла:\n%1$s\n\nОжидаемый SHA-256:\n%2$s\n\nХеш позволяет сверить локальные байты, но сам по себе не доказывает происхождение, общую Git-ревизию, паритет токенизатора или готовность модели. Инференс отключён.</string>
+    <string name="knowledge_models_e5_copy_sha">Копировать SHA-256</string>
+    <string name="knowledge_models_e5_sha_copied">Ожидаемый SHA-256 скопирован</string>
     <string name="knowledge_models_package_help">Как импортировать</string>
     <string name="knowledge_models_package_import">Импортировать манифест и файлы</string>
     <string name="knowledge_models_package_audit">Проверить SHA-256 комплекта</string>

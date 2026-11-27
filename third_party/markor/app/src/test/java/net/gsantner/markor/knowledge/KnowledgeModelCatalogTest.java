@@ -67,4 +67,51 @@ public class KnowledgeModelCatalogTest {
             fail("Accepted unverified weight hash");
         } catch (IllegalArgumentException expected) { }
     }
+
+    @Test public void officialE5CompanionsRequireAnExactKnownEmbeddingWeight() {
+        final List<KnowledgeModelCatalog.Artifact> e5 = KnowledgeModelCatalog.forRole(
+                KnowledgeModelPolicy.Role.EMBEDDING);
+        assertEquals(2, e5.size());
+        for (final KnowledgeModelCatalog.Artifact weight : e5) {
+            final List<KnowledgeModelCatalog.Companion> companions =
+                    KnowledgeModelCatalog.e5Companions(weight.role, weight.expectedSha256);
+            assertEquals(3, companions.size());
+            assertEquals("sentencepiece.bpe.model", companions.get(0).filename);
+            assertEquals("cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
+                    companions.get(0).expectedSha256);
+            assertEquals("config.json", companions.get(1).filename);
+            assertEquals("bbb7c1333fc4b3e27fbc9cd5d2070aabcc1d4dfb99917c3633e772f97545a6b6",
+                    companions.get(1).expectedSha256);
+            assertEquals("tokenizer_config.json", companions.get(2).filename);
+            assertEquals("a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+                    companions.get(2).expectedSha256);
+            for (final KnowledgeModelCatalog.Companion companion : companions) {
+                assertEquals("https://huggingface.co/intfloat/multilingual-e5-small/"
+                                + "blob/main/onnx/" + companion.filename, companion.sourcePage);
+            }
+            try {
+                companions.clear();
+                fail("The official companion catalog must be immutable");
+            } catch (UnsupportedOperationException expected) { }
+            assertTrue(KnowledgeModelCatalog.e5Companions(
+                    KnowledgeModelPolicy.Role.GENERATION, weight.expectedSha256).isEmpty());
+        }
+        assertTrue(KnowledgeModelCatalog.e5Companions(KnowledgeModelPolicy.Role.EMBEDDING,
+                "0000000000000000000000000000000000000000000000000000000000000000").isEmpty());
+    }
+
+    @Test public void officialCompanionsRejectUnsafePathsAndInvalidHashes() {
+        for (final String upstream : new String[]{"../config.json", "onnx/../config.json",
+                "https://elsewhere/config.json"}) {
+            try {
+                new KnowledgeModelCatalog.Companion("config.json", upstream,
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+                fail("Untrusted companion path accepted");
+            } catch (IllegalArgumentException expected) { }
+        }
+        try {
+            new KnowledgeModelCatalog.Companion("config.json", "onnx/config.json", "unknown");
+            fail("Unpinned companion accepted");
+        } catch (IllegalArgumentException expected) { }
+    }
 }

@@ -15,6 +15,25 @@ import java.util.List;
  * The source's 'main' ref can move, but the expected digest is mandatory.
  */
 final class KnowledgeModelCatalog {
+    /** Download guidance only: companions require a manually audited manifest. */
+    static final class Companion {
+        final String filename;
+        final String sourcePage;
+        final String expectedSha256;
+
+        Companion(final String localName, final String upstreamName, final String digest) {
+            if (localName == null || !localName.matches("[A-Za-z0-9._-]{1,96}")
+                    || upstreamName == null || !upstreamName.equals("onnx/" + localName)
+                    || digest == null || !digest.matches("[0-9a-f]{64}")) {
+                throw new IllegalArgumentException("Invalid E5 companion reference");
+            }
+            filename = localName;
+            sourcePage = "https://huggingface.co/intfloat/multilingual-e5-small/blob/main/"
+                    + upstreamName;
+            expectedSha256 = digest;
+        }
+    }
+
     static final class Artifact {
         final KnowledgeModelPolicy.Role role;
         final String id;
@@ -93,6 +112,19 @@ final class KnowledgeModelCatalog {
                     "22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48")
     ));
 
+    // Official onnx/ filenames flattened into a local package. The two JSON
+    // hashes were calculated from the upstream raw bytes (653 and 443 bytes),
+    // while the SentencePiece hash is published on the HF blob page.
+    // SHA matching is a file identity check, not proof of common Git revision.
+    private static final List<Companion> E5_COMPANIONS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new Companion("sentencepiece.bpe.model", "onnx/sentencepiece.bpe.model",
+                            "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"),
+                    new Companion("config.json", "onnx/config.json",
+                            "bbb7c1333fc4b3e27fbc9cd5d2070aabcc1d4dfb99917c3633e772f97545a6b6"),
+                    new Companion("tokenizer_config.json", "onnx/tokenizer_config.json",
+                            "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b")));
+
     private KnowledgeModelCatalog() { }
 
     static List<Artifact> forRole(final KnowledgeModelPolicy.Role role) {
@@ -108,5 +140,15 @@ final class KnowledgeModelCatalog {
             if (artifact.role == role && artifact.expectedSha256.equals(digest)) return artifact;
         }
         return null;
+    }
+
+    static List<Companion> e5Companions(final KnowledgeModelPolicy.Role role,
+                                        final String weightDigest) {
+        final Artifact candidate = findInstalled(role, weightDigest);
+        if (candidate == null || role != KnowledgeModelPolicy.Role.EMBEDDING
+                || !candidate.id.startsWith("intfloat/multilingual-e5-small:onnx/")) {
+            return Collections.emptyList();
+        }
+        return E5_COMPANIONS;
     }
 }

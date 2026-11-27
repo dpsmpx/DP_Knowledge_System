@@ -2,6 +2,8 @@
 package net.gsantner.markor.knowledge;
 
 import android.app.ActivityManager;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -9,6 +11,7 @@ import android.net.Uri;
 import android.text.InputType;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -387,6 +390,13 @@ final class KnowledgeModelSettingsDialog {
         if (e5Qa) menu.add(context.getString(R.string.knowledge_models_e5_qa));
         final int e5GraphIndex = e5Graph ? menu.size() : -1;
         if (e5Graph) menu.add(context.getString(R.string.knowledge_models_e5_graph));
+        // Show only for an exact known upstream E5 weight SHA. Unknown/custom
+        // E5 exports continue through the standard manual package workflow.
+        final int companionsIndex = KnowledgeModelCatalog.e5Companions(
+                entry.role, entry.sha256).isEmpty() ? -1 : menu.size();
+        if (companionsIndex >= 0) {
+            menu.add(context.getString(R.string.knowledge_models_e5_companions));
+        }
         final int removeIndex = menu.size();
         menu.add(context.getString(R.string.knowledge_models_package_remove));
         menu.add(context.getString(R.string.knowledge_models_delete));
@@ -400,6 +410,7 @@ final class KnowledgeModelSettingsDialog {
                     else if (which == sessionIndex) confirmOnnxSession(entry);
                     else if (which == e5QaIndex) confirmE5Qa(entry);
                     else if (which == e5GraphIndex) confirmE5Graph(entry);
+                    else if (which == companionsIndex) showE5Companions(entry);
                     else if (which == removeIndex) confirmRemovePackage(entry);
                     else confirmDelete(entry);
                 })
@@ -410,6 +421,56 @@ final class KnowledgeModelSettingsDialog {
                                         showPackageActions(entry)).show())
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) ->
                         showDetails(entry))
+                .show();
+    }
+
+    /** Purely manual browser guidance; no HTTP request or background job here. */
+    private void showE5Companions(final KnowledgeModelFiles.Entry entry) {
+        final List<KnowledgeModelCatalog.Companion> companions =
+                KnowledgeModelCatalog.e5Companions(entry.role, entry.sha256);
+        if (companions.isEmpty()) return;
+        final String[] names = new String[companions.size()];
+        for (int i = 0; i < names.length; i++) names[i] = companions.get(i).filename;
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.knowledge_models_e5_companions)
+                .setMessage(R.string.knowledge_models_e5_companions_help)
+                .setItems(names, (dialog, which) ->
+                        showE5CompanionDetails(entry, companions.get(which)))
+                .setNegativeButton(R.string.knowledge_models_back,
+                        (dialog, which) -> showPackageActions(entry))
+                .show();
+    }
+
+    private void showE5CompanionDetails(final KnowledgeModelFiles.Entry entry,
+                                        final KnowledgeModelCatalog.Companion companion) {
+        new AlertDialog.Builder(context)
+                .setTitle(companion.filename)
+                .setMessage(context.getString(R.string.knowledge_models_e5_companion_details,
+                        companion.sourcePage, companion.expectedSha256))
+                .setPositiveButton(R.string.knowledge_models_catalog_open_source,
+                        (dialog, which) -> {
+                            try {
+                                context.startActivity(new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse(companion.sourcePage)));
+                            } catch (RuntimeException unavailable) {
+                                new AlertDialog.Builder(context)
+                                        .setMessage(R.string.knowledge_models_no_browser)
+                                        .setPositiveButton(android.R.string.ok, null).show();
+                            }
+                        })
+                .setNeutralButton(R.string.knowledge_models_e5_copy_sha,
+                        (dialog, which) -> {
+                            final ClipboardManager clipboard = (ClipboardManager)
+                                    context.getSystemService(Context.CLIPBOARD_SERVICE);
+                            if (clipboard != null) {
+                                clipboard.setPrimaryClip(ClipData.newPlainText(
+                                        "E5 SHA-256", companion.expectedSha256));
+                                Toast.makeText(context, R.string.knowledge_models_e5_sha_copied,
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                .setNegativeButton(R.string.knowledge_models_back,
+                        (dialog, which) -> showE5Companions(entry))
                 .show();
     }
 
