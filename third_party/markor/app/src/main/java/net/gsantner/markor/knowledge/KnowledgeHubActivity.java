@@ -929,6 +929,20 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                     modelStatus.setText(getString(R.string.knowledge_models_e5_graph_passed,
                             result.inputs, result.outputs, result.dynamicAxes,
                             result.modelBytes, millis));
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle(R.string.knowledge_models_e5_graph)
+                            .setMessage(getString(R.string.knowledge_models_e5_graph_fingerprint,
+                                    result.descriptorSha256))
+                            .setNeutralButton(R.string.knowledge_models_e5_qa_copy,
+                                    (dialog, button) -> {
+                                        final ClipboardManager clipboard = (ClipboardManager)
+                                                getSystemService(Context.CLIPBOARD_SERVICE);
+                                        if (clipboard != null) clipboard.setPrimaryClip(
+                                                ClipData.newPlainText("DPKS E5 I/O fingerprint",
+                                                        result.descriptorSha256));
+                                    })
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
                 });
             } catch (IOException | RuntimeException invalid) {
                 runOnUiThread(() -> {

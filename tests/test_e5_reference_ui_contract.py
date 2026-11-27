@@ -25,6 +25,19 @@ IDS = {
 
 
 class E5ReferenceUiContract(unittest.TestCase):
+    def test_manual_e5_graph_fingerprint_is_localized_and_copyable(self):
+        for locale in ("values", "values-ru"):
+            strings = ET.parse(ROOT / f"res/{locale}/knowledge_strings.xml").getroot()
+            by_name = {element.get("name"): element.text or ""
+                       for element in strings.findall("string")}
+            self.assertIn("%1$s", by_name["knowledge_models_e5_graph_fingerprint"])
+            self.assertIn("DPKS-E5-IO-v1", by_name["knowledge_models_e5_graph_fingerprint"])
+        activity = (BASE / "KnowledgeHubActivity.java").read_text()
+        probe = (BASE / "KnowledgeE5OnnxMetadataProbe.java").read_text()
+        self.assertIn("result.descriptorSha256", activity)
+        self.assertIn('ClipData.newPlainText("DPKS E5 I/O fingerprint"', activity)
+        self.assertIn("KnowledgeE5OnnxSignature.descriptorSha256(in, out)", probe)
+
     def test_localized_ui_has_explicit_manual_reference_and_no_readiness_claim(self):
         for locale in ("values", "values-ru"):
             strings = ET.parse(ROOT / f"res/{locale}/knowledge_strings.xml").getroot()

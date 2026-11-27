@@ -142,7 +142,8 @@ public final class KnowledgeE5OnnxSignatureTest {
 
     @Test public void exactE5FingerprintIsOrderedByNamesAndChangesForEveryAxisOrVariant() {
         final String baseline = KnowledgeE5OnnxSignature.descriptorSha256(inputs(), outputs());
-        assertTrue(baseline.matches("[0-9a-f]{64}"));
+        assertEquals("ba6fae2bc91e325112ad050672b5dc3375ca84550480f358acfbf8075fc79640",
+                baseline);
         final Map<String, KnowledgeE5OnnxSignature.Tensor> reordered = new LinkedHashMap<>();
         reordered.put("attention_mask", inputs().get("attention_mask"));
         reordered.put("input_ids", inputs().get("input_ids"));
@@ -163,6 +164,8 @@ public final class KnowledgeE5OnnxSignatureTest {
                 KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput));
         fixedOutput.put("pooler_output",
                 t(KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 384));
+        assertEquals("faecd1bd73a62364cdc9675b97ce35cf8af0c5a4131a750f9678dcd9bc329b85",
+                KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput));
         assertNotEquals(fixedHash,
                 KnowledgeE5OnnxSignature.descriptorSha256(fixed, fixedOutput));
 

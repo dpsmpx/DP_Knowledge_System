@@ -27,6 +27,7 @@ final class KnowledgeE5OnnxMetadataProbe {
         final int outputs;
         final int dynamicAxes;
         final long modelBytes;
+        final String descriptorSha256;
         // Only expected public E5 graph names survive requireE5Small().
         // These in-memory declarations are NEVER put into UI or Binder output.
         final Map<String, KnowledgeE5OnnxSignature.Tensor> inputSignature;
@@ -39,6 +40,7 @@ final class KnowledgeE5OnnxMetadataProbe {
             outputs = out.size();
             dynamicAxes = dynamic;
             modelBytes = bytes;
+            descriptorSha256 = KnowledgeE5OnnxSignature.descriptorSha256(in, out);
             inputSignature = Collections.unmodifiableMap(new LinkedHashMap<>(in));
             outputSignature = Collections.unmodifiableMap(new LinkedHashMap<>(out));
         }

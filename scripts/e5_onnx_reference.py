@@ -307,6 +307,33 @@ def session_sequence(session: Any) -> int | None:
     return next(iter(fixed)) if fixed else None
 
 
+def e5_io_descriptor_sha256(session: Any) -> str:
+    """Cross-language DPKS-E5-IO-v1 SHA over exact allowlisted ORT metadata.
+
+    The Android protobuf reader and isolated worker implement the same
+    canonical format. Symbolic axis names are deliberately reduced to -1;
+    no model-specific strings are emitted in this diagnostic fingerprint.
+    """
+    session_sequence(session)  # Fail closed on unknown names/types/ranks/axes.
+    inputs = {item.name: item for item in session.get_inputs()}
+    outputs = {item.name: item for item in session.get_outputs()}
+    canonical = ["DPKS-E5-IO-v1;"]
+    for role, name, members, dtype in (
+            ("I", "input_ids", inputs, "INT64"),
+            ("I", "attention_mask", inputs, "INT64"),
+            ("I", "token_type_ids", inputs, "INT64"),
+            ("O", "last_hidden_state", outputs, "FLOAT32"),
+            ("O", "pooler_output", outputs, "FLOAT32")):
+        if name not in members:
+            continue
+        axes = members[name].shape
+        canonical.append(f"{role}:{name}:{dtype}:{len(axes)}")
+        for axis in axes:
+            canonical.append(":" + str(-1 if axis is None or isinstance(axis, str) else axis))
+        canonical.append(";")
+    return hashlib.sha256("".join(canonical).encode("ascii")).hexdigest()
+
+
 def padded_input(ids: list[int], sequence: int | None) -> tuple[list[int], list[int]]:
     if not isinstance(ids, list) or not 3 <= len(ids) <= 512 or ids[0] != 0 \
             or ids[-1] != 2 or any(type(i) is not int or i < 0 or i >= 250037
@@ -363,6 +390,11 @@ def compare_reference(expected: dict[str, Any], actual: dict[str, Any],
             or set(expected.get("samples", {})) != set(SAMPLES) \
             or set(actual.get("samples", {})) != set(SAMPLES):
         raise ValueError("E5 reference identity or sample set differs")
+    if "e5_io_descriptor_sha256" in expected or "e5_io_descriptor_sha256" in actual:
+        left = expected.get("e5_io_descriptor_sha256")
+        right = actual.get("e5_io_descriptor_sha256")
+        if not _sha(left) or not _sha(right) or left != right:
+            raise ValueError("E5 exact ONNX I/O descriptor fingerprint differs")
     maximum = 0.0
     for name in SAMPLES:
         lhs = expected["samples"][name]
@@ -402,17 +434,50 @@ def require_inline_model(model_proto: Any) -> None:
     walk(model_proto)
 
 
+def _verified_cpu_session(package: CheckedPackage) -> tuple[Any, str]:
+    """Open a metadata-checked ORT session; never call Run or resolve external shards."""
+    try:
+        import onnx
+        import onnxruntime as ort
+    except ImportError as missing:
+        raise RuntimeError("Offline E5 metadata requires preinstalled onnx and onnxruntime") \
+            from missing
+    model = _read_regular(package.model_path, MAX_INLINE_ONNX_BYTES,
+                          package.model_sha256)
+    require_inline_model(onnx.load_model_from_string(model))
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    session = ort.InferenceSession(model, sess_options=options,
+                                   providers=["CPUExecutionProvider"])
+    session_sequence(session)
+    return session, ort.__version__
+
+
+def inspect_metadata(package: CheckedPackage) -> dict[str, Any]:
+    """Explicit CPU metadata-only reference; no tokenizer, session.run, or note IO."""
+    session, runtime_version = _verified_cpu_session(package)
+    return {
+        "schema": "dpks-e5-io-reference-v1",
+        "manifest_sha256": package.manifest_sha256,
+        "model_sha256": package.model_sha256,
+        "e5_io_descriptor_sha256": e5_io_descriptor_sha256(session),
+        "inputs": len(session.get_inputs()),
+        "outputs": len(session.get_outputs()),
+        "onnxruntime_version": runtime_version,
+    }
+
+
 def execute(package: CheckedPackage) -> dict[str, Any]:
     """Load optional native runtimes only after the complete SHA/config preflight."""
     try:
         import numpy as np
-        import onnx
-        import onnxruntime as ort
         import sentencepiece  # noqa: F401 - required by slow tokenizer
         import transformers
         from transformers import XLMRobertaTokenizer
     except ImportError as missing:
-        raise RuntimeError("Install numpy, onnx, onnxruntime, sentencepiece and transformers "
+        raise RuntimeError("Install numpy, sentencepiece and transformers "
                            "offline before running the E5 reference") from missing
     if transformers.__version__ != REFERENCE_TRANSFORMERS_VERSION:
         raise ValueError("Unexpected Transformers slow tokenizer version")
@@ -425,18 +490,10 @@ def execute(package: CheckedPackage) -> dict[str, Any]:
         ids_reference = reference(tokenizer, package.sentencepiece_sha256,
                                   transformers.__version__)
 
-    # Bytes rather than a filesystem path prevent ONNX Runtime from using
-    # external_data locations as filenames. Schema v2 is refused preflight.
-    model = _read_regular(package.model_path, MAX_INLINE_ONNX_BYTES,
-                          package.model_sha256)
-    require_inline_model(onnx.load_model_from_string(model))
-    options = ort.SessionOptions()
-    options.intra_op_num_threads = 1
-    options.inter_op_num_threads = 1
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-    session = ort.InferenceSession(model, sess_options=options,
-                                   providers=["CPUExecutionProvider"])
+    # The same verified CPU session path is used for metadata-only and full QA.
+    session, runtime_version = _verified_cpu_session(package)
     sequence = session_sequence(session)
+    io_descriptor_sha = e5_io_descriptor_sha256(session)
     has_types = any(item.name == "token_type_ids" for item in session.get_inputs())
     result: dict[str, Any] = {
         "schema": "dpks-e5-onnx-embedding-reference-v1",
@@ -444,8 +501,9 @@ def execute(package: CheckedPackage) -> dict[str, Any]:
         "model_sha256": package.model_sha256,
         "sentencepiece_sha256": package.sentencepiece_sha256,
         "golden_token_fingerprint_sha256": ids_reference["golden_fingerprint_sha256"],
+        "e5_io_descriptor_sha256": io_descriptor_sha,
         "transformers_version": transformers.__version__,
-        "onnxruntime_version": ort.__version__,
+        "onnxruntime_version": runtime_version,
         "samples": {},
     }
     for name in SAMPLES:
@@ -475,9 +533,13 @@ def main() -> int:
                         help="independently pinned lowercase SHA-256 of the manifest")
     parser.add_argument("--compare", type=Path,
                         help="optional, local Android-shaped reference JSON to compare")
+    parser.add_argument("--metadata-only", action="store_true",
+                        help="inspect exact E5 ORT I/O only; never call Run or tokenize text")
     args = parser.parse_args()
+    if args.metadata_only and args.compare:
+        parser.error("--compare requires the full reference; cannot use --metadata-only")
     package = preflight(args.manifest, args.expected_manifest_sha256)
-    output = execute(package)
+    output = inspect_metadata(package) if args.metadata_only else execute(package)
     if args.compare:
         candidate = _object(_read_regular(args.compare, MAX_COMPARE_BYTES))
         verdict = compare_reference(output, candidate)
