@@ -584,6 +584,29 @@ public final class KnowledgeModelPackageStoreTest {
         } finally { removeTree(directory); }
     }
 
+    @Test public void inlineBytesAlongsideExternalShardCannotPassPackagePreflight()
+            throws Exception {
+        final File directory = Files.createTempDirectory("dpks-external-conflict").toFile();
+        try {
+            final byte[] shard = new byte[]{1, 2, 3, 4};
+            final KnowledgeModelFiles weights = new KnowledgeModelFiles(directory);
+            final KnowledgeModelFiles.Entry entry = weights.importFile(
+                    new ByteArrayInputStream(onnxExternal("tensors.data", 0, 4, true)),
+                    "model.onnx", KnowledgeModelPolicy.Role.EMBEDDING);
+            final KnowledgeModelPackageStore packages = new KnowledgeModelPackageStore(directory, weights);
+            packages.install(externalManifest(entry, "tensors.data", shard),
+                    externalCompanions("tensors.data", shard), entry);
+            final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID,
+                    audit.container.detailState);
+            assertFalse(audit.externalDataPreflightPassed());
+            try {
+                packages.prepareOnnx(entry, new File(directory, "cache"));
+                fail("Conflicting TensorProto storage was staged");
+            } catch (IOException expected) { }
+        } finally { removeTree(directory); }
+    }
+
     @Test public void packageRejectsSymlinkedShardAndExternalDataInV1() throws Exception {
         final File directory = Files.createTempDirectory("dpks-external-symlink").toFile();
         try {
@@ -770,12 +793,21 @@ public final class KnowledgeModelPackageStoreTest {
     }
 
     private static byte[] onnxExternal(final String name, final int offset, final int length) {
+        return onnxExternal(name, offset, length, false);
+    }
+
+    private static byte[] onnxExternal(final String name, final int offset, final int length,
+                                       final boolean conflictingInlineData) {
         final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
         pbVarint(tensor, 112); // data_location EXTERNAL
         pbVarint(tensor, 1);
         pbExternal(tensor, "location", name);
         pbExternal(tensor, "offset", Integer.toString(offset));
         pbExternal(tensor, "length", Integer.toString(length));
+        if (conflictingInlineData) {
+            pbVarint(tensor, 74); // TensorProto.raw_data must not coexist with EXTERNAL.
+            pbBytes(tensor, new byte[]{5, 6});
+        }
         final ByteArrayOutputStream graph = new ByteArrayOutputStream();
         pbVarint(graph, 42); // GraphProto.initializer
         pbBytes(graph, tensor.toByteArray());
