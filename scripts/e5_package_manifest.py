@@ -5,8 +5,8 @@ This tool never downloads models or dependencies, opens a note vault, or starts
 an ML runtime. The revision/license are *user assertions*, not authentication
 of an upstream repository. Every component requires an independently supplied
 expected SHA-256; no digest is silently promoted to a trusted pin.
-An opt-in upstream catalog supplies two published E5 hashes (ONNX and
-SentencePiece); it does not authenticate a Git revision or file provenance.
+An opt-in upstream catalog supplies four independently checked E5 file hashes;
+it does not authenticate a Git revision or file provenance.
 """
 
 from __future__ import annotations
@@ -48,6 +48,23 @@ OFFICIAL_ONNX = {
 OFFICIAL_SENTENCEPIECE_SHA256 = (
     "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
 )
+# The JSON SHA-256 values were computed from the official /raw/main/onnx/
+# responses (653 and 443 bytes, respectively), not advertised by HF as
+# published SHA-256 values. Treat them as opt-in file pins, not signatures.
+OFFICIAL_CONFIG_SHA256 = (
+    "bbb7c1333fc4b3e27fbc9cd5d2070aabcc1d4dfb99917c3633e772f97545a6b6"
+)
+OFFICIAL_TOKENIZER_CONFIG_SHA256 = (
+    "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"
+)
+
+
+def _official_components(variant: str) -> list[str]:
+    weight_name, weight_sha = OFFICIAL_ONNX[variant]
+    return [f"WEIGHTS:{weight_name}:{weight_sha}",
+            "TOKENIZER:sentencepiece.bpe.model:" + OFFICIAL_SENTENCEPIECE_SHA256,
+            "MODEL_CONFIG:config.json:" + OFFICIAL_CONFIG_SHA256,
+            "TOKENIZER:tokenizer_config.json:" + OFFICIAL_TOKENIZER_CONFIG_SHA256]
 
 
 def _with_official_pins(components: list[str], variant: str | None,
@@ -58,16 +75,15 @@ def _with_official_pins(components: list[str], variant: str | None,
         raise ValueError("Unknown official E5 ONNX variant")
     if license_id != "MIT":
         raise ValueError("Official E5 ONNX pins require the upstream MIT license declaration")
-    weight_name, weight_sha = OFFICIAL_ONNX[variant]
+    official = _official_components(variant)
+    pinned_names = {name for _, name, _ in map(_component, official)}
     # Never override or silently ignore conflicting user-provided components.
     for argument in components:
         kind, name, _ = _component(argument)
-        if kind == "WEIGHTS" or name == "sentencepiece.bpe.model":
-            raise ValueError("Official E5 ONNX pins must not duplicate weight/"
-                             "SentencePiece --component arguments")
-    return components + [f"WEIGHTS:{weight_name}:{weight_sha}",
-                         "TOKENIZER:sentencepiece.bpe.model:"
-                         + OFFICIAL_SENTENCEPIECE_SHA256]
+        if kind == "WEIGHTS" or name in pinned_names:
+            raise ValueError("Official E5 pins must not duplicate weight or "
+                             "companion --component arguments")
+    return components + official
 
 
 def _component(argument: str) -> tuple[str, str, str]:
@@ -193,8 +209,8 @@ def main() -> int:
     parser.add_argument("--component", action="append", default=[],
                         help="KIND:filename:expected_sha256; repeat for each local file")
     parser.add_argument("--official-onnx-variant", choices=sorted(OFFICIAL_ONNX),
-                        help="opt-in published upstream ONNX + SentencePiece hashes; "
-                             "no download or provenance proof; omit their --component entries")
+                        help="opt-in hashes for four official ONNX package files; "
+                             "no download or provenance proof; --component not needed")
     parser.add_argument("--output", type=Path,
                         help="write new manifest here (refuses to overwrite); default stdout")
     args = parser.parse_args()
