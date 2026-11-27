@@ -183,6 +183,49 @@ python scripts/e5_package_manifest.py \
   --output /path/to/local-e5/dpks-model-package.json
 ```
 
+**Необязательные фиксированные SHA официальных файлов.** В upstream
+[`intfloat/multilingual-e5-small/onnx/`](https://huggingface.co/intfloat/multilingual-e5-small/tree/main/onnx)
+опубликованы уже экспортированные ONNX-файлы; конвертировать модель для
+первой проверки не обязательно. Сверенные 27.11.2026 SHA-256 файлов:
+
+| Выбор `--official-onnx-variant` | Файл в локальном каталоге | SHA-256 |
+| --- | --- | --- |
+| `original` | `model.onnx` ([upstream](https://huggingface.co/intfloat/multilingual-e5-small/blob/main/onnx/model.onnx)) | `ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665` |
+| `o4` | `model_O4.onnx` ([upstream](https://huggingface.co/intfloat/multilingual-e5-small/blob/main/onnx/model_O4.onnx)) | `4654c156f3e4171abc9c716cdb771bf9116455d15ac1aab364aeeede0e3205b0` |
+
+Для **обоих** вариантов обязателен локальный
+[`onnx/sentencepiece.bpe.model`](https://huggingface.co/intfloat/multilingual-e5-small/blob/main/onnx/sentencepiece.bpe.model)
+с SHA-256
+`cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865`.
+Все файлы необходимо **самостоятельно** поместить в один локальный каталог
+без подпапки `onnx`. Команда ничего не скачивает:
+
+```bash
+python scripts/e5_package_manifest.py \
+  --directory /path/to/local-e5 \
+  --official-onnx-variant original \
+  --revision VERIFIED_40_HEX_COMMIT \
+  --license MIT \
+  --component MODEL_CONFIG:config.json:EXPECTED_CONFIG_SHA256 \
+  --component TOKENIZER:tokenizer_config.json:EXPECTED_TOKENIZER_CONFIG_SHA256 \
+  --output /path/to/local-e5/dpks-model-package.json
+```
+
+Для `o4` измените `--official-onnx-variant` на `o4` и используйте файл
+`model_O4.onnx`. Указывать `--component` для весов и SentencePiece в этом
+режиме **нельзя**: опция добавляет их независимо опубликованные хеши сама,
+после чего сверяет **фактические локальные байты** до записи манифеста.
+SHA остальных companion-файлов нужно получить из независимого источника;
+их содержимое, особенно `config.json`, утилита отдельно проверит при
+дальнейшем preflight. `--revision` остаётся требованием и **утверждением
+пользователя**: опубликованные хеши отдельных файлов не доказывают, что
+все компоненты взяты из одного указанного Git-коммита. MIT — заявление
+лицензии, а не её автоматическая юридическая проверка. Оптимизированный
+O4 **не прошёл** проверку реального запуска на Android/ARM или сравнения
+качества с исходным графом. Специализированный AVX512-VNNI ONNX-вариант
+не добавлен в Android-ориентированный каталог. Никакая опция не меняет
+`ONNX_UNVERIFIED` или `runnable=false` и не инициирует inference.
+
 Допустимы также `ONNX_EXTERNAL_DATA:filename:sha256` для локальных
 сегментов весов: манифест автоматически получает schema v2, применяются
 Android-ограничения на размер и количество компонентов. Схема v1
