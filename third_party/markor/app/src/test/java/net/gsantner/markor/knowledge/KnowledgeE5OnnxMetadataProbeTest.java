@@ -125,6 +125,8 @@ public final class KnowledgeE5OnnxMetadataProbeTest {
                 KnowledgeE5OnnxSignature.descriptorSha256(expectedInputs, expectedOutputs),
                 KnowledgeE5OnnxSignature.descriptorSha256(
                         report.inputSignature, report.outputSignature));
+        assertEquals("ba6fae2bc91e325112ad050672b5dc3375ca84550480f358acfbf8075fc79640",
+                report.descriptorSha256);
         final byte[] large = model(384, false, true);
         assertTrue(large.length > 1024 * 1024);
         assertEquals(large.length, inspect(large).modelBytes);

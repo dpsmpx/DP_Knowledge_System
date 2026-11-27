@@ -6,13 +6,17 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 from scripts.e5_onnx_reference import (
     MODEL_PROFILE, TOKENIZER_PROFILE, SAMPLES, _read_regular,
     _stage_pinned_tokenizer, compare_reference,
-    padded_input, pool_and_normalize, preflight, require_inline_model,
+    e5_io_descriptor_sha256, inspect_metadata, padded_input, pool_and_normalize,
+    preflight, require_inline_model,
     session_sequence,
 )
 
@@ -84,6 +88,58 @@ def session(sequence=None, token_types=False, pooler=False) -> Session:
 
 
 class E5OnnxReferenceTest(unittest.TestCase):
+    def test_metadata_only_cpu_path_never_runs_model_or_tokenizer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path, pin = package(Path(temp))
+            checked = preflight(path, pin)
+            fake_onnx = types.ModuleType("onnx")
+            fake_onnx.load_model_from_string = lambda data: {"verified_bytes": sha(data)}
+            fake_ort = types.ModuleType("onnxruntime")
+            fake_ort.__version__ = "synthetic-test"
+            fake_ort.SessionOptions = lambda: types.SimpleNamespace()
+            fake_ort.GraphOptimizationLevel = types.SimpleNamespace(ORT_DISABLE_ALL="none")
+            fake_ort.InferenceSession = lambda data, sess_options, providers: session()
+            with mock.patch.dict(sys.modules, {"onnx": fake_onnx, "onnxruntime": fake_ort}):
+                with mock.patch("scripts.e5_onnx_reference.require_inline_model") as gate:
+                    output = inspect_metadata(checked)
+            gate.assert_called_once()
+            self.assertEqual("dpks-e5-io-reference-v1", output["schema"])
+            self.assertEqual(checked.manifest_sha256, output["manifest_sha256"])
+            self.assertEqual(checked.model_sha256, output["model_sha256"])
+            self.assertEqual(2, output["inputs"])
+            self.assertEqual(1, output["outputs"])
+            self.assertEqual(
+                "5e4d3a1bbbde5299429c3d789e15596cdd8271a0e04f0199278def6f9403e09b",
+                output["e5_io_descriptor_sha256"])
+            self.assertNotIn("samples", output)
+            self.assertNotIn("embedding", output)
+
+    def test_e5_io_v1_matches_android_canonical_fixtures(self):
+        dynamic = Session([
+            Input("input_ids", "tensor(int64)", ["batch", "sequence"]),
+            Input("attention_mask", "tensor(int64)", ["batch", "sequence"]),
+        ], [Input("last_hidden_state", "tensor(float)",
+                  ["batch", "sequence", 384])])
+        self.assertEqual(
+            "ba6fae2bc91e325112ad050672b5dc3375ca84550480f358acfbf8075fc79640",
+            e5_io_descriptor_sha256(dynamic))
+        variant = session(sequence=6, token_types=True, pooler=True)
+        self.assertEqual(
+            "faecd1bd73a62364cdc9675b97ce35cf8af0c5a4131a750f9678dcd9bc329b85",
+            e5_io_descriptor_sha256(variant))
+        variant.inputs.reverse()
+        variant.outputs.reverse()
+        self.assertEqual(
+            "faecd1bd73a62364cdc9675b97ce35cf8af0c5a4131a750f9678dcd9bc329b85",
+            e5_io_descriptor_sha256(variant))
+        variant.outputs[0].shape[0] = "dynamic_batch"
+        self.assertNotEqual(
+            "faecd1bd73a62364cdc9675b97ce35cf8af0c5a4131a750f9678dcd9bc329b85",
+            e5_io_descriptor_sha256(variant))
+        variant.inputs.append(Input("unknown", "tensor(int64)", [1, 6]))
+        with self.assertRaisesRegex(ValueError, "Unknown"):
+            e5_io_descriptor_sha256(variant)
+
     def test_native_tokenizer_uses_exact_pinned_private_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
@@ -256,6 +312,15 @@ class E5OnnxReferenceTest(unittest.TestCase):
         clone = json.loads(json.dumps(doc))
         clone["manifest_sha256"] = "f" * 64
         with self.assertRaisesRegex(ValueError, "identity"):
+            compare_reference(doc, clone)
+        doc["e5_io_descriptor_sha256"] = "a" * 64
+        clone = json.loads(json.dumps(doc))
+        self.assertTrue(compare_reference(doc, clone)["within_tolerance"])
+        clone["e5_io_descriptor_sha256"] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "descriptor fingerprint"):
+            compare_reference(doc, clone)
+        clone.pop("e5_io_descriptor_sha256")
+        with self.assertRaisesRegex(ValueError, "descriptor fingerprint"):
             compare_reference(doc, clone)
 
     def test_reflective_external_tensor_gate_covers_nested_fields(self):
