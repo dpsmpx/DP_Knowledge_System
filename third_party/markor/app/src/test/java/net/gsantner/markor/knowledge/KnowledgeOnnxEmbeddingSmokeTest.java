@@ -63,7 +63,8 @@ public final class KnowledgeOnnxEmbeddingSmokeTest {
             Files.write(file.toPath(), e5Width);
             final KnowledgeE5OnnxMetadataProbe.Report report =
                     KnowledgeE5OnnxMetadataProbe.inspect(file, e5Width.length,
-                            KnowledgeE5ConfigProfile.parse(KnowledgeE5ConfigProfileTest.model(), null));
+                            KnowledgeE5ConfigProfile.parse(KnowledgeE5ConfigProfileTest.model(), null),
+                            KnowledgeOnnxSessionPipe.sha256Hex(e5Width));
             assertEquals(3, report.inputs);
             assertEquals(1, report.outputs);
             assertEquals(0, report.dynamicAxes);

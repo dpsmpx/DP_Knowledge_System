@@ -94,7 +94,8 @@ public final class KnowledgeE5OnnxMetadataProbeTest {
         try {
             Files.write(file.toPath(), source);
             return KnowledgeE5OnnxMetadataProbe.inspect(file, source.length,
-                    KnowledgeE5ConfigProfile.parse(KnowledgeE5ConfigProfileTest.model(), null));
+                    KnowledgeE5ConfigProfile.parse(KnowledgeE5ConfigProfileTest.model(), null),
+                    KnowledgeOnnxSessionPipe.sha256Hex(source));
         } finally { assertTrue(file.delete()); }
     }
 
@@ -150,12 +151,26 @@ public final class KnowledgeE5OnnxMetadataProbeTest {
             final KnowledgeE5ConfigProfile.Result profile = KnowledgeE5ConfigProfile.parse(
                     KnowledgeE5ConfigProfileTest.model(), null);
             try {
-                KnowledgeE5OnnxMetadataProbe.inspect(file, valid.length + 1, profile);
+                KnowledgeE5OnnxMetadataProbe.inspect(file, valid.length + 1, profile,
+                        KnowledgeOnnxSessionPipe.sha256Hex(valid));
                 fail("Changed model length accepted");
             } catch (IOException expected) { }
             try {
-                KnowledgeE5OnnxMetadataProbe.inspect(file, valid.length, null);
+                KnowledgeE5OnnxMetadataProbe.inspect(file, valid.length, null,
+                        KnowledgeOnnxSessionPipe.sha256Hex(valid));
                 fail("Missing E5 profile accepted");
+            } catch (IOException expected) { }
+            final String pinned = KnowledgeOnnxSessionPipe.sha256Hex(valid);
+            final byte[] swapped = valid.clone();
+            swapped[swapped.length - 1] ^= 1;
+            Files.write(file.toPath(), swapped); // Same length, no longer the pinned bytes.
+            try {
+                KnowledgeE5OnnxMetadataProbe.inspect(file, swapped.length, profile, pinned);
+                fail("Same-length changed ONNX file accepted after SHA audit");
+            } catch (IOException expected) { }
+            try {
+                KnowledgeE5OnnxMetadataProbe.inspect(file, swapped.length, profile, "A".repeat(64));
+                fail("Noncanonical SHA-256 pin accepted");
             } catch (IOException expected) { }
         } finally { assertTrue(file.delete()); }
     }
