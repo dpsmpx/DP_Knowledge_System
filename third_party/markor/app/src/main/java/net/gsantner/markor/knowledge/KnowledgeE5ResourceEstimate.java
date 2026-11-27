@@ -33,6 +33,20 @@ final class KnowledgeE5ResourceEstimate {
     private KnowledgeE5ResourceEstimate() { }
 
     /**
+     * Catalog pre-download hint, not a proof of model size or a session gate.
+     * Only official E5 weight candidates are covered. The published decimal MB
+     * value is approximate; unknown external weights are NOT included.
+     */
+    static Plan assessCurated(final KnowledgeModelCatalog.Artifact artifact,
+                              final long availableBytes, final boolean lowMemory) {
+        if (artifact == null || KnowledgeModelCatalog.e5Companions(
+                artifact.role, artifact.expectedSha256).isEmpty()) return null;
+        return assess(Math.multiplyExact((long) artifact.approximateMegabytes, 1_000_000L),
+                0, KnowledgeEmbeddingTensorContract.MAX_SEQUENCE_LENGTH, true,
+                availableBytes, lowMemory);
+    }
+
+    /**
      * No fixed model-size cap: big user-chosen models receive a warning.
      * A live OS low-memory state or <512 MiB available RAM is a hard veto.
      * 2x file bytes + external bytes + 128 MiB is a rough diagnostic only.

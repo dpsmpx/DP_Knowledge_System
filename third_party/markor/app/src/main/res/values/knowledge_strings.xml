@@ -884,6 +884,7 @@
     <string name="knowledge_models_e5_resource_denied">Low-memory OS state or less than 512 MiB free: veto</string>
     <string name="knowledge_models_e5_resource_warning">Estimated working set exceeds RAM minus 256 MiB reserve: warning</string>
     <string name="knowledge_models_e5_resource_prefilter">Estimate below RAM reserve: preliminary only</string>
+    <string name="knowledge_models_e5_catalog_resource_report">E5 Small CPU memory estimate BEFORE download, 512 tokens: approximately %1$s working set versus %2$s currently OS-available RAM. %3$s. Uses advertised APPROXIMATE decimal MB weight size, assumes no external ONNX weight files and 128 MiB overhead. Not a verified file size, peak memory measurement, performance benchmark or approval to run. No model files were read.</string>
     <string name="knowledge_models_resource_unavailable">Model resource information is unavailable. No model has been loaded.</string>
     <string name="knowledge_models_resource_gguf">GGUF backend not integrated; runtime unavailable</string>
     <string name="knowledge_models_resource_no_package">Package manifest not yet installed</string>
