@@ -23,12 +23,21 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int RESULT_DEBUG_LARGE_FD_VERIFIED = 14;
     static final int RESULT_DEBUG_LARGE_FD_FAILED = 15;
     static final String DEBUG_LARGE_FD_LENGTH = "debug_large_fd_length";
+    // No inference and no trust grant: compare ONLY the received bytes with a
+    // caller-declared SHA. The client must independently enforce package audit.
+    static final int VERIFY_ONLY_LARGE_FD = 16;
+    static final int RESULT_VERIFY_ONLY_MATCH = 17;
+    static final int RESULT_VERIFY_ONLY_MISMATCH = 18;
+    static final String VERIFY_ONLY_FD_LENGTH = "verify_fd_length";
     static final int DEBUG_E5_TWO_INPUT_POOLER = 1;
     static final int DEBUG_E5_THREE_INPUT = 2;
     static final String DEBUG_E5_VARIANT = "debug_e5_variant";
     static final long WATCHDOG_MILLIS = 30_000L;
     static final long CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L;
     static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
+    // Large FD verification may hash up to 1 GiB; unlike native ORT sessions,
+    // it has no model allocation or executable graph and gets its own timeout.
+    static final long VERIFY_ONLY_WATCHDOG_MILLIS = 180_000L;
     static final String VERSION = "v";
     static final String INIT_MILLIS = "init_ms";
     static final String RUN_MICROS = "run_us";
@@ -60,6 +69,11 @@ final class KnowledgeOnnxIsolatedProtocol {
 
     static boolean validDebugE5Variant(final int variant) {
         return variant == DEBUG_E5_TWO_INPUT_POOLER || variant == DEBUG_E5_THREE_INPUT;
+    }
+
+    static boolean validVerifyOnlyFdEnvelope(final long length, final String sha256) {
+        return length >= 16 && length <= KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES
+                && KnowledgeOnnxSessionPipe.validSha256(sha256);
     }
 
     /** Runtime metadata is not user-supplied and never needs arbitrary text. */

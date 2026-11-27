@@ -22,4 +22,22 @@ public final class KnowledgeOnnxIsolatedProtocolTest {
         assertFalse(KnowledgeOnnxIsolatedProtocol.validTimings(0,
                 KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS * 1000L + 1));
     }
+
+    @Test public void verifyOnlyLargeFdHasIndependentBoundedEnvelopeAndWatchdog() {
+        assertEquals(16, KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_LARGE_FD);
+        assertEquals(17, KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MATCH);
+        assertEquals(18, KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH);
+        assertTrue(KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_WATCHDOG_MILLIS
+                > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS);
+        final String sha = KnowledgeE5LargeFdFixture.SHA256;
+        assertTrue(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(16, sha));
+        assertTrue(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(
+                KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES, sha));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(15, sha));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(
+                KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES + 1, sha));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(16, null));
+        assertFalse(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(16,
+                sha.toUpperCase()));
+    }
 }

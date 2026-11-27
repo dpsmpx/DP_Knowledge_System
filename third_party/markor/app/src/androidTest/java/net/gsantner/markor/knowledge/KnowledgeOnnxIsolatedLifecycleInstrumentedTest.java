@@ -886,6 +886,121 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void verifyOnlyLargeFdUsesIndependentReceiverDigestWithoutOrt()
+            throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendVerifyOnly(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (InputStream source = KnowledgeE5LargeFdFixture.open();
+                 OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                KnowledgeE5LargeFdTransfer.copyToQuarantine(source, output,
+                        KnowledgeE5LargeFdFixture.LENGTH_BYTES, KnowledgeE5LargeFdFixture.SHA256);
+            }
+            assertTrue("Verify-only FD worker did not return a result",
+                    connection.responded.await(30, TimeUnit.SECONDS));
+            assertEquals("Verify-only large FD failed its own exact SHA/EOF",
+                    KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MATCH,
+                    connection.responseCode.get());
+            assertFalse("Owning app turned into worker", KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void verifyOnlyRejectsTruncatedPayload() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            final byte[] bytes = new byte[256];
+            final String pinnedSha = KnowledgeOnnxSessionPipe.sha256Hex(bytes);
+            connection.sendVerifyOnly(pipe[0], bytes.length, pinnedSha);
+            closePipe(pipe[0]);
+            try (OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                output.write(bytes, 0, bytes.length - 1);
+            }
+            assertTrue("Truncated verify-only FD did not return",
+                    connection.responded.await(15, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void verifyOnlyRejectsChangedBytesWithPlausibleEnvelope() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            final byte[] original = new byte[256];
+            final String pinned = KnowledgeOnnxSessionPipe.sha256Hex(original);
+            original[0] = 1;
+            connection.sendVerifyOnly(pipe[0], original.length, pinned);
+            closePipe(pipe[0]);
+            try (OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                output.write(original);
+            }
+            assertTrue("Changed verify-only FD did not return",
+                    connection.responded.await(15, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void verifyOnlyRejectsOutOfRangeEnvelopeWithoutReading() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendVerifyOnly(pipe[0],
+                    KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES + 1,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            assertTrue("Oversized verify-only envelope did not return",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void verifyOnlyCancelKillsBlockedReaderWithoutHarmingOwner() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendVerifyOnly(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                output.write(0);
+                output.flush();
+                assertFalse("Partial verify-only FD unexpectedly succeeded",
+                        connection.responded.await(800, TimeUnit.MILLISECONDS));
+                connection.messenger.send(Message.obtain(null,
+                        KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT));
+                assertTrue("Verify-only cancellation did not kill blocked worker",
+                        connection.died.await(5, TimeUnit.SECONDS));
+            }
+            assertFalse(KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
     private void assertRejectedSession(final byte[] transmitted, final int advertisedLength,
                                        final String expectedSha) throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
@@ -972,7 +1087,9 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_VERIFIED
-                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED) {
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MATCH
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH) {
                 responseCode.set(message.what);
                 responded.countDown();
             }
@@ -1054,6 +1171,20 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
             data.putLong(KnowledgeOnnxIsolatedProtocol.DEBUG_LARGE_FD_LENGTH, length);
+            request.setData(data);
+            messenger.send(request);
+        }
+
+        void sendVerifyOnly(final ParcelFileDescriptor readPipe, final long length,
+                            final String expectedSha) throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_LARGE_FD);
+            request.arg1 = 1;
+            request.replyTo = reply;
+            final Bundle data = new Bundle();
+            data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
+            data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            data.putLong(KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_FD_LENGTH, length);
             request.setData(data);
             messenger.send(request);
         }
