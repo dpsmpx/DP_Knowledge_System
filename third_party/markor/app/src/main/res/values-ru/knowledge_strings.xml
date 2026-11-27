@@ -884,6 +884,7 @@
     <string name="knowledge_models_e5_resource_denied">ОС сообщает нехватку памяти либо свободно менее 512 МиБ: запрет</string>
     <string name="knowledge_models_e5_resource_warning">Оценка рабочего набора превышает RAM с резервом 256 МиБ: предупреждение</string>
     <string name="knowledge_models_e5_resource_prefilter">Оценка ниже резерва RAM: только предварительно</string>
+    <string name="knowledge_models_e5_catalog_resource_report">Оценка CPU-памяти E5 Small ДО скачивания, 512 токенов: приблизительный рабочий набор %1$s при доступных сейчас по данным ОС %2$s RAM. %3$s. Используется ПРИБЛИЗИТЕЛЬНЫЙ рекламируемый размер весов в десятичных МБ; внешние файлы ONNX-весов не учитываются, накладные расходы 128 МиБ. Это не проверенный размер файла, не измерение пиковой памяти, не тест производительности и не разрешение на запуск. Файлы модели не читались.</string>
     <string name="knowledge_models_resource_unavailable">Сведения о ресурсах модели недоступны. Модель не загружалась.</string>
     <string name="knowledge_models_resource_gguf">Движок GGUF не подключён; исполнение недоступно</string>
     <string name="knowledge_models_resource_no_package">Манифест комплекта пока не установлен</string>

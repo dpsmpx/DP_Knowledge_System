@@ -720,7 +720,8 @@ final class KnowledgeModelSettingsDialog {
         final List<KnowledgeModelComparison.Row> compared;
         final List<KnowledgeModelCatalog.Artifact> curated = KnowledgeModelCatalog.forRole(role);
         final long freeBytes = context.getFilesDir().getUsableSpace();
-        final long availableRam = availableRamBytes();
+        final ActivityManager.MemoryInfo memory = memorySnapshot();
+        final long availableRam = memory == null ? 0 : Math.max(0, memory.availMem);
         try {
             compared = KnowledgeModelComparison.forRole(role, files.installed(),
                     preferences.getString(role.name(), ""), freeBytes, availableRam);
@@ -750,7 +751,7 @@ final class KnowledgeModelSettingsDialog {
                 .setMessage(R.string.knowledge_models_catalog_info)
                 .setItems(labels, (dialog, which) -> {
                     if (compareOffset == 1 && which == 0) {
-                        showComparison(role, compared, freeBytes, availableRam);
+                        showComparison(role, compared, freeBytes, availableRam, memory);
                         return;
                     }
                     final int index = which - compareOffset;
@@ -775,11 +776,6 @@ final class KnowledgeModelSettingsDialog {
                 })
                 .setNegativeButton(R.string.knowledge_models_back, (dialog, which) -> showRole(role))
                 .show();
-    }
-
-    private long availableRamBytes() {
-        final ActivityManager.MemoryInfo memory = memorySnapshot();
-        return memory == null ? 0 : Math.max(0, memory.availMem);
     }
 
     private ActivityManager.MemoryInfo memorySnapshot() {
@@ -820,7 +816,8 @@ final class KnowledgeModelSettingsDialog {
 
     private void showComparison(final KnowledgeModelPolicy.Role role,
                                 final List<KnowledgeModelComparison.Row> artifacts,
-                                final long freeBytes, final long availableRam) {
+                                final long freeBytes, final long availableRam,
+                                final ActivityManager.MemoryInfo memory) {
         final StringBuilder report = new StringBuilder(context.getString(
                 R.string.knowledge_models_compare_intro,
                 freeBytes <= 0 ? context.getString(R.string.knowledge_models_space_unknown)
@@ -832,6 +829,9 @@ final class KnowledgeModelSettingsDialog {
                     row.title
                             + (row.preferred ? context.getString(R.string.knowledge_models_compare_preferred) : ""),
                     formatSize(row.weightBytes), storageComparison(row.storage), ramComparison(row)));
+            final String e5Estimate = row.installed ? ""
+                    : curatedE5ResourceReport(row.artifact, memory);
+            if (!e5Estimate.isEmpty()) report.append("\n").append(e5Estimate);
         }
         new AlertDialog.Builder(context)
                 .setTitle(roleName(role))
@@ -845,6 +845,8 @@ final class KnowledgeModelSettingsDialog {
         final KnowledgeModelCatalog.Artifact artifact = row.artifact;
         final long freeBytes = context.getFilesDir().getUsableSpace();
         final boolean lowSpace = row.storage == KnowledgeModelComparison.Storage.MAY_NOT_FIT;
+        final String e5Estimate = row.installed ? ""
+                : curatedE5ResourceReport(artifact, memorySnapshot());
         final String message = context.getString(R.string.knowledge_models_catalog_artifact_details,
                 artifact.id, artifact.approximateMegabytes, artifact.license,
                 artifact.sourcePage, artifact.expectedSha256,
@@ -854,6 +856,7 @@ final class KnowledgeModelSettingsDialog {
                         artifact.title, formatSize(row.weightBytes),
                         storageComparison(row.storage), ramComparison(row))
                 + (lowSpace ? "\n\n" + context.getString(R.string.knowledge_models_space_warning) : "")
+                + (e5Estimate.isEmpty() ? "" : "\n\n" + e5Estimate)
                 + "\n\n" + context.getString(R.string.knowledge_models_imported_not_runnable);
         final AlertDialog.Builder builder = new AlertDialog.Builder(context)
                 .setTitle(artifact.title)
@@ -885,5 +888,24 @@ final class KnowledgeModelSettingsDialog {
 
     static String formatSize(final long bytes) {
         return String.format(Locale.ROOT, "%.1f MiB", bytes / 1048576.0);
+    }
+
+    /** Display-only estimate for known E5 catalog variants, even before import. */
+    private String curatedE5ResourceReport(final KnowledgeModelCatalog.Artifact artifact,
+                                           final ActivityManager.MemoryInfo memory) {
+        final long ram = memory == null ? 0 : Math.max(0, memory.availMem);
+        final KnowledgeE5ResourceEstimate.Plan plan =
+                KnowledgeE5ResourceEstimate.assessCurated(
+                        artifact, ram, memory == null || memory.lowMemory);
+        if (plan == null) return "";
+        final int status = memory == null || ram == 0
+                ? R.string.knowledge_models_e5_resource_unknown
+                : plan.memoryDenied ? R.string.knowledge_models_e5_resource_denied
+                : plan.memoryWarning ? R.string.knowledge_models_e5_resource_warning
+                : R.string.knowledge_models_e5_resource_prefilter;
+        return context.getString(R.string.knowledge_models_e5_catalog_resource_report,
+                formatSize(plan.estimatedWorkingSetBytes),
+                ram == 0 ? context.getString(R.string.knowledge_models_container_unknown)
+                        : formatSize(ram), context.getString(status));
     }
 }

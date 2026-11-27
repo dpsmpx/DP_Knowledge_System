@@ -41,6 +41,30 @@ public final class KnowledgeE5ResourceEstimateTest {
         assertTrue(plan.estimatedWorkingSetBytes > plan.availableBytes);
     }
 
+    @Test public void curatedEstimateOnlyAppliesToKnownE5VariantsBeforeDownload() {
+        final KnowledgeModelCatalog.Artifact o4 = KnowledgeModelCatalog.forRole(
+                KnowledgeModelPolicy.Role.EMBEDDING).get(0);
+        final KnowledgeModelCatalog.Artifact fp32 = KnowledgeModelCatalog.forRole(
+                KnowledgeModelPolicy.Role.EMBEDDING).get(1);
+        final KnowledgeE5ResourceEstimate.Plan smaller = KnowledgeE5ResourceEstimate.assessCurated(
+                o4, 4 * 1024 * MIB, false);
+        final KnowledgeE5ResourceEstimate.Plan bigger = KnowledgeE5ResourceEstimate.assessCurated(
+                fp32, 4 * 1024 * MIB, false);
+        assertNotNull(smaller);
+        assertNotNull(bigger);
+        assertTrue(smaller.estimatedWorkingSetBytes < bigger.estimatedWorkingSetBytes);
+        assertEquals(512 * 3 * Long.BYTES, smaller.inputTensorBytes);
+        assertFalse(smaller.memoryWarning);
+        assertTrue(KnowledgeE5ResourceEstimate.assessCurated(
+                fp32, 512 * MIB, false).memoryWarning);
+        assertTrue(KnowledgeE5ResourceEstimate.assessCurated(
+                o4, 4 * 1024 * MIB, true).memoryDenied);
+        assertNull(KnowledgeE5ResourceEstimate.assessCurated(null, 4 * 1024 * MIB, false));
+        assertNull(KnowledgeE5ResourceEstimate.assessCurated(
+                KnowledgeModelCatalog.forRole(KnowledgeModelPolicy.Role.GENERATION).get(0),
+                4 * 1024 * MIB, false));
+    }
+
     @Test public void RejectsInvalidAndOverflowingCalculations() {
         for (final int seq : new int[]{0, 2, 513}) {
             try {
