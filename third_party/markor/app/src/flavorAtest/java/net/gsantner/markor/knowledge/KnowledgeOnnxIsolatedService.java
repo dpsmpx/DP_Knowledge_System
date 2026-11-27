@@ -72,10 +72,13 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         }
         final boolean debugE5Fd = BuildConfig.DEBUG
                 && message.what == KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD;
+        final boolean debugLargeFd = BuildConfig.DEBUG
+                && message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_VERIFY_LARGE_FD;
         final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION
                 || debugE5Fd;
+        final boolean fdRequest = sessionRequest || debugLargeFd;
         final boolean debugOom = message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_SIMULATE_OOM;
-        if ((debugOom && !BuildConfig.DEBUG) || (!sessionRequest
+        if ((debugOom && !BuildConfig.DEBUG) || (!fdRequest
                 && message.what != KnowledgeOnnxIsolatedProtocol.RUN_SYNTHETIC && !debugOom)) {
             return true;
         }
@@ -85,11 +88,16 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         String expectedSha = null;
         boolean simulatedLowMemory = false;
         int debugVariant = 0;
-        if (sessionRequest) {
+        long debugLargeLength = -1L;
+        if (fdRequest) {
             try {
                 final Bundle request = message.getData();
                 pipe = request.getParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD);
                 expectedSha = request.getString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256);
+                if (debugLargeFd) {
+                    debugLargeLength = request.getLong(
+                            KnowledgeOnnxIsolatedProtocol.DEBUG_LARGE_FD_LENGTH, -1L);
+                }
                 simulatedLowMemory = BuildConfig.DEBUG && request.getBoolean(
                         KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, false);
                 if (debugE5Fd) {
@@ -97,21 +105,26 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                 }
             } catch (RuntimeException invalidParcel) {
                 closePipe(pipe);
-                answerSession(reply, requestId, null);
+                if (debugLargeFd) answerLargeFd(reply, requestId, false);
+                else answerSession(reply, requestId, null);
                 return true;
             }
-            if (pipe == null || message.arg2 < 16
-                    || message.arg2 > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES
-                    || !KnowledgeOnnxSessionPipe.validSha256(expectedSha)
+            if (pipe == null || !KnowledgeOnnxSessionPipe.validSha256(expectedSha)
+                    || (debugLargeFd && !KnowledgeE5LargeFdFixture.isPinned(
+                            debugLargeLength, expectedSha))
+                    || (sessionRequest && (message.arg2 < 16
+                            || message.arg2 > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES))
                     || (debugE5Fd && !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(debugVariant))) {
                 closePipe(pipe);
-                answerSession(reply, requestId, null);
+                if (debugLargeFd) answerLargeFd(reply, requestId, false);
+                else answerSession(reply, requestId, null);
                 return true;
             }
         }
         if (reply == null || !running.compareAndSet(false, true)) {
             closePipe(pipe);
-            if (sessionRequest) answerSession(reply, requestId, null);
+            if (debugLargeFd) answerLargeFd(reply, requestId, false);
+            else if (sessionRequest) answerSession(reply, requestId, null);
             else answer(reply, requestId, null);
             return true;
         }
@@ -119,6 +132,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         final String sha = expectedSha;
         final boolean debugLowMemory = simulatedLowMemory;
         final int variant = debugVariant;
+        final long largeLength = debugLargeLength;
         final int size = message.arg2;
         handler.postDelayed(deadline, KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS);
         worker.execute(() -> {
@@ -126,6 +140,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             KnowledgeOnnxSessionGate.Report session = null;
             boolean memoryDenied = false;
             boolean fatalMemory = false;
+            boolean largeVerified = false;
             try {
                 final KnowledgeOnnxMemoryTrace.Recorder memory =
                         new KnowledgeOnnxMemoryTrace.Recorder();
@@ -134,6 +149,14 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     // Exercise the same fatal-memory handler as production ONNX work,
                     // without exhausting RAM or opening a user-supplied model.
                     throw new OutOfMemoryError("debug-only simulated worker OOM");
+                } else if (debugLargeFd) {
+                    // No ONNX allocation, native session, filesystem or user data.
+                    // The envelope is pinned to independently generated QA bytes.
+                    KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
+                    try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe)) {
+                        KnowledgeE5LargeFdTransfer.verifyExactly(stream, largeLength, sha);
+                    }
+                    largeVerified = true;
                 } else if (sessionRequest) {
                     // Check in the worker immediately before allocating model bytes,
                     // then once more before native session creation. Neither check
@@ -182,7 +205,8 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             } finally {
                 closePipe(inputPipe);
                 if (!fatalMemory) {
-                    if (sessionRequest) answerSession(reply, requestId, session, memoryDenied);
+                    if (debugLargeFd) answerLargeFd(reply, requestId, largeVerified);
+                    else if (sessionRequest) answerSession(reply, requestId, session, memoryDenied);
                     else answer(reply, requestId, smoke);
                     handler.post(() -> {
                         handler.removeCallbacks(deadline);
@@ -197,6 +221,19 @@ public final class KnowledgeOnnxIsolatedService extends Service {
     private static void answerSession(final Messenger recipient, final int requestId,
                                       final KnowledgeOnnxSessionGate.Report result) {
         answerSession(recipient, requestId, result, false);
+    }
+
+    /** A single debug-only Boolean; no file bytes, paths or session metadata cross Binder. */
+    private static void answerLargeFd(final Messenger recipient, final int requestId,
+                                      final boolean verified) {
+        if (recipient == null) return;
+        final Message response = Message.obtain(null, verified
+                ? KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_VERIFIED
+                : KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED);
+        response.arg1 = requestId;
+        try {
+            recipient.send(response);
+        } catch (RemoteException ignored) { }
     }
 
     private static void answerSession(final Messenger recipient, final int requestId,

@@ -18,6 +18,11 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int DEBUG_SIMULATE_OOM = 11;
     // Debug-only FD transport for ONE exact, generated E5 fixture. No arbitrary inference.
     static final int RUN_DEBUG_E5_FD = 12;
+    // Debug-only, SHA-pinned >16 MiB synthetic FD verification; never invokes ORT.
+    static final int DEBUG_VERIFY_LARGE_FD = 13;
+    static final int RESULT_DEBUG_LARGE_FD_VERIFIED = 14;
+    static final int RESULT_DEBUG_LARGE_FD_FAILED = 15;
+    static final String DEBUG_LARGE_FD_LENGTH = "debug_large_fd_length";
     static final int DEBUG_E5_TWO_INPUT_POOLER = 1;
     static final int DEBUG_E5_THREE_INPUT = 2;
     static final String DEBUG_E5_VARIANT = "debug_e5_variant";

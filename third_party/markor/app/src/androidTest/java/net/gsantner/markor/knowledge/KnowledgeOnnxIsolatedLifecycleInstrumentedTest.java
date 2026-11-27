@@ -27,6 +27,7 @@ import org.junit.runner.RunWith;
 import java.io.IOException;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -719,6 +720,172 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void debugLargeFdFixtureIsVerifiedInsideIsolatedWorkerWithoutOrt()
+            throws Exception {
+        assertTrue(KnowledgeE5LargeFdFixture.LENGTH_BYTES
+                > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES);
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (InputStream source = KnowledgeE5LargeFdFixture.open();
+                 OutputStream destination = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                KnowledgeE5LargeFdTransfer.copyToQuarantine(source, destination,
+                        KnowledgeE5LargeFdFixture.LENGTH_BYTES, KnowledgeE5LargeFdFixture.SHA256);
+            }
+            assertTrue("Large synthetic FD worker did not respond",
+                    connection.responded.await(25, TimeUnit.SECONDS));
+            assertEquals("Receiver rejected its independently verified fixture",
+                    KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_VERIFIED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdRejectsForgedEnvelopeBeforeReading() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES + 1L,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            assertTrue("Unpinned large FD envelope had no reply",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdRejectsForgedShaBeforeReading() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    "0000000000000000000000000000000000000000000000000000000000000000");
+            closePipe(pipe[0]);
+            assertTrue("Unpinned hash had no reply",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdRejectsTruncatedPipe() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (OutputStream destination = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                destination.write(new byte[64]);
+            }
+            assertTrue("Truncated large FD did not produce a reply",
+                    connection.responded.await(15, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdRejectsExtraBytes() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (InputStream source = KnowledgeE5LargeFdFixture.open();
+                 OutputStream destination = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                final byte[] block = new byte[KnowledgeE5LargeFdTransfer.CHUNK_BYTES];
+                int count;
+                while ((count = source.read(block)) != -1) destination.write(block, 0, count);
+                destination.write(0); // Sender lies about exact EOF.
+            }
+            assertTrue("Extended large FD did not produce a reply",
+                    connection.responded.await(25, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdRejectsChangedBytesDespitePinnedEnvelope() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (InputStream source = KnowledgeE5LargeFdFixture.open();
+                 OutputStream destination = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                final byte[] block = new byte[KnowledgeE5LargeFdTransfer.CHUNK_BYTES];
+                int count;
+                boolean changed = false;
+                while ((count = source.read(block)) != -1) {
+                    if (!changed) {
+                        block[0] ^= 1;
+                        changed = true;
+                    }
+                    destination.write(block, 0, count);
+                }
+                assertTrue(changed);
+            }
+            assertTrue("Modified large FD did not produce a reply",
+                    connection.responded.await(25, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void debugLargeFdCancelKillsBlockedWorkerOnly() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256);
+            closePipe(pipe[0]);
+            try (OutputStream destination = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                destination.write(new byte[64]);
+                destination.flush();
+                assertFalse("Partial large FD unexpectedly passed",
+                        connection.responded.await(800, TimeUnit.MILLISECONDS));
+                connection.messenger.send(Message.obtain(null,
+                        KnowledgeOnnxIsolatedProtocol.CANCEL_AND_EXIT));
+                assertTrue("Cancel did not kill blocked large FD worker",
+                        connection.died.await(5, TimeUnit.SECONDS));
+            }
+            assertFalse("Cancel killed owning application", KnowledgeOnnxProcessIdentity.isWorker());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
     private void assertRejectedSession(final byte[] transmitted, final int advertisedLength,
                                        final String expectedSha) throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
@@ -803,7 +970,9 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_FAILED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED
-                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED) {
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_VERIFIED
+                    || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED) {
                 responseCode.set(message.what);
                 responded.countDown();
             }
@@ -871,6 +1040,20 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
             data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, variant);
+            request.setData(data);
+            messenger.send(request);
+        }
+
+        void sendLargeFixture(final ParcelFileDescriptor readPipe, final long length,
+                              final String expectedSha) throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_VERIFY_LARGE_FD);
+            request.arg1 = 1;
+            request.replyTo = reply;
+            final Bundle data = new Bundle();
+            data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
+            data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            data.putLong(KnowledgeOnnxIsolatedProtocol.DEBUG_LARGE_FD_LENGTH, length);
             request.setData(data);
             messenger.send(request);
         }
