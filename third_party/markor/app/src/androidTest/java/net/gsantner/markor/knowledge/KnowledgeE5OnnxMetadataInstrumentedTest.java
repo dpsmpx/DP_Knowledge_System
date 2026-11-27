@@ -60,7 +60,8 @@ public final class KnowledgeE5OnnxMetadataInstrumentedTest {
             assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
                     generic.detailState);
             assertEquals(4, generic.graphNodes);
-            return KnowledgeE5OnnxMetadataProbe.inspect(file, bytes.length, profile);
+            return KnowledgeE5OnnxMetadataProbe.inspect(file, bytes.length, profile,
+                    KnowledgeOnnxSessionPipe.sha256Hex(bytes));
         } finally {
             assertTrue("Synthetic ONNX cache file was not removed", file.delete());
         }

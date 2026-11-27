@@ -282,7 +282,7 @@ final class KnowledgeModelPackageStore {
             throw new IOException("E5 weight file changed after audit");
         }
         final KnowledgeE5OnnxMetadataProbe.Report signature =
-                KnowledgeE5OnnxMetadataProbe.inspect(file, entry.bytes, config);
+                KnowledgeE5OnnxMetadataProbe.inspect(file, entry.bytes, config, entry.sha256);
         if (model.graphInputs != signature.inputs || model.graphOutputs != signature.outputs) {
             throw new IOException("E5 graph I/O counts disagree between metadata readers");
         }
@@ -595,7 +595,8 @@ final class KnowledgeModelPackageStore {
         try {
             final KnowledgeE5ConfigProfile.Result config = e5Config(entry);
             final KnowledgeE5OnnxMetadataProbe.Report metadata =
-                    KnowledgeE5OnnxMetadataProbe.inspect(weightFile(entry), entry.bytes, config);
+                    KnowledgeE5OnnxMetadataProbe.inspect(
+                            weightFile(entry), entry.bytes, config, entry.sha256);
             if (metadata.inputs != container.graphInputs
                     || metadata.outputs != container.graphOutputs) return null;
             return KnowledgeE5OnnxSignature.descriptorSha256(

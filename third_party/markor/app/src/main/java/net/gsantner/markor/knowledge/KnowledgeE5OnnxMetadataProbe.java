@@ -5,6 +5,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.RandomAccessFile;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -13,7 +15,9 @@ import java.util.Map;
  * Read-only ModelProto -> GraphProto -> ValueInfoProto tensor signature probe.
  * A seek skips initializer payloads: it NEVER loads weights, opens external
  * locations, creates an ORT session, or reads user notes. The owning package
- * gate must SHA-audit all installed files before calling this parser.
+ * gate must SHA-audit all installed files before calling this parser. The
+ * parser independently binds its opened FD to that pinned SHA before and
+ * after seeking graph metadata, preventing a path-replacement gap.
  */
 final class KnowledgeE5OnnxMetadataProbe {
     private static final int MAX_TOP_AND_GRAPH_FIELDS = 100_000;
@@ -131,12 +135,16 @@ final class KnowledgeE5OnnxMetadataProbe {
     private KnowledgeE5OnnxMetadataProbe() { }
 
     static Report inspect(final File file, final long expectedBytes,
-                          final KnowledgeE5ConfigProfile.Result config) throws IOException {
+                          final KnowledgeE5ConfigProfile.Result config,
+                          final String expectedSha256) throws IOException {
         if (file == null || !file.isFile() || expectedBytes < 16
-                || file.length() != expectedBytes || config == null) {
+                || file.length() != expectedBytes || config == null
+                || !KnowledgeOnnxSessionPipe.validSha256(expectedSha256)) {
             throw new IOException("Missing pinned ONNX model or E5 config");
         }
         try (RandomAccessFile source = new RandomAccessFile(file, "r")) {
+            verifyOpenedBytes(source, expectedBytes, expectedSha256);
+            source.seek(0L);
             final Decoder model = new Decoder(source, expectedBytes);
             final Map<String, KnowledgeE5OnnxSignature.Tensor> inputs = new LinkedHashMap<>();
             final Map<String, KnowledgeE5OnnxSignature.Tensor> outputs = new LinkedHashMap<>();
@@ -170,7 +178,46 @@ final class KnowledgeE5OnnxMetadataProbe {
             } catch (IllegalArgumentException mismatch) {
                 throw new IOException("ONNX graph signature is not E5 Small", mismatch);
             }
+            // Audit the SAME open inode again: the graph parser can skip
+            // huge initializers, but the final report must bind all bytes.
+            verifyOpenedBytes(source, expectedBytes, expectedSha256);
             return new Report(inputs, outputs, dynamicAxes[0], expectedBytes);
+        }
+    }
+
+    private static void verifyOpenedBytes(final RandomAccessFile source, final long expectedBytes,
+                                          final String expectedSha256) throws IOException {
+        if (source.length() != expectedBytes) {
+            throw new IOException("ONNX file length changed during metadata inspection");
+        }
+        final MessageDigest digest;
+        try { digest = MessageDigest.getInstance("SHA-256"); }
+        catch (NoSuchAlgorithmException unavailable) {
+            throw new IOException("SHA-256 unavailable", unavailable);
+        }
+        final byte[] buffer = new byte[64 * 1024];
+        source.seek(0L);
+        long remaining = expectedBytes;
+        while (remaining > 0) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("ONNX metadata SHA audit cancelled");
+            }
+            final int read = source.read(buffer, 0, (int) Math.min(remaining, buffer.length));
+            if (read <= 0) throw new IOException("ONNX bytes truncated during SHA audit");
+            digest.update(buffer, 0, read);
+            remaining -= read;
+        }
+        if (source.length() != expectedBytes) {
+            throw new IOException("ONNX size changed during SHA audit");
+        }
+        final char[] alphabet = "0123456789abcdef".toCharArray();
+        final byte[] sum = digest.digest();
+        final StringBuilder hex = new StringBuilder(64);
+        for (final byte value : sum) {
+            hex.append(alphabet[(value >>> 4) & 15]).append(alphabet[value & 15]);
+        }
+        if (!expectedSha256.equals(hex.toString())) {
+            throw new IOException("ONNX bytes differ from pinned SHA-256");
         }
     }
 

@@ -20,7 +20,8 @@ public final class KnowledgeE5TokenEmbeddingSmokeTest {
             final KnowledgeE5ConfigProfile.Result config = KnowledgeE5ConfigProfile.parse(
                     KnowledgeE5ConfigProfileTest.model(), null);
             final KnowledgeE5OnnxMetadataProbe.Report result =
-                    KnowledgeE5OnnxMetadataProbe.inspect(file, fixture.length, config);
+                    KnowledgeE5OnnxMetadataProbe.inspect(file, fixture.length, config,
+                            KnowledgeOnnxSessionPipe.sha256Hex(fixture));
             assertEquals(3, result.inputs);
             assertEquals(1, result.outputs);
             assertEquals(0, result.dynamicAxes);
@@ -59,7 +60,8 @@ public final class KnowledgeE5TokenEmbeddingSmokeTest {
             final KnowledgeE5ConfigProfile.Result config = KnowledgeE5ConfigProfile.parse(
                     KnowledgeE5ConfigProfileTest.model(), null);
             final KnowledgeE5OnnxMetadataProbe.Report result =
-                    KnowledgeE5OnnxMetadataProbe.inspect(file, fixture.length, config);
+                    KnowledgeE5OnnxMetadataProbe.inspect(file, fixture.length, config,
+                            KnowledgeOnnxSessionPipe.sha256Hex(fixture));
             assertEquals(2, result.inputs);
             assertEquals(2, result.outputs);
             assertEquals(0, result.dynamicAxes);
