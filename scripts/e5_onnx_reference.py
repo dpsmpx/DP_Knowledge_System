@@ -44,6 +44,7 @@ EXPECTED_SOURCE = "intfloat/multilingual-e5-small"
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 REVISION = re.compile(r"[0-9a-f]{40}\Z")
+LOCAL_REVISION_DOMAIN = "dpks-e5-local-package-v1\n"
 
 MODEL_PROFILE: dict[str, Any] = {
     "model_type": "bert",
@@ -174,6 +175,37 @@ def _profile(data: bytes, expected: dict[str, Any]) -> None:
             raise ValueError("Non-canonical E5 configuration field: " + key)
 
 
+def local_content_set_revision(files: list[dict[str, Any]]) -> str | None:
+    """Reproduce the Android E5 assembly's *local*, non-upstream revision.
+
+    Only the exact four-file E5 package shape is eligible. The identifier
+    names a set of independently pinned bytes; it does not establish their
+    origin, authorize inference, or assert a common publisher Git revision.
+    """
+    if not isinstance(files, list) or len(files) != 4:
+        return None
+    by_name = {item["name"]: item for item in files}
+    if len(by_name) != 4:
+        return None
+    weights = [item for item in files if item["kind"] == "WEIGHTS"]
+    if len(weights) != 1 or weights[0]["name"] not in {"model.onnx", "model_O4.onnx"}:
+        return None
+    ordered = [(weights[0]["name"], "WEIGHTS"),
+               ("sentencepiece.bpe.model", "TOKENIZER"),
+               ("config.json", "MODEL_CONFIG"),
+               ("tokenizer_config.json", "TOKENIZER")]
+    if set(by_name) != {name for name, _ in ordered}:
+        return None
+    identity = LOCAL_REVISION_DOMAIN
+    for name, kind in ordered:
+        item = by_name[name]
+        if item["kind"] != kind or not _sha(item["sha256"]) \
+                or type(item["bytes"]) is not int or item["bytes"] < 1:
+            return None
+        identity += f'{name}:{item["sha256"]}:{item["bytes"]}\n'
+    return "sha256:" + hashlib.sha256(identity.encode("ascii")).hexdigest()
+
+
 def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPackage:
     """Verify every declared file before importing optional native ML modules."""
     if not _sha(expected_manifest_sha256):
@@ -196,7 +228,7 @@ def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPack
         raise ValueError("Not a declared canonical E5 Small ONNX package")
     revision = manifest["revision"]
     if not isinstance(revision, str) or not (REVISION.fullmatch(revision) or
-            revision == "sha256:" + manifest["weight_sha256"]):
+            revision.startswith("sha256:") and _sha(revision[7:])):
         raise ValueError("Invalid declared E5 revision")
     if not isinstance(manifest["license"], str) or not 1 <= len(manifest["license"]) <= 128:
         raise ValueError("Missing declared license")
@@ -231,6 +263,9 @@ def preflight(manifest_path: Path, expected_manifest_sha256: str) -> CheckedPack
         components.setdefault(kind, []).append(path)
     if other_total > MAX_OTHER_TOTAL_BYTES or len(components.get("WEIGHTS", [])) != 1:
         raise ValueError("Invalid E5 package component totals")
+    if revision.startswith("sha256:") and revision != "sha256:" + manifest["weight_sha256"]:
+        if manifest["license"] != "MIT" or revision != local_content_set_revision(files):
+            raise ValueError("Invalid E5 local content-set revision")
     tokenizers = [p for p in components.get("TOKENIZER", []) if p.suffix == ".model"]
     configs = [p for p in components.get("MODEL_CONFIG", []) if p.name == "config.json"]
     if len(tokenizers) != 1 or len(configs) != 1:
