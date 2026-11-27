@@ -392,6 +392,13 @@ public final class KnowledgeModelPackageStoreTest {
             assertFalse(KnowledgeModelPackageContract.inspect(entry,
                     packages.installed(entry)).runnable());
 
+            final ByteArrayOutputStream quarantined = new ByteArrayOutputStream();
+            packages.copyAuditedE5WeightToQuarantine(entry, quarantined);
+            assertArrayEquals("Audited E5 graph differs from FD transfer source",
+                    graph, quarantined.toByteArray());
+            assertFalse(KnowledgeModelPackageContract.inspect(entry,
+                    packages.installed(entry)).runnable());
+
             final File file = new File(directory, entry.sha256 + ".onnx");
             final byte[] changed = Arrays.copyOf(graph, graph.length);
             changed[changed.length - 1] ^= 1;
@@ -400,6 +407,13 @@ public final class KnowledgeModelPackageStoreTest {
                 packages.e5OnnxMetadata(entry);
                 fail("Graph metadata read without first rehashing the pinned model");
             } catch (IOException expected) { }
+            final ByteArrayOutputStream rejected = new ByteArrayOutputStream();
+            try {
+                packages.copyAuditedE5WeightToQuarantine(entry, rejected);
+                fail("Tampered E5 weight was streamed after package audit failed");
+            } catch (IOException expected) { }
+            assertEquals("Untrusted E5 data written before mandatory audit", 0,
+                    rejected.size());
         } finally { removeTree(directory); }
     }
 
@@ -714,6 +728,12 @@ public final class KnowledgeModelPackageStoreTest {
             final KnowledgeModelPackageStore.Audit audit = packages.audit(entry, null);
             assertTrue(audit.externalDataPreflightPassed());
             assertFalse(audit.jsonPreflightPassed());
+            final ByteArrayOutputStream rejectedFd = new ByteArrayOutputStream();
+            try {
+                packages.copyAuditedE5WeightToQuarantine(entry, rejectedFd);
+                fail("Single-FD E5 transfer accepted an ONNX external-data shard");
+            } catch (IOException expected) { }
+            assertEquals("External-data weights reached untrusted FD", 0, rejectedFd.size());
             final File cache = new File(directory, "uncreated-cache");
             try {
                 packages.prepareOnnx(entry, cache);

@@ -11,6 +11,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -287,6 +289,42 @@ final class KnowledgeModelPackageStore {
             throw new IOException("E5 graph I/O counts disagree between metadata readers");
         }
         return signature;
+    }
+
+    /**
+     * Future MANUAL transport source for one registered, package-audited E5 graph.
+     * Currently not called by the UI or worker. The destination is untrusted;
+     * the caller must discard it on failure and verify its own received bytes.
+     * No ONNX Runtime session is opened and no package is made runnable.
+     */
+    synchronized void copyAuditedE5WeightToQuarantine(
+            final KnowledgeModelFiles.Entry entry, final OutputStream quarantine)
+            throws IOException {
+        if (entry == null || entry.format != KnowledgeModelFiles.Format.ONNX_UNVERIFIED
+                || entry.bytes < 16 || entry.bytes > KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES
+                || quarantine == null) {
+            throw new IOException("E5 FD transfer requires a bounded registered ONNX weight");
+        }
+        final KnowledgeModelPackageManifest manifest = installed(entry);
+        if (manifest == null || manifest.role != KnowledgeModelPolicy.Role.EMBEDDING) {
+            throw new IOException("E5 FD transfer requires installed embedding package");
+        }
+        for (final KnowledgeModelPackageManifest.Component component : manifest.components) {
+            if (component.kind == KnowledgeModelPackageManifest.Kind.ONNX_EXTERNAL_DATA) {
+                throw new IOException("External-data ONNX FD transfer is not supported");
+            }
+        }
+        // Includes current SHA audit of all sidecars, strict E5 Small I/O
+        // preflight and read-only metadata check of the same graph bytes.
+        e5OnnxMetadata(entry);
+        final File file = weightFile(entry);
+        if (!safeChild(directory, file) || !file.isFile() || file.length() != entry.bytes) {
+            throw new IOException("E5 weight changed before FD transfer");
+        }
+        try (RandomAccessFile opened = new RandomAccessFile(file, "r")) {
+            KnowledgeE5PinnedOpenedFdSender.copyVerified(
+                    opened, quarantine, entry.bytes, entry.sha256);
+        }
     }
 
     /**
