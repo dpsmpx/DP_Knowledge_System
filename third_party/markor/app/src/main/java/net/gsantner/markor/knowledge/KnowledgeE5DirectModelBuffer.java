@@ -66,8 +66,9 @@ final class KnowledgeE5DirectModelBuffer {
             if (!direct.isDirect() || direct.remaining() != bytes) {
                 throw new IOException("E5 direct-buffer copy incomplete");
             }
+            final Verified result = new Verified(direct);
             verified = true;
-            return new Verified(direct);
+            return result;
         } finally {
             if (!verified) wipe(direct);
         }
