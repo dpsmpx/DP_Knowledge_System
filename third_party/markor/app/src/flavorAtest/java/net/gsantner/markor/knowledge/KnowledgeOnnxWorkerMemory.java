@@ -37,6 +37,24 @@ final class KnowledgeOnnxWorkerMemory {
         }
     }
 
+    /**
+     * Direct allocation and native opening require distinct, current snapshots.
+     * Run INSIDE the isolated UID immediately before each respective stage.
+     * A successful snapshot is not a reservation or OOM-proof guarantee.
+     */
+    static void requireAvailableForDirect(final Context context, final long modelBytes,
+                                          final boolean beforeNative,
+                                          final boolean debugSimulateLowMemory) throws Denied {
+        try {
+            final Snapshot memory = snapshot(context);
+            KnowledgeE5DirectRamGate.requireAvailable(modelBytes, beforeNative,
+                    debugSimulateLowMemory ? 0L : memory.availableBytes,
+                    debugSimulateLowMemory || memory.lowMemory);
+        } catch (IOException | RuntimeException blocked) {
+            throw new Denied();
+        }
+    }
+
     /** Same worker-UID snapshot also feeds the E5 advisory resource plan. */
     static Snapshot snapshot(final Context context) throws Denied {
         try {

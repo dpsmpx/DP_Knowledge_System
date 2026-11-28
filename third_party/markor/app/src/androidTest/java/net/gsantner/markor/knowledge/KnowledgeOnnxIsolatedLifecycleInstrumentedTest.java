@@ -765,6 +765,26 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void debugLargeFdLowRamIsDeniedBeforeAnyPipeRead() throws Exception {
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendLargeFixture(pipe[0], KnowledgeE5LargeFdFixture.LENGTH_BYTES,
+                    KnowledgeE5LargeFdFixture.SHA256, true);
+            closePipe(pipe[0]);
+            // Deliberately keep the writer open and send ZERO bytes. A receiver
+            // that reads before the RAM gate would block until its watchdog.
+            assertTrue("Direct RAM veto did not happen before reading the FD",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_DEBUG_LARGE_FD_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
     @Test public void debugLargeFdRejectsForgedShaBeforeReading() throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
         final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
@@ -1305,6 +1325,12 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
 
         void sendLargeFixture(final ParcelFileDescriptor readPipe, final long length,
                               final String expectedSha) throws RemoteException {
+            sendLargeFixture(readPipe, length, expectedSha, false);
+        }
+
+        void sendLargeFixture(final ParcelFileDescriptor readPipe, final long length,
+                              final String expectedSha, final boolean debugLowMemory)
+                throws RemoteException {
             final Message request = Message.obtain(null,
                     KnowledgeOnnxIsolatedProtocol.DEBUG_VERIFY_LARGE_FD);
             request.arg1 = 1;
@@ -1313,6 +1339,8 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
             data.putLong(KnowledgeOnnxIsolatedProtocol.DEBUG_LARGE_FD_LENGTH, length);
+            if (debugLowMemory) data.putBoolean(
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, true);
             request.setData(data);
             messenger.send(request);
         }

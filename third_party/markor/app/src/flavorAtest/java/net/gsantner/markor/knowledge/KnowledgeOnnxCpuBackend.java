@@ -71,7 +71,7 @@ final class KnowledgeOnnxCpuBackend {
      * match alone does not authorize a real installed E5 model for native ORT.
      */
     static KnowledgeOnnxSessionGate.Report inspectVerifiedDirectDebug(
-            final KnowledgeE5DirectModelBuffer.Verified verified,
+            final Context workerContext, final KnowledgeE5DirectModelBuffer.Verified verified,
             final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
         if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker()
                 || verified == null) {
@@ -83,6 +83,10 @@ final class KnowledgeOnnxCpuBackend {
                 || model.remaining() > KnowledgeE5DirectModelBuffer.MAX_DIRECT_BYTES) {
             throw new IOException("Direct ONNX metadata input outside verified buffer gate");
         }
+        // Snapshot AFTER the direct allocation, just before the native ORT
+        // session. Never infer native safety from the earlier copy-stage gate.
+        KnowledgeOnnxWorkerMemory.requireAvailableForDirect(
+                workerContext, model.remaining(), true, false);
         return inspectMetadata(null, model, memory);
     }
 
@@ -292,7 +296,6 @@ final class KnowledgeOnnxCpuBackend {
         for (final int variant : new int[]{
                 KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
                 KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT}) {
-            KnowledgeOnnxWorkerMemory.requireAvailable(workerContext, false);
             final boolean tokenTypes = variant
                     == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
             final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(
@@ -301,6 +304,8 @@ final class KnowledgeOnnxCpuBackend {
                 // Byte equality against an independently regenerated graph is
                 // required BEFORE any native session, even for debug fixtures.
                 KnowledgeE5IsolatedSmoke.requirePinnedGraph(pinned, variant);
+                KnowledgeOnnxWorkerMemory.requireAvailableForDirect(
+                        workerContext, pinned.length, false, false);
                 final KnowledgeOnnxMemoryTrace.Recorder directMemory =
                         new KnowledgeOnnxMemoryTrace.Recorder();
                 directMemory.begin(KnowledgeOnnxWorkerMemory.samplePssKiB());
@@ -308,9 +313,8 @@ final class KnowledgeOnnxCpuBackend {
                              KnowledgeE5DirectModelBuffer.readVerified(
                                      new ByteArrayInputStream(pinned), pinned.length,
                                      KnowledgeOnnxSessionPipe.sha256Hex(pinned))) {
-                    KnowledgeOnnxWorkerMemory.requireAvailable(workerContext, false);
                     final KnowledgeOnnxSessionGate.Report metadata =
-                            inspectVerifiedDirectDebug(verified, directMemory);
+                            inspectVerifiedDirectDebug(workerContext, verified, directMemory);
                     final long expectedInputs = tokenTypes ? 3 : 2;
                     final long expectedOutputs = tokenTypes ? 1 : 2;
                     if (metadata.inputs != expectedInputs
