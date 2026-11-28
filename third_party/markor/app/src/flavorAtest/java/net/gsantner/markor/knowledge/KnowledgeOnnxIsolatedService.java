@@ -168,7 +168,17 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     // pinned synthetic debug fixture exercises a direct-memory
                     // quarantine; the real manual E5 verify-only command MUST
                     // remain streaming and must not allocate model-sized RAM.
-                    KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
+                    if (debugLargeFd) {
+                        // Strict admission BEFORE creating a model-sized native
+                        // direct buffer; a synthetic low-RAM flag exercises this
+                        // path without ever allocating fixture bytes.
+                        KnowledgeOnnxWorkerMemory.requireAvailableForDirect(
+                                this, largeLength, false, debugLowMemory);
+                    } else {
+                        // Real manual verify-only still streams using 64 KiB,
+                        // with no direct/model-sized allocation or ORT session.
+                        KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
+                    }
                     try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe)) {
                         if (debugLargeFd) {
                             try (KnowledgeE5DirectModelBuffer.Verified direct =
