@@ -6,11 +6,13 @@ import android.os.Debug;
 
 import net.gsantner.markor.BuildConfig;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -60,6 +62,34 @@ final class KnowledgeOnnxCpuBackend {
                 || modelBytes.length > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES) {
             throw new IOException("ONNX CPU input outside the size gate");
         }
+        return inspectMetadata(modelBytes, null, memory);
+    }
+
+    /**
+     * Native direct-buffer ORT metadata probe for a PINNED debug graph only.
+     * The caller must keep Verified open until the session is closed. A SHA
+     * match alone does not authorize a real installed E5 model for native ORT.
+     */
+    static KnowledgeOnnxSessionGate.Report inspectVerifiedDirectDebug(
+            final KnowledgeE5DirectModelBuffer.Verified verified,
+            final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
+        if (!BuildConfig.DEBUG || !KnowledgeOnnxProcessIdentity.isWorker()
+                || verified == null) {
+            throw new IOException("Direct ONNX metadata probe is pinned-debug-worker only");
+        }
+        final ByteBuffer model = verified.view();
+        if (!model.isDirect() || !model.isReadOnly() || model.position() != 0
+                || model.remaining() < 16
+                || model.remaining() > KnowledgeE5DirectModelBuffer.MAX_DIRECT_BYTES) {
+            throw new IOException("Direct ONNX metadata input outside verified buffer gate");
+        }
+        return inspectMetadata(null, model, memory);
+    }
+
+    /** One read-only metadata path; the only difference is ORT's input API. */
+    private static KnowledgeOnnxSessionGate.Report inspectMetadata(
+            final byte[] modelBytes, final ByteBuffer direct,
+            final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("ONNX CPU session inspection cancelled");
         }
@@ -76,7 +106,9 @@ final class KnowledgeOnnxCpuBackend {
             options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
             // No model filename is passed to native code, so paths from ONNX
             // external_data cannot be deliberately resolved via the API.
-            try (OrtSession session = environment.createSession(modelBytes, options)) {
+            try (OrtSession session = direct == null
+                    ? environment.createSession(modelBytes, options)
+                    : environment.createSession(direct, options)) {
                 memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
                 elapsed = Math.max(0L, (System.nanoTime() - began) / 1_000_000L);
                 inputs = session.getNumInputs();
@@ -237,6 +269,11 @@ final class KnowledgeOnnxCpuBackend {
             // Exercise the canonical 384-channel E5 runner inside the actual
             // isolated service UID, not only the instrumentation process.
             KnowledgeE5IsolatedSmoke.verify(workerContext, environment, options, memory);
+            if (BuildConfig.DEBUG) {
+                // Both pinned E5 export forms open through the direct ByteBuffer
+                // API for metadata ONLY. Never run() or inspect a user model here.
+                smokePinnedDirectMetadata(workerContext, memory);
+            }
         }
         // Count AFTER the session, options, result and input tensor have closed.
         // This is a diagnostic native-heap delta, NOT peak RSS or model RAM.
@@ -245,6 +282,75 @@ final class KnowledgeOnnxCpuBackend {
         return new KnowledgeOnnxSmoke.Report(environment.getVersion(),
                 initMillis, runMicros, nativeDelta, memory.result(),
                 KnowledgeOnnxRssHighWater.readSelf());
+    }
+
+    private static void smokePinnedDirectMetadata(final Context workerContext,
+            final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
+        if (!KnowledgeOnnxProcessIdentity.isWorker()) {
+            throw new IOException("Direct E5 metadata smoke requires the worker UID");
+        }
+        for (final int variant : new int[]{
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT}) {
+            KnowledgeOnnxWorkerMemory.requireAvailable(workerContext, false);
+            final boolean tokenTypes = variant
+                    == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
+            final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(
+                    6, tokenTypes, !tokenTypes);
+            try {
+                // Byte equality against an independently regenerated graph is
+                // required BEFORE any native session, even for debug fixtures.
+                KnowledgeE5IsolatedSmoke.requirePinnedGraph(pinned, variant);
+                final KnowledgeOnnxMemoryTrace.Recorder directMemory =
+                        new KnowledgeOnnxMemoryTrace.Recorder();
+                directMemory.begin(KnowledgeOnnxWorkerMemory.samplePssKiB());
+                try (KnowledgeE5DirectModelBuffer.Verified verified =
+                             KnowledgeE5DirectModelBuffer.readVerified(
+                                     new ByteArrayInputStream(pinned), pinned.length,
+                                     KnowledgeOnnxSessionPipe.sha256Hex(pinned))) {
+                    KnowledgeOnnxWorkerMemory.requireAvailable(workerContext, false);
+                    final KnowledgeOnnxSessionGate.Report metadata =
+                            inspectVerifiedDirectDebug(verified, directMemory);
+                    final long expectedInputs = tokenTypes ? 3 : 2;
+                    final long expectedOutputs = tokenTypes ? 1 : 2;
+                    if (metadata.inputs != expectedInputs
+                            || metadata.outputs != expectedOutputs
+                            || metadata.ioSummary == null
+                            || !pinnedDirectDescriptorSha256(tokenTypes).equals(
+                                    metadata.ioSummary.e5DescriptorSha256)
+                            || !KnowledgeOnnxIoSummary.valid(metadata.ioSummary,
+                                    metadata.inputs, metadata.outputs)) {
+                        throw new IOException("Pinned direct E5 ORT metadata mismatch");
+                    }
+                }
+                memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
+            } finally {
+                Arrays.fill(pinned, (byte) 0);
+            }
+        }
+    }
+
+    /** Independent expected name/type/axis description for the six-token fixture. */
+    private static String pinnedDirectDescriptorSha256(final boolean tokenTypes) {
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> inputs = new LinkedHashMap<>();
+        final Map<String, KnowledgeE5OnnxSignature.Tensor> outputs = new LinkedHashMap<>();
+        inputs.put("input_ids", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        inputs.put("attention_mask", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        if (tokenTypes) {
+            inputs.put("token_type_ids", new KnowledgeE5OnnxSignature.Tensor(
+                    KnowledgeE5OnnxSignature.DataType.INT64, 1, 6));
+        }
+        outputs.put("last_hidden_state", new KnowledgeE5OnnxSignature.Tensor(
+                KnowledgeE5OnnxSignature.DataType.FLOAT32, 1, 6,
+                KnowledgeE5TokenEmbeddingSmoke.DIMENSIONS));
+        if (!tokenTypes) {
+            outputs.put("pooler_output", new KnowledgeE5OnnxSignature.Tensor(
+                    KnowledgeE5OnnxSignature.DataType.FLOAT32, 1,
+                    KnowledgeE5TokenEmbeddingSmoke.DIMENSIONS));
+        }
+        return KnowledgeE5OnnxSignature.descriptorSha256(inputs, outputs);
     }
 
     private static void smokeEmbeddingTensors(final OrtEnvironment environment,
