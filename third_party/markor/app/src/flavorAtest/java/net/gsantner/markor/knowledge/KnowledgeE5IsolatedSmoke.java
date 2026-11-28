@@ -4,6 +4,7 @@ package net.gsantner.markor.knowledge;
 import android.content.Context;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -86,6 +87,50 @@ final class KnowledgeE5IsolatedSmoke {
             if (received == null || !Arrays.equals(pinned, received)) {
                 throw new IOException("FD graph is not the pinned synthetic E5 fixture");
             }
+        } finally {
+            Arrays.fill(pinned, (byte) 0);
+        }
+    }
+
+    /**
+     * Pin the SHA-verified direct FD bytes independently BEFORE native ORT.
+     * Only the ~50 KiB synthetic pinned reference is generated in heap;
+     * received FD bytes stay direct. Never use this for real weights.
+     */
+    static void requirePinnedDirectGraph(final KnowledgeE5DirectModelBuffer.Verified verified,
+                                         final int variant) throws IOException {
+        if (verified == null || !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(variant)) {
+            throw new IOException("Unknown direct E5 debug fixture");
+        }
+        final boolean tokenTypes = variant == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
+        final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(6,
+                tokenTypes, !tokenTypes);
+        try {
+            final ByteBuffer received = verified.view();
+            int different = received.remaining() ^ pinned.length;
+            final int shared = Math.min(received.remaining(), pinned.length);
+            for (int index = 0; index < shared; index++) {
+                different |= (received.get(index) ^ pinned[index]) & 0xff;
+            }
+            if (different != 0) throw new IOException("Unpinned direct E5 debug graph");
+        } finally {
+            Arrays.fill(pinned, (byte) 0);
+        }
+    }
+
+    /** Reject a debug FD envelope before reading or allocating its payload. */
+    static boolean isPinnedDirectEnvelope(final int bytes, final String sha256,
+                                          final int variant) {
+        if (!KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(variant)
+                || !KnowledgeOnnxSessionPipe.validSha256(sha256)) return false;
+        final boolean tokenTypes = variant == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
+        final byte[] pinned = KnowledgeE5TokenEmbeddingSmoke.graph(6,
+                tokenTypes, !tokenTypes);
+        try {
+            return bytes == pinned.length
+                    && sha256.equals(KnowledgeOnnxSessionPipe.sha256Hex(pinned));
+        } catch (IOException unavailable) {
+            return false;
         } finally {
             Arrays.fill(pinned, (byte) 0);
         }

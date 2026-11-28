@@ -40,4 +40,16 @@ public final class KnowledgeOnnxIsolatedProtocolTest {
         assertFalse(KnowledgeOnnxIsolatedProtocol.validVerifyOnlyFdEnvelope(16,
                 sha.toUpperCase()));
     }
+
+    @Test public void debugDirectMetadataUsesSeparateCommandWithoutTrustResult() {
+        assertEquals(19, KnowledgeOnnxIsolatedProtocol.DEBUG_INSPECT_DIRECT_E5_FD);
+        assertNotEquals(KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD,
+                KnowledgeOnnxIsolatedProtocol.DEBUG_INSPECT_DIRECT_E5_FD);
+        assertNotEquals(KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_LARGE_FD,
+                KnowledgeOnnxIsolatedProtocol.DEBUG_INSPECT_DIRECT_E5_FD);
+        assertTrue(KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER));
+        assertTrue(KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT));
+    }
 }
