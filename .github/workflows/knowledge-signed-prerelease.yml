@@ -1,11 +1,12 @@
 name: Signed DP Knowledge Android prerelease
 
 on:
-  # Publish QA milestones automatically when the signed workflow is updated;
-  # other milestones can still be started explicitly from integration.
+  # Publish QA milestones when this workflow is updated on the fixed,
+  # reviewed integration or Stage 18 preview refs. Never sign arbitrary PRs.
   push:
     branches:
       - feature/knowledge-android
+      - feature/stage18-context-temporal-relations
     paths:
       - .github/workflows/knowledge-signed-prerelease.yml
   workflow_dispatch:
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   sign-and-publish:
-    if: github.ref == 'refs/heads/feature/knowledge-android'
+    if: github.ref == 'refs/heads/feature/knowledge-android' || github.ref == 'refs/heads/feature/stage18-context-temporal-relations'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -37,6 +38,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Python 3.10 for the DPKS native SentencePiece wheel
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
 
@@ -44,7 +50,7 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Test the knowledge core
-        run: python -m unittest discover -s tests -t .
+        run: python3.11 -m unittest discover -s tests -t .
 
       - name: Build and test isolated Android preview package
         working-directory: third_party/markor
@@ -121,7 +127,12 @@ jobs:
           printf 'APK_PATH=%s\n' "$apk" >> "$GITHUB_ENV"
           echo 'Verified signed Android preview. No signing passwords were logged.'
 
-      - name: Publish consolidated Stage 22 signed APK and SHA-256 as prerelease
+      - name: Verify AVD home, install and cold-launch the exact signed APK on Android 15
+        shell: bash
+        timeout-minutes: 20
+        run: bash scripts/ci-android-signed-smoke.sh "$APK_PATH"
+
+      - name: Publish signed DP Knowledge APK and SHA-256 as prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -129,6 +140,11 @@ jobs:
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:10}"
           tag="knowledge-stage22-${GITHUB_RUN_NUMBER}-${short_sha}"
+          release_title="DP Knowledge System (com.dpsmpx.dpks) — signed preview #${GITHUB_RUN_NUMBER}"
+          if [[ "$GITHUB_REF" == 'refs/heads/feature/stage18-context-temporal-relations' ]]; then
+            tag="knowledge-stage18-${GITHUB_RUN_NUMBER}-${short_sha}"
+            release_title="DP Knowledge System (com.dpsmpx.dpks) — Stage 18 signed preview #${GITHUB_RUN_NUMBER}"
+          fi
           notes="$(printf '%s\n' \
             'DP Knowledge System: единая сборка Android UI/UX Stage 22 для комплексной аппаратной проверки.' \
             '' \
@@ -196,9 +212,17 @@ jobs:
             '' \
             "Исходный коммит: ${GITHUB_SHA}." \
           )"
+          if [[ "$GITHUB_REF" == 'refs/heads/feature/stage18-context-temporal-relations' ]]; then
+            notes="${notes}"$'\n\n'"Stage 18, PR #76 (slices 1–27): conservative cross-note matching by exact context and intervals, human-reviewed entity aliases, source-copy families and lineage, original-source SHA freshness, source-type annotations, modal/temporal hints and partial-result warnings."$'\n'"Stage 18 manual version-pair review: select an exact dated relation, inspect both original excerpts and hashes, record one of four descriptive interpretations with an explanation, browse decision history and withdraw offline. No original Markdown rewrite, automatic truth decision or numerical confidence score."$'\n'"Stage 18 synthetic Device QA: VERSION-18-SUITE runs six count-only checks in the app-private temporary folder without reading the selected notebook. Android 11/15 touch, lifecycle, TalkBack, 200% font and 20k-vault physical acceptance remain OPEN; see docs/STAGE18_COMPLETION_GATE.md."$'\n'"This branch includes the Stage 22 integration baseline, but NOT the unmerged Stage 21 PR #74. Stage 21 real-device QA and read-only FTS warnings remain deferred under PR #75. Signed prerelease is for manual testing, not production acceptance."
+            notes="${notes}"$'\n'"Navigation fix after Preview #27 device feedback: Library now has a visible Related claims — choose a note action, in addition to the existing long-press shortcut. Processes has a visible Go to device tests button above the analysis cards; it scrolls to quick, 20k stress and editor QA. English/Russian UI labels and Stage 18 acceptance instructions were updated."$'\n'"Owner's Android 15 quick QA of Preview #27: 23 PASS, 2 WARN, 0 FAIL, 4 SKIP; all six VERSION-18 checks passed. The read-only SQLite quick_check discrepancy remains an OPEN diagnostic debt, not evidence of corruption and not automatically repaired."
+            notes="${notes}"$'\n'"Fix after #24: journal-only export now checks for actual decisions and encrypts before opening Android's save dialog; the saved SAF document is read back and checked for exact size and SHA-256. An empty journal is reported without creating a 0-byte file. This does not export Markdown notes or replace the Stage 21 full-library backup."
+            notes="${notes}"$'\n'"Stage 17 PR #80: each bounded human batch confirmation now shows an original-source excerpt and rejects directly opposing new claims as one combined decision. Separate reviewed source claims remain possible; no automatic facts."
+            notes="${notes}"$'\n'"Stage 19 PR #81: opt-in lexical/vector hybrid source selection with separate embedding and chat consent; indexed-file metadata verified before/after retrieval; malformed citations and fabricated verbatim quotes get warnings. Matching references do NOT prove the generated statements."
+            notes="${notes}"$'\n'"Signed prerelease gate: after signing/hash verification, CI must install and cold-launch this exact APK on a clean Android 15 emulator before publishing. The first CI-02 emulator run timed out before ADB; follow-up diagnostics are active. Emulator smoke is not physical-device QA, and CI-02 remains OPEN until a real PASS."
+          fi
           gh release create "$tag" "$APK_PATH" "$APK_PATH.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "DP Knowledge System (com.dpsmpx.dpks) — signed preview #${GITHUB_RUN_NUMBER}" \
+            --title "$release_title" \
             --notes "$notes" \
             --prerelease

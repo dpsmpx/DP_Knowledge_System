@@ -478,6 +478,18 @@ class KnowledgeBase:
     def alias(self, alias: str, canonical: str) -> Entry:
         return self._commit("alias", {"alias": alias, "canonical": canonical})[0]
 
+    def alias_reviewed(self, alias: str, canonical: str, evidence: list[dict],
+                       reason: str) -> Entry:
+        return self._commit("alias", {"alias": alias, "canonical": canonical,
+                                      "evidence": evidence, "review": "android_manual_v1"},
+                            note=reason or "Explicit Android entity match")[0]
+
+    def unalias(self, alias: str, canonical: str, decision_id: str) -> Entry:
+        if self.state.alias_decisions.get(alias) != (canonical, decision_id, self.journal.actor):
+            raise KSError(ErrorKind.JOURNAL_ERROR, "alias decision is no longer active")
+        return self._commit("unalias", {"alias": alias, "canonical": canonical,
+                                        "decision_id": decision_id})[0]
+
     def add_schema(self, schema: dict) -> Entry:
         return self._commit("schema", {"schema": schema})[0]
 

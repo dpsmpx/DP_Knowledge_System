@@ -5,6 +5,7 @@ This does not stand in for a device accessibility, layout or lifecycle test.
 from __future__ import annotations
 
 import unittest
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -14,6 +15,1291 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
 class KnowledgeWorkspaceShellTests(unittest.TestCase):
+    def test_hybrid_android_sqlite_qa_joins_both_indexes_and_filters_changed_bytes(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        start = qa.index("private String checkSyntheticHybridIndex()")
+        end = qa.index("\n    private ", start + 1)
+        fixture = qa[start:end]
+        self.assertIn('step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex)', qa)
+        for marker in ("KnowledgeVaultScanner.scan(vault, 12,",
+                       "KnowledgeEmbeddingChunks.fromNote(bodies[i])",
+                       "testIndex.beginEmbedding(paths[i],",
+                       "testIndex.appendEmbeddingBatch(paths[i],",
+                       'testIndex.evidenceSearch("amber violet", 8)',
+                       "testIndex.semanticSearch(model, query, 8)",
+                       "KnowledgeHybridRanking.combine(",
+                       "KnowledgeHybridRanking.selectBalancedIndices(",
+                       "matchesIndexedEvidenceSource(",
+                       'bodies[4].replace("violet", "VIOLET")',
+                       "semanticP50us=", "semanticP95us=", "semanticTrials=21",
+                       "hybridVerifiedRecallAt4=4/4", "artificialVectorsOnly=true"):
+            self.assertIn(marker, fixture)
+        self.assertIn("removeSandbox(sandbox)", fixture)
+        self.assertNotIn("KnowledgeEmbeddingClient.embed", fixture)
+
+    def test_embedding_multichunk_android_qa_requires_complete_sealed_best_chunk(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        start = qa.index("private String checkSyntheticMultichunkIndex()")
+        end = qa.index("\n    private ", start + 1)
+        fixture = qa[start:end]
+        self.assertIn('step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex)', qa)
+        for marker in ('chunks.size() != 2', 'testIndex.beginEmbedding("multi.md",',
+                       'new float[][]{near}', 'new float[][]{exact}',
+                       'testIndex.hasEmbeddings("multi.md",',
+                       'testIndex.semanticSearch(model, exact, 8)',
+                       'testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 1)',
+                       'exactBucketAtOneChunkBudget=true',
+                       'hits.get(0).excerptStart != chunks.get(1).start',
+                       'testIndex.matchesIndexedEvidenceSource(',
+                       'incompleteExcluded=true', 'bestLaterChunkSelected=true',
+                       'perPathDeduplicated=true', 'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+
+    def test_semantic_cap_uses_fast_path_until_exact_lsh_priority_is_necessary(self):
+        index = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeLocalIndex.java").read_text()
+        for marker in ('SELECT COUNT(*) FROM embedding_chunks',
+                       'c.getLong(0) > candidateBudget',
+                       'KnowledgeEmbeddingLsh.BITS + 1',
+                       'appendSemanticCandidates(db, exact, modelKey,',
+                       'appendSemanticCandidates(db, neighbors, modelKey,',
+                       'MAX_SEMANTIC_CANDIDATES - exactRows'):
+            if marker == 'MAX_SEMANTIC_CANDIDATES - exactRows':
+                self.assertNotIn(marker, index)  # budget also bounds synthetic QA
+            else:
+                self.assertIn(marker, index)
+        self.assertIn('candidateBudget - exactRows', index)
+        self.assertIn('!syntheticDatabase', index)
+        self.assertIn('parent.getName().startsWith("dpks-device-qa-")', index)
+        self.assertIn('return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,',
+                      index)
+
+    def test_overloaded_semantic_neighbor_pass_excludes_exact_candidates_in_android_qa(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        jvm = (ROOT.parent / "test/java/net/gsantner/markor/knowledge/KnowledgeEmbeddingTest.java")
+        # The new exclusion must only run for the overloaded neighbor pass.
+        self.assertIn('AND NOT EXISTS (SELECT 1 FROM embedding_lsh prior', index)
+        self.assertIn('prior.path=l.path AND prior.chunk=l.chunk', index)
+        self.assertIn('candidateBudget - exactRows, exact,', index)
+        self.assertIn('candidateBudget, null, best', index)
+        self.assertIn('step("EMBED-OVERLAP-19", this::checkSyntheticLshOverlapBudget)', qa)
+        start = qa.index('private String checkSyntheticLshOverlapBudget()')
+        end = qa.index('\n    private ', start + 1)
+        fixture = qa[start:end]
+        for marker in ('dpks-device-qa-', 'qa-overlap.sqlite',
+                       'syntheticSemanticSearchWithBudget(model, exact, 8, 2)',
+                       'neighborOnlySourceRecovered=true', 'sourceBytesSealed=true',
+                       'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+        self.assertIn('overloadedCandidateFixtureIncludesExactNeighborOverlapButNotHiddenSource',
+                      jvm.read_text())
+
+    def test_android_quota_experiment_is_cache_only_and_does_not_change_public_search(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('MAX_SEMANTIC_CANDIDATES, CandidatePolicy.PRODUCTION)', index)
+        self.assertIn('syntheticSemanticSearchWithBudget(final String modelKey,', index)
+        self.assertIn('CandidatePolicy.PRODUCTION)', index)
+        self.assertIn('syntheticSemanticSearchQuotaWithBudget(final String modelKey,', index)
+        self.assertIn('checkSyntheticSearchBudget(candidateBudget)', index)
+        self.assertIn('CandidatePolicy.SOURCE_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchSampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.SAMPLE_THEN_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchDedupSampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA)', index)
+        self.assertIn('syntheticSemanticSearchMemorySampleQuotaWithBudget(', index)
+        self.assertIn('CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA)', index)
+        for marker in ('!syntheticDatabase', 'dpks-device-qa-',
+                       'databaseFile.getName().startsWith("qa-")',
+                       'SELECT COUNT(*) FROM embedding_notes e',
+                       'e.completed=e.chunks AND n.oversized=0',
+                       'n.raw_sha256=e.source_sha256',
+                       'n.generation=(SELECT value FROM meta',
+                       'final int quota = (int) Math.max(1L, remaining / completedSources)',
+                       'new int[]{bucket}', 'candidateBudget - accepted',
+                       'samplePerSource ? "GROUP BY l.path LIMIT ?"',
+                       'CREATE TEMP TABLE qa_seen_lsh_candidates(',
+                       'if (temporaryExclusion && db.inTransaction())',
+                       'db.endTransaction();',
+                       'NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen',
+                       'selected.add(new String[]{c.getString(0)',
+                       'INSERT OR IGNORE INTO qa_seen_lsh_candidates(path,chunk)',
+                       'insert.executeInsert()',
+                       'candidateBudget + Math.min(candidateBudget, 4096)',
+                       'final Set<String> inMemorySeen = memoryDedup ? new HashSet<>()',
+                       'if (!inMemorySeen.add(key))',
+                       'rawScanLimit - sampled',
+                       'chunkRange.append(" AND l.chunk>=?")',
+                       'chunkRange.append(" AND l.chunk<?")',
+                       'false, deduplicate, inMemorySeen, candidateBudget, best'):
+            self.assertIn(marker, index)
+        self.assertIn('step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget)', qa)
+        start = qa.index('private String checkSyntheticSourceQuotaBudget()')
+        end = qa.index('\n    /** Synthetic cache-only post-approval', start)
+        fixture = qa[start:end]
+        for marker in ('qa-quota-skew.sqlite', 'qa-quota-uniform.sqlite',
+                       'qa-quota-dedup.sqlite',
+                       'KnowledgeVaultScanner.scan(vault, 8,',
+                       'KnowledgeEmbeddingChunks.fromNote(body)',
+                       'testIndex.beginEmbedding(paths[i]', 'testIndex.appendEmbeddingBatch(paths[i]',
+                       'syntheticSemanticSearchWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget)',
+                       'syntheticSemanticSearchDedupSampleQuotaWithBudget(',
+                       'syntheticSemanticSearchMemorySampleQuotaWithBudget(',
+                       'syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1)',
+                       'quota.get(0).excerptStart', 'matchesIndexedEvidenceSource(paths[i]',
+                       'uniformLateExactRecovered=true', 'skewLateOnlyStillMissed=true',
+                       'sampleThenQuotaSkewRecovered=true', 'tightSampleBudgetBounded=true',
+                       'syntheticScenarios=3', 'dedupLateBestRecovered=true',
+                       'memoryDedupLateBestRecovered=true',
+                       'overlapTimingTrials=21', 'overlapSampleP50us=',
+                       'overlapSampleP95us=', 'overlapTempP50us=',
+                       'overlapTempP95us=', 'overlapMemoryP50us=',
+                       'overlapMemoryP95us=',
+                       'SystemClock.elapsedRealtimeNanos()',
+                       'Arrays.sort(microseconds[policy])',
+                       'timingsNotRepresentative20k=true',
+                       'candidatePolicyUnshipped=true', 'removeSandbox(sandbox)'):
+            self.assertIn(marker, fixture)
+        self.assertNotIn('KnowledgeEmbeddingClient.embed', fixture)
+        self.assertNotIn('actualIndex.', fixture)
+        self.assertNotIn('notebook.', fixture)
+        jvm = (ROOT.parent / 'test/java/net/gsantner/markor/knowledge/KnowledgeEmbeddingTest.java')
+        self.assertIn('sourceQuotaQaFixtureHasOneNearExactBucketAndLateOnlyTarget',
+                      jvm.read_text())
+        self.assertIn('laterBetterSameBucketFixtureCannotBeResolvedBySourceSamplingAlone',
+                      jvm.read_text())
+
+    def test_hybrid_rrf_counts_unique_source_rank_without_duplicate_penalty(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        ranking = (folder / "KnowledgeHybridRanking.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("int uniqueRank = 0;", ranking)
+        self.assertIn("RRF_K + uniqueRank", ranking)
+        self.assertIn("duplicateRankInvariant=true", qa)
+        self.assertIn("syntheticFusionRecallAt6=4/4", qa)
+        self.assertIn("sharedOpposingSourcesTopTwo=true", qa)
+
+    def test_contrastive_claims_and_quotes_do_not_borrow_nearby_citations(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("isContrastiveClauseSeparator(", audit)
+        self.assertIn("CONTRASTIVE_CONNECTORS", audit)
+        self.assertIn("isProseBoundary(visible, i, lineEnd)", audit)
+        self.assertIn("isContrastiveClauseSeparator(text, i, to)", audit)
+        self.assertIn("quoteContrastLaunderingRejected=true", qa)
+        self.assertIn("contrastiveClauseIsolation=true", qa)
+        self.assertIn("ordinaryCommaPreserved=true", qa)
+
+    def test_citation_numeric_warnings_check_each_claimed_value(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("!source.numbers.containsAll(numbers)", audit)
+        self.assertIn("numbers.isEmpty() && !source.numbers.isEmpty()", audit)
+        self.assertIn('step("CITE-ANCHOR-19",', qa)
+        self.assertIn("partialNumberOverlapFlagged=true", qa)
+
+    def test_markdown_reference_spacing_and_escaped_backticks_stay_in_citation_audit(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("final int maximum = Math.min(text.length(), end + 64);", audit)
+        self.assertIn("isLineBreak(character) && breaks == 0", audit)
+        self.assertIn("answer.charAt(at) != '`' || isEscapedAt(answer, at)", audit)
+        self.assertIn("answer.charAt(end) != '`' || isEscapedAt(answer, end)", audit)
+        self.assertIn('step("CITE-COVER-19",', qa)
+        self.assertIn("softWrappedReferenceExcluded=true", qa)
+        self.assertIn("escapedBacktickHandled=true", qa)
+
+    def test_hybrid_shared_source_excerpt_preserves_literal_evidence_and_consent(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("chooseHybridExcerpt(final String question,", evidence)
+        self.assertIn("adjacentPhraseStart(foldForOffsets(lexicalExcerpt), terms)", evidence)
+        self.assertIn("KnowledgeLlmEvidence.chooseHybridExcerpt(question,", hub)
+        self.assertIn("KnowledgeEmbeddingChunks.atOffset(", hub)
+        self.assertIn("matchesIndexedEvidenceSource(relativePath,", hub)
+        self.assertIn("new KnowledgeLlmEvidence.ConsentSeal(", hub)
+        for marker in ("sharedSourceLexicalPhraseVisible=true",
+                       "strongerVectorRetained=true", "russianPrefixPassageSupported=true"):
+            self.assertIn(marker, qa)
+
+    def test_llm_excerpt_uses_same_search_terms_and_phrase_priority(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("final List<String> selected = ftsEvidenceTerms(question);", parser)
+        self.assertIn("KnowledgeMarkdownMetadata.ftsEvidenceTerms(question)", evidence)
+        self.assertLess(evidence.index("adjacentPhraseStart(folded, terms)"),
+                        evidence.index("bestCoverageStart(folded, terms)"))
+        self.assertLess(evidence.index("bestCoverageStart(folded, terms)"),
+                        evidence.index("firstTokenPrefixStart(folded, term, 0)"))
+        self.assertIn('step("CITE-EXCERPT-19",', qa)
+        self.assertIn("EXCERPT_PHRASE_PRIORITY_LOST", qa)
+        self.assertIn("multiTermCoverageAligned=true", qa)
+
+    def test_llm_answer_warns_when_sources_change_during_generation(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        self.assertEqual(2, hub.count("consentEvidenceStillCurrent(seals, generation)"))
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,")
+        after = hub.index("final boolean sourceStillCurrentAfterReply =", network)
+        audit = hub.index("KnowledgeLlmCitationAudit.inspect(answer, excerpts)", after)
+        self.assertLess(network, after)
+        self.assertLess(after, audit)
+        self.assertIn("R.string.knowledge_llm_sources_changed_after_reply", hub)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_sources_changed_after_reply", names)
+
+    def test_llm_refuses_explicit_incomplete_provider_response(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        client = (folder / "KnowledgeLlmClient.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for token in ("IncompleteResponseException", "validatedAnswer(",
+                      "finish_reason", "MAX_ANSWER_CHARS"):
+            self.assertIn(token, client)
+        self.assertNotIn("answer.substring(0, 12_000)", client)
+        self.assertLess(hub.index("consentEvidenceStillCurrent(seals, generation)"),
+                        hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,"))
+        self.assertIn("R.string.knowledge_llm_incomplete_response", hub)
+        self.assertIn('step("CITE-RESPONSE-19",', qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_incomplete_response", names)
+
+    def test_stress_20k_runs_android_retrieval_quality_and_timing_fixture(self):
+        qa = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn("benchmarkSynthetic20kRetrieval(testIndex)", qa)
+        for marker in ("i < 48", "i >= total - 4",
+                       "Crimson cedar supports a wholly synthetic claim",
+                       "Crimson cedar contradicts a wholly synthetic claim",
+                       "STRESS_PHRASE_RECALL_OR_ORDER", "phraseRecallAt6=4/4",
+                       "retrievalP50us=", "retrievalP95us=", "retrievalTrials=21"):
+            self.assertIn(marker, qa)
+
+    def test_llm_quote_attribution_uses_nearby_citations_with_visible_warnings(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("nearestLocalCitations(", "containsSentenceBreak(",
+                       "MAX_LOCAL_CITATION_GAP", "mismatchedQuoteCitations"):
+            self.assertIn(marker, audit)
+        self.assertIn('R.string.knowledge_llm_mismatched_quote_citations', hub)
+        self.assertIn('step("CITE-LOCAL-19",', qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_mismatched_quote_citations", names)
+
+    def test_llm_structural_citation_coverage_cannot_use_markdown_code(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("maskMarkdownCode(answer)", "countUncitedProseSpans(",
+                       "uncitedProseSpans", "uncitedSubstantiveSpan("):
+            self.assertIn(marker, audit)
+        for marker in ("isEscapedBracket(", "isMarkdownLinkLabel(",
+                       "SourceLexicon", "MAX_EXCERPT_CHARS"):
+            self.assertIn(marker, audit)
+        for marker in ("maskMarkdownNonProse(answer)", "REFERENCE_DEFINITION",
+                       "AUTOLINK", "markdownLinkDestinationEnd(",
+                       "maskHtmlTagsAndRawSections(visible)", "htmlRawClosingEnd(",
+                       "htmlTagEnd("):
+            self.assertIn(marker, audit)
+        for marker in ("sentenceBoundaryEnd(", "citationStartingAt(",
+                       "isMarkdownAtxHeading(", "isLineBreak(", "nextLineStart("):
+            self.assertIn(marker, audit)
+        self.assertIn("R.string.knowledge_llm_uncited_prose_spans", hub)
+        self.assertIn('step("CITE-COVER-19",', qa)
+        self.assertIn('htmlNonProseExcluded=true', qa)
+        self.assertIn('htmlVisibleTextPreserved=true', qa)
+        self.assertIn("containsNumericDigit(label)", audit)
+        self.assertIn("Character.isDigit(point)", audit)
+        self.assertIn("isNumericCitationCluster(reference)", audit)
+        self.assertIn("unicodeDigitSpoofRejected=true", qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_uncited_prose_spans", names)
+
+    def test_llm_numeric_and_distinctive_anchor_hints_are_localized_and_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        audit = (folder / "KnowledgeLlmCitationAudit.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("NON_ANCHOR_WORDS", "informativeTerms(", "NUMERIC_LITERAL",
+                       "numericTokens(", "numericMismatchedCitations",
+                       "Flag.Kind.NUMERIC_MISMATCH", "source.numbers.containsAll(numbers)"):
+            self.assertIn(marker, audit)
+        for marker in ("knowledge_llm_numeric_mismatch", "knowledge_llm_flagged_numeric",
+                       "review.numericMismatchedCitations"):
+            self.assertIn(marker, hub)
+        for marker in ("numericMismatchFlagged=true", "genericWordConflictsExcluded=true"):
+            self.assertIn(marker, qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_numeric_mismatch", names)
+            self.assertIn("knowledge_llm_flagged_numeric", names)
+
+    def test_lexical_evidence_boosts_short_phrases_without_dropping_fallback(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        first = index.index('final String phrase = KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(')
+        strict = index.index('safe.replace(" OR ", " ")', first)
+        fallback = index.index('appendEvidenceHits(db, safe, generation', strict)
+        self.assertLess(first, strict)
+        self.assertLess(strict, fallback)
+        for marker in ('ftsEvidencePhraseQuery(final String question)',
+                       'selected.subList(0, Math.min(selected.size(), 8))',
+                       'private static boolean isQuestionFiller('):
+            self.assertIn(marker, parser)
+        self.assertIn('step("LEX-PHRASE-19",', qa)
+        self.assertIn('PHRASE_OR_TITLE_PRIORITY_OR_CONFLICT_LOSS', qa)
+        self.assertIn('titlePriorityWithinAllPass=true', qa)
+        self.assertIn('titleEvidenceTermMatches(title, titleTerms)', index)
+        self.assertIn('limit * 2, limit,', index)
+        self.assertIn('Collections.sort(candidates,', index)
+        self.assertIn('static int titleEvidenceTermMatches(', parser)
+
+    def test_bounded_evidence_query_and_verified_source_diversity_tie_break(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        selector = (folder / "KnowledgeLlmEvidence.java").read_text()
+        parser = (folder / "KnowledgeMarkdownMetadata.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("repeatsSelectedExcerpt(", "bestDuplicate",
+                       "Collections.sort(selected)", "MAX_LEXICAL_CANDIDATES"):
+            self.assertIn(marker, selector)
+        self.assertIn("MAX_EVIDENCE_QUESTION_CHARS = 1200", parser)
+        self.assertIn("question.length() > 1200", hub)
+
+    def test_embedding_vectors_are_revision_sealed_before_api_upload_or_search(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        for marker in ("embeddingSourceUnchanged(note, sourceSha256)",
+                       "index.matchesIndexedEvidenceSource(note.relativePath,",
+                       "index.beginEmbedding(note.relativePath,",
+                       "index.appendEmbeddingBatch(note.relativePath,"):
+            self.assertIn(marker, hub)
+        self.assertEqual(3, hub.count("embeddingSourceUnchanged(note, sourceSha256)"))
+        for marker in ("ALTER TABLE embedding_notes ADD COLUMN source_sha256 BLOB",
+                       "n.raw_sha256=e.source_sha256", "MessageDigest.isEqual(sourceSha256,",
+                       'note.put("source_sha256", sourceSha256)'):
+            self.assertIn(marker, index)
+        self.assertIn('step("EMBED-SOURCE-19",', qa)
+        self.assertIn("UNSEALED_LEGACY_VECTOR_REUSED", qa)
+
+    def test_llm_evidence_uses_sealed_raw_source_in_both_retrieval_paths(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        # Two retrieval paths, embedding upload, and post-consent send gate.
+        self.assertEqual(4, hub.count("index.matchesIndexedEvidenceSource("))
+        self.assertEqual(3, hub.count("final SelectedSource source = readSelectedSource("))
+        self.assertIn("currentBytes.length != size", index)
+        self.assertIn("KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)", index)
+        self.assertIn("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB", index)
+        self.assertIn("matchesStoredBody(db, existingId,", index)
+        self.assertIn("V3_SOURCE_SEAL_MIGRATION_MISMATCH", qa)
+
+    def test_llm_post_consent_source_revision_is_checked_before_network_send(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        evidence = (folder / "KnowledgeLlmEvidence.java").read_text()
+        qa = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertEqual(2, hub.count("new KnowledgeLlmEvidence.ConsentSeal("))
+        guard = hub.index("if (!consentEvidenceStillCurrent(seals, generation))")
+        network = hub.index("KnowledgeLlmClient.ask(endpoint, model, apiKey,", guard)
+        self.assertLess(guard, network)
+        for marker in ("scanGeneration.get() != consentGeneration",
+                       "seal.matchesCurrentBytes(current.bytes)",
+                       "index.matchesIndexedEvidenceSource(seal.relativePath,"):
+            self.assertIn(marker, hub)
+        self.assertIn("rawDigest = rawSha256(approvedBytes)", evidence)
+        self.assertIn('step("CITE-SEND-19",', qa)
+        self.assertIn("SAME_METADATA_EDIT_NOT_REJECTED", qa)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_llm_sources_changed_before_send", names)
+
+    def test_m0_network_clients_require_scoped_approval_before_connection(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        gate = (folder / "KnowledgeNetworkApproval.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        llm = (folder / "KnowledgeLlmClient.java").read_text()
+        embedding = (folder / "KnowledgeEmbeddingClient.java").read_text()
+        for marker in ("Purpose.EMBEDDING_INDEX", "Purpose.EMBEDDING_QUERY",
+                       "Purpose.GENERATION", "MessageDigest.isEqual", "synchronized void revoke",
+                       "providerFor(target)"):
+            self.assertIn(marker, gate)
+        self.assertLess(llm.index("approval.consume("),
+                        llm.index("endpoint.openConnection()"))
+        self.assertLess(embedding.index("approval.consume("),
+                        embedding.index("endpoint.openConnection()"))
+        for marker in ("KnowledgeNetworkApproval.forIndex(endpoint, model,",
+                       "KnowledgeNetworkApproval.forQuery(endpoint, model, question)",
+                       "KnowledgeNetworkApproval.forAnswer(endpoint, model, exactPreview)",
+                       "activeIndexApproval.revoke()"):
+            self.assertIn(marker, hub)
+
+    def test_embedding_bulk_consent_previews_the_exact_hash_bound_outgoing_plan(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        gate = (folder / "KnowledgeNetworkApproval.java").read_text()
+        index = (folder / "KnowledgeLocalIndex.java").read_text()
+        self.assertIn("outgoing.setText(exactPreview.toString())", hub)
+        self.assertIn("inputs.add(chunk.text)", hub)
+        self.assertIn("reviewedBatches.add(inputs)", hub)
+        self.assertIn("index.previewEmbeddingResumeOffset(", hub)
+        self.assertIn("from != prepared.resumeFrom", hub)
+        self.assertIn("indexBatchHashes.get(used), digest(outgoingText)", gate)
+        self.assertIn("verifyCurrentNote(db, path, modified, size, sourceSha256)", index)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_embedding_exact_preview_help", names)
+
+    def test_network_failure_matrix_is_loopback_only_and_synthetic(self):
+        # The Android source root is app/src/main; tests live under app/src/test.
+        test = ROOT.parent / "test/java/net/gsantner/markor/knowledge/KnowledgeNetworkTransportTest.java"
+        source = test.read_text()
+        for marker in ("127.0.0.1", "missingOrMismatchedConsentSendsNoHttpRequest",
+                       "embeddingUploadsOnlyReviewedOrderedChunks",
+                       "serverErrorsAndMalformedRepliesNeverRetryAutomatically",
+                       "redirectCannotForwardPrivateTextOrKeyToAnotherServer",
+                       "interruptedCallIsRefusedBeforeSocketOpen",
+                       "stoppedEndpointFailsWithoutHiddenCloudFallback"):
+            self.assertIn(marker, source)
+        gradle = (ROOT.parent.parent / "build.gradle").read_text()
+        self.assertIn("testImplementation 'org.json:json:20240303'", gradle)
+
+    def test_m1_resumable_download_requires_digest_and_exact_http_range(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        download = (folder / "KnowledgeModelDownload.java").read_text()
+        shelf = (folder / "KnowledgeModelFiles.java").read_text()
+        ui = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        for marker in ('connection.setRequestProperty("Range", "bytes=" + checkpoint + "-")',
+                       'checkedContentRange(',
+                       'responseBytes != range[0]',
+                       'files.importResumed('):
+            self.assertIn(marker, download)
+        for marker in ('"resume-" + expectedSha256', 'digest.update(buffer, 0, count)',
+                       'expectedSha256.equals(hex(digest.digest()))',
+                       'synchronized void discardResume('):
+            self.assertIn(marker, shelf)
+        self.assertIn('beginTrustedDownload(', ui)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for label in ("knowledge_models_resume_continue",
+                          "knowledge_models_resume_restart", "knowledge_models_resume_failed"):
+                self.assertIn(label, names)
+
+    def test_m1_model_package_readiness_is_not_inferred_from_weight_file(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        contract = (folder / "KnowledgeModelPackageContract.java").read_text()
+        ui = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        for marker in ("SCHEMA_VERSION = 1", "PINNED_REVISION", "LICENSE_REVIEW",
+                       "MODEL_CONFIG", "EMBEDDING_POOLING", "CHAT_TEMPLATE",
+                       "RERANKER_SCORE", "FEATURE_LABEL_SCHEMA",
+                       "VALIDATED_ANDROID_BACKEND", "UNSUPPORTED_ROLE_FORMAT",
+                       "boolean runnable()"):
+            self.assertIn(marker, contract)
+        self.assertIn("KnowledgeModelPackageContract.inspect(entry)", ui)
+        self.assertIn("packageRequirementName(requirement)", ui)
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for item in ("knowledge_models_package_report", "knowledge_models_req_revision",
+                         "knowledge_models_req_tokenizer", "knowledge_models_req_backend",
+                         "knowledge_models_req_features"):
+                self.assertIn(item, names)
+
+    def test_m1_package_import_is_manual_atomic_and_never_starts_inference(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        manifest = (folder / "KnowledgeModelPackageManifest.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        for snippet in ("Intent.EXTRA_ALLOW_MULTIPLE", "KnowledgeModelPackageManifest.readBounded",
+                        "modelPackages.install(json, sidecars, entry)",
+                        "REQUEST_IMPORT_MODEL_PACKAGE", "modelPackages ="):
+            self.assertIn(snippet, hub)
+        self.assertIn("packageImporter.pick(entry)", dialog)
+        self.assertIn("packages.forget(entry)", dialog)
+        for snippet in ("MAX_MANIFEST_BYTES", "MAX_SIDECAR_BYTES", "exactKeys(",
+                        'name.contains("..")', "requireWeight("):
+            self.assertIn(snippet, manifest)
+        for snippet in ("registeredWeightMatches(entry)", "copyExact(",
+                        "staging.renameTo(destination)", "removeKnownFiles(staging)"):
+            self.assertIn(snippet, store)
+        self.assertIn("return false;", (folder / "KnowledgeModelPackageContract.java").read_text())
+        for locale in ("values", "values-ru"):
+            names = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_package_import", "knowledge_models_package_remove",
+                        "knowledge_models_package_importing", "knowledge_models_package_failed",
+                        "knowledge_models_package_present"):
+                self.assertIn(key, names)
+
+    def test_m1_package_audit_is_explicit_read_only_and_cancelable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeModelSettingsDialog.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        for marker in ("this::auditModelPackage", "modelPackages.audit(",
+                       "modelGeneration.get() == operation", "cancelModelImport()"):
+            self.assertIn(marker, hub)
+        self.assertIn("auditor.verify(entry)", dialog)
+        self.assertIn("knowledge_models_package_audit", dialog)
+        for marker in ("synchronized Audit audit(", "entry.sha256.equals(weightHash)",
+                       "component.sha256.equals(actual)", "basicJsonObject(",
+                       "MAX_JSON_PREFLIGHT_BYTES", "MAX_JSON_DEPTH"):
+            self.assertIn(marker, store)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_package_audit", "knowledge_models_package_audit_report",
+                        "knowledge_models_package_audit_progress",
+                        "knowledge_models_package_audit_failed",
+                        "knowledge_models_package_audit_json_warning"):
+                self.assertIn(key, labels)
+
+    def test_m1_container_probe_is_bounded_and_cannot_mark_runtime_ready(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        code = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        store = (folder / "KnowledgeModelPackageStore.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_GGUF_METADATA_SCAN", "MAX_GGUF_KEYS",
+                       "MAX_ARRAY_MEMBERS", "MAX_ONNX_FIELDS", "readVarint(",
+                       '"general.architecture"', '"tokenizer.ggml.model"',
+                       "readOpsetDeclaration(", "checkInterrupted("):
+            self.assertIn(marker, code)
+        self.assertIn("KnowledgeModelContainerProbe.inspect(weight, entry.format)", store)
+        self.assertIn("containerPreflightLabel(result.container)", hub)
+        self.assertIn("KnowledgeModelContainerProbe.State.INVALID", hub)
+        self.assertIn("return false;", (folder / "KnowledgeModelPackageContract.java").read_text())
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_container_gguf", "knowledge_models_container_onnx",
+                        "knowledge_models_container_invalid", "knowledge_models_container_partial"):
+                self.assertIn(key, labels)
+
+    def test_m1_tensor_and_graph_declarations_are_bounded_preflight_only(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_GGUF_TENSOR_INFOS", "MAX_GGUF_DESCRIPTOR_SCAN",
+                       "MAX_ONNX_GRAPH_FIELDS", "MAX_ONNX_GRAPH_NODES",
+                       "inspectGgufTensorDescriptors(", "inspectOnnxGraph(",
+                       "inspectOnnxNode(", "offset % alignment", "skipWire("):
+            self.assertIn(marker, probe)
+        for marker in ("result.tensorDescriptors", "result.graphNodes",
+                       "result.graphInputs", "result.graphOutputs", "result.operatorHints"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_models_container_gguf_descriptors",
+                        "knowledge_models_container_onnx_graph",
+                        "knowledge_models_container_detail_read"):
+                self.assertIn(key, labels)
+
+    def test_onnx_typeproto_preflight_remains_bounded_and_diagnostic_only(self):
+        probe = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeModelContainerProbe.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_TYPED_VALUES", "MAX_ONNX_VALUE_INFO_BYTES",
+                       "MAX_ONNX_SHAPE_DIMS", "inspectOnnxValueInfo(",
+                       "inspectOnnxType(", "inspectOnnxShape(", "boundedOnnxEnd("):
+            self.assertIn(marker, probe)
+        for marker in ("result.typedInputs", "result.typedOutputs",
+                       "result.signatureHints", "knowledge_models_container_onnx_signatures"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_signatures", labels)
+
+    def test_gguf_storage_extents_are_known_type_only_without_inference(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("knownGgufTensorBytes(", "axes[0] % blockSize",
+                       "Long.MAX_VALUE / blockBytes", "tensorExtentsUnknown",
+                       "declaredBytes[i] > data.length() - startOfData - offset"):
+            self.assertIn(marker, probe)
+        for marker in ("result.tensorExtentsChecked", "result.tensorExtentsUnknown",
+                       "knowledge_models_container_gguf_extents"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_gguf_extents", labels)
+
+    def test_onnx_opset_domain_linkage_is_bounded_advisory_only(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_DOMAINS", "readOnnxDomain(",
+                       "safeOnnxDomainHint(", "customNodesMissingImport",
+                       "duplicateOpsetDomains", "referencedDomains",
+                       "importedDomains"):
+            self.assertIn(marker, probe)
+        for marker in ("result.opsetHints", "result.customDomainNodes",
+                       "result.customNodesMissingImport", "result.duplicateOpsetDomains",
+                       "knowledge_models_container_onnx_opset_domains"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_opset_domains", labels)
+
+    def test_onnx_operator_inventory_shows_import_not_backend_support(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_OPERATOR_KINDS", "class OperatorKey",
+                       "LinkedHashMap", "operatorInventoryHints", "undecodedOperatorNodes",
+                       "ambiguousDomains"):
+            self.assertIn(marker, probe)
+        for marker in ("result.distinctOperatorKinds", "result.undecodedOperatorNodes",
+                       "result.operatorInventoryHints", "knowledge_models_container_onnx_inventory"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_inventory", labels)
+
+    def test_model_m1_onnx_schema_revision_snapshot_is_explicitly_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        catalog = (folder / "KnowledgeOnnxSchemaCatalog.java").read_text()
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_SNAPSHOT_OPSET = 25", '"MatMul"', '"Add"',
+                       '"LayerNormalization"', '"Gelu"', "BEYOND_SNAPSHOT",
+                       "BEFORE_INTRODUCTION", "UNRESOLVED_IMPORT"):
+            self.assertIn(marker, catalog)
+        for marker in ("schemaMatchedKinds", "schemaUnlistedKinds",
+                       "schemaBeyondSnapshotKinds", "schemaSnapshotHints",
+                       "KnowledgeOnnxSchemaCatalog.lookup"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.schemaMatchedKinds", hub)
+        self.assertIn("knowledge_models_container_onnx_schema_snapshot", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_schema_snapshot", labels)
+
+    def test_model_m1_onnx_local_functions_are_inspected_without_execution(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_LOCAL_FUNCTIONS = 128", "class FunctionKey",
+                       "inspectOnnxLocalFunction", "matchedGraphFunctionNodes",
+                       "undecodedLocalFunctions", "duplicateLocalFunctions",
+                       "undecodedFunctionOverloads", "field == 25 && wire == 2"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.matchedGraphFunctionNodes", hub)
+        self.assertIn("knowledge_models_container_onnx_local_functions", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_local_functions", labels)
+
+    def test_model_m1_onnx_function_imports_are_bounded_review_hints(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_FUNCTION_IMPORTS = 2048",
+                       "localFunctionBodyNodes", "localFunctionImportDeclarations",
+                       "localFunctionImportVersionDifferences",
+                       "localFunctionImportMissingModel",
+                       "localFunctionImportAmbiguousModel",
+                       "duplicateLocalFunctionImportDomains",
+                       "invalidLocalFunctionImportVersions",
+                       "FunctionProto.opset_import"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.localFunctionImportVersionDifferences", hub)
+        self.assertIn("knowledge_models_container_onnx_function_imports", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_function_imports", labels)
+
+    def test_model_m1_onnx_function_body_operator_names_are_bounded(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_FUNCTION_OPERATOR_KINDS = 128",
+                       "inspectOnnxFunctionBodyNode",
+                       "localFunctionOperatorKinds",
+                       "undecodedLocalFunctionOperatorNodes",
+                       "localFunctionCustomNodesMissingImport",
+                       "localFunctionOperatorHints"):
+            self.assertIn(marker, probe)
+        for marker in ("result.localFunctionOperatorKinds",
+                       "knowledge_models_container_onnx_function_operators"):
+            self.assertIn(marker, hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_function_operators", labels)
+
+    def test_model_m1_onnx_external_data_paths_are_not_opened(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        probe = (folder / "KnowledgeModelContainerProbe.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        for marker in ("MAX_ONNX_DENSE_INITIALIZERS",
+                       "MAX_ONNX_EXTERNAL_ENTRIES",
+                       "inspectOnnxInitializerExternalData",
+                       "isLexicallyRelativeExternalPath",
+                       "externalDataMissingLocations",
+                       "externalDataUntrustedLocations",
+                       "externalDataDuplicateLocations",
+                       "sparseInitializersSkipped"):
+            self.assertIn(marker, probe)
+        self.assertIn("result.externalDataTensorsDeclared", hub)
+        self.assertIn("knowledge_models_container_onnx_external_data", hub)
+        for locale in ("values", "values-ru"):
+            labels = {element.get("name") for element in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertIn("knowledge_models_container_onnx_external_data", labels)
+
+    def test_stage18_relation_and_device_qa_are_visibly_discoverable(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        for panel_id, child_ids in (
+                ("knowledge_page_library", ("knowledge_library_relations",)),
+                ("knowledge_page_processes", ("knowledge_process_jump_qa",
+                                               "knowledge_process_qa_card", "knowledge_qa_quick"))):
+            panel = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                         == "@+id/" + panel_id)
+            for child_id in child_ids:
+                self.assertTrue(any(e.get(ANDROID + "id") == "@+id/" + child_id
+                                    for e in panel.iter()), child_id)
+        for name in ("knowledge_library_relations", "knowledge_process_jump_qa"):
+            button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                          == "@+id/" + name)
+            self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for signal in ("showLibraryRelationsPicker()", "showSemanticRelations(paths[which])",
+                       "knowledge_process_jump_qa", "qaCard.getTop()"):
+            self.assertIn(signal, java)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_library_relations", "knowledge_relations_choose_note",
+                         "knowledge_relations_empty_page", "knowledge_process_jump_qa"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_all_python_bridge_protocols_are_accepted_by_java_transport(self):
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        java = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgePythonBridge.java").read_text()
+        emitted = set(re.findall(r"dpksys\.[a-z0-9_]+\.v[0-9]+", python))
+        allowed = set(re.findall(r'"(dpksys\.[a-z0-9_]+\.v[0-9]+)".equals\(protocol\)', java))
+        self.assertEqual(emitted, allowed)
+
+    def test_manual_version_review_has_source_and_journal_gates(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        dialog = (folder / "KnowledgeVersionReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_version_reviews")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        for name in ("versionReviewDecisions", "previewVersionReview", "confirmVersionReview",
+                     "previewVersionUnreview", "confirmVersionUnreview"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", hub)
+        self.assertIn("new KnowledgeVersionReviewDialog(this", editor)
+        self.assertIn("version_review_id", (folder / "KnowledgeRelationPresentation.java").read_text())
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_version_title", "knowledge_version_warning",
+                         "knowledge_version_action", "knowledge_version_revoke_warning",
+                         "knowledge_version_historical", "knowledge_version_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_stage18_version_device_suite_has_isolated_transport(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        transport = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        for marker in ("VERSION-18-SUITE", "checkSyntheticStage18Versions",
+                       "getCacheDir().getCanonicalPath()", "selectedVaultUntouched=true"):
+            self.assertIn(marker, runner)
+        self.assertIn('"dpksys.stage18_version_selftest.v1".equals(protocol)', transport)
+        self.assertIn('invoke(context, "stage18_version_selftest", cacheDir)', transport)
+        for marker in ("def stage18_version_selftest(",
+                       '"used_selected_vault": False',
+                       '"requires_manual_ui_qa": True'):
+            self.assertIn(marker, python)
+
+    def test_relation_pair_detail_previews_both_sources_before_navigation(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("showSemanticRelationDetail(relativePath, match, titles[position])", hub)
+        self.assertIn("openIndexedNote(sourcePath)", hub)
+        self.assertIn('openIndexedNote(relation.optString("path"))', hub)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("view -> setDockExpanded(false)", editor)
+        self.assertIn('openRelatedNote(relation.optString("path"), selectedVault)', editor)
+        self.assertIn("relationComparison(Context context, JSONObject relation, String sourcePath)",
+                      presentation)
+        self.assertIn('relation.optBoolean("source_excerpt_available")', presentation)
+        self.assertIn('relation.optBoolean("other_excerpt_available")', presentation)
+        self.assertIn('MAX_RELATION_PREVIEW_CHARS = 240', bridge)
+        self.assertIn('MAX_RELATION_PREVIEW_FRAGMENTS = 200', bridge)
+        self.assertIn('_annotate_relation_previews(con, relative_path', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_preview_warning",
+                         "knowledge_relation_preview_inspected",
+                         "knowledge_relation_preview_other",
+                         "knowledge_relation_open_inspected",
+                         "knowledge_relation_open_other"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_indexed_cross_source_evidence_is_explicitly_unrated_and_navigable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optJSONArray("evidence_groups")', hub)
+        self.assertIn("showEvidenceDetail(group, sourcePath)", hub)
+        self.assertIn("evidenceSourceActions(group, source, sourcePath)", hub)
+        self.assertIn("(d, w) -> openIndexedNote(path)", hub)
+        self.assertIn('context.optJSONArray("evidence_groups")', editor)
+        self.assertIn('context.optBoolean("evidence_limited")', editor)
+        self.assertIn("showContextEvidence(group, selectedVault, context.optString", editor)
+        self.assertIn("openRelatedNote(selected.optString(\"path\"), selectedVault)", editor)
+        self.assertIn("evidenceDisclosure(Context context, JSONObject group)", presentation)
+        self.assertIn("evidenceSourceLabel(Context context, JSONObject source)", presentation)
+        self.assertIn('context.optBoolean("evidence_checks_limited")', editor)
+        self.assertIn('result.optBoolean("evidence_checks_limited")', hub)
+        self.assertIn('source.optBoolean("repeated_excerpt")', presentation)
+        self.assertIn('source.optBoolean("identical_document")', presentation)
+        self.assertIn('group.optJSONArray("excerpt_families")', presentation)
+        self.assertIn('group.optJSONArray("document_families")', presentation)
+        self.assertIn('source.optString("excerpt_family")', presentation)
+        self.assertIn('source.optString("document_family")', presentation)
+        self.assertIn("evidenceFamilyDetails(Context context, JSONArray families, int label)",
+                      presentation)
+        self.assertIn('source.optString("reviewed_source_link_state")', presentation)
+        self.assertIn('source.optString("reviewed_source_link_id")', presentation)
+        self.assertIn('group.optInt("reviewed_source_links_current")', presentation)
+        self.assertIn('result.optBoolean("source_lineage_limited")', hub)
+        self.assertIn('context.optBoolean("source_lineage_limited")', editor)
+        self.assertIn('"evidence_groups": matches["evidence_groups"]', bridge)
+        self.assertIn('"evidence_checks_limited": evidence_checks_limited', bridge)
+        self.assertIn("_verify_evidence_freshness(", bridge)
+        self.assertIn('result.optBoolean("modal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("modal_checks_limited")', editor)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        self.assertIn('"modal_checks_limited": modal_checks_limited', bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_evidence_title", "knowledge_evidence_file_counts",
+                        "knowledge_evidence_disclaimer", "knowledge_evidence_limited",
+                        "knowledge_evidence_source_mixed", "knowledge_evidence_current",
+                        "knowledge_evidence_stale", "knowledge_evidence_unavailable",
+                        "knowledge_evidence_not_checked", "knowledge_evidence_checked_counts",
+                        "knowledge_evidence_other_statuses", "knowledge_evidence_checks_limited",
+                        "knowledge_evidence_repeated_excerpt", "knowledge_evidence_identical_document"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_evidence_excerpt_diversity",
+                        "knowledge_evidence_family_counts", "knowledge_evidence_source_family",
+                        "knowledge_evidence_source_document_family",
+                        "knowledge_evidence_repeated_family", "knowledge_evidence_duplicate_family",
+                        "knowledge_evidence_family_members",
+                        "knowledge_evidence_document_family_members"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_source_lineage_evidence_counts",
+                        "knowledge_source_lineage_evidence_current",
+                        "knowledge_source_lineage_evidence_historical",
+                        "knowledge_source_lineage_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+            for key in ("knowledge_modal_checks_limited", "knowledge_modal_current_pair",
+                        "knowledge_modal_historical_pair"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_manual_source_lineage_review_is_reversible_and_reachable(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_lineage")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        dialog = (folder / "KnowledgeSourceReviewDialog.java").read_text()
+        self.assertIn("new KnowledgeSourceReviewDialog(this, workspacePath()", hub)
+        self.assertIn("chooseLineagePartner(group, sourcePath)", hub)
+        self.assertIn('"current".equals(source.optString("verification"))', hub)
+        self.assertIn("paths.get(index) : \"\"", hub)
+        for name in ("sourceLineageDecisions", "previewSourceLink", "confirmSourceLink",
+                     "previewSourceUnlink", "confirmSourceUnlink"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "requires_human_confirmation", "source_link", "source_unlink"):
+            if signal == "requires_human_confirmation":
+                self.assertIn(signal, (ROOT / "python/ksys_android_bridge.py").read_text())
+            else:
+                self.assertIn(signal, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_source_lineage_title", "knowledge_source_lineage_new",
+                         "knowledge_source_lineage_history", "knowledge_source_lineage_reason",
+                         "knowledge_source_lineage_preview", "knowledge_source_lineage_confirm",
+                         "knowledge_source_lineage_revoke", "knowledge_source_lineage_revoke_warning",
+                         "knowledge_source_lineage_error_detail",
+                         "knowledge_source_lineage_choose_candidate",
+                         "knowledge_source_lineage_manual_path",
+                         "knowledge_source_lineage_historical_warning"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_manual_source_type_review_does_not_rate_truth(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_source_assessment")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        python = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("new KnowledgeSourceAssessmentDialog(this, workspacePath()", hub)
+        for method in ("sourceAssessmentDecisions", "previewSourceAssessment",
+                       "confirmSourceAssessment", "previewSourceUnassessment",
+                       "confirmSourceUnassessment"):
+            self.assertIn(method + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + method + "(", dialog)
+        for signal in ("source_sha256", "preview_token", "journal_head",
+                       "source_assess", "source_unassess", "setTextIsSelectable(true)"):
+            self.assertIn(signal, dialog)
+        self.assertIn('"changes_claim_authority": False', python)
+        self.assertIn('"reliability_score": None', python)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_title",
+                        "knowledge_source_assessment_primary",
+                        "knowledge_source_assessment_secondary",
+                        "knowledge_source_assessment_republication",
+                        "knowledge_source_assessment_unclassified",
+                        "knowledge_source_assessment_preview_warning",
+                        "knowledge_source_assessment_revoke_warning",
+                        "knowledge_source_assessment_history",
+                        "knowledge_source_assessment_error_detail"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_manual_source_type_is_disclosed_beside_evidence(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn("sourceAssessmentLabel(context, group)", presentation)
+        self.assertIn("sourceAssessmentLabel(context, source)", presentation)
+        self.assertIn("source_assessment_current_files", presentation)
+        self.assertIn("source_assessment_historical_files", presentation)
+        self.assertIn('"source_assessment_limited"', hub)
+        self.assertIn('"source_assessment_limited"', editor)
+        self.assertIn("_annotate_source_assessments(", bridge)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_source_assessment_evidence_inspected",
+                        "knowledge_source_assessment_evidence_counts",
+                        "knowledge_source_assessment_evidence_current",
+                        "knowledge_source_assessment_evidence_historical",
+                        "knowledge_source_assessment_evidence_limited"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_source_type_review_prefills_only_current_evidence_path(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("evidenceSourceActions(group, null, sourcePath)", hub)
+        self.assertIn("sources.optJSONObject(selected - 1)", hub)
+        self.assertIn('if (!"current".equals(verification))', hub)
+        self.assertIn("if (alreadyReviewed) dialog.showReviewed(path)", hub)
+        self.assertIn("else dialog.showNew(path)", hub)
+        self.assertIn("void showNew(final String initialPath)", dialog)
+        self.assertIn("chooseKind(initialPath)", dialog)
+        self.assertIn("path.setText(initialPath)", dialog)
+        # UI prefill is not an approval bypass: its preview invokes the
+        # existing live source/hash and journal verification bridge.
+        self.assertIn("KnowledgePythonBridge.previewSourceAssessment", dialog)
+
+    def test_exact_bounded_excerpts_are_disclosed_before_source_actions(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        index = (Path(__file__).resolve().parents[1] / "ksys/importer/relations.py").read_text()
+        self.assertIn("evidenceExcerptComparison(Context context, JSONObject group", presentation)
+        self.assertIn('group.optString("source_excerpt"', presentation)
+        self.assertIn('selected.optString("excerpt"', presentation)
+        self.assertIn("R.string.knowledge_evidence_comparison_warning", presentation)
+        self.assertIn("evidenceExcerptComparison(\n                        this, group, selected, sourcePath)", hub)
+        self.assertIn("showContextEvidenceComparison(group, item, sourcePath, selectedVault)", editor)
+        self.assertIn("KnowledgeRelationPresentation.evidenceExcerptComparison(", editor)
+        self.assertIn("MAX_EVIDENCE_EXCERPT_CHARS = 240", index)
+        self.assertIn("f.doc=a.doc", index)
+        self.assertIn("substr(f.plain, 1, ?)", index)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_evidence_comparison_warning",
+                         "knowledge_evidence_comparison_inspected",
+                         "knowledge_evidence_comparison_selected",
+                         "knowledge_evidence_comparison_missing",
+                         "knowledge_evidence_comparison_truncated"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_modal_contrasts_are_separate_from_asserted_conflict_ui(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        schema = (Path(__file__).resolve().parents[1] / "ksys/store/db.py").read_text()
+        for view in (hub, editor):
+            self.assertIn('"modal_contrast".equals(kind)', view)
+            self.assertIn('"modal_search_limited"', view)
+            self.assertIn("R.string.knowledge_possible_modal_contrast", view)
+        self.assertIn('"modal_contrast".equals(relation.optString("kind"))', presentation)
+        self.assertIn("R.string.knowledge_modal_opposing_info", presentation)
+        self.assertIn('"modal_search_limited": modal_limited', bridge)
+        self.assertIn("CREATE TABLE IF NOT EXISTS candidate_modal_atoms", schema)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_modal_contrast", "knowledge_modal_source",
+                         "knowledge_modal_other", "knowledge_modal_asserted",
+                         "knowledge_modal_possible", "knowledge_modal_usually",
+                         "knowledge_modal_claim", "knowledge_modal_hypothesis",
+                         "knowledge_modal_opposing_info", "knowledge_modal_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_existing_source_review_opens_exact_active_decision_for_withdrawal(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        dialog = (folder / "KnowledgeSourceAssessmentDialog.java").read_text()
+        self.assertIn("void showReviewed(final String exactPath)", dialog)
+        self.assertIn('exactPath.equals(record.optString("path"))', dialog)
+        self.assertIn("showActive(record)", dialog)
+        self.assertIn("KnowledgePythonBridge.sourceAssessmentDecisions", dialog)
+        self.assertIn("KnowledgePythonBridge.previewSourceUnassessment", dialog)
+        self.assertIn("KnowledgePythonBridge.confirmSourceUnassessment", dialog)
+        self.assertIn("show();", dialog)  # Stale evidence gracefully reopens menu.
+
+    def test_manual_entity_review_exposes_live_sources_confirmation_and_revocation(self):
+        layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
+        button = next(e for e in layout.iter() if e.get(ANDROID + "id")
+                      == "@+id/knowledge_entity_matching")
+        self.assertEqual("48dp", button.get(ANDROID + "minHeight"))
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        dialog = (folder / "KnowledgeEntityReviewDialog.java").read_text()
+        bridge = (folder / "KnowledgePythonBridge.java").read_text()
+        self.assertIn("new KnowledgeEntityReviewDialog(this, workspacePath()", hub)
+        for name in ("entityAliasWorkspace", "previewEntityAlias", "confirmEntityAlias",
+                     "entityAliasDecisions", "previewEntityUnalias", "confirmEntityUnalias"):
+            self.assertIn(name + "(", bridge)
+            self.assertIn("KnowledgePythonBridge." + name + "(", dialog)
+        for name in ("source_sha256", "fragment_id", "preview_token", "journal_head",
+                     "openNote.accept", "knowledge_entity_revoke_warning"):
+            self.assertIn(name, dialog)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_entity_matching", "knowledge_entity_source_a",
+                         "knowledge_entity_source_b", "knowledge_entity_confirm_warning",
+                         "knowledge_entity_revoke_warning", "knowledge_entity_saved"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_temporal_overlap_hints_have_distinct_labels_and_both_intervals(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_overlap".equals(kind)', hub)
+        self.assertIn('"temporal_overlap".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("other_interval")', presentation)
+        self.assertIn('relation.optJSONObject("overlap_interval")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for key in ("knowledge_possible_temporal_overlap",
+                        "knowledge_relation_other_interval",
+                        "knowledge_relation_overlap_interval"):
+                self.assertTrue(strings[key], f"{locale}: {key}")
+
+    def test_time_separation_hints_show_order_gap_and_anti_conflict_warning(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_separation".equals(kind)', hub)
+        self.assertIn('"temporal_separation".equals(kind)', editor)
+        self.assertIn('"temporal_separation".equals(relation.optString("kind"))', presentation)
+        self.assertIn('relation.optInt("gap_days")', presentation)
+        self.assertIn('relation.optString("relative_order")', presentation)
+        self.assertIn('relation.optString("version_review")', presentation)
+        self.assertIn('relation.optBoolean("earlier_negated")', presentation)
+        self.assertIn('relation.optBoolean("later_negated")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_temporal_separation",
+                         "knowledge_relation_source_earlier",
+                         "knowledge_relation_other_earlier",
+                         "knowledge_relation_gap_days",
+                         "knowledge_relation_version_review",
+                         "knowledge_relation_earlier_polarity",
+                         "knowledge_relation_later_polarity",
+                         "knowledge_relation_negative",
+                         "knowledge_relation_positive",
+                         "knowledge_relation_temporal_separation_warning"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_incomplete_temporal_bounds_are_labeled_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        for activity in ("KnowledgeHubActivity.java", "KnowledgeDocumentActivity.java"):
+            self.assertIn('"temporal_uncertainty".equals(kind)',
+                          (folder / activity).read_text())
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"temporal_uncertainty".equals(relation.optString("kind"))',
+                      presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_possible_temporal_uncertainty"])
+            self.assertTrue(strings["knowledge_relation_temporal_uncertainty_warning"])
+
+    def test_temporal_hints_show_per_file_sha_and_shared_limit_in_both_surfaces(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("temporal_checks_limited")', hub)
+        self.assertIn('context.optBoolean("temporal_checks_limited")', editor)
+        self.assertIn('"temporal_checks_limited": temporal_checks_limited', bridge)
+        self.assertIn('relation.optString("source_verification", "not_checked")', presentation)
+        self.assertIn('relation.optString("other_verification", "not_checked")', presentation)
+        self.assertIn('relation.optBoolean("live_source_pair")', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_temporal_source_sha", "knowledge_temporal_other_sha",
+                         "knowledge_temporal_current_pair", "knowledge_temporal_historical_pair",
+                         "knowledge_temporal_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_exact_and_alias_hints_show_live_sha_and_unapproved_disclaimer(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        bridge = (ROOT / "python/ksys_android_bridge.py").read_text()
+        self.assertIn('result.optBoolean("relation_checks_limited")', hub)
+        self.assertIn('context.optBoolean("relation_checks_limited")', editor)
+        self.assertIn('"relation_checks_limited": relation_checks_limited', bridge)
+        self.assertIn('"possible_agreement".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"possible_conflict".equals(relation.optString("kind"))', presentation)
+        self.assertIn('"alias_candidate".equals(relation.optString("kind"))', presentation)
+        self.assertIn('R.string.knowledge_relation_source_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_other_sha', presentation)
+        self.assertIn('R.string.knowledge_relation_historical_pair', presentation)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_relation_source_sha", "knowledge_relation_other_sha",
+                         "knowledge_relation_current_pair", "knowledge_relation_historical_pair",
+                         "knowledge_relation_checks_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_approved_alias_candidates_have_distinct_labels_and_provenance(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        editor = (folder / "KnowledgeDocumentActivity.java").read_text()
+        presentation = (folder / "KnowledgeRelationPresentation.java").read_text()
+        self.assertIn('"alias_candidate".equals(kind)', hub)
+        self.assertIn('"alias_candidate".equals(kind)', editor)
+        self.assertIn('relation.optJSONObject("alias_evidence")', presentation)
+        self.assertIn('evidence.optJSONArray("journal_ids")', presentation)
+        self.assertIn('result.optBoolean("alias_search_limited")', hub)
+        self.assertIn('context.optBoolean("alias_search_limited")', editor)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            for name in ("knowledge_possible_alias", "knowledge_relation_alias_source",
+                         "knowledge_relation_alias_decisions", "knowledge_alias_search_limited"):
+                self.assertTrue(strings[name], f"{locale}: {name}")
+
+    def test_journal_export_prepares_before_saf_and_verifies_destination(self):
+        folder = ROOT / "java/net/gsantner/markor/knowledge"
+        hub = (folder / "KnowledgeHubActivity.java").read_text()
+        prepare = hub[hub.index("private void prepareJournalExport("):
+                      hub.index("private void requestJournalImport(")]
+        self.assertLess(prepare.index("KnowledgePythonBridge.journalExportInfo("),
+                        prepare.index("KnowledgeJournalCrypto.encrypt("))
+        self.assertLess(prepare.index("KnowledgeJournalCrypto.encrypt("),
+                        prepare.index("startActivityForResult(intent, REQUEST_EXPORT_JOURNAL)"))
+        self.assertIn("journal.length() == 0L", prepare)
+        self.assertIn("KnowledgeJournalExportWriter.writeAndVerify(", hub)
+        self.assertIn('openOutputStream(destination, "wt")', hub)
+        self.assertIn("openInputStream(destination)", hub)
+        self.assertNotIn("pendingExportPassword", hub)
+        self.assertTrue((ROOT.parent / "test/java/net/gsantner/markor/knowledge/"
+                         "KnowledgeJournalExportWriterTest.java").exists())
+        runner = (folder / "KnowledgeDeviceQaRunner.java").read_text()
+        self.assertIn('step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter)', runner)
+        for locale in ("values", "values-ru"):
+            strings = {e.get("name"): e.text or "" for e in ET.parse(
+                ROOT / f"res/{locale}/knowledge_strings.xml").getroot()}
+            self.assertTrue(strings["knowledge_backup_export_empty"])
+            self.assertTrue(strings["knowledge_backup_export_incomplete"])
+
     def test_stage22_first_open_guide_is_private_and_accessible(self):
         layout = ET.parse(ROOT / "res/layout/knowledge__activity.xml").getroot()
         buttons = [element for element in layout.iter()
@@ -336,6 +1622,13 @@ class KnowledgeWorkspaceShellTests(unittest.TestCase):
                     if x.get(ANDROID + "id") == "@+id/knowledge_editor_context_body")
         self.assertEqual("gone", body.get(ANDROID + "visibility"))
         editor = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeDocumentActivity.java").read_text()
+        hub = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeHubActivity.java").read_text()
+        formatter = (ROOT / "java/net/gsantner/markor/knowledge/KnowledgeRelationPresentation.java").read_text()
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", editor)
+        self.assertIn("KnowledgeRelationPresentation.relationComparison(", hub)
+        self.assertIn("qualifiers(context, relation)", formatter)
+        self.assertIn("knowledge_editor_structural_context", formatter)
+        self.assertIn("knowledge_editor_structural_interval", formatter)
         for item in ("toggleKnowledgeContext()", "readSavedNote(file.getCanonicalFile())",
                      "KnowledgePythonBridge.editorContext(", "relation_index_state",
                      "accepted_records", "candidate_relations", "source_span_state",

@@ -863,7 +863,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 final String saved = readSavedNote(file.getCanonicalFile());
                 final JSONObject context = KnowledgePythonBridge.editorContext(this,
                         new File(getNoBackupFilesDir(), "knowledge_workspace_v1").getAbsolutePath(),
-                        path, saved);
+                        path, saved, selectedVault.getAbsolutePath());
                 runOnUiThread(() -> {
                     if (!currentDock(generation)) return;
                     final DocumentEditAndViewFragment currentEditor = editor();
@@ -897,6 +897,7 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                                         final boolean unsavedBuffer, final File selectedVault) {
         final JSONArray records = context.optJSONArray("accepted_records");
         final JSONArray relations = context.optJSONArray("candidate_relations");
+        final JSONArray evidenceGroups = context.optJSONArray("evidence_groups");
         final int recordCount = records == null ? 0 : records.length();
         final int relationCount = relations == null ? 0 : relations.length();
         final String countLabel = relationCount
@@ -929,14 +930,34 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
         for (int i = 0; i < relationCount; i++) {
             final JSONObject item = relations.optJSONObject(i);
             if (item == null) continue;
-            final int label = "possible_conflict".equals(item.optString("kind"))
-                    ? R.string.knowledge_editor_context_conflict
-                    : R.string.knowledge_editor_context_agreement;
+            final String kind = item.optString("kind");
+            final int label = "alias_candidate".equals(kind)
+                    ? R.string.knowledge_possible_alias
+                    : "temporal_overlap".equals(kind)
+                    ? R.string.knowledge_possible_temporal_overlap
+                    : "temporal_separation".equals(kind)
+                    ? R.string.knowledge_possible_temporal_separation
+                    : "temporal_uncertainty".equals(kind)
+                    ? R.string.knowledge_possible_temporal_uncertainty
+                    : "modal_contrast".equals(kind)
+                    ? R.string.knowledge_possible_modal_contrast
+                    : "possible_conflict".equals(kind)
+                            ? R.string.knowledge_editor_context_conflict
+                            : R.string.knowledge_editor_context_agreement;
             addContextRow(related, getString(label) + " · "
                     + item.optString("path") + " · " + item.optString("other_locator"),
-                    view -> showContextRelation(item, label, selectedVault));
+                    view -> showContextRelation(item, label, selectedVault,
+                            context.optString("path")));
         }
-        if (relationCount == 0) {
+        final int evidenceCount = evidenceGroups == null ? 0 : evidenceGroups.length();
+        for (int i = 0; i < evidenceCount; i++) {
+            final JSONObject group = evidenceGroups.optJSONObject(i);
+            if (group == null) continue;
+            addContextRow(related, getString(R.string.knowledge_evidence_title) + " · "
+                            + KnowledgeRelationPresentation.evidenceSummary(this, group),
+                    view -> showContextEvidence(group, selectedVault, context.optString("path")));
+        }
+        if (relationCount == 0 && evidenceCount == 0) {
             addContextEmpty(related, R.string.knowledge_editor_context_empty_relations);
         }
 
@@ -944,6 +965,26 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
                 getString(R.string.knowledge_editor_context_disclaimer));
         if (unsavedBuffer) appendContextWarning(warnings,
                 R.string.knowledge_editor_context_unsaved);
+        if (context.optBoolean("alias_search_limited")) appendContextWarning(warnings,
+                R.string.knowledge_alias_search_limited);
+        if (context.optBoolean("modal_search_limited")) appendContextWarning(warnings,
+                R.string.knowledge_modal_limited);
+        if (context.optBoolean("modal_checks_limited")) appendContextWarning(warnings,
+                R.string.knowledge_modal_checks_limited);
+        if (context.optBoolean("temporal_checks_limited")) appendContextWarning(warnings,
+                R.string.knowledge_temporal_checks_limited);
+        if (context.optBoolean("relation_checks_limited")) appendContextWarning(warnings,
+                R.string.knowledge_relation_checks_limited);
+        if (context.optBoolean("version_review_limited")) appendContextWarning(warnings,
+                R.string.knowledge_version_limited);
+        if (context.optBoolean("evidence_limited")) appendContextWarning(warnings,
+                R.string.knowledge_evidence_limited);
+        if (evidenceCount > 0 && context.optBoolean("evidence_checks_limited"))
+            appendContextWarning(warnings, R.string.knowledge_evidence_checks_limited);
+        if (evidenceCount > 0 && context.optBoolean("source_lineage_limited"))
+            appendContextWarning(warnings, R.string.knowledge_source_lineage_evidence_limited);
+        if (evidenceCount > 0 && context.optBoolean("source_assessment_limited"))
+            appendContextWarning(warnings, R.string.knowledge_source_assessment_evidence_limited);
         final String indexState = context.optString("relation_index_state");
         if ("absent".equals(indexState)) {
             appendContextWarning(warnings, R.string.knowledge_editor_context_index_absent);
@@ -1494,17 +1535,51 @@ public final class KnowledgeDocumentActivity extends DocumentActivity {
     }
 
     private void showContextRelation(final JSONObject relation, final int title,
-                                     final File selectedVault) {
-        final String description = getString(R.string.knowledge_editor_context_disclaimer)
-                + "\n\n" + getString(R.string.knowledge_editor_context_source)
-                + ": " + relation.optString("source_locator")
-                + "\n" + relation.optString("path") + " · "
-                + relation.optString("other_locator");
+                                     final File selectedVault, final String sourcePath) {
         final LinearLayout body = newDockContent();
-        body.addView(contextDetailText(description));
-        addContextRow(body, getString(R.string.knowledge_editor_context_open),
+        body.addView(contextDetailText(KnowledgeRelationPresentation.relationComparison(
+                this, relation, sourcePath)));
+        addContextRow(body, getString(R.string.knowledge_relation_open_inspected),
+                view -> setDockExpanded(false));
+        addContextRow(body, getString(R.string.knowledge_relation_open_other),
                 view -> openRelatedNote(relation.optString("path"), selectedVault));
+        final String kind = relation.optString("kind");
+        if ("temporal_overlap".equals(kind) || "temporal_separation".equals(kind)
+                || "temporal_uncertainty".equals(kind)) {
+            addContextRow(body, getString(R.string.knowledge_version_action), view ->
+                    new KnowledgeVersionReviewDialog(this,
+                            new File(getNoBackupFilesDir(), "knowledge_workspace_v1")
+                                    .getAbsolutePath(), selectedVault, knowledgeWorker,
+                            sourcePath, relation, this::refreshKnowledgeContext).show());
+        }
         showDockPage(getString(title), body);
+    }
+
+    private void showContextEvidence(final JSONObject group, final File selectedVault,
+                                     final String sourcePath) {
+        final LinearLayout body = newDockContent();
+        body.addView(contextDetailText(
+                KnowledgeRelationPresentation.evidenceDisclosure(this, group)));
+        final JSONArray others = group.optJSONArray("other_sources");
+        if (others != null) {
+            for (int i = 0; i < others.length(); i++) {
+                final JSONObject item = others.optJSONObject(i);
+                if (item == null) continue;
+                addContextRow(body, KnowledgeRelationPresentation.evidenceSourceLabel(this, item),
+                        view -> showContextEvidenceComparison(group, item, sourcePath, selectedVault));
+            }
+        }
+        showDockPage(getString(R.string.knowledge_evidence_title), body);
+    }
+
+    private void showContextEvidenceComparison(final JSONObject group, final JSONObject selected,
+                                               final String sourcePath, final File selectedVault) {
+        final LinearLayout body = newDockContent();
+        body.addView(contextDetailText(KnowledgeRelationPresentation.evidenceExcerptComparison(
+                this, group, selected, sourcePath)));
+        addContextRow(body, getString(R.string.knowledge_editor_context_open),
+                view -> openRelatedNote(selected.optString("path"), selectedVault));
+        showDockPage(getString(R.string.knowledge_evidence_title), body);
     }
 
     private TextView contextDetailText(final String text) {

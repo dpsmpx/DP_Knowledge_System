@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.database.sqlite.SQLiteDatabase;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.SystemClock;
@@ -15,17 +16,25 @@ import android.os.SystemClock;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -133,14 +142,29 @@ public final class KnowledgeDeviceQaRunner {
                 step("MD-01", this::checkMarkdown);
                 step("CORE-01", this::checkPythonCore);
                 step("EMBED-01", this::checkEmbeddingPrimitives);
+                step("EMBED-SOURCE-19", this::checkSyntheticEmbeddingSourceSeal);
                 step("CRYPTO-01", this::checkSyntheticCrypto);
+                step("BACKUP-WRITE-01", this::checkSyntheticBackupWriter);
                 step(stress ? "STRESS-20K" : "SANDBOX-01", this::checkSyntheticIndex);
                 step("RECONCILE-16", this::checkSyntheticReconciliation);
+                step("LEX-PHRASE-19", this::checkSyntheticPhraseRetrieval);
+                step("CITE-EXCERPT-19", this::checkSyntheticExcerptSelection);
+                step("CITE-LOCAL-19", this::checkSyntheticLocalCitations);
+                step("CITE-COVER-19", this::checkSyntheticCitationCoverage);
+                step("CITE-ANCHOR-19", this::checkSyntheticClaimAnchors);
+                step("HYBRID-BALANCE-19", this::checkSyntheticHybridBalance);
+                step("HYBRID-INDEX-19", this::checkSyntheticHybridIndex);
+                step("EMBED-CHUNKS-19", this::checkSyntheticMultichunkIndex);
+                step("EMBED-OVERLAP-19", this::checkSyntheticLshOverlapBudget);
+                step("EMBED-QUOTA-19", this::checkSyntheticSourceQuotaBudget);
+                step("CITE-SEND-19", this::checkSyntheticConsentSourceRevision);
+                step("CITE-RESPONSE-19", this::checkSyntheticLlmCompletion);
                 step("DECISION-17", this::checkSyntheticDecisionLifecycle);
                 step("REVISE-17", this::checkSyntheticRevision);
                 step("SPLIT-17", this::checkSyntheticSplit);
                 step("MERGE-17", this::checkSyntheticMerge);
                 step("BATCH-17", this::checkSyntheticClaimBatch);
+                step("VERSION-18-SUITE", this::checkSyntheticStage18Versions);
                 step("BG-01", () -> "scheduler preference readable; enabled="
                         + KnowledgeBackgroundScheduler.isEnabled(context)
                         + ", alerts=" + KnowledgeBackgroundScheduler.notificationsEnabled(context)
@@ -275,6 +299,43 @@ public final class KnowledgeDeviceQaRunner {
                 + ", failures=0, temporaryCacheCleaned=true, selectedVaultUntouched=true";
     }
 
+    /** Private synthetic source-pair and journal test; no selected vault reads. */
+    private String checkSyntheticStage18Versions() throws Exception {
+        ensureRunning();
+        final JSONObject result = KnowledgePythonBridge.stage18VersionSelfTest(context,
+                context.getCacheDir().getCanonicalPath());
+        if (!"dpksys.stage18_version_selftest.v1".equals(result.getString("protocol"))
+                || !result.getBoolean("synthetic_only")
+                || result.getBoolean("used_selected_vault")
+                || !result.getBoolean("read_only_user_data")
+                || !result.getBoolean("requires_manual_ui_qa")) {
+            throw new SyntheticMismatch("verdict=UNTRUSTED_VERSION_QA_CONTRACT");
+        }
+        final JSONArray checks = result.getJSONArray("checks");
+        if (checks.length() != 6
+                || result.getInt("passed") + result.getInt("failed") != checks.length()) {
+            throw new SyntheticMismatch("verdict=VERSION_QA_COUNT_MISMATCH");
+        }
+        int failures = 0;
+        for (int i = 0; i < checks.length(); i++) {
+            ensureRunning();
+            final JSONObject row = checks.getJSONObject(i);
+            if (!row.getString("code").matches("VERSION-[A-Z0-9-]{4,28}")) {
+                throw new SyntheticMismatch("verdict=VERSION_QA_CODE_MISMATCH");
+            }
+            if (!row.getBoolean("passed")) failures++;
+            report.add(row.getBoolean("passed") ? "PASS" : "FAIL", row.getString("code"), 0,
+                    row.getBoolean("passed") ? "isolated version bridge assertions passed"
+                            : "isolated version bridge assertions failed");
+        }
+        if (failures != 0 || result.getInt("failed") != failures) {
+            throw new SyntheticMismatch("syntheticChecks=" + checks.length()
+                    + ", failedChecks=" + failures);
+        }
+        return "syntheticChecks=6, failures=0, temporaryCacheCleaned=true, "
+                + "selectedVaultUntouched=true";
+    }
+
     private String checkRealVaultReadOnly() throws Exception {
         if (notebook == null || !notebook.isDirectory()) {
             throw new SkippedCheck("notebook not selected/accessible");
@@ -366,6 +427,89 @@ public final class KnowledgeDeviceQaRunner {
                 + "; LSH tables=" + buckets.length + "; probes=" + probes.length;
     }
 
+    /** No real model call: validate revision-sealed checkpoints and legacy exclusion. */
+    private String checkSyntheticEmbeddingSourceSeal() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create embedding sandbox");
+        }
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) {
+                throw new IOException("Could not create synthetic embedding vault");
+            }
+            final File source = new File(vault, "vector.md");
+            final String text = "# Vector\nSynthetic embeddable source, no network.\n";
+            writeFixture(source, text);
+            final byte[] sourceHash = sha256(source);
+            final byte[] wrongHash = sourceHash.clone();
+            wrongHash[0] ^= 0x01;
+            final File dbFile = new File(sandbox, "qa-vectors.sqlite");
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(dbFile);
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 10,
+                    this::isCancelled), this::isCancelled);
+            final String key = "qa-synthetic-vector-model";
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(text);
+            final float[] vector = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{2, 1, 0, 0, 1, 0, -1, 0});
+            if (chunks.size() != 1 || testIndex.beginEmbedding("vector.md",
+                    source.lastModified(), source.length(), key,
+                    chunks.size(), false, sourceHash) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_BEGIN_MISMATCH");
+            }
+            boolean mismatchedBatchRejected = false;
+            try {
+                testIndex.appendEmbeddingBatch("vector.md", source.lastModified(),
+                        source.length(), key, chunks, 0, new float[][]{vector}, wrongHash);
+            } catch (IllegalStateException expected) {
+                mismatchedBatchRejected = true;
+            }
+            if (!mismatchedBatchRejected || testIndex.hasEmbeddings("vector.md",
+                    source.lastModified(), source.length(), key)) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_STALE_BATCH_ACCEPTED");
+            }
+            testIndex.appendEmbeddingBatch("vector.md", source.lastModified(), source.length(),
+                    key, chunks, 0, new float[][]{vector}, sourceHash);
+            if (!testIndex.hasEmbeddings("vector.md", source.lastModified(), source.length(), key)
+                    || !testIndex.embeddedPaths(key).contains("vector.md")
+                    || testIndex.embeddingNoteCount(key) != 1
+                    || testIndex.semanticSearch(key, vector, 8).size() != 1) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_RETRIEVAL_MISMATCH");
+            }
+            boolean wrongSourceRejected = false;
+            try {
+                testIndex.beginEmbedding("vector.md", source.lastModified(), source.length(),
+                        key, chunks.size(), false, wrongHash);
+            } catch (IllegalStateException expected) {
+                wrongSourceRejected = true;
+            }
+            if (!wrongSourceRejected || !testIndex.embeddedPaths(key).contains("vector.md")) {
+                throw new SyntheticMismatch("verdict=EMBED_SOURCE_REVISION_ACCEPTED");
+            }
+            // Existing v1-v4 vectors have no trustworthy source-byte identity.
+            // Keep their rows, but prevent search and reuse until explicit rebuild.
+            try (SQLiteDatabase legacy = SQLiteDatabase.openOrCreateDatabase(dbFile, null)) {
+                legacy.execSQL("UPDATE embedding_notes SET source_sha256=NULL "
+                        + "WHERE path='vector.md'");
+            }
+            if (testIndex.hasEmbeddings("vector.md", source.lastModified(), source.length(), key)
+                    || testIndex.embeddedPaths(key).contains("vector.md")
+                    || testIndex.embeddingNoteCount(key) != 0
+                    || !testIndex.semanticSearch(key, vector, 8).isEmpty()
+                    || testIndex.beginEmbedding("vector.md", source.lastModified(),
+                            source.length(), key, chunks.size(), false, sourceHash) != 0
+                    || !Arrays.equals(sourceHash, sha256(source))) {
+                throw new SyntheticMismatch("verdict=UNSEALED_LEGACY_VECTOR_REUSED");
+            }
+            return "syntheticVector=1, byteSeal=true, staleBatchRejected=true, "
+                    + "legacyUnsealedExcluded=true, sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
     private String checkSyntheticCrypto() throws GeneralSecurityException {
         final byte[] input = "synthetic backup only".getBytes(StandardCharsets.UTF_8);
         final char[] passphrase = "synthetic-only-qa-password".toCharArray();
@@ -390,6 +534,40 @@ public final class KnowledgeDeviceQaRunner {
             Arrays.fill(passphrase, '\0');
             Arrays.fill(input, (byte) 0);
         }
+    }
+
+    private String checkSyntheticBackupWriter() throws IOException {
+        final byte[] fixture = "synthetic encrypted data; not a real journal"
+                .getBytes(StandardCharsets.UTF_8);
+        final ByteArrayOutputStream saved = new ByteArrayOutputStream();
+        KnowledgeJournalExportWriter.writeAndVerify(new KnowledgeJournalExportWriter.Destination() {
+            @Override public OutputStream openWrite() { return saved; }
+            @Override public InputStream openRead() {
+                return new ByteArrayInputStream(saved.toByteArray());
+            }
+        }, fixture);
+        if (!Arrays.equals(fixture, saved.toByteArray())) {
+            throw new SyntheticMismatch("verdict=SYNTHETIC_BACKUP_WRITE_MISMATCH");
+        }
+        boolean refusedEmptyProvider = false;
+        try {
+            KnowledgeJournalExportWriter.writeAndVerify(
+                    new KnowledgeJournalExportWriter.Destination() {
+                        @Override public OutputStream openWrite() {
+                            return new ByteArrayOutputStream();
+                        }
+                        @Override public InputStream openRead() {
+                            return new ByteArrayInputStream(new byte[0]);
+                        }
+                    }, fixture);
+        } catch (IOException expected) {
+            refusedEmptyProvider = true;
+        }
+        if (!refusedEmptyProvider) {
+            throw new SyntheticMismatch("verdict=EMPTY_BACKUP_PROVIDER_NOT_REJECTED");
+        }
+        return "synthetic stream closed/read-back verified, zero-byte provider rejected; "
+                + "real SAF/document picker still requires manual device QA";
     }
 
     private String checkSyntheticIndex() throws Exception {
@@ -417,7 +595,18 @@ public final class KnowledgeDeviceQaRunner {
                     throw new IOException("Could not create fixture group");
                 }
                 final File note = new File(dir, String.format(Locale.ROOT, "qa-%05d.md", i));
-                writeFixture(note, FIXTURE_TEXT + "Synthetic id " + i + '\n');
+                final StringBuilder body = new StringBuilder(FIXTURE_TEXT)
+                        .append("Synthetic id ").append(i).append('\n');
+                if (stress && i < 48) {
+                    // Early, path-ordered distractors contain both words but
+                    // not the adjacent phrase used by the four late labels.
+                    body.append("Crimson is separated from the unrelated cedar token.\n");
+                } else if (stress && i >= total - 4) {
+                    body.append(i % 2 == 0
+                            ? "Crimson cedar supports a wholly synthetic claim.\n"
+                            : "Crimson cedar contradicts a wholly synthetic claim.\n");
+                }
+                writeFixture(note, body.toString());
                 if (i == 0) {
                     reference = note;
                     referenceHash = sha256(note);
@@ -442,6 +631,8 @@ public final class KnowledgeDeviceQaRunner {
                     this::isCancelled, (count, sum) -> notifyProgress("synthetic FTS", count, sum));
             final long indexMillis = SystemClock.elapsedRealtime() - indexStart;
             ensureRunning();
+            final String retrievalMetrics = stress
+                    ? benchmarkSynthetic20kRetrieval(testIndex) : "";
             final List<KnowledgeLocalIndex.Hit> hits = testIndex.search("amber", 8);
             final KnowledgeLocalIndex.SearchPage firstPage = testIndex.searchPage("", 0, 60);
             final KnowledgeLocalIndex.SearchPage lastPage = testIndex.searchPage(
@@ -506,11 +697,46 @@ public final class KnowledgeDeviceQaRunner {
             }
             return counts
                     + ", indexingMillis=" + indexMillis
+                    + retrievalMetrics
                     + (stress ? ", 20k target exercised" : ", incremental reuse verified")
                     + "; synthetic source hash unchanged; all fixtures confined to app cache";
         } finally {
             removeSandbox(sandbox);
         }
+    }
+
+    /** Labels are predetermined, synthetic and intentionally adversarial.
+     * Measures Android FTS4 lookup, not learned relevance or semantic proof.
+     */
+    private String benchmarkSynthetic20kRetrieval(final KnowledgeLocalIndex testIndex)
+            throws IOException {
+        final String question = "Which crimson cedar?";
+        final long[] microseconds = new long[21];
+        for (int attempt = -2; attempt < microseconds.length; attempt++) {
+            ensureRunning();
+            final long started = SystemClock.elapsedRealtimeNanos();
+            final List<KnowledgeLocalIndex.Hit> ranked = testIndex.evidenceSearch(question, 6);
+            final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+            if (ranked.size() != 6) {
+                throw new SyntheticMismatch("verdict=STRESS_RETRIEVAL_RESULT_COUNT");
+            }
+            for (int label = 0; label < 4; label++) {
+                final int i = STRESS_NOTES - 4 + label;
+                final String expected = String.format(Locale.ROOT,
+                        "group-%03d/qa-%05d.md", i / 200, i);
+                if (!expected.equals(ranked.get(label).relativePath)) {
+                    throw new SyntheticMismatch("verdict=STRESS_PHRASE_RECALL_OR_ORDER");
+                }
+            }
+            if (attempt >= 0) {
+                microseconds[attempt] = Math.max(0, elapsed / 1_000L);
+            }
+        }
+        Arrays.sort(microseconds);
+        return ", phraseRecallAt6=4/4, phrasePrecisionAt6=4/6"
+                + ", retrievalTrials=21, retrievalP50us=" + microseconds[10]
+                + ", retrievalP95us=" + microseconds[19]
+                + ", fixture=adversarial-two-token-only, noSemanticTruthClaim=true";
     }
 
     /** Synthetic rename, complete/partial scan and cancellation regression. */
@@ -528,18 +754,71 @@ public final class KnowledgeDeviceQaRunner {
             final File alpha = new File(vault, "alpha.md");
             final File oldName = new File(vault, "beta.md");
             final File newName = new File(vault, "gamma.md");
-            writeFixture(alpha, "# Alpha\nSynthetic amber source points to [[beta]].\n");
-            writeFixture(oldName, "# Beta\nSynthetic violet source.\n");
+            final String alphaText = "# Alpha\nSynthetic amber source points to [[beta]].\n";
+            final String betaText = "# Beta\nSynthetic violet source.\n";
+            writeFixture(alpha, alphaText);
+            writeFixture(oldName, betaText);
             final byte[] unchangedHash = sha256(alpha);
             final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
                     new File(sandbox, "qa-reconciliation.sqlite"));
             final KnowledgeVaultScanner.Snapshot firstScan = KnowledgeVaultScanner.scan(
                     vault, 10, this::isCancelled);
+            // Simulate a populated v3 index. The v4 upgrade must preserve its
+            // FTS row, verify source text, and backfill the missing byte seal.
+            final File legacyDb = new File(sandbox, "qa-v3-migration.sqlite");
+            try (SQLiteDatabase legacy = SQLiteDatabase.openOrCreateDatabase(legacyDb, null)) {
+                legacy.execSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                        + "path TEXT NOT NULL UNIQUE, modified INTEGER NOT NULL, "
+                        + "size INTEGER NOT NULL, title TEXT NOT NULL, "
+                        + "oversized INTEGER NOT NULL, generation TEXT NOT NULL)");
+                legacy.execSQL("CREATE VIRTUAL TABLE documents_fts "
+                        + "USING fts4(path, title, body, tokenize=unicode61)");
+                legacy.execSQL("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+                legacy.execSQL("INSERT INTO notes(id,path,modified,size,title,oversized,generation) "
+                                + "VALUES(1,?,?,?,?,0,'old-generation')",
+                        new Object[]{"alpha.md", alpha.lastModified(), alpha.length(), "Alpha"});
+                legacy.execSQL("INSERT INTO documents_fts(docid,path,title,body) VALUES(1,?,?,?)",
+                        new Object[]{"alpha.md", "Alpha", alphaText});
+                legacy.execSQL("INSERT INTO meta(key,value) VALUES('root',?)",
+                        new Object[]{vault.getCanonicalPath()});
+                legacy.execSQL("INSERT INTO meta(key,value) VALUES('last_scan_generation',"
+                        + "'old-generation')");
+                legacy.execSQL("PRAGMA user_version=3");
+            }
+            final KnowledgeLocalIndex migratedIndex = new KnowledgeLocalIndex(legacyDb);
+            final KnowledgeLocalIndex.SyncResult migrated = migratedIndex.synchronize(
+                    vault, firstScan, this::isCancelled);
+            if (migrated.reused != 1 || migrated.indexed != 1
+                    || !migratedIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                            alpha.length(), alphaText.getBytes(StandardCharsets.UTF_8))) {
+                throw new SyntheticMismatch("verdict=V3_SOURCE_SEAL_MIGRATION_MISMATCH");
+            }
             final KnowledgeLocalIndex.SyncResult first = testIndex.synchronize(
                     vault, firstScan, this::isCancelled);
             if (first.indexed != 2 || first.removed != 0
                     || testIndex.possibleBacklinks("beta.md", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=INITIAL_RECONCILIATION_MISMATCH");
+            }
+            if (!testIndex.matchesIndexedEvidenceText("alpha.md", alpha.lastModified(),
+                    alpha.length(), alphaText)
+                    || testIndex.matchesIndexedEvidenceText("alpha.md", alpha.lastModified(),
+                            alpha.length(), alphaText.replace("amber", "amper"))) {
+                throw new SyntheticMismatch("verdict=INDEXED_SOURCE_HASH_MISMATCH");
+            }
+            final byte[] indexedAlpha = alphaText.getBytes(StandardCharsets.UTF_8);
+            final byte[] rewrittenAlpha = alphaText.replace("amber", "amper")
+                    .getBytes(StandardCharsets.UTF_8);
+            if (!testIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                    alpha.length(), indexedAlpha)
+                    || testIndex.matchesIndexedEvidenceSource("alpha.md", alpha.lastModified(),
+                            alpha.length(), rewrittenAlpha)) {
+                throw new SyntheticMismatch("verdict=RAW_SOURCE_SEAL_MISMATCH");
+            }
+            final List<KnowledgeLocalIndex.Hit> rankedEvidence =
+                    testIndex.evidenceSearch("synthetic violet", 10);
+            if (rankedEvidence.size() != 2
+                    || !"beta.md".equals(rankedEvidence.get(0).relativePath)) {
+                throw new SyntheticMismatch("verdict=ALL_TERM_RANKING_MISMATCH");
             }
             if (!oldName.renameTo(newName)) {
                 throw new IOException("Synthetic rename failed");
@@ -580,8 +859,20 @@ public final class KnowledgeDeviceQaRunner {
                     || testIndex.evidenceSearch("synthetic", 10).size() != 1) {
                 throw new SyntheticMismatch("verdict=PARTIAL_SCAN_MISMATCH");
             }
-            for (final KnowledgeLocalIndex.Hit evidence :
-                    testIndex.evidenceSearch("amber violet synthetic", 10)) {
+            if (testIndex.matchesIndexedEvidenceText("gamma.md", newName.lastModified(),
+                    newName.length(), betaText)
+                    || testIndex.matchesIndexedEvidenceSource("gamma.md", newName.lastModified(),
+                            newName.length(), betaText.getBytes(StandardCharsets.UTF_8))) {
+                throw new SyntheticMismatch("verdict=UNVERIFIED_INDEXED_TEXT_ACCEPTED");
+            }
+            final List<KnowledgeLocalIndex.Hit> partialEvidence =
+                    testIndex.evidenceSearch("amber violet synthetic", 10);
+            // Catch a formerly silent FTS4 multi-term OR zero-hit failure.
+            if (partialEvidence.size() != 1
+                    || !"alpha.md".equals(partialEvidence.get(0).relativePath)) {
+                throw new SyntheticMismatch("verdict=PARTIAL_OR_EVIDENCE_MISMATCH");
+            }
+            for (final KnowledgeLocalIndex.Hit evidence : partialEvidence) {
                 if (!evidence.confirmedInLastScan) {
                     throw new SyntheticMismatch("verdict=UNVERIFIED_EVIDENCE");
                 }
@@ -590,6 +881,9 @@ public final class KnowledgeDeviceQaRunner {
                     vault, renamedScan, this::isCancelled);
             if (restored.reused != 2 || restored.unverified != 0) {
                 throw new SyntheticMismatch("verdict=FULL_RESCAN_MISMATCH");
+            }
+            if (testIndex.evidenceSearch("amber violet synthetic", 10).size() != 2) {
+                throw new SyntheticMismatch("verdict=RESTORED_OR_EVIDENCE_MISMATCH");
             }
             boolean cancelled = false;
             try {
@@ -604,7 +898,869 @@ public final class KnowledgeDeviceQaRunner {
             }
             return "renamed=1, derivedOldRemoved=1, partialUnverified=1, "
                     + "partialRemoved=0, evidenceExcluded=true, "
-                    + "cancelRollback=true, sourceHashUnchanged=true; synthetic cache only";
+                    + "v3Migration=true, rawSourceSeal=true, cancelRollback=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Adversarial path ordering with opposite artificial statements, no LLM. */
+    private String checkSyntheticPhraseRetrieval() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) {
+            throw new IOException("Could not create lexical sandbox");
+        }
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) {
+                throw new IOException("Could not create lexical fixture vault");
+            }
+            final File reference = new File(vault, "a-00.md");
+            for (int i = 0; i < 30; i++) {
+                writeFixture(new File(vault, String.format(Locale.ROOT, "a-%02d.md", i)),
+                        "# Decoy\nAmber synthetic-distance violet.\n");
+                writeFixture(new File(vault, String.format(Locale.ROOT, "r-%02d.md", i)),
+                        "# Ложное совпадение\nПамять synthetic-distance синтез.\n");
+            }
+            final byte[] unchanged = sha256(reference);
+            writeFixture(new File(vault, "z-support.md"),
+                    "# Evidence\nAmber violet supports an artificial statement.\n");
+            writeFixture(new File(vault, "z-refute.md"),
+                    "# Evidence\nAmber violet refutes an artificial statement.\n");
+            writeFixture(new File(vault, "z-r-support.md"),
+                    "# Доказательство\nПамять синтез поддерживает вымышленное утверждение.\n");
+            writeFixture(new File(vault, "z-r-refute.md"),
+                    "# Доказательство\nПамять синтез опровергает вымышленное утверждение.\n");
+            // These titles contain both query prefixes but no adjacent phrase.
+            // They should win only *within* the later all-term pass, after
+            // both true phrase hits, despite their late alphabetical paths.
+            writeFixture(new File(vault, "z-title-en.md"),
+                    "# Violet related to amber\nAmber synthetic-distance violet.\n");
+            writeFixture(new File(vault, "z-title-ru.md"),
+                    "# Синтез и память\nПамять synthetic-distance синтез.\n");
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-phrase.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 80,
+                    this::isCancelled), this::isCancelled);
+            final List<KnowledgeLocalIndex.Hit> ranked =
+                    testIndex.evidenceSearch("Which amber violet?", 6);
+            final List<KnowledgeLocalIndex.Hit> naturalEnglish =
+                    testIndex.evidenceSearch("Tell me about amber violet", 6);
+            final List<KnowledgeLocalIndex.Hit> naturalRussian =
+                    testIndex.evidenceSearch("Расскажи, что известно про память синтез?", 6);
+            if (ranked.size() != 6 || !"z-refute.md".equals(ranked.get(0).relativePath)
+                    || !"z-support.md".equals(ranked.get(1).relativePath)
+                    || !"z-title-en.md".equals(ranked.get(2).relativePath)
+                    || naturalEnglish.size() != 6
+                    || !"z-refute.md".equals(naturalEnglish.get(0).relativePath)
+                    || !"z-support.md".equals(naturalEnglish.get(1).relativePath)
+                    || !"z-title-en.md".equals(naturalEnglish.get(2).relativePath)
+                    || naturalRussian.size() != 6
+                    || !"z-r-refute.md".equals(naturalRussian.get(0).relativePath)
+                    || !"z-r-support.md".equals(naturalRussian.get(1).relativePath)
+                    || !"z-title-ru.md".equals(naturalRussian.get(2).relativePath)
+                    || !Arrays.equals(unchanged, sha256(reference))) {
+                throw new SyntheticMismatch("verdict=PHRASE_OR_TITLE_PRIORITY_OR_CONFLICT_LOSS");
+            }
+            return "syntheticNotes=66, exactPhraseTop2=true, enRuQuestionFraming=true, "
+                    + "titlePriorityWithinAllPass=true, "
+                    + "opposingSourcesPreserved=true, noSemanticProof=true, "
+                    + "sourceHashUnchanged=true; synthetic cache only";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Confirm that a long note's approved excerpt follows the phrase-ranked
+     * evidence, not an unrelated first token. All text is artificial, in RAM.
+     */
+    private String checkSyntheticExcerptSelection() {
+        final String padding = new String(new char[1400]).replace('\0', 'x');
+        final String english = "Amber appears alone at the beginning.\n" + padding
+                + "\nAMBER, violet supports an artificial example.";
+        final String russian = "Память упомянута отдельно.\n" + padding
+                + "\nПАМЯТЬЮ — синтезом объясняется вымышленный пример.";
+        final String multiTerm = "Amber appears alone near the beginning.\n" + padding
+                + "\nViolet cobalt willow citrine form a later artificial cluster.";
+        final String enExcerpt = KnowledgeLlmEvidence.excerpt(
+                english, "Tell me about amber violet");
+        final String ruExcerpt = KnowledgeLlmEvidence.excerpt(
+                russian, "Расскажи, что известно про память синтез?");
+        final String multiExcerpt = KnowledgeLlmEvidence.excerpt(
+                multiTerm, "amber violet cobalt willow citrine");
+        final String deceptiveGap = "Amber"
+                + new String(new char[1100]).replace('\0', '-') + "violet is too far.\n"
+                + padding + "\nAMBER, violet are close together.";
+        final String boundedExcerpt = KnowledgeLlmEvidence.excerpt(deceptiveGap, "amber violet");
+        final KnowledgeLlmEvidence.TermCoverage missing = KnowledgeLlmEvidence.termCoverage(
+                "amber violet cobalt", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("amber.md", "Chamber is unrelated."),
+                        new KnowledgeLlmEvidence.Item("violet.md", "VIOLET and cobalt are here.")));
+        final List<Integer> diverse = KnowledgeLlmEvidence.selectLexicalIndices(
+                "amber violet cobalt", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("first.md", "Amber is supported."),
+                        new KnowledgeLlmEvidence.Item("opposite.md", "Amber is not supported."),
+                        new KnowledgeLlmEvidence.Item("repeat.md", "Amber again."),
+                        new KnowledgeLlmEvidence.Item("complement.md", "Violet cobalt here.")), 3);
+        if (!enExcerpt.contains("AMBER, violet supports")
+                || enExcerpt.contains("Amber appears alone")
+                || !ruExcerpt.contains("ПАМЯТЬЮ — синтезом объясняется")
+                || ruExcerpt.contains("Память упомянута отдельно")
+                || !multiExcerpt.contains("Violet cobalt willow citrine")
+                || multiExcerpt.contains("Amber appears alone")
+                || !boundedExcerpt.contains("AMBER, violet are close together")
+                || boundedExcerpt.contains("violet is too far")
+                || missing.total != 3 || missing.matched != 2 || !missing.isIncomplete()
+                || !diverse.equals(Arrays.asList(0, 1, 3))
+                || enExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || ruExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || multiExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4
+                || boundedExcerpt.length() > KnowledgeLlmEvidence.MAX_EXCERPT_CHARS + 4) {
+            throw new SyntheticMismatch("verdict=EXCERPT_PHRASE_PRIORITY_LOST");
+        }
+        return "syntheticQuestions=4, enRuPhraseAligned=true, "
+                + "multiTermCoverageAligned=true, bounded=true, "
+                + "longPunctuationGapRejected=true, lexicalCoverageWarning=true, "
+                + "rankedTopTwoPreserved=true, complementarySourceSelected=true, "
+                + "sourceReadOnly=true, noProviderCall=true; in-memory text only";
+    }
+
+    /** Test provider completion policy without any real model or network. */
+    private String checkSyntheticLlmCompletion() throws Exception {
+        final String answer = "A fully synthetic response [1].";
+        if (!answer.equals(KnowledgeLlmClient.validatedAnswer(answer, "stop"))
+                || !answer.equals(KnowledgeLlmClient.validatedAnswer(answer, ""))) {
+            throw new SyntheticMismatch("verdict=COMPLETE_ANSWER_REJECTED");
+        }
+        int refused = 0;
+        for (final String reason : Arrays.asList("length", "content_filter",
+                "tool_calls", "function_call", "aborted")) {
+            try {
+                KnowledgeLlmClient.validatedAnswer(answer, reason);
+            } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+                refused++;
+            }
+        }
+        final char[] oversized = new char[12_001];
+        Arrays.fill(oversized, 'x');
+        try {
+            KnowledgeLlmClient.validatedAnswer(new String(oversized), "stop");
+        } catch (KnowledgeLlmClient.IncompleteResponseException expected) {
+            refused++;
+        }
+        if (refused != 6) {
+            throw new SyntheticMismatch("verdict=INCOMPLETE_RESPONSE_PRESENTED");
+        }
+        return "syntheticCases=8, explicitIncompleteRefused=5, oversizedRefused=true, "
+                + "completeAccepted=true; no network or user data";
+    }
+
+    /** Pure, count-only quote attribution fixture; no network or user vault. */
+    private String checkSyntheticLocalCitations() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("synthetic-one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("synthetic-two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review correct = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [1], «Amber violet is false.» [2]", sources);
+        final KnowledgeLlmCitationAudit.Review laundered = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [2]. A different sentence cites [1].", sources);
+        final KnowledgeLlmCitationAudit.Review mixed = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [1][2]", sources);
+        final KnowledgeLlmCitationAudit.Review unicodeFake = KnowledgeLlmCitationAudit.inspect(
+                "«Amber violet is true.» [１][١][𝟙]", sources);
+        final KnowledgeLlmCitationAudit.Review contrastiveQuote =
+                KnowledgeLlmCitationAudit.inspect(
+                        "«Amber violet is true.», однако a different invented claim [1].",
+                        sources);
+        if (correct.unverifiedQuotes != 0 || correct.mismatchedQuoteCitations != 0
+                || laundered.unverifiedQuotes != 1 || laundered.mismatchedQuoteCitations != 1
+                || mixed.unverifiedQuotes != 0 || mixed.mismatchedQuoteCitations != 1
+                || unicodeFake.referenceCount != 0 || unicodeFake.invalidReferences != 3
+                || unicodeFake.unverifiedQuotes != 1
+                || contrastiveQuote.unverifiedQuotes != 1) {
+            throw new SyntheticMismatch("verdict=LOCAL_CITATION_ATTRIBUTION_MISMATCH");
+        }
+        return "syntheticSources=2, localQuotesVerified=true, "
+                + "distantCitationLaunderingRejected=true, mixedSourcesFlagged=true, "
+                + "unicodeDigitSpoofRejected=true, quoteContrastLaunderingRejected=true; "
+                + "no model request or selected vault access";
+    }
+
+    /** Code samples cannot masquerade as cited claims; content is synthetic. */
+    private String checkSyntheticCitationCoverage() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("synthetic-one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("synthetic-two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review covered = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Amber violet is false [2].", sources);
+        final KnowledgeLlmCitationAudit.Review uncited = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Another unsupported synthetic claim is asserted.",
+                sources);
+        final KnowledgeLlmCitationAudit.Review spoofed = KnowledgeLlmCitationAudit.inspect(
+                "```\nAmber violet is true [1].\n```\n"
+                        + "Another unsupported synthetic claim is asserted.", sources);
+        final KnowledgeLlmCitationAudit.Review htmlHidden = KnowledgeLlmCitationAudit.inspect(
+                "The first unsupported synthetic claim is asserted.\n"
+                        + "<span title=\"[1] «False quote»\">visible text</span>\n"
+                        + "<script>[2] «Fake quote»</script>\n"
+                        + "The final unsupported synthetic claim is asserted.", sources);
+        final KnowledgeLlmCitationAudit.Review htmlVisible = KnowledgeLlmCitationAudit.inspect(
+                "<span data-source='[2]'>Amber violet is true [1].</span>", sources);
+        final KnowledgeLlmCitationAudit.Review wrappedReference =
+                KnowledgeLlmCitationAudit.inspect(
+                        "An invented claim uses [1] \n  [bibliography] as a link.", sources);
+        final KnowledgeLlmCitationAudit.Review escapedBacktick =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true \\`[1] on screen [1].", sources);
+        final KnowledgeLlmCitationAudit.Review actualCode =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true `[2] \\` [2]` then [1].", sources);
+        final KnowledgeLlmCitationAudit.Review contrasting =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true [1], но an invented unrelated conclusion is certain.",
+                        sources);
+        final KnowledgeLlmCitationAudit.Review simpleComma =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Amber violet is true [1], and the example merely continues.", sources);
+        if (covered.uncitedProseSpans != 0 || uncited.uncitedProseSpans != 1
+                || !uncited.hasValidReferences() || spoofed.hasValidReferences()
+                || spoofed.referenceCount != 0 || spoofed.uncitedProseSpans != 1
+                || htmlHidden.referenceCount != 0 || htmlHidden.invalidReferences != 0
+                || htmlHidden.quotedPassages != 0 || htmlHidden.uncitedProseSpans != 2
+                || htmlVisible.referenceCount != 1 || htmlVisible.invalidReferences != 0
+                || htmlVisible.uncitedProseSpans != 0
+                || wrappedReference.referenceCount != 0 || wrappedReference.invalidReferences != 0
+                || escapedBacktick.referenceCount != 2 || actualCode.referenceCount != 1
+                || contrasting.uncitedProseSpans != 1 || simpleComma.uncitedProseSpans != 0) {
+            throw new SyntheticMismatch("verdict=UNCITED_CLAIM_OR_CODE_REFERENCE_LAUNDERING");
+        }
+        return "syntheticSources=2, mixedCitationCoverageFlagged=true, "
+                + "codeFenceCitationsExcluded=true, htmlNonProseExcluded=true, "
+                + "htmlVisibleTextPreserved=true, heuristicNotSemanticProof=true; "
+                + "softWrappedReferenceExcluded=true, escapedBacktickHandled=true, "
+                + "contrastiveClauseIsolation=true, ordinaryCommaPreserved=true, "
+                + "no network or selected vault access";
+    }
+
+    /** A numbered reference is not enough: inspect local lexical anchors and
+     * explicit opposing synthetic source labels, without calling a model. */
+    private String checkSyntheticClaimAnchors() {
+        final List<KnowledgeLlmEvidence.Item> sources = Arrays.asList(
+                new KnowledgeLlmEvidence.Item("one.md", "Amber violet is true."),
+                new KnowledgeLlmEvidence.Item("two.md", "Amber violet is false."));
+        final KnowledgeLlmCitationAudit.Review correct = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [1]. Amber violet is false [2].", sources);
+        final KnowledgeLlmCitationAudit.Review wrong = KnowledgeLlmCitationAudit.inspect(
+                "Amber violet is true [2]. A fabricated unrelated conclusion is certain [1].",
+                sources);
+        final KnowledgeLlmCitationAudit.Review numeric = KnowledgeLlmCitationAudit.inspect(
+                "The observed temperature measured 42 degrees [1].",
+                Collections.singletonList(new KnowledgeLlmEvidence.Item("temperature.md",
+                        "The observed temperature measured 24.0 degrees.")));
+        final KnowledgeLlmCitationAudit.Review partiallyMatchingNumbers =
+                KnowledgeLlmCitationAudit.inspect(
+                        "Battery runtime measured 60 minutes and temperature measured 42 degrees [1].",
+                        Collections.singletonList(new KnowledgeLlmEvidence.Item("battery.md",
+                                "Battery runtime measured 60 minutes and temperature measured 24 degrees.")));
+        final KnowledgeLlmCitationAudit.Review boilerplate = KnowledgeLlmCitationAudit.inspect(
+                "This that were with about is true [1].", Arrays.asList(
+                        new KnowledgeLlmEvidence.Item("generic-true.md",
+                                "This that were with about is true."),
+                        new KnowledgeLlmEvidence.Item("generic-false.md",
+                                "This that were with about is false.")));
+        if (correct.weakTextAttributions != 0 || correct.polarityMismatchedCitations != 0
+                || correct.potentiallyOpposingSources != 1
+                || wrong.weakTextAttributions != 1
+                || wrong.polarityMismatchedCitations != 1
+                || wrong.potentiallyOpposingSources != 1
+                || wrong.flaggedSpans.size() != 2
+                || wrong.flaggedSpans.get(0).sourceNumber != 2
+                || wrong.flaggedSpans.get(1).sourceNumber != 1
+                || numeric.numericMismatchedCitations != 1
+                || numeric.weakTextAttributions != 0
+                || numeric.flaggedSpans.size() != 1
+                || numeric.flaggedSpans.get(0).kind
+                        != KnowledgeLlmCitationAudit.Flag.Kind.NUMERIC_MISMATCH
+                || partiallyMatchingNumbers.numericMismatchedCitations != 1
+                || partiallyMatchingNumbers.weakTextAttributions != 0
+                || boilerplate.potentiallyOpposingSources != 0) {
+            throw new SyntheticMismatch("verdict=CLAIM_SOURCE_ANCHOR_WARNING_LOST");
+        }
+        return "syntheticOpposingSources=2, weakAttributionFlagged=true, "
+                + "explicitBooleanMismatchFlagged=true, sourceConflictFlagged=true, "
+                + "numericMismatchFlagged=true, partialNumberOverlapFlagged=true, "
+                + "genericWordConflictsExcluded=true, "
+                + "exactAnswerOffsets=true, sourceNumbersRetained=true, "
+                + "notSemanticProof=true, noNetwork=true, selectedVaultUntouched=true";
+    }
+
+    /** The hybrid shortlist should not silently lose its second modality. */
+    private String checkSyntheticHybridBalance() {
+        final List<Integer> selected = KnowledgeHybridRanking.selectBalancedIndices(
+                Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md", "semantic.md"),
+                Arrays.asList("lex-one.md", "lex-opposite.md", "lex-third.md"),
+                Arrays.asList("semantic.md"), 3);
+        final List<String> lexicalRanks = Arrays.asList("decoy-lex-a.md", "truth-support.md",
+                "truth-refute.md", "lexical-only-true.md", "decoy-lex-b.md");
+        final List<String> semanticRanks = Arrays.asList("decoy-sem-a.md", "truth-support.md",
+                "truth-refute.md", "semantic-only-true.md", "decoy-sem-b.md");
+        final List<String> fused = KnowledgeHybridRanking.combine(lexicalRanks, semanticRanks, 6);
+        final List<String> duplicated = KnowledgeHybridRanking.combine(Arrays.asList(
+                "decoy-lex-a.md", "decoy-lex-a.md", "truth-support.md", "truth-refute.md",
+                "truth-refute.md", "lexical-only-true.md", "decoy-lex-b.md"), semanticRanks, 6);
+        final List<String> gold = Arrays.asList("truth-support.md", "truth-refute.md",
+                "lexical-only-true.md", "semantic-only-true.md");
+        int recovered = 0;
+        for (final String path : fused) if (gold.contains(path)) recovered++;
+        final String source = "Amber violet is the actual artificial observation.\n"
+                + new String(new char[1100]).replace('\0', 'x')
+                + "\nThis distant vector passage concerns an unrelated synthetic item.";
+        final String lexical = KnowledgeLlmEvidence.excerpt(source, "amber violet");
+        final String vector = KnowledgeEmbeddingChunks.atOffset(source,
+                source.indexOf("This distant vector passage"), 60);
+        final String chosen = KnowledgeLlmEvidence.chooseHybridExcerpt(
+                "amber violet", lexical, vector);
+        final String strongVector = "Amber and violet appear in this vector passage.";
+        if (!selected.equals(Arrays.asList(0, 1, 3))
+                || !fused.equals(duplicated) || fused.size() != 6 || recovered != 4
+                || !fused.subList(0, 2).equals(Arrays.asList("truth-support.md", "truth-refute.md"))
+                || !KnowledgeHybridRanking.selectBalancedIndices(fused,
+                        lexicalRanks, semanticRanks, 6).equals(Arrays.asList(0, 1, 2, 3, 4, 5))
+                || !chosen.equals(lexical) || !chosen.contains("Amber violet is the actual")
+                || !strongVector.equals(KnowledgeLlmEvidence.chooseHybridExcerpt(
+                        "amber violet", "Only amber is mentioned.", strongVector))
+                || !KnowledgeLlmEvidence.chooseHybridExcerpt("Расскажи про память синтез",
+                        "ПАМЯТЬЮ — синтезом связан пример.",
+                        "Память рассматривали раньше, а синтез позднее.")
+                        .startsWith("ПАМЯТЬЮ")) {
+            throw new SyntheticMismatch("verdict=HYBRID_MODALITY_DISCARDED");
+        }
+        return "syntheticCandidates=4, originalTopTwoPreserved=true, "
+                + "semanticRepresentativeIncluded=true, boundedAndReadOnly=true, "
+                + "duplicateRankInvariant=true, syntheticFusionRecallAt6=4/4, "
+                + "sharedOpposingSourcesTopTwo=true, "
+                + "sharedSourceLexicalPhraseVisible=true, strongerVectorRetained=true, "
+                + "russianPrefixPassageSupported=true, "
+                + "noModelCall=true, selectedVaultUntouched=true";
+    }
+
+    /** End-to-end Android SQLite retrieval and RRF on disposable, labeled bytes.
+     * Hand-assigned vectors test index integration, not an embedding provider.
+     */
+    private String checkSyntheticHybridIndex() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Could not create hybrid sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Could not create hybrid fixture vault");
+            final String[] paths = {"lexical-only.md", "refute.md", "semantic-only.md",
+                    "support.md", "tampered.md", "decoy.md"};
+            final String[] bodies = {
+                    "# Lexical only\nAmber violet appears in a purely lexical clue.\n",
+                    "# Refutation\nAmber violet is false in this artificial report.\n",
+                    "# Semantic only\nThe fabricated reference concerns a hidden item.\n",
+                    "# Support\nAmber violet is true in this artificial report.\n",
+                    "# Tampered\nAmber violet was noted in a stale test.\n",
+                    "# Decoy\nAmber appears with a different token in this decoy.\n"
+            };
+            for (int i = 0; i < paths.length; i++) {
+                ensureRunning();
+                writeFixture(new File(vault, paths[i]), bodies[i]);
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-hybrid.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 12,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-synthetic-hybrid-vectors";
+            final float[] query = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            final float[] opposite = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{-1, 0, 0, 0, 0, 0, 0, 0});
+            for (int i = 0; i < paths.length; i++) {
+                ensureRunning();
+                final File file = new File(vault, paths[i]);
+                final byte[] sourceHash = sha256(file);
+                final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                        KnowledgeEmbeddingChunks.fromNote(bodies[i]);
+                if (chunks.size() != 1 || testIndex.beginEmbedding(paths[i],
+                        file.lastModified(), file.length(), model, 1, false, sourceHash) != 0) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_CHECKPOINT_MISMATCH");
+                }
+                final float[] vector = i == 0 || i == 5 ? opposite : query;
+                testIndex.appendEmbeddingBatch(paths[i], file.lastModified(), file.length(),
+                        model, chunks, 0, new float[][]{vector}, sourceHash);
+            }
+            final File stale = new File(vault, "tampered.md");
+            final long indexedModified = stale.lastModified();
+            final long indexedSize = stale.length();
+            writeFixture(stale, bodies[4].replace("violet", "VIOLET"));
+            if (stale.length() != indexedSize || !stale.setLastModified(indexedModified)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(
+                            stale, indexedModified, indexedSize)
+                    || testIndex.matchesIndexedEvidenceSource("tampered.md",
+                            indexedModified, indexedSize, readFixtureBytes(stale))) {
+                throw new SyntheticMismatch("verdict=HYBRID_STALE_BYTES_ACCEPTED");
+            }
+
+            final List<KnowledgeLocalIndex.Hit> lexical =
+                    testIndex.evidenceSearch("amber violet", 8);
+            final List<KnowledgeLocalIndex.SemanticHit> semantic =
+                    testIndex.semanticSearch(model, query, 8);
+            final List<String> lexicalPaths = new ArrayList<>();
+            final List<String> semanticPaths = new ArrayList<>();
+            final Map<String, KnowledgeLocalIndex.Hit> lexicalByPath = new HashMap<>();
+            final Map<String, KnowledgeLocalIndex.SemanticHit> semanticByPath = new HashMap<>();
+            for (final KnowledgeLocalIndex.Hit hit : lexical) {
+                lexicalPaths.add(hit.relativePath);
+                lexicalByPath.put(hit.relativePath, hit);
+            }
+            for (final KnowledgeLocalIndex.SemanticHit hit : semantic) {
+                semanticPaths.add(hit.relativePath);
+                semanticByPath.put(hit.relativePath, hit);
+            }
+            if (!lexicalPaths.equals(Arrays.asList("lexical-only.md", "refute.md",
+                    "support.md", "tampered.md", "decoy.md"))
+                    || !semanticPaths.equals(Arrays.asList("refute.md", "semantic-only.md",
+                            "support.md", "tampered.md"))) {
+                throw new SyntheticMismatch("verdict=HYBRID_INDEX_CHANNEL_RANKS");
+            }
+            final List<String> fused = KnowledgeHybridRanking.combine(
+                    lexicalPaths, semanticPaths, 8);
+            final List<String> verified = new ArrayList<>();
+            for (final String path : fused) {
+                ensureRunning();
+                final KnowledgeLocalIndex.SemanticHit vector = semanticByPath.get(path);
+                final KnowledgeLocalIndex.Hit text = lexicalByPath.get(path);
+                final long modified = vector != null ? vector.modifiedAtMillis : text.modifiedAtMillis;
+                final long size = vector != null ? vector.sizeBytes : text.sizeBytes;
+                final File file = new File(vault, path);
+                final byte[] currentBytes = readFixtureBytes(file);
+                if (!KnowledgeLlmEvidence.matchesIndexedSnapshot(file, modified, size)
+                        || !testIndex.matchesIndexedEvidenceSource(
+                                path, modified, size, currentBytes)) {
+                    continue;
+                }
+                if (vector != null && (vector.excerptStart < 0 || vector.excerptLength < 1
+                        || KnowledgeEmbeddingChunks.atOffset(
+                                new String(currentBytes, StandardCharsets.UTF_8),
+                                vector.excerptStart, vector.excerptLength).trim().isEmpty())) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_VECTOR_OFFSET");
+                }
+                verified.add(path);
+            }
+            final List<String> selected = new ArrayList<>();
+            for (final int index : KnowledgeHybridRanking.selectBalancedIndices(
+                    verified, lexicalPaths, semanticPaths, 4)) {
+                selected.add(verified.get(index));
+            }
+            final List<String> gold = Arrays.asList("refute.md", "support.md",
+                    "lexical-only.md", "semantic-only.md");
+            if (fused.size() != 6 || verified.size() != 5 || selected.size() != 4
+                    || !selected.containsAll(gold) || selected.contains("tampered.md")
+                    || !selected.subList(0, 2).containsAll(gold.subList(0, 2))) {
+                throw new SyntheticMismatch("verdict=HYBRID_INDEX_FUSION_RECALL");
+            }
+
+            final long[] microseconds = new long[21];
+            for (int attempt = -2; attempt < microseconds.length; attempt++) {
+                ensureRunning();
+                final long started = SystemClock.elapsedRealtimeNanos();
+                final List<KnowledgeLocalIndex.SemanticHit> ranked =
+                        testIndex.semanticSearch(model, query, 8);
+                final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+                if (ranked.size() != semantic.size()
+                        || !ranked.get(0).relativePath.equals(semantic.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=HYBRID_INDEX_TIMED_RANK_MISMATCH");
+                }
+                if (attempt >= 0) microseconds[attempt] = Math.max(0, elapsed / 1_000L);
+            }
+            Arrays.sort(microseconds);
+            return "syntheticNotes=6, indexedVectors=6, lexicalCandidates=5, "
+                    + "semanticCandidates=4, sharedOpposingSources=true, "
+                    + "lexicalOnlyRecovered=true, semanticOnlyRecovered=true, "
+                    + "hybridVerifiedRecallAt4=4/4, staleSameMetadataBytesRejected=true, "
+                    + "semanticTrials=21, semanticP50us=" + microseconds[10]
+                    + ", semanticP95us=" + microseconds[19]
+                    + ", artificialVectorsOnly=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Verify that a later chunk can win cosine ranking and that a partial
+     * embedding upload never becomes retrievable. No external model is called.
+     */
+    private String checkSyntheticMultichunkIndex() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create chunk sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Cannot create chunk vault");
+            final File note = new File(vault, "multi.md");
+            final String body = "# Artificial multi-chunk note\n"
+                    + new String(new char[920]).replace('\0', 'x')
+                    + "\nThe late artificial chunk is the exact vector match.\n";
+            writeFixture(note, body);
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(body);
+            if (chunks.size() != 2 || chunks.get(1).start <= chunks.get(0).start
+                    || !chunks.get(1).text.contains("late artificial chunk")) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_FIXTURE_INVALID");
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-multichunk.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 4,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-synthetic-two-chunks";
+            final byte[] digest = sha256(note);
+            final long modified = note.lastModified();
+            final long size = note.length();
+            final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            final float[] near = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{0.9f, 0.4358899f, 0, 0, 0, 0, 0, 0});
+            if (testIndex.beginEmbedding("multi.md", modified, size,
+                    model, chunks.size(), false, digest) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_CHECKPOINT_INVALID");
+            }
+            testIndex.appendEmbeddingBatch("multi.md", modified, size, model,
+                    chunks, 0, new float[][]{near}, digest);
+            if (testIndex.hasEmbeddings("multi.md", modified, size, model)
+                    || !testIndex.semanticSearch(model, exact, 8).isEmpty()) {
+                throw new SyntheticMismatch("verdict=EMBED_PARTIAL_CHUNK_DISCLOSED");
+            }
+            testIndex.appendEmbeddingBatch("multi.md", modified, size, model,
+                    chunks, 1, new float[][]{exact}, digest);
+            final List<KnowledgeLocalIndex.SemanticHit> hits =
+                    testIndex.semanticSearch(model, exact, 8);
+            // At a one-chunk budget the unprioritized grouped SQL could read
+            // the earlier near-match and never inspect the exact second chunk.
+            final List<KnowledgeLocalIndex.SemanticHit> tinyBudget =
+                    testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 1);
+            if (!testIndex.hasEmbeddings("multi.md", modified, size, model)
+                    || testIndex.embeddingNoteCount(model) != 1 || hits.size() != 1
+                    || !"multi.md".equals(hits.get(0).relativePath)
+                    || hits.get(0).score < 0.999
+                    || tinyBudget.size() != 1 || tinyBudget.get(0).score < 0.999
+                    || tinyBudget.get(0).excerptStart != chunks.get(1).start
+                    || hits.get(0).excerptStart != chunks.get(1).start
+                    || hits.get(0).excerptLength != chunks.get(1).text.length()
+                    || !KnowledgeEmbeddingChunks.atOffset(body, hits.get(0).excerptStart,
+                            hits.get(0).excerptLength).contains("late artificial chunk")
+                    || !testIndex.matchesIndexedEvidenceSource(
+                            "multi.md", modified, size, readFixtureBytes(note))) {
+                throw new SyntheticMismatch("verdict=EMBED_MULTICHUNK_BEST_SOURCE_LOST");
+            }
+            return "syntheticNotes=1, chunks=2, incompleteExcluded=true, "
+                    + "bestLaterChunkSelected=true, perPathDeduplicated=true, "
+                    + "exactBucketAtOneChunkBudget=true, "
+                    + "rawByteSealVerified=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Cross-pass duplicates must not crowd out another source within a
+     * tiny, explicit budget. This uses only three cache-generated files.
+     */
+    private String checkSyntheticLshOverlapBudget() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create overlap sandbox");
+        try {
+            final File vault = new File(sandbox, "vault");
+            if (!vault.mkdir()) throw new IOException("Cannot create overlap vault");
+            final String[] paths = {
+                    "a-overlap.md", "z-neighbor.md", "zz-unreachable.md"};
+            final float[] cosines = {0.99f, 0.98f, 0.80f};
+            final File[] notes = new File[paths.length];
+            final String[] bodies = new String[paths.length];
+            for (int i = 0; i < paths.length; i++) {
+                notes[i] = new File(vault, paths[i]);
+                bodies[i] = "# Synthetic isolated LSH overlap " + i + "\n";
+                writeFixture(notes[i], bodies[i]);
+            }
+            final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                    new File(sandbox, "qa-overlap.sqlite"));
+            testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 4,
+                    this::isCancelled), this::isCancelled);
+            final String model = "qa-lsh-overlap-budget";
+            final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                    new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+            for (int i = 0; i < paths.length; i++) {
+                final float cosine = cosines[i];
+                final float[] vector = new float[8];
+                vector[0] = cosine;
+                // The neighbor-only vector uses a different rotation plane:
+                // float32 rounding near one LSH hyperplane is otherwise unstable.
+                vector[i == 1 ? 7 : 1] = (float) Math.sqrt(1 - cosine * cosine);
+                final float[] normalized = KnowledgeEmbeddingVectors.normalize(vector);
+                final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                        KnowledgeEmbeddingChunks.fromNote(bodies[i]);
+                if (chunks.size() != 1 || testIndex.beginEmbedding(paths[i],
+                        notes[i].lastModified(), notes[i].length(), model, 1,
+                        false, sha256(notes[i])) != 0) {
+                    throw new SyntheticMismatch("verdict=EMBED_OVERLAP_FIXTURE_INVALID");
+                }
+                testIndex.appendEmbeddingBatch(paths[i], notes[i].lastModified(),
+                        notes[i].length(), model, chunks, 0,
+                        new float[][]{normalized}, sha256(notes[i]));
+            }
+            final List<KnowledgeLocalIndex.SemanticHit> limited =
+                    testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, 2);
+            if (testIndex.embeddingNoteCount(model) != 3 || limited.size() != 2
+                    || !paths[0].equals(limited.get(0).relativePath)
+                    || !paths[1].equals(limited.get(1).relativePath)
+                    || limited.get(0).score <= limited.get(1).score
+                    || !testIndex.matchesIndexedEvidenceSource(paths[0],
+                            notes[0].lastModified(), notes[0].length(),
+                            readFixtureBytes(notes[0]))
+                    || !testIndex.matchesIndexedEvidenceSource(paths[1],
+                            notes[1].lastModified(), notes[1].length(),
+                            readFixtureBytes(notes[1]))) {
+                throw new SyntheticMismatch("verdict=EMBED_OVERLAP_BUDGET_DOUBLE_COUNT");
+            }
+            return "syntheticNotes=3, candidateBudget=2, "
+                    + "exactAndNeighborOverlapDeduplicated=true, "
+                    + "neighborOnlySourceRecovered=true, "
+                    + "sourceBytesSealed=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true";
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    /** Diagnose unshipped quota policies in three disposable indexes:
+     * balanced, skewed, and repeated sampling of early same-bucket chunks.
+     * All vectors and Markdown files are artificial; production search is not
+     * switched to this policy.
+     */
+    private String checkSyntheticSourceQuotaBudget() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create quota sandbox");
+        try {
+            checkSyntheticSourceQuotaScenario(sandbox, 0);
+            checkSyntheticSourceQuotaScenario(sandbox, 1);
+            final String overlapTiming = checkSyntheticSourceQuotaScenario(sandbox, 2);
+            return "syntheticScenarios=3, balancedNotes=4, balancedChunks=16, "
+                    + "balancedBudget=12, uniformLateExactRecovered=true, "
+                    + "skewNotes=5, skewBudget=6, skewLateOnlyStillMissed=true, "
+                    + "sampleThenQuotaSkewRecovered=true, tightSampleBudgetBounded=true, "
+                    + "overlapNotes=8, overlapBudget=32, dedupLateBestRecovered=true, "
+                    + "memoryDedupLateBestRecovered=true, memoryRawRetryCap=4096, "
+                    + "exactChunkOffsetVerified=true, rawByteSealVerified=true, "
+                    + "candidatePolicyUnshipped=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true, " + overlapTiming;
+        } finally {
+            removeSandbox(sandbox);
+        }
+    }
+
+    private String checkSyntheticSourceQuotaScenario(final File sandbox,
+                                                     final int scenario) throws Exception {
+        final boolean skew = scenario == 1;
+        final boolean overlap = scenario == 2;
+        final File vault = new File(sandbox, overlap ? "overlap-vault"
+                : skew ? "skew-vault" : "uniform-vault");
+        if (!vault.mkdir()) throw new IOException("Cannot create quota vault");
+        final String[] paths = overlap
+                ? new String[]{"a-0.md", "a-1.md", "a-2.md", "a-3.md",
+                        "a-4.md", "a-5.md", "a-6.md", "z-target.md"}
+                : skew ? new String[]{"a-long.md", "b-short.md", "c-short.md",
+                        "d-short.md", "z-target.md"}
+                : new String[]{"a-0.md", "a-1.md", "a-2.md", "z-target.md"};
+        final int targetChunk = overlap ? 3 : skew ? 1 : 2;
+        final int budget = overlap ? 32 : skew ? 6 : 12;
+        final File[] notes = new File[paths.length];
+        final List<List<KnowledgeEmbeddingChunks.Chunk>> allChunks = new ArrayList<>();
+        final String longBody = new String(new char[3000]).replace('\0', 'x');
+        int totalChunks = 0;
+        for (int i = 0; i < paths.length; i++) {
+            notes[i] = new File(vault, paths[i]);
+            final boolean longNote = !skew || i == 0 || i == paths.length - 1;
+            final String body = longNote ? longBody : "# Synthetic short source " + i + "\n";
+            writeFixture(notes[i], body);
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks =
+                    KnowledgeEmbeddingChunks.fromNote(body);
+            if (chunks.size() != (longNote ? 4 : 1)) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_FIXTURE_INVALID");
+            }
+            allChunks.add(chunks);
+            totalChunks += chunks.size();
+        }
+        if (totalChunks != (overlap ? 32 : skew ? 11 : 16)) {
+            throw new SyntheticMismatch("verdict=EMBED_QUOTA_CHUNK_COUNT_INVALID");
+        }
+        final KnowledgeLocalIndex testIndex = new KnowledgeLocalIndex(
+                new File(sandbox, overlap ? "qa-quota-dedup.sqlite"
+                        : skew ? "qa-quota-skew.sqlite" : "qa-quota-uniform.sqlite"));
+        testIndex.synchronize(vault, KnowledgeVaultScanner.scan(vault, 8,
+                this::isCancelled), this::isCancelled);
+        final String model = "qa-synthetic-source-quota";
+        final float[] exact = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.99f, 0.14106736f, 0, 0, 0, 0, 0, 0});
+        final float[] hidden = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.8f, 0.6f, 0, 0, 0, 0, 0, 0});
+        final float[] lateBetter = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.999f, (float) Math.sqrt(1 - .999 * .999),
+                        0, 0, 0, 0, 0, 0});
+        for (int i = 0; i < paths.length; i++) {
+            final File note = notes[i];
+            final List<KnowledgeEmbeddingChunks.Chunk> chunks = allChunks.get(i);
+            final byte[] digest = sha256(note);
+            if (testIndex.beginEmbedding(paths[i], note.lastModified(), note.length(),
+                    model, chunks.size(), false, digest) != 0) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_CHECKPOINT_INVALID");
+            }
+            final float[][] vectors = new float[chunks.size()][];
+            for (int j = 0; j < chunks.size(); j++) {
+                vectors[j] = i == paths.length - 1
+                        ? (overlap ? (j == targetChunk ? lateBetter : near)
+                                : (j == targetChunk ? exact : hidden)) : near;
+            }
+            testIndex.appendEmbeddingBatch(paths[i], note.lastModified(), note.length(),
+                    model, chunks, 0, vectors, digest);
+            if (!testIndex.hasEmbeddings(paths[i], note.lastModified(), note.length(), model)
+                    || !testIndex.matchesIndexedEvidenceSource(paths[i],
+                            note.lastModified(), note.length(), readFixtureBytes(note))) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_SOURCE_SEAL_INVALID");
+            }
+        }
+        final List<KnowledgeLocalIndex.SemanticHit> existing =
+                testIndex.syntheticSemanticSearchWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> quota =
+                testIndex.syntheticSemanticSearchQuotaWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> sampled =
+                testIndex.syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> deduplicated =
+                testIndex.syntheticSemanticSearchDedupSampleQuotaWithBudget(
+                        model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> inMemory =
+                testIndex.syntheticSemanticSearchMemorySampleQuotaWithBudget(
+                        model, exact, 8, budget);
+        final List<KnowledgeLocalIndex.SemanticHit> tightSample =
+                testIndex.syntheticSemanticSearchSampleQuotaWithBudget(model, exact, 8, 1);
+        final String target = paths[paths.length - 1];
+        boolean existingContainsTarget = false;
+        boolean quotaContainsTarget = false;
+        for (final KnowledgeLocalIndex.SemanticHit hit : existing) {
+            if (target.equals(hit.relativePath)) existingContainsTarget = true;
+        }
+        for (final KnowledgeLocalIndex.SemanticHit hit : quota) {
+            if (target.equals(hit.relativePath)) quotaContainsTarget = true;
+        }
+        if (testIndex.embeddingNoteCount(model) != paths.length
+                || sampled.isEmpty() || deduplicated.isEmpty() || inMemory.isEmpty()
+                || tightSample.size() != 1
+                || !paths[0].equals(tightSample.get(0).relativePath)) {
+            throw new SyntheticMismatch("verdict=EMBED_QUOTA_GENERAL_CHECK_FAILED");
+        }
+        final int expectedOffset = allChunks.get(paths.length - 1).get(targetChunk).start;
+        if (overlap) {
+            if (!target.equals(deduplicated.get(0).relativePath)
+                    || deduplicated.get(0).score < .998
+                    || deduplicated.get(0).excerptStart != expectedOffset
+                    || deduplicated.get(0).score < sampled.get(0).score
+                    || !target.equals(inMemory.get(0).relativePath)
+                    || inMemory.get(0).score < .998
+                    || inMemory.get(0).excerptStart != expectedOffset) {
+                throw new SyntheticMismatch("verdict=EMBED_QUOTA_DEDUP_LATE_BEST_LOST");
+            }
+        } else if (existingContainsTarget || quotaContainsTarget == skew
+                || !target.equals(sampled.get(0).relativePath)
+                || sampled.get(0).score < .999
+                || sampled.get(0).excerptStart != expectedOffset
+                || !target.equals(deduplicated.get(0).relativePath)
+                || deduplicated.get(0).score < .999
+                || deduplicated.get(0).excerptStart != expectedOffset
+                || !target.equals(inMemory.get(0).relativePath)
+                || inMemory.get(0).score < .999
+                || inMemory.get(0).excerptStart != expectedOffset
+                || (!skew && (quota.isEmpty()
+                        || !target.equals(quota.get(0).relativePath)
+                        || quota.get(0).score < .999
+                        || quota.get(0).excerptStart != expectedOffset))) {
+            throw new SyntheticMismatch(skew
+                    ? "verdict=EMBED_QUOTA_SKEW_EXPECTATION_CHANGED"
+                    : "verdict=EMBED_QUOTA_BALANCED_LATE_EXACT_LOST");
+        }
+        if (!overlap) return "";
+        // Small artificial-vector microtimings only, never a 20k-vault
+        // latency claim. Warm each policy twice before 21 measured calls.
+        final long[][] microseconds = new long[3][21];
+        for (int policy = 0; policy < microseconds.length; policy++) {
+            for (int attempt = -2; attempt < microseconds[policy].length; attempt++) {
+                if (isCancelled()) {
+                    throw new InterruptedIOException("Synthetic quota QA cancelled");
+                }
+                final long started = SystemClock.elapsedRealtimeNanos();
+                final List<KnowledgeLocalIndex.SemanticHit> timed = policy == 0
+                        ? testIndex.syntheticSemanticSearchSampleQuotaWithBudget(
+                                model, exact, 8, budget)
+                        : policy == 1
+                                ? testIndex.syntheticSemanticSearchDedupSampleQuotaWithBudget(
+                                        model, exact, 8, budget)
+                                : testIndex.syntheticSemanticSearchMemorySampleQuotaWithBudget(
+                                        model, exact, 8, budget);
+                final long elapsed = SystemClock.elapsedRealtimeNanos() - started;
+                if (timed.isEmpty() || !target.equals(timed.get(0).relativePath)) {
+                    throw new SyntheticMismatch("verdict=EMBED_QUOTA_TIMING_RESULT_CHANGED");
+                }
+                if (attempt >= 0) {
+                    microseconds[policy][attempt] = Math.max(0, elapsed / 1_000L);
+                }
+            }
+            Arrays.sort(microseconds[policy]);
+        }
+        return "overlapTimingNotes=8, overlapTimingTrials=21, "
+                + "overlapSampleP50us=" + microseconds[0][10]
+                + ", overlapSampleP95us=" + microseconds[0][19]
+                + ", overlapTempP50us=" + microseconds[1][10]
+                + ", overlapTempP95us=" + microseconds[1][19]
+                + ", overlapMemoryP50us=" + microseconds[2][10]
+                + ", overlapMemoryP95us=" + microseconds[2][19]
+                + ", timingsNotRepresentative20k=true";
+    }
+
+    /** Synthetic cache-only post-approval mutation; no LLM call is made. */
+    private String checkSyntheticConsentSourceRevision() throws Exception {
+        final File sandbox = new File(context.getCacheDir(),
+                "dpks-device-qa-" + UUID.randomUUID());
+        if (!sandbox.mkdir()) throw new IOException("Cannot create consent sandbox");
+        try {
+            final File file = new File(sandbox, "approved.md");
+            final byte[] approved = "Amber violet is true.".getBytes(StandardCharsets.UTF_8);
+            final byte[] changed = "Amber violet is fake.".getBytes(StandardCharsets.UTF_8);
+            if (approved.length != changed.length) {
+                throw new SyntheticMismatch("verdict=FIXTURE_SIZE_MISMATCH");
+            }
+            writeFixture(file, "Amber violet is true.");
+            final long modified = file.lastModified();
+            final KnowledgeLlmEvidence.ConsentSeal seal = new KnowledgeLlmEvidence.ConsentSeal(
+                    "approved.md", modified, file.length(), approved);
+            if (!seal.matchesCurrentBytes(approved)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(file, modified, approved.length)) {
+                throw new SyntheticMismatch("verdict=APPROVED_SEAL_INVALID");
+            }
+            writeFixture(file, "Amber violet is fake.");
+            if (!file.setLastModified(modified)
+                    || !KnowledgeLlmEvidence.matchesIndexedSnapshot(file,
+                            modified, approved.length)
+                    || seal.matchesCurrentBytes(changed)) {
+                throw new SyntheticMismatch("verdict=SAME_METADATA_EDIT_NOT_REJECTED");
+            }
+            return "syntheticSource=1, approvedBytesSealed=true, "
+                    + "sameSizeSameMtimeRewriteRejected=true, noModelCall=true, "
+                    + "selectedVaultUntouched=true; temporary cache only";
         } finally {
             removeSandbox(sandbox);
         }
@@ -999,8 +2155,41 @@ public final class KnowledgeDeviceQaRunner {
                     workspace, selections.toString());
             if (!preview.getBoolean("read_only")
                     || !preview.getBoolean("requires_human_confirmation")
-                    || preview.getJSONArray("items").length() != 2) {
+                    || preview.getJSONArray("items").length() != 2
+                    || !sources[0].contains(preview.getJSONArray("items").getJSONObject(0)
+                            .getString("source_excerpt"))
+                    || preview.getJSONArray("items").getJSONObject(0)
+                            .getBoolean("source_truncated")) {
                 throw new SyntheticMismatch("verdict=BATCH_PREVIEW_MISMATCH");
+            }
+            // Fresh opposing claims must not bypass individual review merely
+            // because neither assertion appears in the current journal.
+            final String opposingSource = "# Opposing\nСтресс не приводит к бессоннице.\n";
+            final String opposingPath = "synthetic-batch-opposing.md";
+            final String opposingFragment = KnowledgePythonBridge.inspect(context,
+                    opposingPath, opposingSource).getJSONArray("fragments")
+                    .getJSONObject(1).getString("id");
+            final String opposingReading = KnowledgePythonBridge.preview(context, workspace,
+                    opposingPath, opposingSource, opposingFragment)
+                    .getJSONObject("preview").getJSONArray("options")
+                    .getJSONObject(0).getString("reading_id");
+            final JSONObject opposingEntry = new JSONObject();
+            opposingEntry.put("path", opposingPath);
+            opposingEntry.put("markdown", opposingSource);
+            opposingEntry.put("fragment_id", opposingFragment);
+            opposingEntry.put("reading_id", opposingReading);
+            final JSONArray opposingBatch = new JSONArray();
+            opposingBatch.put(selections.getJSONObject(0));
+            opposingBatch.put(opposingEntry);
+            boolean opposingRejected = false;
+            try {
+                KnowledgePythonBridge.previewClaimBatch(context, workspace,
+                        opposingBatch.toString());
+            } catch (Exception expected) {
+                opposingRejected = true;
+            }
+            if (!opposingRejected) {
+                throw new SyntheticMismatch("verdict=BATCH_OPPOSING_READINGS_ALLOWED");
             }
             boolean staleRejected = false;
             try {
@@ -1054,6 +2243,7 @@ public final class KnowledgeDeviceQaRunner {
             }
             if (!replayRejected) throw new SyntheticMismatch("verdict=BATCH_REPLAY_ALLOWED");
             return "syntheticClaims=2, activeAfterBatch=2, atomicJournalEntry=true, "
+                    + "sourceExcerptVerified=true, opposingBundleRejected=true, "
                     + "staleHeadRejected=true, changedSourceRejected=true, replayRejected=true, "
                     + "sourceHashUnchanged=true; synthetic cache only";
         } finally {
@@ -1074,6 +2264,16 @@ public final class KnowledgeDeviceQaRunner {
     private static void writeFixture(final File destination, final String content) throws IOException {
         try (FileOutputStream out = new FileOutputStream(destination)) {
             out.write(content.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static byte[] readFixtureBytes(final File file) throws IOException {
+        try (FileInputStream in = new FileInputStream(file);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            final byte[] buffer = new byte[1024];
+            int count;
+            while ((count = in.read(buffer)) >= 0) out.write(buffer, 0, count);
+            return out.toByteArray();
         }
     }
 

@@ -1,0 +1,1068 @@
+/* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
+package net.gsantner.markor.knowledge;
+
+import org.junit.Test;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+
+import static org.junit.Assert.*;
+
+public final class KnowledgeModelContainerProbeTest {
+    @Test public void readsGgufVersionTensorAndSafeArchitectureHints() throws Exception {
+        final ByteArrayOutputStream data = newGguf(3, 2, 2);
+        ggufString(data, "general.architecture");
+        u32(data, 8);
+        ggufString(data, "llama");
+        ggufString(data, "tokenizer.ggml.model");
+        u32(data, 8);
+        ggufString(data, "gpt2");
+        ggufTensorInfo(data, "blk.0.attn", new long[]{16, 16}, 1, 0);
+        ggufTensorInfo(data, "output", new long[]{128}, 1, 512);
+        ggufTensorBytes(data, 32, 768);
+        final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(3, result.version);
+        assertEquals(2, result.tensorCount);
+        assertEquals(2, result.metadataCount);
+        assertEquals("llama", result.architecture);
+        assertEquals("gpt2", result.tokenizer);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(2, result.tensorDescriptors);
+        assertEquals(2, result.tensorExtentsChecked);
+        assertEquals(0, result.tensorExtentsUnknown);
+    }
+
+    @Test public void ggufMalformedAndUnboundedArrayNeverReachRuntimeValidation() throws Exception {
+        final byte[] bad = new byte[64];
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(bad,
+                KnowledgeModelFiles.Format.GGUF).state);
+        final ByteArrayOutputStream huge = newGguf(3, 1, 2);
+        ggufString(huge, "general.architecture");
+        u32(huge, 8);
+        ggufString(huge, "qwen3");
+        ggufString(huge, "tokenizer.ggml.tokens");
+        u32(huge, 9);
+        u32(huge, 8);
+        u64(huge, 1_000_000); // synthetic hostile array length, no allocation
+        final KnowledgeModelContainerProbe.Result limited = probe(huge.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, limited.state);
+        assertEquals("qwen3", limited.architecture);
+        assertEquals(1, limited.tensorCount);
+        final ByteArrayOutputStream cut = newGguf(3, 1, 1);
+        ggufString(cut, "general.architecture");
+        u32(cut, 8);
+        u64(cut, 5); // missing actual architecture bytes
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(cut.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF).state);
+    }
+
+    @Test public void ggufHintCannotInjectNewlineOrFakeState() throws Exception {
+        final ByteArrayOutputStream data = newGguf(2, 1, 1);
+        ggufString(data, "general.architecture");
+        u32(data, 8);
+        ggufString(data, "llama\nRUNTIME_PASS");
+        ggufTensorInfo(data, "weight", new long[]{8}, 0, 0);
+        ggufTensorBytes(data, 32, 64);
+        final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals("", result.architecture);
+        assertEquals(2, result.version);
+    }
+
+    @Test public void recognizesOnnxTopLevelIrGraphAndOpsetDeclarationsOnly() throws Exception {
+        final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        varint(data, 8); // ModelProto.ir_version, field 1
+        varint(data, 9);
+        varint(data, 58); // ModelProto.graph, field 7
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        varint(node, 34); // NodeProto.op_type, field 4
+        protobufString(node, "MatMul");
+        varint(graph, 10); // GraphProto.node, field 1
+        protobufBytes(graph, node.toByteArray());
+        varint(graph, 90); // GraphProto.input, field 11
+        protobufBytes(graph, onnxTensorValueInfo("input_ids", 7, -1, 384));
+        varint(graph, 98); // GraphProto.output, field 12
+        protobufBytes(graph, onnxTensorValueInfo("output", 1, 1, 384));
+        protobufBytes(data, graph.toByteArray());
+        varint(data, 66); // ModelProto.opset_import, field 8
+        varint(data, 2);
+        varint(data, 16); // OperatorSetIdProto.version, field 2
+        varint(data, 17);
+        final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(9, result.version);
+        assertTrue(result.graphDeclared);
+        assertEquals(1, result.opsetDeclarations);
+        assertEquals("", result.architecture);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.graphNodes);
+        assertEquals(1, result.graphInputs);
+        assertEquals(1, result.graphOutputs);
+        assertEquals("MatMul", result.operatorHints);
+        assertEquals(1, result.typedInputs);
+        assertEquals(1, result.typedOutputs);
+        assertEquals(0, result.floatInputs);
+        assertEquals(1, result.floatOutputs);
+        assertEquals(1, result.int64Inputs);
+        assertEquals(0, result.int64Outputs);
+        assertEquals("in:input_ids:int64[?,384]; out:output:float32[1,384]",
+                result.signatureHints);
+        assertEquals("default@17", result.opsetHints);
+        assertEquals(0, result.customDomainNodes);
+        assertEquals(0, result.customNodesMissingImport);
+        assertEquals(1, result.distinctOperatorKinds);
+        assertEquals(0, result.undecodedOperatorNodes);
+        assertEquals("default/MatMul@opset17 x1", result.operatorInventoryHints);
+        assertEquals(1, result.schemaMatchedKinds);
+        assertEquals(0, result.schemaUnlistedKinds);
+        assertEquals("default/MatMul=revision13", result.schemaSnapshotHints);
+    }
+
+    @Test public void onnxMatchesCustomNodeDomainsToDeclaredOpsets() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10); // GraphProto.node
+        protobufBytes(graph, onnxNode("MyOp", "com.example.custom"));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("AnotherOp", "com.example.custom"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length); // Includes default @17 import.
+        appendOnnxOpset(model, "com.example.custom", 3);
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(2, result.opsetDeclarations);
+        assertEquals(2, result.customDomainNodes);
+        assertEquals(0, result.customNodesMissingImport);
+        assertEquals(0, result.duplicateOpsetDomains);
+        assertEquals("default@17, com.example.custom@3", result.opsetHints);
+        assertEquals(2, result.distinctOperatorKinds);
+        assertEquals("com.example.custom/MyOp@opset3 x1; "
+                        + "com.example.custom/AnotherOp@opset3 x1",
+                result.operatorInventoryHints);
+        assertEquals(2, result.schemaUnlistedKinds);
+        assertEquals(0, result.schemaMatchedKinds);
+    }
+
+    @Test public void onnxMissingOrDuplicateCustomOpsetIsAWarningNotRuntimeVerdict()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MyOp", "example.unknown"));
+        final KnowledgeModelContainerProbe.Result missing = probe(
+                onnxWithGraph(graph.toByteArray()), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, missing.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, missing.detailState);
+        assertEquals(1, missing.customDomainNodes);
+        assertEquals(1, missing.customNodesMissingImport);
+        assertEquals("example.unknown/MyOp@opset? x1", missing.operatorInventoryHints);
+
+        final ByteArrayOutputStream duplicate = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        duplicate.write(baseline, 0, baseline.length);
+        appendOnnxOpset(duplicate, "", 18); // Default domain already imported at 17.
+        final KnowledgeModelContainerProbe.Result ambiguity = probe(duplicate.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, ambiguity.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, ambiguity.detailState);
+        assertEquals(1, ambiguity.duplicateOpsetDomains);
+        assertEquals("default@17", ambiguity.opsetHints);
+    }
+
+    @Test public void onnxUntrustedDomainIsBoundedWithoutModelExecution() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("Op", new String(new char[129]).replace('\0', 'x')));
+        final KnowledgeModelContainerProbe.Result oversized = probe(
+                onnxWithGraph(graph.toByteArray()), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, oversized.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, oversized.detailState);
+    }
+
+    @Test public void onnxOperatorInventoryCountsRepeatedNamesAndBoundsUnknown() throws Exception {
+        final ByteArrayOutputStream repeatedGraph = new ByteArrayOutputStream();
+        for (int i = 0; i < 2; i++) {
+            varint(repeatedGraph, 10);
+            protobufBytes(repeatedGraph, onnxNode("MatMul", ""));
+        }
+        final KnowledgeModelContainerProbe.Result repeated = probe(
+                onnxWithGraph(repeatedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                repeated.detailState);
+        assertEquals(1, repeated.distinctOperatorKinds);
+        assertEquals("default/MatMul@opset17 x2", repeated.operatorInventoryHints);
+        assertEquals(1, repeated.schemaMatchedKinds); // Kinds, not total node occurrences.
+
+        final ByteArrayOutputStream untrustedGraph = new ByteArrayOutputStream();
+        varint(untrustedGraph, 10);
+        protobufBytes(untrustedGraph, onnxNode("MatMul\nFALSE_PASS", ""));
+        final KnowledgeModelContainerProbe.Result untrusted = probe(
+                onnxWithGraph(untrustedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, untrusted.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, untrusted.detailState);
+        assertEquals(1, untrusted.undecodedOperatorNodes);
+        assertEquals("", untrusted.operatorInventoryHints);
+        assertEquals(0, untrusted.schemaMatchedKinds);
+
+        final ByteArrayOutputStream excessiveGraph = new ByteArrayOutputStream();
+        for (int i = 0; i < 129; i++) {
+            varint(excessiveGraph, 10);
+            protobufBytes(excessiveGraph, onnxNode("Op" + i, ""));
+        }
+        final KnowledgeModelContainerProbe.Result excessive = probe(
+                onnxWithGraph(excessiveGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, excessive.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
+    }
+
+    @Test public void onnxPinnedSchemaSnapshotIsSmallAndConservative() {
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 13,
+                "", "MatMul", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 7,
+                "", "Add", 7, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 17,
+                "", "LayerNormalization", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.SNAPSHOT_REVISION, 20,
+                "", "Gelu", 20, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.BEFORE_INTRODUCTION, 0,
+                "", "Gelu", 19, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNLISTED, 0,
+                "", "Squeeze", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNLISTED, 0,
+                "com.example", "MatMul", 17, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNRESOLVED_IMPORT, 0,
+                "", "MatMul", 0, false);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.UNRESOLVED_IMPORT, 0,
+                "", "MatMul", 17, true);
+        assertSchema(KnowledgeOnnxSchemaCatalog.Kind.BEYOND_SNAPSHOT, 0,
+                "", "MatMul", 26, false);
+    }
+
+    private static void assertSchema(final KnowledgeOnnxSchemaCatalog.Kind kind,
+                                     final int sinceVersion, final String domain,
+                                     final String operator, final long opset,
+                                     final boolean ambiguous) {
+        final KnowledgeOnnxSchemaCatalog.Match match =
+                KnowledgeOnnxSchemaCatalog.lookup(domain, operator, opset, ambiguous);
+        assertEquals(kind, match.kind);
+        assertEquals(sinceVersion, match.sinceVersion);
+    }
+
+    @Test public void onnxLocalFunctionsMatchExactIdentityWithoutExecutingBodies()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MyOp", "com.example", "alt"));
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MyOp", "com.example", "other"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxOpset(model, "com.example", 1);
+        appendOnnxFunction(model, "MatMul", "", "");
+        appendOnnxFunction(model, "MyOp", "com.example", "alt");
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(2, result.localFunctionDeclarations);
+        assertEquals(2, result.matchedGraphFunctionNodes);
+        assertEquals(0, result.duplicateLocalFunctions);
+        assertEquals(0, result.undecodedLocalFunctions);
+        assertEquals("default/MatMul; com.example/MyOp#alt", result.localFunctionHints);
+        assertEquals(1, result.schemaMatchedKinds); // Still only a revision hint.
+    }
+
+    @Test public void onnxLocalFunctionDuplicatesAndUnsafeNamesAreOnlyWarnings()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(new byte[]{10, 2, 34, 0});
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunction(model, "Same", "com.example", "");
+        appendOnnxFunction(model, "Same", "com.example", "");
+        appendOnnxFunction(model, "Bad\nFUNCTION", "com.example", "");
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(3, result.localFunctionDeclarations);
+        assertEquals(1, result.duplicateLocalFunctions);
+        assertEquals(1, result.undecodedLocalFunctions);
+        assertEquals("com.example/Same; com.example/Same", result.localFunctionHints);
+    }
+
+    @Test public void onnxLocalFunctionsHaveBoundedCountAndUnknownOverloads()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNodeWithOverload("MatMul", "", "line\nattack"));
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunction(model, "MatMul", "", "");
+        final KnowledgeModelContainerProbe.Result unknown = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, unknown.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, unknown.detailState);
+        assertEquals(1, unknown.undecodedFunctionOverloads);
+        assertEquals(0, unknown.matchedGraphFunctionNodes);
+
+        for (int i = 0; i < 128; i++) appendOnnxFunction(model, "F" + i, "", "");
+        final KnowledgeModelContainerProbe.Result excessive = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, excessive.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, excessive.detailState);
+    }
+
+    @Test public void onnxFunctionOpsetImportsAreReviewHintsNotCompatibilityVerdicts()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        appendOnnxFunctionWithImports(model, "UseOtherOpset", "", "",
+                new String[]{"", "com.example"}, new int[]{13, 3});
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length); // Function may precede model imports.
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.localFunctionBodyNodes);
+        assertEquals(2, result.localFunctionImportDeclarations);
+        assertEquals(1, result.localFunctionImportVersionDifferences);
+        assertEquals(1, result.localFunctionImportMissingModel);
+        assertEquals(0, result.localFunctionImportAmbiguousModel);
+        assertEquals(0, result.duplicateLocalFunctionImportDomains);
+        assertEquals(1, result.localFunctionOperatorKinds);
+        assertEquals("default/Add", result.localFunctionOperatorHints);
+        assertEquals(0, result.localFunctionCustomNodesMissingImport);
+    }
+
+    @Test public void onnxFunctionImportDuplicatesAndInvalidVersionsAreWarnings()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithImports(model, "Dupe", "", "",
+                new String[]{"", "", "com.example"}, new int[]{17, 18, 0});
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(3, result.localFunctionImportDeclarations);
+        assertEquals(1, result.duplicateLocalFunctionImportDomains);
+        assertEquals(1, result.invalidLocalFunctionImportVersions);
+        assertEquals(0, result.localFunctionImportVersionDifferences);
+
+        final ByteArrayOutputStream ambiguous = new ByteArrayOutputStream();
+        ambiguous.write(model.toByteArray(), 0, model.size());
+        appendOnnxOpset(ambiguous, "", 18);
+        final KnowledgeModelContainerProbe.Result ambiguousResult = probe(
+                ambiguous.toByteArray(), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, ambiguousResult.localFunctionImportAmbiguousModel);
+        assertEquals(0, ambiguousResult.localFunctionImportVersionDifferences);
+    }
+
+    @Test public void onnxFunctionImportsHaveACombinedScanLimit() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        model.write(baseline, 0, baseline.length);
+        final String[] domains = new String[17];
+        final int[] versions = new int[17];
+        for (int i = 0; i < domains.length; i++) {
+            domains[i] = "";
+            versions[i] = 17;
+        }
+        for (int i = 0; i < 121; i++) {
+            appendOnnxFunctionWithImports(model, "F" + i, "", "", domains, versions);
+        }
+        final KnowledgeModelContainerProbe.Result result = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, result.detailState);
+        assertEquals(2049, result.localFunctionImportDeclarations);
+    }
+
+    @Test public void onnxFunctionBodyOperatorInventoryIsBoundedAndLocalToFunction()
+            throws Exception {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithBody(model, "F", new String[]{"Add", "Add", "MyOp"},
+                new String[]{"", "", "com.example"}, false);
+        final KnowledgeModelContainerProbe.Result missing = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, missing.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, missing.detailState);
+        assertEquals(3, missing.localFunctionBodyNodes);
+        assertEquals(2, missing.localFunctionOperatorKinds);
+        assertEquals(0, missing.undecodedLocalFunctionOperatorNodes);
+        assertEquals(1, missing.localFunctionCustomNodesMissingImport);
+        assertEquals("default/Add; com.example/MyOp", missing.localFunctionOperatorHints);
+
+        final ByteArrayOutputStream withImport = new ByteArrayOutputStream();
+        withImport.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithBody(withImport, "F", new String[]{"Add", "MyOp"},
+                new String[]{"", "com.example"}, true);
+        final KnowledgeModelContainerProbe.Result imported = probe(withImport.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(0, imported.localFunctionCustomNodesMissingImport);
+        assertEquals(2, imported.localFunctionOperatorKinds);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                imported.detailState);
+    }
+
+    @Test public void onnxFunctionBodyUnsafeNamesAndExcessKindsRemainUntrusted()
+            throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10);
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final byte[] baseline = onnxWithGraph(graph.toByteArray());
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        model.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithBody(model, "F", new String[]{"Bad\nOP"},
+                new String[]{""}, false);
+        final KnowledgeModelContainerProbe.Result unsafe = probe(model.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, unsafe.undecodedLocalFunctionOperatorNodes);
+        assertEquals(0, unsafe.localFunctionOperatorKinds);
+        assertEquals("", unsafe.localFunctionOperatorHints);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, unsafe.detailState);
+
+        final String[] ops = new String[129];
+        final String[] domains = new String[129];
+        for (int i = 0; i < ops.length; i++) {
+            ops[i] = "Op" + i;
+            domains[i] = "";
+        }
+        final ByteArrayOutputStream excessive = new ByteArrayOutputStream();
+        excessive.write(baseline, 0, baseline.length);
+        appendOnnxFunctionWithBody(excessive, "F", ops, domains, false);
+        final KnowledgeModelContainerProbe.Result bounded = probe(excessive.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, bounded.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, bounded.detailState);
+    }
+
+    @Test public void onnxExternalInitializerLocationsAreOnlyLexicalHints()
+            throws Exception {
+        final KnowledgeModelContainerProbe.Result relative = probe(
+                onnxWithExternalInitializer(1, "weights/model.data", false, true),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, relative.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                relative.detailState);
+        assertEquals(1, relative.denseInitializersScanned);
+        assertEquals(1, relative.externalDataEntriesScanned);
+        assertEquals(1, relative.externalDataTensorsDeclared);
+        assertEquals(1, relative.externalDataRelativeLocations);
+        assertEquals(0, relative.externalDataMissingLocations);
+        assertEquals(0, relative.externalDataUntrustedLocations);
+        assertEquals(1, relative.sparseInitializersSkipped);
+        // The external file is never read or resolved by this container probe.
+    }
+
+    @Test public void onnxExternalInitializerTraversalAndMissingLocationsAreWarnings()
+            throws Exception {
+        for (final String path : new String[]{"../secret", "/etc/passwd", "a/../b",
+                "C:\\weights\\x", "a//b", "a/./b", "a\u0000b"}) {
+            final KnowledgeModelContainerProbe.Result result = probe(
+                    onnxWithExternalInitializer(1, path, false, false),
+                    KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                    result.detailState);
+            assertEquals(1, result.externalDataUntrustedLocations);
+            assertEquals(0, result.externalDataRelativeLocations);
+        }
+        final KnowledgeModelContainerProbe.Result missing = probe(
+                onnxWithExternalInitializer(1, null, false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, missing.externalDataMissingLocations);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                missing.detailState);
+
+        final KnowledgeModelContainerProbe.Result duplicate = probe(
+                onnxWithExternalInitializer(1, "weights.data", true, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, duplicate.externalDataDuplicateLocations);
+        assertEquals(1, duplicate.externalDataUntrustedLocations);
+        assertEquals(2, duplicate.externalDataEntriesScanned);
+
+        final KnowledgeModelContainerProbe.Result oversized = probe(
+                onnxWithExternalInitializer(1,
+                        new String(new char[513]).replace('\0', 'a'), false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, oversized.externalDataUntrustedLocations);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                oversized.detailState);
+    }
+
+    @Test public void onnxUnknownDataLocationDoesNotPretendExternalFileIsAvailable()
+            throws Exception {
+        final KnowledgeModelContainerProbe.Result unknown = probe(
+                onnxWithExternalInitializer(9, "weights.data", false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, unknown.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, unknown.detailState);
+        assertEquals(1, unknown.invalidExternalDataLocationEnums);
+        assertEquals(0, unknown.externalDataTensorsDeclared);
+        assertEquals(0, unknown.externalDataRelativeLocations);
+    }
+
+    @Test public void onnxContradictoryInitializerStorageIsInvalidNotExternalReady()
+            throws Exception {
+        final ByteArrayOutputStream repeatedLocation = new ByteArrayOutputStream();
+        varint(repeatedLocation, 112); // EXTERNAL followed by DEFAULT: last-wins is unsafe.
+        varint(repeatedLocation, 1);
+        varint(repeatedLocation, 112);
+        varint(repeatedLocation, 0);
+        appendOnnxExternalEntry(repeatedLocation, "location", "weights.data");
+
+        final ByteArrayOutputStream undeclaredExternal = new ByteArrayOutputStream();
+        appendOnnxExternalEntry(undeclaredExternal, "location", "weights.data");
+
+        final ByteArrayOutputStream externalWithRaw = new ByteArrayOutputStream();
+        varint(externalWithRaw, 112);
+        varint(externalWithRaw, 1);
+        appendOnnxExternalEntry(externalWithRaw, "location", "weights.data");
+        varint(externalWithRaw, 74); // TensorProto.raw_data, field 9.
+        protobufBytes(externalWithRaw, new byte[]{1, 2, 3, 4});
+
+        final ByteArrayOutputStream externalWithTyped = new ByteArrayOutputStream();
+        varint(externalWithTyped, 112);
+        varint(externalWithTyped, 1);
+        appendOnnxExternalEntry(externalWithTyped, "location", "weights.data");
+        varint(externalWithTyped, 34); // TensorProto.float_data, packed field 4.
+        protobufBytes(externalWithTyped, new byte[]{0, 0, 0, 0});
+
+        for (final byte[] tensor : new byte[][]{
+                repeatedLocation.toByteArray(), undeclaredExternal.toByteArray(),
+                externalWithRaw.toByteArray(), externalWithTyped.toByteArray()}) {
+            final KnowledgeModelContainerProbe.Result result = probe(
+                    onnxWithInitializer(tensor), KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(KnowledgeModelContainerProbe.State.INVALID, result.state);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, result.detailState);
+        }
+        final KnowledgeModelContainerProbe.Result inlineOnly = probe(
+                onnxWithExternalInitializer(0, null, false, false),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                inlineOnly.detailState);
+        assertEquals(0, inlineOnly.externalDataTensorsDeclared);
+    }
+
+    @Test public void onnxExternalOffsetAndLengthAreBoundedDeclarationsOnly() throws Exception {
+        final KnowledgeModelContainerProbe.Result bounded = probe(
+                onnxWithExternalRange("weights.data", "4", "10"),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, bounded.externalReferences.size());
+        assertEquals("weights.data", bounded.externalReferences.get(0).location);
+        assertEquals(4, bounded.externalReferences.get(0).offset);
+        assertEquals(10, bounded.externalReferences.get(0).length);
+        assertEquals(0, bounded.invalidExternalDataRanges);
+        for (final String bad : new String[]{"-1", "99999999999999999999", "1e3", ""}) {
+            final KnowledgeModelContainerProbe.Result malformed = probe(
+                    onnxWithExternalRange("weights.data", bad, "10"),
+                    KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+            assertEquals(0, malformed.externalReferences.size());
+            assertEquals(1, malformed.invalidExternalDataRanges);
+            assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL,
+                    malformed.detailState);
+        }
+        final KnowledgeModelContainerProbe.Result zeroLength = probe(
+                onnxWithExternalRange("weights.data", "0", "0"),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(1, zeroLength.invalidExternalDataRanges);
+    }
+
+    @Test public void onnxUnknownTensorTypeDoesNotBecomeFalseIncompatibility() throws Exception {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 90);
+        protobufBytes(graph, onnxTensorValueInfo("tensor_future", 29));
+        final ByteArrayOutputStream sequence = new ByteArrayOutputStream();
+        varint(sequence, 10);
+        protobufString(sequence, "sequence_value");
+        final ByteArrayOutputStream other = new ByteArrayOutputStream();
+        varint(other, 34); // TypeProto.sequence_type, field 4
+        protobufBytes(other, new byte[0]);
+        varint(sequence, 18); // ValueInfoProto.type, field 2
+        protobufBytes(sequence, other.toByteArray());
+        varint(graph, 98);
+        protobufBytes(graph, sequence.toByteArray());
+        final KnowledgeModelContainerProbe.Result result = probe(onnxWithGraph(graph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.DECLARATIONS_READ,
+                result.detailState);
+        assertEquals(1, result.typedInputs);
+        assertEquals(0, result.typedOutputs);
+        assertEquals(0, result.floatInputs);
+        assertEquals(0, result.int64Inputs);
+        assertEquals(0, result.floatOutputs);
+        assertEquals(0, result.int64Outputs);
+        assertEquals("in:tensor_future:type#29?", result.signatureHints);
+    }
+
+    @Test public void onnxNestedSignatureLengthsAndLimitsAreBounded() throws Exception {
+        final ByteArrayOutputStream badValue = new ByteArrayOutputStream();
+        varint(badValue, 18); // ValueInfoProto.type, field 2
+        varint(badValue, 8); // Claims eight bytes, but only two exist.
+        badValue.write(10);
+        badValue.write(0);
+        final ByteArrayOutputStream malformedGraph = new ByteArrayOutputStream();
+        varint(malformedGraph, 90);
+        protobufBytes(malformedGraph, badValue.toByteArray());
+        final KnowledgeModelContainerProbe.Result invalid = probe(
+                onnxWithGraph(malformedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, invalid.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, invalid.detailState);
+
+        final ByteArrayOutputStream oversizedGraph = new ByteArrayOutputStream();
+        varint(oversizedGraph, 90);
+        protobufBytes(oversizedGraph, new byte[17_000]);
+        final KnowledgeModelContainerProbe.Result partial = probe(
+                onnxWithGraph(oversizedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.PARTIAL, partial.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, partial.detailState);
+
+        final ByteArrayOutputStream undefinedGraph = new ByteArrayOutputStream();
+        varint(undefinedGraph, 90);
+        protobufBytes(undefinedGraph, onnxTensorValueInfo("bad_type", 0, 8));
+        final KnowledgeModelContainerProbe.Result undefined = probe(
+                onnxWithGraph(undefinedGraph.toByteArray()),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, undefined.state);
+    }
+
+    @Test public void ggufRejectsMisalignedOrDuplicateTensorDescriptor() throws Exception {
+        final ByteArrayOutputStream misaligned = newGguf(3, 1, 0);
+        ggufTensorInfo(misaligned, "weight", new long[]{12}, 1, 3);
+        ggufTensorBytes(misaligned, 32, 64);
+        final KnowledgeModelContainerProbe.Result badOffset = probe(misaligned.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, badOffset.state);
+
+        final ByteArrayOutputStream duplicate = newGguf(3, 2, 0);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 1, 0);
+        ggufTensorInfo(duplicate, "weight", new long[]{12}, 1, 32);
+        ggufTensorBytes(duplicate, 32, 64);
+        final KnowledgeModelContainerProbe.Result badNames = probe(duplicate.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, badNames.state);
+    }
+
+    @Test public void ggufChecksKnownQuantizedBlockStorageAndTruncation() throws Exception {
+        final ByteArrayOutputStream q4k = newGguf(3, 1, 0);
+        ggufTensorInfo(q4k, "weight", new long[]{256}, 12, 0); // Q4_K: 144 bytes / 256 vals.
+        ggufTensorBytes(q4k, 32, 144);
+        final KnowledgeModelContainerProbe.Result valid = probe(q4k.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, valid.state);
+        assertEquals(1, valid.tensorExtentsChecked);
+        assertEquals(0, valid.tensorExtentsUnknown);
+
+        final ByteArrayOutputStream shortQ4k = newGguf(3, 1, 0);
+        ggufTensorInfo(shortQ4k, "weight", new long[]{256}, 12, 0);
+        ggufTensorBytes(shortQ4k, 32, 128); // Entire aligned data region is too short.
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                shortQ4k.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
+
+        final ByteArrayOutputStream badRow = newGguf(3, 1, 0);
+        ggufTensorInfo(badRow, "weight", new long[]{31}, 2, 0); // Q4_0 requires 32.
+        ggufTensorBytes(badRow, 32, 64);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                badRow.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
+    }
+
+    @Test public void ggufFutureQuantizationStaysPartialAndOverflowIsRejected() throws Exception {
+        final ByteArrayOutputStream unknown = newGguf(3, 1, 0);
+        ggufTensorInfo(unknown, "future", new long[]{8}, 200, 0);
+        ggufTensorBytes(unknown, 32, 64);
+        final KnowledgeModelContainerProbe.Result partial = probe(unknown.toByteArray(),
+                KnowledgeModelFiles.Format.GGUF);
+        assertEquals(KnowledgeModelContainerProbe.State.METADATA_HINTS, partial.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.PARTIAL, partial.detailState);
+        assertEquals(0, partial.tensorExtentsChecked);
+        assertEquals(1, partial.tensorExtentsUnknown);
+
+        final ByteArrayOutputStream overflow = newGguf(3, 1, 0);
+        ggufTensorInfo(overflow, "overflow", new long[]{Long.MAX_VALUE, 4}, 0, 0);
+        ggufTensorBytes(overflow, 32, 64);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(
+                overflow.toByteArray(), KnowledgeModelFiles.Format.GGUF).state);
+    }
+
+    @Test public void truncatedOnnxGraphFieldCannotReportDeclarationsRead() throws Exception {
+        final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        varint(data, 8);
+        varint(data, 9);
+        varint(data, 58);
+        varint(data, 4); // A malformed GraphProto node length within declared graph.
+        data.write(10);
+        data.write(5);
+        data.write(34);
+        data.write(0);
+        final KnowledgeModelContainerProbe.Result result = probe(data.toByteArray(),
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, result.state);
+        assertEquals(KnowledgeModelContainerProbe.DetailState.INVALID, result.detailState);
+    }
+
+    @Test public void invalidOnnxProtobufCannotClaimMetadataHints() throws Exception {
+        final byte[] fake = new byte[48]; // Existing .onnx shelf only checks size.
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID, probe(fake,
+                KnowledgeModelFiles.Format.ONNX_UNVERIFIED).state);
+        final ByteArrayOutputStream missingOpset = new ByteArrayOutputStream();
+        varint(missingOpset, 8);
+        varint(missingOpset, 8);
+        varint(missingOpset, 58);
+        varint(missingOpset, 1);
+        missingOpset.write(0);
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID,
+                probe(missingOpset.toByteArray(), KnowledgeModelFiles.Format.ONNX_UNVERIFIED).state);
+
+        final ByteArrayOutputStream badLength = new ByteArrayOutputStream();
+        varint(badLength, 8);
+        varint(badLength, 8);
+        varint(badLength, 58);
+        varint(badLength, 9_000_000); // exceeds actual content length
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID,
+                probe(badLength.toByteArray(), KnowledgeModelFiles.Format.ONNX_UNVERIFIED).state);
+        final ByteArrayOutputStream illegalWire = new ByteArrayOutputStream();
+        varint(illegalWire, 11); // field 1, wire=3, unsupported group
+        assertEquals(KnowledgeModelContainerProbe.State.INVALID,
+                probe(illegalWire.toByteArray(), KnowledgeModelFiles.Format.ONNX_UNVERIFIED).state);
+    }
+
+    @Test public void interruptionPropagatesWithoutRunningAContainer() throws Exception {
+        final File folder = Files.createTempDirectory("dpks-container-cancel").toFile();
+        try {
+            final File item = new File(folder, "probe.onnx");
+            Files.write(item.toPath(), new byte[64]);
+            Thread.currentThread().interrupt();
+            try {
+                KnowledgeModelContainerProbe.inspect(item,
+                        KnowledgeModelFiles.Format.ONNX_UNVERIFIED);
+                fail("A cancelled preflight returned a status");
+            } catch (InterruptedIOException expected) { }
+            finally { Thread.interrupted(); }
+        } finally { removeFolder(folder); }
+    }
+
+    private static KnowledgeModelContainerProbe.Result probe(final byte[] bytes,
+            final KnowledgeModelFiles.Format format) throws IOException {
+        final File folder = Files.createTempDirectory("dpks-container-probe").toFile();
+        try {
+            final File item = new File(folder, "synthetic.model");
+            Files.write(item.toPath(), bytes);
+            return KnowledgeModelContainerProbe.inspect(item, format);
+        } finally { removeFolder(folder); }
+    }
+
+    private static ByteArrayOutputStream newGguf(final int version,
+            final long tensorCount, final long metadataCount) {
+        final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        data.write('G'); data.write('G'); data.write('U'); data.write('F');
+        u32(data, version);
+        u64(data, tensorCount);
+        u64(data, metadataCount);
+        return data;
+    }
+
+    private static void ggufString(final ByteArrayOutputStream data, final String text) {
+        final byte[] utf8 = text.getBytes(StandardCharsets.UTF_8);
+        u64(data, utf8.length);
+        data.write(utf8, 0, utf8.length);
+    }
+
+    private static void ggufTensorInfo(final ByteArrayOutputStream data, final String name,
+                                       final long[] dimensions, final long type, final long offset) {
+        ggufString(data, name);
+        u32(data, dimensions.length);
+        for (final long dimension : dimensions) u64(data, dimension);
+        u32(data, type);
+        u64(data, offset);
+    }
+
+    private static void ggufTensorBytes(final ByteArrayOutputStream data,
+                                        final int alignment, final int bytes) {
+        while (data.size() % alignment != 0) data.write(0);
+        for (int i = 0; i < bytes; i++) data.write(0);
+    }
+
+    private static void protobufBytes(final ByteArrayOutputStream data, final byte[] contents) {
+        varint(data, contents.length);
+        data.write(contents, 0, contents.length);
+    }
+
+    private static void protobufString(final ByteArrayOutputStream data, final String value) {
+        protobufBytes(data, value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] onnxTensorValueInfo(final String name, final int elementType,
+                                               final long... dimensions) {
+        final ByteArrayOutputStream value = new ByteArrayOutputStream();
+        varint(value, 10); // ValueInfoProto.name
+        protobufString(value, name);
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 8); // TypeProto.Tensor.elem_type
+        varint(tensor, elementType);
+        if (dimensions.length > 0) {
+            final ByteArrayOutputStream shape = new ByteArrayOutputStream();
+            for (final long dimension : dimensions) {
+                final ByteArrayOutputStream dim = new ByteArrayOutputStream();
+                if (dimension < 0) {
+                    varint(dim, 18); // Symbolic TensorShapeProto.Dimension.dim_param
+                    protobufString(dim, "batch");
+                } else {
+                    varint(dim, 8); // TensorShapeProto.Dimension.dim_value
+                    varint(dim, dimension);
+                }
+                varint(shape, 10); // TensorShapeProto.dim
+                protobufBytes(shape, dim.toByteArray());
+            }
+            varint(tensor, 18); // TypeProto.Tensor.shape
+            protobufBytes(tensor, shape.toByteArray());
+        }
+        final ByteArrayOutputStream type = new ByteArrayOutputStream();
+        varint(type, 10); // TypeProto.tensor_type
+        protobufBytes(type, tensor.toByteArray());
+        varint(value, 18); // ValueInfoProto.type
+        protobufBytes(value, type.toByteArray());
+        return value.toByteArray();
+    }
+
+    private static byte[] onnxWithGraph(final byte[] graph) {
+        final ByteArrayOutputStream model = new ByteArrayOutputStream();
+        varint(model, 8); // ModelProto.ir_version
+        varint(model, 9);
+        varint(model, 58); // ModelProto.graph
+        protobufBytes(model, graph);
+        varint(model, 66); // ModelProto.opset_import
+        varint(model, 2);
+        varint(model, 16);
+        varint(model, 17);
+        return model.toByteArray();
+    }
+
+    private static byte[] onnxWithExternalInitializer(final int dataLocation,
+                                                      final String location,
+                                                      final boolean duplicateLocation,
+                                                      final boolean sparseInitializer) {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 10); // GraphProto.node
+        protobufBytes(graph, onnxNode("MatMul", ""));
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 112); // TensorProto.data_location, field 14
+        varint(tensor, dataLocation);
+        if (location != null) {
+            appendOnnxExternalEntry(tensor, "location", location);
+            if (duplicateLocation) appendOnnxExternalEntry(tensor, "location", "other.data");
+        }
+        if (dataLocation != 1) { // Only DEFAULT/unknown locations can carry inline bytes.
+            varint(tensor, 74); // TensorProto.raw_data: skip without allocating bytes
+            protobufBytes(tensor, new byte[]{1, 2, 3, 4});
+        }
+        varint(graph, 42); // GraphProto.initializer, field 5
+        protobufBytes(graph, tensor.toByteArray());
+        if (sparseInitializer) {
+            varint(graph, 122); // GraphProto.sparse_initializer, field 15
+            protobufBytes(graph, new byte[]{8, 1});
+        }
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static byte[] onnxWithExternalRange(final String location, final String offset,
+                                                final String length) {
+        final ByteArrayOutputStream tensor = new ByteArrayOutputStream();
+        varint(tensor, 112); // EXTERNAL
+        varint(tensor, 1);
+        appendOnnxExternalEntry(tensor, "location", location);
+        appendOnnxExternalEntry(tensor, "offset", offset);
+        appendOnnxExternalEntry(tensor, "length", length);
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 42); // GraphProto.initializer
+        protobufBytes(graph, tensor.toByteArray());
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static byte[] onnxWithInitializer(final byte[] tensor) {
+        final ByteArrayOutputStream graph = new ByteArrayOutputStream();
+        varint(graph, 42); // GraphProto.initializer
+        protobufBytes(graph, tensor);
+        return onnxWithGraph(graph.toByteArray());
+    }
+
+    private static void appendOnnxExternalEntry(final ByteArrayOutputStream tensor,
+                                                 final String key, final String value) {
+        final ByteArrayOutputStream entry = new ByteArrayOutputStream();
+        varint(entry, 10); // StringStringEntryProto.key
+        protobufString(entry, key);
+        varint(entry, 18); // StringStringEntryProto.value
+        protobufString(entry, value);
+        varint(tensor, 106); // TensorProto.external_data, field 13
+        protobufBytes(tensor, entry.toByteArray());
+    }
+
+    private static byte[] onnxNode(final String operation, final String domain) {
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        varint(node, 34); // NodeProto.op_type, field 4
+        protobufString(node, operation);
+        varint(node, 58); // NodeProto.domain, field 7
+        protobufString(node, domain);
+        return node.toByteArray();
+    }
+
+    private static byte[] onnxNodeWithOverload(final String operation, final String domain,
+                                               final String overload) {
+        final ByteArrayOutputStream node = new ByteArrayOutputStream();
+        final byte[] base = onnxNode(operation, domain);
+        node.write(base, 0, base.length);
+        varint(node, 66); // NodeProto.overload, field 8
+        protobufString(node, overload);
+        return node.toByteArray();
+    }
+
+    private static void appendOnnxFunction(final ByteArrayOutputStream model,
+                                           final String name, final String domain,
+                                           final String overload) {
+        final ByteArrayOutputStream function = new ByteArrayOutputStream();
+        varint(function, 10); // FunctionProto.name, field 1
+        protobufString(function, name);
+        varint(function, 82); // FunctionProto.domain, field 10
+        protobufString(function, domain);
+        if (!overload.isEmpty()) {
+            varint(function, 106); // FunctionProto.overload, field 13
+            protobufString(function, overload);
+        }
+        varint(function, 58); // FunctionProto.node, field 7: skip body
+        protobufBytes(function, onnxNode("Add", ""));
+        varint(model, 202); // ModelProto.functions, field 25
+        protobufBytes(model, function.toByteArray());
+    }
+
+    private static void appendOnnxFunctionWithImports(final ByteArrayOutputStream model,
+                                                       final String name, final String domain,
+                                                       final String overload,
+                                                       final String[] importedDomains,
+                                                       final int[] versions) {
+        final ByteArrayOutputStream function = new ByteArrayOutputStream();
+        varint(function, 10); // FunctionProto.name
+        protobufString(function, name);
+        varint(function, 82); // FunctionProto.domain
+        protobufString(function, domain);
+        if (!overload.isEmpty()) {
+            varint(function, 106); // FunctionProto.overload
+            protobufString(function, overload);
+        }
+        for (int i = 0; i < importedDomains.length; i++) {
+            final ByteArrayOutputStream imported = new ByteArrayOutputStream();
+            if (!importedDomains[i].isEmpty()) {
+                varint(imported, 10); // OperatorSetIdProto.domain
+                protobufString(imported, importedDomains[i]);
+            }
+            varint(imported, 16); // OperatorSetIdProto.version
+            varint(imported, versions[i]);
+            varint(function, 74); // FunctionProto.opset_import, field 9
+            protobufBytes(function, imported.toByteArray());
+        }
+        varint(function, 58); // FunctionProto.node, field 7
+        protobufBytes(function, onnxNode("Add", ""));
+        varint(model, 202); // ModelProto.functions, field 25
+        protobufBytes(model, function.toByteArray());
+    }
+
+    private static void appendOnnxFunctionWithBody(final ByteArrayOutputStream model,
+                                                   final String name,
+                                                   final String[] operations,
+                                                   final String[] domains,
+                                                   final boolean importCustomDomain) {
+        final ByteArrayOutputStream function = new ByteArrayOutputStream();
+        varint(function, 10); // FunctionProto.name
+        protobufString(function, name);
+        varint(function, 82); // FunctionProto.domain
+        protobufString(function, "");
+        if (importCustomDomain) {
+            final ByteArrayOutputStream imported = new ByteArrayOutputStream();
+            varint(imported, 10);
+            protobufString(imported, "com.example");
+            varint(imported, 16);
+            varint(imported, 3);
+            varint(function, 74); // FunctionProto.opset_import
+            protobufBytes(function, imported.toByteArray());
+        }
+        for (int i = 0; i < operations.length; i++) {
+            varint(function, 58); // FunctionProto.node
+            protobufBytes(function, onnxNode(operations[i], domains[i]));
+        }
+        varint(model, 202); // ModelProto.functions
+        protobufBytes(model, function.toByteArray());
+    }
+
+    private static void appendOnnxOpset(final ByteArrayOutputStream model,
+                                         final String domain, final int version) {
+        final ByteArrayOutputStream declaration = new ByteArrayOutputStream();
+        if (!domain.isEmpty()) {
+            varint(declaration, 10); // OperatorSetIdProto.domain, field 1
+            protobufString(declaration, domain);
+        }
+        varint(declaration, 16); // OperatorSetIdProto.version, field 2
+        varint(declaration, version);
+        varint(model, 66); // ModelProto.opset_import, field 8
+        protobufBytes(model, declaration.toByteArray());
+    }
+
+    private static void u32(final ByteArrayOutputStream data, final long value) {
+        for (int b = 0; b < 4; b++) data.write((int) (value >>> (b * 8)) & 255);
+    }
+
+    private static void u64(final ByteArrayOutputStream data, final long value) {
+        for (int b = 0; b < 8; b++) data.write((int) (value >>> (b * 8)) & 255);
+    }
+
+    private static void varint(final ByteArrayOutputStream data, long value) {
+        while (value >= 128) {
+            data.write(((int) value & 127) | 128);
+            value >>>= 7;
+        }
+        data.write((int) value);
+    }
+
+    private static void removeFolder(final File folder) {
+        final File[] files = folder.listFiles();
+        if (files != null) for (final File file : files) file.delete();
+        folder.delete();
+    }
+}

@@ -1,0 +1,720 @@
+#!/usr/bin/env python3
+"""Host-only LSH candidate-fairness experiment; never a production search path.
+
+Compares bounded SQL policies on a disposable in-memory multi-chunk index.
+All vectors, paths and labels are artificial. No model, vault, network or APK.
+The output contains aggregate counts/timing only, not fixture paths.
+"""
+
+import argparse
+import heapq
+import json
+import math
+import sqlite3
+import statistics
+import struct
+import time
+
+if __package__:
+    from .benchmark_stage19_hybrid import (
+        DIMENSIONS, LSH_TABLES, MAX_SEMANTIC_CANDIDATES, MODEL_KEY,
+        basis, lsh_buckets, search_semantic_mirror,
+    )
+    from .benchmark_stage19_retrieval import GENERATION
+else:
+    from benchmark_stage19_hybrid import (
+        DIMENSIONS, LSH_TABLES, MAX_SEMANTIC_CANDIDATES, MODEL_KEY,
+        basis, lsh_buckets, search_semantic_mirror,
+    )
+    from benchmark_stage19_retrieval import GENERATION
+
+
+TARGET = 'z-synthetic-late-source.md'
+POLICIES = ('current_exact_first', 'one_chunk_per_source',
+            'chunk_interleaved_sort', 'equal_exact_bucket_quotas',
+            'per_bucket_source_sample', 'fourway_indexed_merge',
+            'source_chunk_quota_then_fill', 'source_sample_quota_fill',
+            'source_sample_quota_dedup')
+
+FOURWAY_QUERY = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
+                   INDEXED BY embedding_lsh_bucket_chunk_path
+                   JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
+                   JOIN embedding_notes e ON e.path=v.path
+                   JOIN notes n ON n.path=e.path
+                   WHERE l.bucket=?
+                     AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+                     AND n.generation=? AND n.oversized=0
+                   ORDER BY l.chunk,l.path'''
+
+
+def _vector(cosine: float) -> tuple[float, ...]:
+    return (cosine, math.sqrt(1 - cosine * cosine), 0., 0., 0., 0., 0., 0.)
+
+
+def _database(sources: int, chunks: int) -> sqlite3.Connection:
+    connection = sqlite3.connect(':memory:')
+    connection.executescript('''
+        CREATE TABLE notes(path TEXT PRIMARY KEY, generation TEXT, oversized INTEGER);
+        CREATE TABLE embedding_notes(path TEXT PRIMARY KEY, model_key TEXT,
+                                     dimension INTEGER, chunks INTEGER, completed INTEGER);
+        CREATE TABLE embedding_chunks(path TEXT, chunk INTEGER, vector BLOB,
+                                      PRIMARY KEY(path,chunk));
+        CREATE TABLE embedding_lsh(bucket INTEGER, path TEXT, chunk INTEGER,
+                                   PRIMARY KEY(bucket,path,chunk));
+        CREATE INDEX embedding_lsh_path ON embedding_lsh(path);
+    ''')
+    near = _vector(.99)  # one exact table, but cosine lower than the target
+    hidden = _vector(.80)  # no matching exact or one-bit bucket
+    exact = basis(0)
+    packed_near = struct.pack('<8f', *near)
+    packed_hidden = struct.pack('<8f', *hidden)
+    packed_exact = struct.pack('<8f', *exact)
+    near_buckets, hidden_buckets, exact_buckets = map(
+        lsh_buckets, (near, hidden, exact))
+    with connection:
+        for number in range(sources):
+            path = TARGET if number == sources - 1 else f'a-synthetic-{number:04d}.md'
+            connection.execute('INSERT INTO notes VALUES (?,?,0)', (path, GENERATION))
+            connection.execute('INSERT INTO embedding_notes VALUES (?,?,?,?,?)',
+                               (path, MODEL_KEY, DIMENSIONS, chunks, chunks))
+            is_target = path == TARGET
+            connection.executemany('INSERT INTO embedding_chunks VALUES (?,?,?)',
+                                   ((path, chunk,
+                                     packed_exact if is_target and chunk == 3 else
+                                     packed_hidden if is_target else packed_near)
+                                    for chunk in range(chunks)))
+            connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,?)',
+                                   ((bucket, path, chunk)
+                                    for chunk in range(chunks)
+                                    for bucket in (exact_buckets if is_target and chunk == 3
+                                                   else hidden_buckets if is_target
+                                                   else near_buckets)))
+    return connection
+
+
+def _make_target_earlier_chunks_exact_reachable(connection: sqlite3.Connection,
+                                                chunks: int) -> None:
+    """Target has an early weaker exact-bucket chunk and a later perfect one."""
+    near = _vector(.99)
+    packed = struct.pack('<8f', *near)
+    buckets = lsh_buckets(near)
+    with connection:
+        connection.execute('DELETE FROM embedding_lsh WHERE path=? AND chunk<>3', (TARGET,))
+        connection.executemany('UPDATE embedding_chunks SET vector=? '
+                               'WHERE path=? AND chunk=?',
+                               ((packed, TARGET, i) for i in range(chunks) if i != 3))
+        connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,?)',
+                               ((bucket, TARGET, i) for i in range(chunks) if i != 3
+                                for bucket in buckets))
+
+
+def _make_target_best_only_within_same_exact_bucket(connection: sqlite3.Connection) -> None:
+    """Later 0.999 chunk shares one exact table with earlier 0.99 chunks."""
+    better = _vector(.999)
+    if len(set(lsh_buckets(better)).intersection(lsh_buckets(basis(0)))) != 1:
+        raise AssertionError('The fixed one-table collision fixture changed')
+    with connection:
+        connection.execute('UPDATE embedding_chunks SET vector=? '
+                           'WHERE path=? AND chunk=3',
+                           (struct.pack('<8f', *better), TARGET))
+        connection.execute('DELETE FROM embedding_lsh WHERE path=? AND chunk=3', (TARGET,))
+        connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,3)',
+                               ((bucket, TARGET) for bucket in lsh_buckets(better)))
+
+
+def _relocate_single_target_exact_chunk(connection: sqlite3.Connection,
+                                        chunks: int, target_chunk: int) -> None:
+    """Place the only target exact hit at a chosen offset; all others are hidden."""
+    if not 0 <= target_chunk < chunks:
+        raise ValueError('Target chunk outside the artificial source')
+    packed_hidden = struct.pack('<8f', *_vector(.80))
+    packed_exact = struct.pack('<8f', *basis(0))
+    hidden_buckets = lsh_buckets(_vector(.80))
+    exact_buckets = lsh_buckets(basis(0))
+    with connection:
+        connection.execute('DELETE FROM embedding_lsh WHERE path=?', (TARGET,))
+        connection.execute('UPDATE embedding_chunks SET vector=? WHERE path=?',
+                           (packed_hidden, TARGET))
+        connection.execute('UPDATE embedding_chunks SET vector=? '
+                           'WHERE path=? AND chunk=?',
+                           (packed_exact, TARGET, target_chunk))
+        connection.executemany('INSERT INTO embedding_lsh VALUES (?,?,?)',
+                               ((bucket, TARGET, chunk)
+                                for chunk in range(chunks)
+                                for bucket in (exact_buckets if chunk == target_chunk
+                                               else hidden_buckets)))
+
+
+def _truncate_short_sources(connection: sqlite3.Connection,
+                            indices: range) -> None:
+    """Keep exactly one artificial vector in each selected early source."""
+    with connection:
+        for number in indices:
+            path = f'a-synthetic-{number:04d}.md'
+            connection.execute('DELETE FROM embedding_lsh WHERE path=? AND chunk>0',
+                               (path,))
+            connection.execute('DELETE FROM embedding_chunks WHERE path=? AND chunk>0',
+                               (path,))
+            connection.execute('UPDATE embedding_notes SET chunks=1, completed=1 '
+                               'WHERE path=?', (path,))
+
+
+def _candidates(connection: sqlite3.Connection, policy: str,
+                cap: int) -> list[tuple[str, int, bytes]]:
+    exact = lsh_buckets(basis(0))
+
+    def fetch(buckets: tuple[int, ...], maximum: int,
+              grouping: str, order: str = '',
+              chunk_range: tuple[int | None, int | None] | None = None,
+              skip_seen: bool = False,
+              ) -> list[tuple[str, int, bytes]]:
+        # The same model/checkpoint/scan filters apply to each bounded pass.
+        # A split by chunk number uses the *existing* (bucket,path,chunk)
+        # index; no new production SQLite index is assumed.
+        chunk_sql = ''
+        range_args = []
+        if chunk_range is not None:
+            low, high = chunk_range
+            if low is not None:
+                chunk_sql += ' AND l.chunk>=?'
+                range_args.append(low)
+            if high is not None:
+                chunk_sql += ' AND l.chunk<?'
+                range_args.append(high)
+        sql = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
+                 JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
+                 JOIN embedding_notes e ON e.path=v.path
+                 JOIN notes n ON n.path=e.path
+                 WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')'
+        sql += chunk_sql
+        if skip_seen:
+            sql += ''' AND NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen
+                         WHERE seen.path=l.path AND seen.chunk=l.chunk)'''
+        sql += ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+                   AND n.generation=? AND n.oversized=0
+                 GROUP BY ''' + grouping + order + ' LIMIT ?'
+        return list(connection.execute(sql, (*buckets, *range_args, MODEL_KEY, DIMENSIONS,
+                                             GENERATION, maximum)))
+
+    if policy == 'current_exact_first':
+        return fetch(exact, cap, 'l.path,l.chunk')
+    if policy == 'one_chunk_per_source':
+        return fetch(exact, cap, 'l.path')
+    if policy == 'chunk_interleaved_sort':
+        return fetch(exact, cap, 'l.path,l.chunk', ' ORDER BY l.chunk,l.path')
+    if policy == 'equal_exact_bucket_quotas':
+        rows = []
+        for index, bucket in enumerate(exact):
+            quota = cap // LSH_TABLES + (1 if index < cap % LSH_TABLES else 0)
+            if quota:
+                rows.extend(fetch((bucket,), quota, 'l.path,l.chunk'))
+        return rows
+    if policy == 'per_bucket_source_sample':
+        # No ORDER BY across chunks. Every exact table gets at most one
+        # candidate per source, with the global *raw row* cap preserved.
+        # Multiple tables can still inspect the same source/chunk: this is
+        # a diagnostic, not a production deduplicated candidate allocator.
+        rows = []
+        for bucket in exact:
+            remaining = cap - len(rows)
+            if remaining <= 0:
+                break
+            rows.extend(fetch((bucket,), remaining, 'l.path'))
+        return rows
+    if policy == 'source_sample_quota_dedup':
+        # The intentionally temporary PRIMARY KEY excludes already-inspected
+        # (path,chunk) pairs from the next SQL. Never exceed the raw-row cap
+        # or add an index to the persistent Android schema.
+        source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+            WHERE model_key=? AND dimension=? AND completed=chunks''',
+            (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+        if source_count == 0:
+            return []
+        connection.execute('''CREATE TEMP TABLE qa_seen_lsh_candidates(
+            path TEXT, chunk INTEGER, PRIMARY KEY(path,chunk))''')
+        try:
+            rows = []
+
+            def reserve(fetched: list[tuple[str, int, bytes]]) -> None:
+                connection.executemany('''INSERT OR IGNORE INTO qa_seen_lsh_candidates
+                    VALUES (?,?)''', ((path, chunk) for path, chunk, _ in fetched))
+                rows.extend(fetched)
+
+            for bucket in exact:
+                if len(rows) == cap:
+                    break
+                reserve(fetch((bucket,), cap - len(rows), 'l.path', skip_seen=True))
+            if len(rows) < cap:
+                quota = max(1, (cap - len(rows)) // source_count)
+                reserve(fetch(exact, cap - len(rows), 'l.path,l.chunk',
+                              chunk_range=(None, quota), skip_seen=True))
+                if len(rows) < cap:
+                    reserve(fetch(exact, cap - len(rows), 'l.path,l.chunk',
+                                  chunk_range=(quota, None), skip_seen=True))
+            return rows
+        finally:
+            connection.execute('DROP TABLE qa_seen_lsh_candidates')
+    if policy in ('source_chunk_quota_then_fill', 'source_sample_quota_fill'):
+        # Guarantee a bounded number of *early chunk indices* per source
+        # before a second disjoint pass. The cap is on raw rows, not on the
+        # number of sources, and best-in-source retrieval remains approximate.
+        source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+            WHERE model_key=? AND dimension=? AND completed=chunks''',
+            (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+        if source_count == 0:
+            return []
+        sampled = (_candidates(connection, 'per_bucket_source_sample', cap)
+                   if policy == 'source_sample_quota_fill' else [])
+        remaining = cap - len(sampled)
+        if remaining == 0:
+            return sampled
+        quota = max(1, remaining // source_count)
+        first = fetch(exact, remaining, 'l.path,l.chunk', chunk_range=(None, quota))
+        remaining -= len(first)
+        return sampled + first + (fetch(exact, remaining, 'l.path,l.chunk',
+                                         chunk_range=(quota, None)) if remaining else [])
+    if policy == 'fourway_indexed_merge':
+        # The *extra* (bucket,chunk,path) index is created only while timing
+        # this host experiment. The production app does not have this index.
+        # One index-ordered cursor per exact bucket, with a four-item heap:
+        # no global GROUP BY/ORDER BY over 45k candidates.
+        cursors = [connection.execute(FOURWAY_QUERY, (bucket, MODEL_KEY,
+                             DIMENSIONS, GENERATION)) for bucket in exact]
+        heap = []
+        for i, cursor in enumerate(cursors):
+            row = cursor.fetchone()
+            if row is not None:
+                path, chunk, packed = row
+                heapq.heappush(heap, (chunk, path, i, packed))
+        rows = []
+        previous_key = None
+        while heap and len(rows) < cap:
+            chunk, path, i, packed = heapq.heappop(heap)
+            if (chunk, path) != previous_key:
+                rows.append((path, chunk, packed))
+                previous_key = (chunk, path)
+            row = cursors[i].fetchone()
+            if row is not None:
+                next_path, next_chunk, next_packed = row
+                heapq.heappush(heap, (next_chunk, next_path, i, next_packed))
+        for cursor in cursors:
+            cursor.close()
+        return rows
+    raise ValueError('Unsupported experimental policy')
+
+
+def memory_dedup_candidates(connection: sqlite3.Connection,
+                            unique_cap: int,
+                            raw_scan_cap: int | None = None
+                            ) -> tuple[list[tuple[str, int, bytes]], int]:
+    """Bounded *host-only* cursor streaming with a Python (path,chunk) set.
+
+    Unlike the TEMP-SQL strategy, repeated rows still cross SQLite/Python and
+    count against a distinct capped scan allowance. Cosine reranking receives
+    at most `unique_cap` unique rows. No schema/index creation or model access.
+    """
+    if not 1 <= unique_cap <= MAX_SEMANTIC_CANDIDATES:
+        raise ValueError('Invalid unique candidate cap')
+    maximum_scan_cap = unique_cap + min(unique_cap, 4096)
+    if raw_scan_cap is None:
+        raw_scan_cap = maximum_scan_cap
+    if not unique_cap <= raw_scan_cap <= maximum_scan_cap:
+        raise ValueError('Raw SQLite rows exceed fixed 4096-row retry allowance')
+    exact = lsh_buckets(basis(0))
+    source_count = connection.execute('''SELECT COUNT(*) FROM embedding_notes
+        WHERE model_key=? AND dimension=? AND completed=chunks''',
+        (MODEL_KEY, DIMENSIONS)).fetchone()[0]
+    if source_count == 0:
+        return [], 0
+    selected: list[tuple[str, int, bytes]] = []
+    seen: set[tuple[str, int]] = set()
+    raw_rows = 0
+
+    def inspect(buckets: tuple[int, ...], group_by_source: bool,
+                lower: int | None = None, upper: int | None = None) -> None:
+        nonlocal raw_rows
+        if len(selected) == unique_cap or raw_rows == raw_scan_cap:
+            return
+        bounds = ''
+        bounds_args = []
+        if lower is not None:
+            bounds += ' AND l.chunk>=?'
+            bounds_args.append(lower)
+        if upper is not None:
+            bounds += ' AND l.chunk<?'
+            bounds_args.append(upper)
+        sql = '''SELECT e.path, v.chunk, v.vector FROM embedding_lsh l
+                 JOIN embedding_chunks v ON v.path=l.path AND v.chunk=l.chunk
+                 JOIN embedding_notes e ON e.path=v.path
+                 JOIN notes n ON n.path=e.path
+                 WHERE l.bucket IN (''' + ','.join('?' for _ in buckets) + ')' + bounds
+        sql += ''' AND e.model_key=? AND e.dimension=? AND e.completed=e.chunks
+                   AND n.generation=? AND n.oversized=0 GROUP BY l.path'''
+        if not group_by_source:
+            sql += ',l.chunk'
+        sql += ' LIMIT ?'
+        args = (*buckets, *bounds_args, MODEL_KEY, DIMENSIONS,
+                GENERATION, raw_scan_cap - raw_rows)
+        cursor = connection.execute(sql, args)
+        try:
+            for path, chunk, packed in cursor:
+                raw_rows += 1
+                key = (path, chunk)
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append((path, chunk, packed))
+                if len(selected) == unique_cap:
+                    break
+        finally:
+            cursor.close()
+
+    for bucket in exact:
+        inspect((bucket,), True)
+    if len(selected) < unique_cap and raw_rows < raw_scan_cap:
+        quota = max(1, (unique_cap - len(selected)) // source_count)
+        inspect(exact, False, upper=quota)
+        inspect(exact, False, lower=quota)
+    return selected, raw_rows
+
+
+def _evaluate(rows: list[tuple[str, int, bytes]],
+              elapsed: list[float]) -> dict:
+    best: dict[str, float] = {}
+    for path, _chunk, packed in rows:
+        vector = struct.unpack('<8f', packed)
+        cosine = vector[0]  # query is the first unit basis; mirrors exact cosine
+        if path not in best or cosine > best[path]:
+            best[path] = cosine
+    ranked = sorted(best, key=lambda path: (-best[path], path))[:6]
+    return {
+        'raw_chunk_rows': len(rows),
+        'distinct_chunk_rows': len({(path, chunk) for path, chunk, _ in rows}),
+        'sources_seen': len(best),
+        'late_best_retrieved_at_6': TARGET in ranked,
+        'late_source_best_cosine': round(best[TARGET], 3) if TARGET in best else None,
+        'lookup_p50_ms': round(statistics.median(elapsed), 3),
+        'lookup_max_ms': round(max(elapsed), 3),
+    }
+
+
+def synthetic_uneven_distribution_probe() -> dict:
+    """Contrast a mixed index and a pathological pair of long sources.
+
+    Both fixtures stay small and live exclusively in RAM. Source quotas
+    sample early chunks by index, so a late-only hit in a long tail can still
+    be lost when a different long source consumes the remaining budget.
+    """
+    probes = {}
+    for name, sources, chunks, cap in (
+            ('mixed_18_short_72_long', 90, 24, 1200),
+            ('two_long_88_short', 90, 128, 100)):
+        connection = _database(sources, chunks)
+        try:
+            if name == 'mixed_18_short_72_long':
+                short_indices = range(0, sources - 1, 5)
+            else:
+                short_indices = range(1, sources - 1)
+            _truncate_short_sources(connection, short_indices)
+            results = {}
+            for policy in ('current_exact_first', 'source_chunk_quota_then_fill',
+                           'source_sample_quota_fill', 'source_sample_quota_dedup',
+                           'chunk_interleaved_sort',
+                           'one_chunk_per_source'):
+                start = time.perf_counter()
+                rows = _candidates(connection, policy, cap)
+                elapsed = (time.perf_counter() - start) * 1000
+                results[policy] = _evaluate(rows, [elapsed])
+            probes[name] = {
+                'sources': sources,
+                'short_sources': len(short_indices),
+                'total_chunks': connection.execute(
+                    'SELECT COUNT(*) FROM embedding_chunks').fetchone()[0],
+                'candidate_cap': cap,
+                'policies': results,
+            }
+        finally:
+            connection.close()
+    return probes
+
+
+def synthetic_skew_budget_sweep() -> dict:
+    """Expose tested budget thresholds for an unbalanced 90-source index.
+
+    Four target offsets and a same-bucket stronger-late case distinguish
+    recovering the *source* from inspecting its highest-scoring chunk.
+    """
+    sources, chunks = 90, 128
+    caps = (88, 89, 90, 91, 92, 93, 100, 128, 150, 216, 217, 240)
+    policies = ('current_exact_first', 'source_chunk_quota_then_fill',
+                'source_sample_quota_fill', 'source_sample_quota_dedup',
+                'chunk_interleaved_sort')
+    connection = _database(sources, chunks)
+    try:
+        _truncate_short_sources(connection, range(1, sources - 1))
+        outcomes = {}
+        for target_chunk in (0, 1, 3, 127):
+            _relocate_single_target_exact_chunk(connection, chunks, target_chunk)
+            runs = {}
+            for cap in caps:
+                records = {}
+                for policy in policies:
+                    rows = _candidates(connection, policy, cap)
+                    matches = [(chunk, struct.unpack('<8f', packed)[0])
+                               for path, chunk, packed in rows if path == TARGET]
+                    records[policy] = {
+                        'target_best_cosine': round(max((x[1] for x in matches),
+                                                        default=-1), 3),
+                        'exact_chunk_seen': any(chunk == target_chunk
+                                                for chunk, _ in matches),
+                        'raw_rows': len(rows),
+                        'unique_rows': len({(path, chunk) for path, chunk, _ in rows}),
+                    }
+                    if len(rows) > cap:
+                        raise AssertionError('Synthetic candidate budget exceeded')
+                runs[str(cap)] = records
+            outcomes[str(target_chunk)] = runs
+        # The source is present in a one-row-per-source sample, but the
+        # later, better 0.999 chunk shares only its first exact table with
+        # the early 0.99 chunks. A tiny cap is insufficient for reranking.
+        _make_target_earlier_chunks_exact_reachable(connection, chunks)
+        _make_target_best_only_within_same_exact_bucket(connection)
+        late_with_early = {}
+        for cap in (90, 100):
+            late_with_early[str(cap)] = {}
+            for policy in policies:
+                rows = _candidates(connection, policy, cap)
+                scores = [struct.unpack('<8f', packed)[0] for path, _, packed in rows
+                          if path == TARGET]
+                late_with_early[str(cap)][policy] = {
+                    'source_seen': bool(scores),
+                    'best_cosine': round(max(scores, default=-1), 3),
+                    'raw_rows': len(rows),
+                }
+        return {
+            'sources': sources, 'short_sources': sources - 2,
+            'total_chunks': 2 * chunks + sources - 2,
+            'candidate_caps': list(caps), 'target_chunk_offsets': [0, 1, 3, 127],
+            'policies': list(policies), 'single_exact_chunk': outcomes,
+            'late_better_same_bucket': late_with_early,
+            'only_synthetic_vectors': True,
+        }
+    finally:
+        connection.close()
+
+
+def synthetic_memory_dedup_probe() -> dict:
+    """Contrast unique rank budget with distinct SQLite rows scanned."""
+    connection = _database(8, 4)
+    try:
+        _make_target_earlier_chunks_exact_reachable(connection, 4)
+        _make_target_best_only_within_same_exact_bucket(connection)
+        old = _candidates(connection, 'source_sample_quota_fill', 32)
+        temp = _candidates(connection, 'source_sample_quota_dedup', 32)
+        memory, raw = memory_dedup_candidates(connection, 32)
+        limited, limited_raw = memory_dedup_candidates(connection, 32, 32)
+
+        def late_best(rows: list[tuple[str, int, bytes]]) -> bool:
+            return any(path == TARGET and chunk == 3 for path, chunk, _ in rows)
+
+        return {
+            'sources': 8, 'chunks': 32, 'unique_cap': 32,
+            'raw_scan_cap': 64, 'memory_sql_rows_scanned': raw,
+            'memory_unique_rows': len(memory),
+            'memory_late_best_seen': late_best(memory),
+            'temp_late_best_seen': late_best(temp),
+            'repeating_sample_late_best_seen': late_best(old),
+            'without_retry_sql_rows_scanned': limited_raw,
+            'without_retry_unique_rows': len(limited),
+            'without_retry_late_best_seen': late_best(limited),
+            'requires_additional_sql_reads': raw > 32,
+            'creates_no_sqlite_temp_table': not bool(connection.execute(
+                "SELECT name FROM sqlite_temp_master WHERE name='qa_seen_lsh_candidates'")
+                .fetchone()),
+        }
+    finally:
+        connection.close()
+
+
+def synthetic_chunk_length_profiles() -> dict:
+    """Cross-check four deterministic source-size distributions without vaults.
+
+    These are artificial adversarial shapes, not samples from user notebooks.
+    Each policy is timed once per budget; the values are descriptive only.
+    """
+    profiles = {
+        'uniform_24': ([24] * 90, 3),
+        'alternating_72_short_18_long':
+            ([128 if i % 5 == 4 else 1 for i in range(90)], 3),
+        'ascending_1_to_128': ([1 + (i * 127) // 89 for i in range(90)], 3),
+        'two_long_88_short_late_tail': ([128 if i in (0, 89) else 1
+                                         for i in range(90)], 127),
+    }
+    policies = ('current_exact_first', 'source_chunk_quota_then_fill',
+                'source_sample_quota_fill', 'source_sample_quota_dedup',
+                'memory_dedup', 'chunk_interleaved_sort')
+    output = {}
+    for profile, (lengths, target_chunk) in profiles.items():
+        connection = _database(90, 128)
+        try:
+            with connection:
+                for i, length in enumerate(lengths):
+                    path = TARGET if i == 89 else f'a-synthetic-{i:04d}.md'
+                    connection.execute('DELETE FROM embedding_lsh '
+                                       'WHERE path=? AND chunk>=?', (path, length))
+                    connection.execute('DELETE FROM embedding_chunks '
+                                       'WHERE path=? AND chunk>=?', (path, length))
+                    connection.execute('UPDATE embedding_notes SET chunks=?, completed=? '
+                                       'WHERE path=?', (length, length, path))
+            if target_chunk != 3:
+                _relocate_single_target_exact_chunk(connection, 128, target_chunk)
+            cases = {}
+            for cap in (100, 1200):
+                records = {}
+                for policy in policies:
+                    start = time.perf_counter()
+                    if policy == 'memory_dedup':
+                        rows, raw_rows = memory_dedup_candidates(connection, cap)
+                    else:
+                        rows = _candidates(connection, policy, cap)
+                        raw_rows = len(rows)
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    records[policy] = {
+                        'sql_rows_scanned': raw_rows,
+                        'unique_candidates': len({(path, chunk) for path, chunk, _ in rows}),
+                        'sources_seen': len({path for path, _, _ in rows}),
+                        'target_exact_chunk_seen': any(path == TARGET and chunk == target_chunk
+                                                       for path, chunk, _ in rows),
+                        'one_call_ms': round(elapsed_ms, 3),
+                    }
+                    if (raw_rows > (cap + min(cap, 4096) if policy == 'memory_dedup'
+                                    else cap)):
+                        raise AssertionError('Chunk profile exceeded SQL row cap')
+                cases[str(cap)] = records
+            output[profile] = {
+                'sources': 90, 'total_chunks': sum(lengths),
+                'single_chunk_sources': sum(length == 1 for length in lengths),
+                'long_64_plus_sources': sum(length >= 64 for length in lengths),
+                'target_exact_chunk': target_chunk,
+                'caps': cases,
+            }
+        finally:
+            connection.close()
+    return output
+
+
+def compare(sources: int = 360, chunks: int = 128,
+            cap: int = MAX_SEMANTIC_CANDIDATES,
+            trials: int = 2) -> dict:
+    if not 8 <= sources <= 20_000 or not 4 <= chunks <= 128:
+        raise ValueError('Only 8..20000 sources and 4..128 chunks are supported')
+    if not 4 <= cap <= MAX_SEMANTIC_CANDIDATES or (sources - 1) * chunks <= cap:
+        raise ValueError('Fixture must saturate exact buckets within the cap')
+    if not 1 <= trials <= 10:
+        raise ValueError('Use 1..10 measured repetitions')
+    connection = _database(sources, chunks)
+    try:
+        cases = {}
+        for case in ('single_late_exact_chunk', 'late_best_among_other_exact_chunks',
+                     'late_better_same_exact_bucket'):
+            if case == 'late_best_among_other_exact_chunks':
+                _make_target_earlier_chunks_exact_reachable(connection, chunks)
+            if case == 'late_better_same_exact_bucket':
+                _make_target_best_only_within_same_exact_bucket(connection)
+            results = {}
+            for policy in POLICIES:
+                index_ms = None
+                index_kib = None
+                if policy == 'fourway_indexed_merge':
+                    page_size = connection.execute('PRAGMA page_size').fetchone()[0]
+                    def in_use_pages():
+                        pages = connection.execute('PRAGMA page_count').fetchone()[0]
+                        free = connection.execute('PRAGMA freelist_count').fetchone()[0]
+                        return pages - free
+                    before_pages = in_use_pages()
+                    started = time.perf_counter()
+                    connection.execute('CREATE INDEX embedding_lsh_bucket_chunk_path '
+                                       'ON embedding_lsh(bucket,chunk,path)')
+                    index_ms = round((time.perf_counter() - started) * 1000, 3)
+                    index_kib = round((in_use_pages() - before_pages) * page_size / 1024, 1)
+                measurements = []
+                reference = None
+                try:
+                    for trial in range(trials + 1):  # first pass is an untimed warmup
+                        start = time.perf_counter()
+                        rows = _candidates(connection, policy, cap)
+                        elapsed = (time.perf_counter() - start) * 1000
+                        signatures = [(path, chunk) for path, chunk, _packed in rows]
+                        if reference is not None and signatures != reference:
+                            raise AssertionError('Unstable synthetic SQL ordering')
+                        reference = signatures
+                        if trial > 0:
+                            measurements.append(elapsed)
+                finally:
+                    if policy == 'fourway_indexed_merge':
+                        connection.execute('DROP INDEX embedding_lsh_bucket_chunk_path')
+                results[policy] = _evaluate(rows, measurements)
+                if index_ms is not None:
+                    results[policy]['additional_index_build_ms'] = index_ms
+                    results[policy]['additional_index_kib'] = index_kib
+                if policy == 'current_exact_first':
+                    baseline = search_semantic_mirror(connection, basis(0), 6,
+                                                      cap, policy='exact_first')
+                    if (TARGET in baseline) != results[policy]['late_best_retrieved_at_6']:
+                        raise AssertionError('Experimental baseline diverged from Android SQL mirror')
+            cases[case] = results
+        return {
+            'mode': 'in_memory_synthetic_lsh_fairness_host_only',
+            'sqlite_version': sqlite3.sqlite_version,
+            'sources': sources, 'chunks_per_source': chunks,
+            'total_chunks': sources * chunks,
+            'candidate_cap': cap, 'measured_trials': trials,
+            'cases': cases,
+            'uneven_distribution_probe': synthetic_uneven_distribution_probe(),
+            'skew_budget_sweep': synthetic_skew_budget_sweep(),
+            'memory_dedup_probe': synthetic_memory_dedup_probe(),
+            'chunk_length_profiles': synthetic_chunk_length_profiles(),
+            'limitations': [
+                'alternative SQL is diagnostic only and is not used in Android',
+                'one-chunk sampling can miss a later better chunk in the same source',
+                'per-bucket quotas may strand capacity or duplicate source chunks',
+                'per-bucket source sampling can repeat paths, starve later tables '
+                'and choose a weaker arbitrary chunk within one table',
+                'even the four-table source sample misses a later better chunk '
+                'when it shares only the same exact table as an earlier chunk',
+                'four-way indexed merging needs an extra derived SQLite index '
+                'whose write, storage, migration and device energy costs are untested',
+                'source chunk quotas favor early offsets and can lose a late-only '
+                'relevant chunk when the first pass exhausts its budget',
+                'combining source sampling with quotas repeats some candidates '
+                'across passes and may still exhaust the cap on dense indexes',
+                'in-memory deduplication can reclaim candidate slots but may return '
+                'up to 4096 extra SQLite rows and retain up to 45k chunk IDs in RAM',
+                'temporary SQL dedup uses a private transactional index, while '
+                'in-memory dedup has extra cursor traffic and has no Android timing',
+                'heterogeneous host-only fixtures are not a representative '
+                'distribution of actual Android vault chunk counts',
+                'single-call timings across artificial chunk-length profiles '
+                'are descriptive, not statistically stable Android p50/p95',
+                'chunk interleaving may require an expensive temporary ORDER BY sort',
+                'no representative model, real vault or physical-device latency/energy',
+                'observed GROUP BY row choice is SQLite-plan-dependent',
+            ],
+        }
+    finally:
+        connection.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sources', type=int, default=360)
+    parser.add_argument('--chunks', type=int, default=128)
+    parser.add_argument('--cap', type=int, default=MAX_SEMANTIC_CANDIDATES)
+    parser.add_argument('--trials', type=int, default=2)
+    args = parser.parse_args()
+    print(json.dumps(compare(args.sources, args.chunks, args.cap, args.trials),
+                     indent=2, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    main()

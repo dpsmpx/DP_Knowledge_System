@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
  * The original Markdown remains authoritative; links are only candidates.
  */
 public final class KnowledgeMarkdownMetadata {
+    /** Matches the explicit chat-question gate; no unbounded FTS work. */
+    public static final int MAX_EVIDENCE_QUESTION_CHARS = 1200;
     private static final Pattern WIKI_LINK = Pattern.compile(
             "!?\\[\\[([^\\]|#^]+)(?:[#^][^\\]|]*)?(?:\\|[^\\]]*)?\\]\\]");
     private static final Pattern MARKDOWN_LINK = Pattern.compile(
@@ -145,8 +147,26 @@ public final class KnowledgeMarkdownMetadata {
 
     /** Bounded recall-first OR query for local LLM evidence, never a raw FTS expression. */
     public static String ftsEvidenceQuery(final String question) {
-        if (question == null || question.isEmpty()) {
-            return "";
+        final List<String> selected = ftsEvidenceTerms(question);
+        final StringBuilder query = new StringBuilder();
+        for (final String part : selected) {
+            if (query.length() > 0) {
+                query.append(" OR ");
+            }
+            // In FTS4 OR expressions, '*' must be inside each quoted term.
+            // The "term"* OR "other"* form can silently return no rows.
+            query.append('"').append(part).append('*').append('"');
+        }
+        return query.toString();
+    }
+
+    /** Share the same bounded, normalized terms with the excerpt selector.
+     * The original question is never sent anywhere by this helper.
+     */
+    static List<String> ftsEvidenceTerms(final String question) {
+        if (question == null || question.isEmpty()
+                || question.length() > MAX_EVIDENCE_QUESTION_CHARS) {
+            return Collections.emptyList();
         }
         final StringBuilder word = new StringBuilder();
         final List<String> terms = new ArrayList<>();
@@ -163,14 +183,116 @@ public final class KnowledgeMarkdownMetadata {
                 word.setLength(0);
             }
         }
-        final StringBuilder query = new StringBuilder();
-        for (final String part : terms.subList(0, Math.min(terms.size(), 8))) {
-            if (query.length() > 0) {
-                query.append(" OR ");
+        // Drop only common question framing when meaningful search terms remain.
+        // A one-word question is still searchable; this is not synonym expansion.
+        final List<String> informative = new ArrayList<>();
+        for (final String term : terms) {
+            if (!isQuestionFiller(term)) {
+                informative.add(term);
             }
-            query.append('"').append(part).append('"').append('*');
         }
-        return query.toString();
+        final List<String> selected = informative.isEmpty() ? terms : informative;
+        return new ArrayList<>(selected.subList(0, Math.min(selected.size(), 8)));
+    }
+
+    /** Count distinct query-token prefixes at title word boundaries (not substrings).
+     * Inspect at most 256 UTF-16 units of title metadata, never source bodies.
+     * One complete title word can satisfy at most one query term.
+     */
+    static int titleEvidenceTermMatches(final String title, final List<String> terms) {
+        if (title == null || title.isEmpty() || terms == null || terms.isEmpty()) {
+            return 0;
+        }
+        final boolean[] matched = new boolean[terms.size()];
+        final int end = Math.min(title.length(), 256);
+        final StringBuilder word = new StringBuilder();
+        int score = 0;
+        for (int i = 0; i <= end; i++) {
+            final boolean atEnd = i == end;
+            final char ch = atEnd ? ' ' : title.charAt(i);
+            if (!atEnd && Character.isLetterOrDigit(ch)) {
+                word.append(Character.toLowerCase(ch));
+            } else if (word.length() > 0) {
+                // Do not award credit for a word truncated at the 256-char cap.
+                if (!atEnd || end == title.length()
+                        || !Character.isLetterOrDigit(title.charAt(end))) {
+                    int best = -1;
+                    for (int j = 0; j < terms.size(); j++) {
+                        if (!matched[j] && word.indexOf(terms.get(j)) == 0
+                                && (best < 0 || terms.get(j).length() > terms.get(best).length())) {
+                            best = j;
+                        }
+                    }
+                    if (best >= 0) {
+                        matched[best] = true;
+                        score++;
+                    }
+                }
+                word.setLength(0);
+            }
+        }
+        return score;
+    }
+
+    /** Boost an adjacent 2–4-term phrase; the ordinary ALL/OR passes remain.
+     * Only sanitized FTS4 tokens are concatenated, never raw query syntax.
+     */
+    public static String ftsEvidencePhraseQuery(final String question) {
+        final String safe = ftsEvidenceQuery(question);
+        final String[] quoted = safe.split(" OR ");
+        if (quoted.length < 2 || quoted.length > 4) {
+            return "";
+        }
+        final StringBuilder phrase = new StringBuilder("\"");
+        for (final String token : quoted) {
+            if (phrase.length() > 1) {
+                phrase.append(' ');
+            }
+            // Each token is generated above as "letters-or-digits*".
+            phrase.append(token, 1, token.length() - 1);
+        }
+        return phrase.append('"').toString();
+    }
+
+    private static boolean isQuestionFiller(final String term) {
+        switch (term) {
+            case "what":
+            case "which":
+            case "where":
+            case "when":
+            case "whose":
+            case "please":
+            case "could":
+            case "would":
+            case "should":
+            // Frequent introductory wording in natural-language questions.
+            // Keep the original terms when *all* of them are fillers.
+            case "tell":
+            case "about":
+            case "know":
+            case "explain":
+            case "describe":
+            case "какие":
+            case "какой":
+            case "какая":
+            case "какое":
+            case "когда":
+            case "почему":
+            case "зачем":
+            case "сколько":
+            case "такое":
+            case "каковы":
+            case "расскажи":
+            case "расскажите":
+            case "известно":
+            case "объясни":
+            case "объясните":
+            case "опиши":
+            case "опишите":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static void addTarget(final Set<String> links, final String raw) {

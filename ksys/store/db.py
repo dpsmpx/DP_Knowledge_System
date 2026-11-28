@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-DB_SCHEMA_VERSION = "4"
+DB_SCHEMA_VERSION = "6"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -45,9 +45,29 @@ CREATE TABLE IF NOT EXISTS candidate_atoms (
     atom_key TEXT NOT NULL,
     predicate TEXT NOT NULL,
     negated INTEGER NOT NULL,
+    scope_key TEXT NOT NULL,
+    valid_from TEXT,
+    valid_to TEXT,
     PRIMARY KEY (candidate_id, atom_key, negated));
 CREATE INDEX IF NOT EXISTS candidate_atoms_doc ON candidate_atoms(doc);
 CREATE INDEX IF NOT EXISTS candidate_atoms_key ON candidate_atoms(atom_key, doc);
+CREATE INDEX IF NOT EXISTS candidate_atoms_scope ON candidate_atoms(scope_key, doc);
+
+-- Unapproved possible/usual/hypothetical readings are NOT claim votes.
+-- Separate table prevents them entering exact agreement/conflict or audits.
+CREATE TABLE IF NOT EXISTS candidate_modal_atoms (
+    candidate_id TEXT NOT NULL,
+    fragment_id TEXT NOT NULL,
+    doc TEXT NOT NULL,
+    locator TEXT NOT NULL,
+    atom_key TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    negated INTEGER NOT NULL,
+    modality TEXT NOT NULL,
+    node_kind TEXT NOT NULL,
+    PRIMARY KEY (candidate_id, atom_key, negated, modality, node_kind));
+CREATE INDEX IF NOT EXISTS candidate_modal_atoms_doc ON candidate_modal_atoms(doc);
+CREATE INDEX IF NOT EXISTS candidate_modal_atoms_key ON candidate_modal_atoms(atom_key, doc);
 
 CREATE TABLE IF NOT EXISTS journal (
     seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, op TEXT NOT NULL, ts TEXT NOT NULL,

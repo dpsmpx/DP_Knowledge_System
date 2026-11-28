@@ -38,6 +38,7 @@ android {
         buildConfigField "String", "BUILD_DATE", "\"${getBuildDate()}\""
         buildConfigField "String", "GITHASH", "\"${getGitHash}\""
         buildConfigField "String", "GITMSG", "\"${getGitLastCommitMessage}\""
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     base {
         archivesName = "${defaultConfig.applicationId}-v${defaultConfig.versionCode}-${defaultConfig.versionName}"
@@ -118,6 +119,17 @@ chaquopy {
         // KnowledgeBase reads its own source for deterministic cache fingerprints.
         extractPackages('ksys')
     }
+    productFlavors {
+        getByName('flavorAtest') {
+            // The official Chaquopy Android wheels for native SentencePiece
+            // 0.2.1 currently target CPython 3.10, not CPython 3.11.
+            // Keep upstream Markor flavors on their existing Python version.
+            version = '3.10'
+            pip {
+                install 'sentencepiece==0.2.1'
+            }
+        }
+    }
     sourceSets {
         getByName('main') {
             srcDir(layout.buildDirectory.dir('generated/python').get().asFile)
@@ -134,6 +146,16 @@ dependencies {
     // Testing
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.assertj:assertj-core:3.27.7'
+    // JVM mock-server tests exercise request serialization: Android's org.json
+    // framework classes are stubs in local unit tests. Test-only, not in APK.
+    testImplementation 'org.json:json:20240303'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+
+    // DPKS-only local CPU backend. No model weights are bundled. Upstream
+    // Markor flavors stay free of the native ONNX Runtime dependency.
+    // Pinned stable Maven Central release; never use latest.release in CI.
+    flavorAtestImplementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.1'
 
     // Android standard libs
     implementation 'androidx.appcompat:appcompat:1.7.1'          // 1.8+    -> minSdk23

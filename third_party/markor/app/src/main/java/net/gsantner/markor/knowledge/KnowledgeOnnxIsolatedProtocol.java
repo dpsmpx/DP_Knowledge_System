@@ -1,0 +1,101 @@
+/* Copyright 2026 DP Knowledge System contributors; SPDX-License-Identifier: Apache-2.0 */
+package net.gsantner.markor.knowledge;
+
+/** Scalar metadata plus one explicit bounded model FD; no note text or file paths. */
+final class KnowledgeOnnxIsolatedProtocol {
+    static final int RUN_SYNTHETIC = 1;
+    static final int CANCEL_AND_EXIT = 2;
+    static final int RESULT_PASSED = 3;
+    static final int RESULT_FAILED = 4;
+    static final int RUN_MODEL_SESSION = 5;
+    static final int RESULT_SESSION_PASSED = 6;
+    static final int RESULT_SESSION_FAILED = 7;
+    // Never sent by production clients; accepted by the isolated service in debug builds only.
+    static final int DEBUG_STALL = 8;
+    static final int DEBUG_STALL_STARTED = 9;
+    static final int RESULT_SESSION_MEMORY_DENIED = 10;
+    // Debug-only synthetic fatal Java error; never allocate memory to trigger a real OOM.
+    static final int DEBUG_SIMULATE_OOM = 11;
+    // Debug-only FD transport for ONE exact, generated E5 fixture. No arbitrary inference.
+    static final int RUN_DEBUG_E5_FD = 12;
+    // Debug-only, SHA-pinned >16 MiB synthetic FD verification; never invokes ORT.
+    static final int DEBUG_VERIFY_LARGE_FD = 13;
+    static final int RESULT_DEBUG_LARGE_FD_VERIFIED = 14;
+    static final int RESULT_DEBUG_LARGE_FD_FAILED = 15;
+    static final String DEBUG_LARGE_FD_LENGTH = "debug_large_fd_length";
+    // No inference and no trust grant: compare ONLY the received bytes with a
+    // caller-declared SHA. The client must independently enforce package audit.
+    static final int VERIFY_ONLY_LARGE_FD = 16;
+    static final int RESULT_VERIFY_ONLY_MATCH = 17;
+    static final int RESULT_VERIFY_ONLY_MISMATCH = 18;
+    static final String VERIFY_ONLY_FD_LENGTH = "verify_fd_length";
+    // DEBUG-only two pinned, generated E5 graphs via FD -> verified direct
+    // ByteBuffer -> ORT metadata. NO run(), real weights or trust grant.
+    static final int DEBUG_INSPECT_DIRECT_E5_FD = 19;
+    static final int DEBUG_E5_TWO_INPUT_POOLER = 1;
+    static final int DEBUG_E5_THREE_INPUT = 2;
+    static final String DEBUG_E5_VARIANT = "debug_e5_variant";
+    static final long WATCHDOG_MILLIS = 30_000L;
+    static final long CLIENT_TIMEOUT_MILLIS = WATCHDOG_MILLIS + 5_000L;
+    static final long DEBUG_WATCHDOG_MILLIS = 6_000L;
+    // Large FD verification may hash up to 1 GiB; unlike native ORT sessions,
+    // it has no model allocation or executable graph and gets its own timeout.
+    static final long VERIFY_ONLY_WATCHDOG_MILLIS = 180_000L;
+    static final String VERSION = "v";
+    static final String INIT_MILLIS = "init_ms";
+    static final String RUN_MICROS = "run_us";
+    static final String NATIVE_DELTA = "native_delta";
+    static final String PSS_BEFORE_KIB = "pss_before_kib";
+    static final String PSS_OBSERVED_KIB = "pss_observed_kib";
+    static final String PSS_AFTER_KIB = "pss_after_kib";
+    static final String RSS_HIGH_WATER_KIB = "rss_hwm_kib";
+    // A DEBUG-only test signal to refuse a verified FD before native session creation.
+    static final String DEBUG_FORCE_LOW_MEMORY = "debug_force_low_memory";
+    static final String PIPE_FD = "fd";
+    static final String MODEL_SHA256 = "sha256";
+    static final String INPUTS = "inputs";
+    static final String OUTPUTS = "outputs";
+    static final String INPUT_TENSORS = "input_tensors";
+    static final String OUTPUT_TENSORS = "output_tensors";
+    static final String FLOAT_INPUTS = "float_inputs";
+    static final String FLOAT_OUTPUTS = "float_outputs";
+    static final String INT64_INPUTS = "int64_inputs";
+    static final String INT64_OUTPUTS = "int64_outputs";
+    static final String DYNAMIC_INPUT_AXES = "dynamic_input_axes";
+    static final String DYNAMIC_OUTPUT_AXES = "dynamic_output_axes";
+    static final String MAX_INPUT_RANK = "max_input_rank";
+    static final String MAX_OUTPUT_RANK = "max_output_rank";
+    // SHA-256 of exact E5 allowlisted names/types/axes; no arbitrary labels in Binder.
+    static final String E5_DESCRIPTOR_SHA256 = "e5_io_sha256";
+
+    private KnowledgeOnnxIsolatedProtocol() { }
+
+    static boolean validDebugE5Variant(final int variant) {
+        return variant == DEBUG_E5_TWO_INPUT_POOLER || variant == DEBUG_E5_THREE_INPUT;
+    }
+
+    static boolean validVerifyOnlyFdEnvelope(final long length, final String sha256) {
+        return length >= 16 && length <= KnowledgeE5LargeFdTransfer.MAX_TRANSFER_BYTES
+                && KnowledgeOnnxSessionPipe.validSha256(sha256);
+    }
+
+    /** Runtime metadata is not user-supplied and never needs arbitrary text. */
+    static String safeVersion(final String supplied) {
+        if (supplied == null || supplied.isEmpty()) return "unknown";
+        final StringBuilder clean = new StringBuilder();
+        for (int i = 0; i < supplied.length() && clean.length() < 48; i++) {
+            final char value = supplied.charAt(i);
+            clean.append((value >= '0' && value <= '9')
+                    || (value >= 'A' && value <= 'Z')
+                    || (value >= 'a' && value <= 'z')
+                    || value == '.' || value == '-' || value == '_' || value == '+'
+                    ? value : '?');
+        }
+        return clean.toString();
+    }
+
+    static boolean validTimings(final long initMillis, final long runMicros) {
+        return initMillis >= 0 && initMillis <= WATCHDOG_MILLIS
+                && runMicros >= 0 && runMicros <= WATCHDOG_MILLIS * 1000L;
+    }
+}

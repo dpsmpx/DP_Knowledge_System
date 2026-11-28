@@ -107,6 +107,124 @@ public class KnowledgeEmbeddingTest {
     }
 
     @Test
+    public void androidHybridFixtureOppositeVectorsCannotLeakIntoLshProbeSet() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] opposite = KnowledgeEmbeddingVectors.normalize(
+                new float[]{-1, 0, 0, 0, 0, 0, 0, 0});
+        // Shared with scripts/benchmark_stage19_hybrid.py: a golden LSH
+        // signature catches drift between the host SQL mirror and Android.
+        assertArrayEquals(new int[]{1023, 1723, 3022, 3807},
+                KnowledgeEmbeddingLsh.buckets(query));
+        final int[] queryProbes = KnowledgeEmbeddingLsh.probes(query);
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.9f, 0.4358899f, 0, 0, 0, 0, 0, 0});
+        boolean nearCandidateSeen = false;
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(near)) {
+            for (final int probe : queryProbes) {
+                if (bucket == probe) nearCandidateSeen = true;
+            }
+        }
+        assertTrue("The two-chunk Android fixture must expose its weaker first chunk",
+                nearCandidateSeen);
+        final int[] oppositeBuckets = KnowledgeEmbeddingLsh.buckets(opposite);
+        for (final int bucket : oppositeBuckets) {
+            for (final int probe : queryProbes) {
+                assertNotEquals("The QA lexical-only vector must stay outside the query LSH",
+                        bucket, probe);
+            }
+        }
+        assertEquals(1, KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(query)), .00001);
+        assertEquals(-1, KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(opposite)), .00001);
+    }
+
+    @Test
+    public void overloadedCandidateFixtureIncludesExactNeighborOverlapButNotHiddenSource() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final int[] exact = KnowledgeEmbeddingLsh.buckets(query);
+        final int[] probes = KnowledgeEmbeddingLsh.probes(query);
+        // Same 0.99/0.98/0.80 vectors as EMBED-OVERLAP-19 and the Python mirror.
+        for (int i = 0; i < 3; i++) {
+            final float cosine = i == 0 ? .99f : i == 1 ? .98f : .80f;
+            final float[] direction = new float[8];
+            direction[0] = cosine;
+            direction[i == 1 ? 7 : 1] = (float) Math.sqrt(1 - cosine * cosine);
+            final float[] candidate = KnowledgeEmbeddingVectors.normalize(direction);
+            int exactMatches = 0;
+            int neighborMatches = 0;
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(candidate)) {
+                for (final int value : exact) if (bucket == value) exactMatches++;
+                for (int j = 0; j < probes.length; j++) {
+                    if (j % (KnowledgeEmbeddingLsh.BITS + 1) != 0
+                            && bucket == probes[j]) neighborMatches++;
+                }
+            }
+            assertEquals(i == 0 ? 1 : 0, exactMatches);
+            assertEquals(i == 0 ? 1 : i == 1 ? 4 : 0, neighborMatches);
+        }
+    }
+
+    @Test
+    public void sourceQuotaQaFixtureHasOneNearExactBucketAndLateOnlyTarget() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] near = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.99f, 0.14106736f, 0, 0, 0, 0, 0, 0});
+        final float[] hidden = KnowledgeEmbeddingVectors.normalize(
+                new float[]{0.8f, 0.6f, 0, 0, 0, 0, 0, 0});
+        final int[] exact = KnowledgeEmbeddingLsh.buckets(query);
+        int nearExactMatches = 0;
+        int hiddenExactMatches = 0;
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(near)) {
+            for (final int signature : exact) if (bucket == signature) nearExactMatches++;
+        }
+        for (final int bucket : KnowledgeEmbeddingLsh.buckets(hidden)) {
+            for (final int signature : exact) if (bucket == signature) hiddenExactMatches++;
+        }
+        assertEquals(1, nearExactMatches);
+        assertEquals(0, hiddenExactMatches);
+        final List<KnowledgeEmbeddingChunks.Chunk> longChunks =
+                KnowledgeEmbeddingChunks.fromNote(
+                        new String(new char[3000]).replace('\0', 'x'));
+        assertEquals(4, longChunks.size());
+        assertEquals(770, longChunks.get(1).start);
+        assertEquals(1540, longChunks.get(2).start);
+        assertTrue(KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(query)) > .999);
+    }
+
+    @Test
+    public void laterBetterSameBucketFixtureCannotBeResolvedBySourceSamplingAlone() {
+        final float[] query = KnowledgeEmbeddingVectors.normalize(
+                new float[]{1, 0, 0, 0, 0, 0, 0, 0});
+        final float[] early = KnowledgeEmbeddingVectors.normalize(
+                new float[]{.99f, (float) Math.sqrt(1 - .99 * .99), 0, 0, 0, 0, 0, 0});
+        final float[] late = KnowledgeEmbeddingVectors.normalize(
+                new float[]{.999f, (float) Math.sqrt(1 - .999 * .999), 0, 0, 0, 0, 0, 0});
+        int earlyExact = 0;
+        int lateExact = 0;
+        for (final int exact : KnowledgeEmbeddingLsh.buckets(query)) {
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(early)) {
+                if (bucket == exact) earlyExact++;
+            }
+            for (final int bucket : KnowledgeEmbeddingLsh.buckets(late)) {
+                if (bucket == exact) lateExact++;
+            }
+        }
+        assertEquals(1, earlyExact);
+        assertEquals(1, lateExact);
+        assertEquals(KnowledgeEmbeddingLsh.buckets(early)[0],
+                KnowledgeEmbeddingLsh.buckets(late)[0]);
+        assertTrue(KnowledgeEmbeddingVectors.similarity(query,
+                KnowledgeEmbeddingVectors.encode(late))
+                > KnowledgeEmbeddingVectors.similarity(query,
+                        KnowledgeEmbeddingVectors.encode(early)));
+    }
+
+    @Test
     public void cosineSearchRanksSemanticVectorsAndRejectsInvalidBuffers() {
         final float[] direction = new float[]{3, 4, 0, 0, 0, 0, 0, 0};
         final float[] query = KnowledgeEmbeddingVectors.normalize(direction);

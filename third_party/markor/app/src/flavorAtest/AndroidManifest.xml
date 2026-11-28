@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- No exported entry point, no app UID permissions, no user-model bytes. -->
+        <service
+            android:name=".knowledge.KnowledgeOnnxIsolatedService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":dpks_onnx_cpu" />
+    </application>
+</manifest>

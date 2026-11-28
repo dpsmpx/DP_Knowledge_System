@@ -8,6 +8,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -15,6 +16,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -35,7 +37,7 @@ import java.util.UUID;
 public final class KnowledgeLocalIndex {
     public static final int MAX_INDEX_BYTES_PER_NOTE = 2_000_000;
     private static final String DB_NAME = "knowledge_index_v1.sqlite";
-    private static final int SCHEMA_VERSION = 3;
+    private static final int SCHEMA_VERSION = 5;
     private static final int MAX_SEMANTIC_CANDIDATES = 45_000;
 
     public interface Progress {
@@ -47,11 +49,21 @@ public final class KnowledgeLocalIndex {
         public final String title;
         /** False for a preserved row not seen in the most recent partial scan. */
         public final boolean confirmedInLastScan;
+        /** Indexed file identity for LLM evidence; -1 for ordinary browsing hits. */
+        public final long modifiedAtMillis;
+        public final long sizeBytes;
 
         private Hit(final String relativePath, final String title, final boolean confirmed) {
+            this(relativePath, title, confirmed, -1, -1);
+        }
+
+        private Hit(final String relativePath, final String title, final boolean confirmed,
+                    final long modified, final long size) {
             this.relativePath = relativePath;
             this.title = title;
             confirmedInLastScan = confirmed;
+            modifiedAtMillis = modified;
+            sizeBytes = size;
         }
     }
 
@@ -264,35 +276,56 @@ public final class KnowledgeLocalIndex {
                 final long existingId;
                 final long existingModified;
                 final long existingSize;
+                final byte[] existingRawSha256;
                 try (Cursor c = db.rawQuery(
-                        "SELECT id, modified, size FROM notes WHERE path=?",
+                        "SELECT id, modified, size, raw_sha256 FROM notes WHERE path=?",
                         new String[]{note.relativePath})) {
                     if (c.moveToFirst()) {
                         existingId = c.getLong(0);
                         existingModified = c.getLong(1);
                         existingSize = c.getLong(2);
+                        existingRawSha256 = c.getBlob(3);
                     } else {
                         existingId = -1;
                         existingModified = -1;
                         existingSize = -1;
+                        existingRawSha256 = null;
                     }
                 }
+                byte[] bounded = null;
                 if (existingId >= 0 && existingModified == note.modifiedAtMillis
                         && existingSize == note.sizeBytes) {
+                    if ((existingRawSha256 != null && existingRawSha256.length == 32)
+                            || note.sizeBytes > MAX_INDEX_BYTES_PER_NOTE) {
+                        checkNoteUnchanged(note);
+                        db.execSQL("UPDATE notes SET generation=? WHERE id=?",
+                                new Object[]{generation, existingId});
+                        reused++;
+                        continue;
+                    }
+                    // Schema v3 contains decoded FTS text but no original-byte seal.
+                    // Backfill only when the current source still decodes to the
+                    // indexed body. Preserve expensive embeddings for that case.
+                    bounded = readBounded(note.file, cancellation);
                     checkNoteUnchanged(note);
-                    db.execSQL("UPDATE notes SET generation=? WHERE id=?",
-                            new Object[]{generation, existingId});
-                    reused++;
-                    continue;
+                    if (bounded != null && matchesStoredBody(db, existingId,
+                            new String(bounded, StandardCharsets.UTF_8))) {
+                        db.execSQL("UPDATE notes SET generation=?, raw_sha256=? WHERE id=?",
+                                new Object[]{generation, KnowledgeLlmEvidence.rawSha256(bounded),
+                                        existingId});
+                        reused++;
+                        continue;
+                    }
                 }
 
                 // A note may grow between discovery and indexing. In that case,
                 // retain its filename and postpone content indexing to a rescan.
-                final String bounded = note.sizeBytes > MAX_INDEX_BYTES_PER_NOTE
-                        ? null : readBounded(note.file, cancellation);
+                if (bounded == null && note.sizeBytes <= MAX_INDEX_BYTES_PER_NOTE) {
+                    bounded = readBounded(note.file, cancellation);
+                }
                 checkNoteUnchanged(note);
                 final boolean tooLarge = bounded == null;
-                final String text = tooLarge ? "" : bounded;
+                final String text = tooLarge ? "" : new String(bounded, StandardCharsets.UTF_8);
                 final KnowledgeMarkdownMetadata.Parsed parsed =
                         KnowledgeMarkdownMetadata.parse(note.relativePath, text);
                 final String title = tooLarge
@@ -304,6 +337,7 @@ public final class KnowledgeLocalIndex {
                 values.put("title", title);
                 values.put("oversized", tooLarge ? 1 : 0);
                 values.put("generation", generation);
+                values.put("raw_sha256", tooLarge ? null : KnowledgeLlmEvidence.rawSha256(bounded));
                 final long rowId;
                 if (existingId < 0) {
                     rowId = db.insertOrThrow("notes", null, values);
@@ -482,15 +516,24 @@ public final class KnowledgeLocalIndex {
             if (generation == null) {
                 return result;
             }
-            try (Cursor c = db.rawQuery("SELECT notes.path, notes.title FROM documents_fts "
-                        + "JOIN notes ON notes.id=documents_fts.docid "
-                        + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
-                        + "AND notes.generation=? "
-                        + "ORDER BY notes.path COLLATE NOCASE LIMIT ?",
-                    new String[]{safe, generation, Integer.toString(limit)})) {
-                while (c.moveToNext()) {
-                    result.add(new Hit(c.getString(0), c.getString(1), true));
-                }
+            final Set<String> seen = new HashSet<>();
+            final List<String> titleTerms = KnowledgeMarkdownMetadata.ftsEvidenceTerms(question);
+            // A path-ordered all-term shortlist may itself crowd out exact
+            // adjacent phrases. Prefer a bounded phrase pass for 2–4 terms,
+            // then all-term matches, then partial OR fallback. Never infer
+            // semantic equivalence or silently synthesize synonyms.
+            final String phrase = KnowledgeMarkdownMetadata.ftsEvidencePhraseQuery(question);
+            if (!phrase.isEmpty()) {
+                appendEvidenceHits(db, phrase, generation, limit * 2, limit,
+                        titleTerms, result, seen);
+            }
+            if (result.size() < limit) {
+                appendEvidenceHits(db, safe.replace(" OR ", " "), generation,
+                        limit * 2, limit, titleTerms, result, seen);
+            }
+            if (result.size() < limit && safe.contains(" OR ")) {
+                appendEvidenceHits(db, safe, generation, limit * 2, limit,
+                        titleTerms, result, seen);
             }
         } finally {
             db.close();
@@ -498,13 +541,123 @@ public final class KnowledgeLocalIndex {
         return result;
     }
 
+    private static final class EvidenceCandidate {
+        final Hit hit;
+        final int titleMatches;
+
+        EvidenceCandidate(final Hit source, final int matches) {
+            hit = source;
+            titleMatches = matches;
+        }
+    }
+
+    private static void appendEvidenceHits(final SQLiteDatabase db, final String query,
+                                           final String generation, final int scanLimit,
+                                           final int outputLimit, final List<String> titleTerms,
+                                           final List<Hit> result, final Set<String> seen) {
+        final List<EvidenceCandidate> candidates = new ArrayList<>();
+        try (Cursor c = db.rawQuery("SELECT notes.path, notes.title, notes.modified, notes.size FROM documents_fts "
+                        + "JOIN notes ON notes.id=documents_fts.docid "
+                        + "WHERE documents_fts MATCH ? AND notes.oversized=0 "
+                        + "AND notes.generation=? "
+                        + "ORDER BY notes.path COLLATE NOCASE, notes.path COLLATE BINARY LIMIT ?",
+                new String[]{query, generation, Integer.toString(scanLimit)})) {
+            while (c.moveToNext()) {
+                final String path = c.getString(0);
+                if (!seen.contains(path)) {
+                    final String title = c.getString(1);
+                    candidates.add(new EvidenceCandidate(
+                            new Hit(path, title, true, c.getLong(2), c.getLong(3)),
+                            KnowledgeMarkdownMetadata.titleEvidenceTermMatches(title, titleTerms)));
+                }
+            }
+        }
+        // Stable sort preserves SQL's NOCASE/BINARY pathname ordering on ties.
+        // Never promote an ALL/OR pass above a preceding exact-phrase pass.
+        Collections.sort(candidates, (left, right) ->
+                Integer.compare(right.titleMatches, left.titleMatches));
+        for (final EvidenceCandidate candidate : candidates) {
+            if (result.size() >= outputLimit) {
+                break;
+            }
+            if (seen.add(candidate.hit.relativePath)) {
+                result.add(candidate.hit);
+            }
+        }
+    }
+
+    /** Fail closed on any raw-byte change, including noncanonical UTF-8 that
+     * decodes to the same text. Missing v3 seals cannot authorize disclosure.
+     * The decoded FTS body is also compared to reject corrupt projections.
+     * Never update notes or projections here.
+     */
+    public synchronized boolean matchesIndexedEvidenceSource(final String path,
+                                                              final long modified, final long size,
+                                                              final byte[] currentBytes) {
+        if (path == null || path.isEmpty() || modified <= 0 || size < 0
+                || currentBytes == null || currentBytes.length != size
+                || currentBytes.length > MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        final SQLiteDatabase db = open();
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return false;
+            }
+            try (Cursor c = db.rawQuery("SELECT notes.raw_sha256, documents_fts.body FROM notes "
+                            + "JOIN documents_fts ON documents_fts.docid=notes.id "
+                            + "WHERE notes.path=? AND notes.modified=? AND notes.size=? "
+                            + "AND notes.oversized=0 AND notes.generation=? LIMIT 1",
+                    new String[]{path, Long.toString(modified), Long.toString(size), generation})) {
+                return c.moveToFirst()
+                        && KnowledgeLlmEvidence.matchesIndexedBytes(c.getBlob(0), currentBytes)
+                        && KnowledgeLlmEvidence.matchesIndexedText(c.getString(1),
+                                new String(currentBytes, StandardCharsets.UTF_8));
+            }
+        } finally {
+            db.close();
+        }
+    }
+
+    /** Legacy decoded-text gate, kept for synthetic source-regression tests. */
+    public synchronized boolean matchesIndexedEvidenceText(final String path,
+                                                            final long modified, final long size,
+                                                            final String currentText) {
+        if (path == null || path.isEmpty() || modified <= 0 || size < 0
+                || currentText == null
+                || currentText.length() > MAX_INDEX_BYTES_PER_NOTE) {
+            return false;
+        }
+        final SQLiteDatabase db = open();
+        try {
+            final String generation = getMeta(db, "last_scan_generation");
+            if (generation == null) {
+                return false;
+            }
+            try (Cursor c = db.rawQuery("SELECT documents_fts.body FROM notes "
+                            + "JOIN documents_fts ON documents_fts.docid=notes.id "
+                            + "WHERE notes.path=? AND notes.modified=? AND notes.size=? "
+                            + "AND notes.oversized=0 AND notes.generation=? LIMIT 1",
+                    new String[]{path, Long.toString(modified), Long.toString(size), generation})) {
+                return c.moveToFirst() && KnowledgeLlmEvidence.matchesIndexedText(
+                        c.getString(0), currentText);
+            }
+        } finally {
+            db.close();
+        }
+    }
+
     /** True only when every part of this unchanged document has been embedded. */
     public synchronized boolean hasEmbeddings(final String path, final long modified,
                                                final long size, final String modelKey) {
         final SQLiteDatabase db = open();
-        try (Cursor c = db.rawQuery("SELECT 1 FROM embedding_notes "
-                        + "WHERE path=? AND modified=? AND size=? AND model_key=? "
-                        + "AND chunker_version=? AND completed=chunks",
+        try (Cursor c = db.rawQuery("SELECT 1 FROM embedding_notes e "
+                        + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.path=? AND e.modified=? AND e.size=? AND e.model_key=? "
+                        + "AND e.chunker_version=? AND e.completed=e.chunks "
+                        + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation')",
                 new String[]{path, Long.toString(modified), Long.toString(size), modelKey,
                         Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION)})) {
             return c.moveToFirst();
@@ -524,7 +677,8 @@ public final class KnowledgeLocalIndex {
             }
             try (Cursor c = db.rawQuery("SELECT e.path FROM embedding_notes e "
                         + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
-                        + "AND n.size=e.size WHERE e.model_key=? AND e.completed=e.chunks "
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.model_key=? AND e.completed=e.chunks "
                         + "AND e.chunker_version=? AND n.generation=?",
                     new String[]{modelKey,
                             Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION),
@@ -539,32 +693,68 @@ public final class KnowledgeLocalIndex {
         return paths;
     }
 
-    /**
-     * Start or resume an explicit user-approved note upload. Old sampled vectors
-     * remain usable until the user initiates a rebuild with the new chunker.
+    /** Read-only preview of the resumable offset; must agree with beginEmbedding
+     * after consent, otherwise the upload plan is stale and must be rejected.
      */
-    public synchronized int beginEmbedding(final String path, final long modified,
-                                            final long size, final String modelKey,
-                                            final int expectedChunks, final boolean truncated) {
-        if (path == null || path.isEmpty() || modelKey == null || modelKey.isEmpty()
-                || expectedChunks < 1
-                || expectedChunks > KnowledgeEmbeddingChunks.MAX_CHUNKS_PER_NOTE) {
-            throw new IllegalArgumentException("Invalid embedding note");
-        }
+    public synchronized int previewEmbeddingResumeOffset(final String path,
+                                                          final long modified,
+                                                          final long size,
+                                                          final String modelKey,
+                                                          final int expectedChunks,
+                                                          final boolean truncated,
+                                                          final byte[] sourceSha256) {
         final SQLiteDatabase db = open();
-        int start = 0;
-        db.beginTransaction();
         try {
-            verifyCurrentNote(db, path, modified, size);
-            boolean reuse = false;
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
             try (Cursor c = db.rawQuery("SELECT model_key, modified, size, chunks, completed,"
-                            + "chunker_version, truncated FROM embedding_notes WHERE path=?",
+                            + "chunker_version, truncated, source_sha256 "
+                            + "FROM embedding_notes WHERE path=?",
                     new String[]{path})) {
                 if (c.moveToFirst() && modelKey.equals(c.getString(0))
                         && modified == c.getLong(1) && size == c.getLong(2)
                         && expectedChunks == c.getInt(3)
                         && KnowledgeEmbeddingChunks.CHUNKER_VERSION == c.getInt(5)
                         && (truncated ? 1 : 0) == c.getInt(6)
+                        && MessageDigest.isEqual(sourceSha256, c.getBlob(7))
+                        && c.getInt(4) >= 0 && c.getInt(4) <= expectedChunks) {
+                    return c.getInt(4);
+                }
+            }
+            return 0;
+        } finally {
+            db.close();
+        }
+    }
+
+    /** Start or resume an explicitly approved upload for the exact source hash.
+     * Unsealed old vectors remain on disk, but cannot be used or resumed.
+     */
+    public synchronized int beginEmbedding(final String path, final long modified,
+                                            final long size, final String modelKey,
+                                            final int expectedChunks, final boolean truncated,
+                                            final byte[] sourceSha256) {
+        if (path == null || path.isEmpty() || modelKey == null || modelKey.isEmpty()
+                || expectedChunks < 1
+                || expectedChunks > KnowledgeEmbeddingChunks.MAX_CHUNKS_PER_NOTE
+                || sourceSha256 == null || sourceSha256.length != 32) {
+            throw new IllegalArgumentException("Invalid embedding note");
+        }
+        final SQLiteDatabase db = open();
+        int start = 0;
+        db.beginTransaction();
+        try {
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
+            boolean reuse = false;
+            try (Cursor c = db.rawQuery("SELECT model_key, modified, size, chunks, completed,"
+                            + "chunker_version, truncated, source_sha256 "
+                            + "FROM embedding_notes WHERE path=?",
+                    new String[]{path})) {
+                if (c.moveToFirst() && modelKey.equals(c.getString(0))
+                        && modified == c.getLong(1) && size == c.getLong(2)
+                        && expectedChunks == c.getInt(3)
+                        && KnowledgeEmbeddingChunks.CHUNKER_VERSION == c.getInt(5)
+                        && (truncated ? 1 : 0) == c.getInt(6)
+                        && MessageDigest.isEqual(sourceSha256, c.getBlob(7))
                         && c.getInt(4) >= 0 && c.getInt(4) <= expectedChunks) {
                     reuse = true;
                     start = c.getInt(4);
@@ -584,6 +774,7 @@ public final class KnowledgeLocalIndex {
                 note.put("completed", 0);
                 note.put("truncated", truncated ? 1 : 0);
                 note.put("chunker_version", KnowledgeEmbeddingChunks.CHUNKER_VERSION);
+                note.put("source_sha256", sourceSha256);
                 db.insertOrThrow("embedding_notes", null, note);
             }
             db.setTransactionSuccessful();
@@ -598,23 +789,27 @@ public final class KnowledgeLocalIndex {
     public synchronized void appendEmbeddingBatch(final String path, final long modified,
                                                     final long size, final String modelKey,
                                                     final List<KnowledgeEmbeddingChunks.Chunk> chunks,
-                                                    final int from, final float[][] normalized) {
+                                                    final int from, final float[][] normalized,
+                                                    final byte[] sourceSha256) {
         if (normalized == null || normalized.length < 1
                 || normalized.length > KnowledgeEmbeddingClient.MAX_BATCH
-                || from < 0 || chunks == null || from + normalized.length > chunks.size()) {
+                || from < 0 || chunks == null || from + normalized.length > chunks.size()
+                || sourceSha256 == null || sourceSha256.length != 32) {
             throw new IllegalArgumentException("Invalid embedding checkpoint");
         }
         final SQLiteDatabase db = open();
         db.beginTransaction();
         try {
-            verifyCurrentNote(db, path, modified, size);
+            verifyCurrentNote(db, path, modified, size, sourceSha256);
             int storedDimension = -1;
-            try (Cursor c = db.rawQuery("SELECT completed, chunks, dimension FROM embedding_notes "
+            try (Cursor c = db.rawQuery("SELECT completed, chunks, dimension, source_sha256 "
+                            + "FROM embedding_notes "
                             + "WHERE path=? AND model_key=? AND modified=? AND size=? "
                             + "AND chunker_version=?",
                     new String[]{path, modelKey, Long.toString(modified), Long.toString(size),
                             Integer.toString(KnowledgeEmbeddingChunks.CHUNKER_VERSION)})) {
-                if (!c.moveToFirst() || c.getInt(0) != from || c.getInt(1) != chunks.size()) {
+                if (!c.moveToFirst() || c.getInt(0) != from || c.getInt(1) != chunks.size()
+                        || !MessageDigest.isEqual(sourceSha256, c.getBlob(3))) {
                     throw new IllegalStateException("Embedding checkpoint is stale");
                 }
                 storedDimension = c.getInt(2);
@@ -653,11 +848,15 @@ public final class KnowledgeLocalIndex {
     }
 
     private static void verifyCurrentNote(final SQLiteDatabase db, final String path,
-                                           final long modified, final long size) {
-        try (Cursor c = db.rawQuery("SELECT modified, size, oversized FROM notes WHERE path=?",
+                                           final long modified, final long size,
+                                           final byte[] sourceSha256) {
+        try (Cursor c = db.rawQuery("SELECT modified, size, oversized, raw_sha256, generation "
+                        + "FROM notes WHERE path=?",
                 new String[]{path})) {
             if (!c.moveToFirst() || c.getLong(0) != modified
-                    || c.getLong(1) != size || c.getInt(2) != 0) {
+                    || c.getLong(1) != size || c.getInt(2) != 0
+                    || !MessageDigest.isEqual(sourceSha256, c.getBlob(3))
+                    || !c.getString(4).equals(getMeta(db, "last_scan_generation"))) {
                 throw new IllegalStateException("Source changed before embedding save");
             }
         }
@@ -667,7 +866,9 @@ public final class KnowledgeLocalIndex {
         final SQLiteDatabase db = open();
         try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_notes e "
                         + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
-                        + "AND n.size=e.size WHERE e.model_key=? AND e.completed=e.chunks",
+                        + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                        + "WHERE e.model_key=? AND e.completed=e.chunks "
+                        + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation')",
                 new String[]{modelKey})) {
             return c.moveToFirst() ? c.getInt(0) : 0;
         } finally {
@@ -682,12 +883,279 @@ public final class KnowledgeLocalIndex {
     public synchronized List<SemanticHit> semanticSearch(final String modelKey,
                                                           final float[] normalizedQuestion,
                                                           final int limit) {
+        return semanticSearchWithBudget(modelKey, normalizedQuestion, limit,
+                MAX_SEMANTIC_CANDIDATES, CandidatePolicy.PRODUCTION);
+    }
+
+    /** Alternative candidate selectors are reachable only from guarded QA. */
+    private enum CandidatePolicy {
+        PRODUCTION, SOURCE_QUOTA, SAMPLE_THEN_QUOTA, DEDUP_SAMPLE_THEN_QUOTA,
+        MEMORY_DEDUP_SAMPLE_QUOTA
+    }
+
+    /** A deliberately small cap exercises adaptive SQL on disposable QA data
+     * without allocating 45k vectors. Never available on the real index.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchWithBudget(final String modelKey,
+                                                                     final float[] question,
+                                                                     final int limit,
+                                                                     final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.PRODUCTION);
+    }
+
+    /** Only the isolated cache-only QA can exercise the unshipped early-chunk
+     * quota candidate policy. Production search keeps its existing SQL.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchQuotaWithBudget(final String modelKey,
+                                                                          final float[] question,
+                                                                          final int limit,
+                                                                          final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.SOURCE_QUOTA);
+    }
+
+    /** Per-exact-table source sampling followed by disjoint early/late chunk
+     * quotas. Duplicate raw candidates across phases still consume the cap;
+     * this is diagnostic, not a production source-diversity promise.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchSampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.SAMPLE_THEN_QUOTA);
+    }
+
+    /** Cache-only diagnostic with a temporary per-search SQLite exclusion
+     * table. Sampling, quota, and fill cannot inspect the same chunk twice.
+     * Temporary index writes have not been measured on physical Android.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchDedupSampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA);
+    }
+
+    /** Only cache-generated QA sources may use bounded in-memory candidate
+     * exclusion. Allows at most 4096 additional grouped SQLite rows to
+     * reclaim wasted duplicate candidates; no TEMP table or index writes.
+     */
+    synchronized List<SemanticHit> syntheticSemanticSearchMemorySampleQuotaWithBudget(
+            final String modelKey, final float[] question, final int limit,
+            final int candidateBudget) {
+        checkSyntheticSearchBudget(candidateBudget);
+        return semanticSearchWithBudget(modelKey, question, limit, candidateBudget,
+                CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA);
+    }
+
+    private void checkSyntheticSearchBudget(final int candidateBudget) {
+        final File parent = databaseFile.getParentFile();
+        if (!syntheticDatabase || parent == null
+                || !parent.getName().startsWith("dpks-device-qa-")
+                || !databaseFile.getName().startsWith("qa-")
+                || candidateBudget < 1 || candidateBudget > MAX_SEMANTIC_CANDIDATES) {
+            throw new IllegalStateException("Budget override requires isolated QA database");
+        }
+    }
+
+    private List<SemanticHit> semanticSearchWithBudget(final String modelKey,
+                                                       final float[] normalizedQuestion,
+                                                       final int limit,
+                                                       final int candidateBudget,
+                                                       final CandidatePolicy candidatePolicy) {
         if (limit < 1 || limit > 40) {
             throw new IllegalArgumentException("Invalid result limit");
         }
-        final int[] buckets = KnowledgeEmbeddingLsh.probes(normalizedQuestion);
+        final int[] probes = KnowledgeEmbeddingLsh.probes(normalizedQuestion);
+        final Map<String, SemanticHit> best = new HashMap<>();
+        final SQLiteDatabase db = open();
+        final boolean temporaryExclusion =
+                candidatePolicy == CandidatePolicy.DEDUP_SAMPLE_THEN_QUOTA;
+        try {
+            if (temporaryExclusion) {
+                // Pin all TEMP-table SQL to one Android SQLite connection
+                // even if its pool uses more than one connection.
+                db.beginTransaction();
+            }
+            if (candidatePolicy != CandidatePolicy.PRODUCTION) {
+                // Deliberately experimental: test the same bounded source
+                // count / early-chunk quota as the offline SQL mirror.
+                // Only the cache-only QA entry point can reach this branch.
+                final int[] exact = KnowledgeEmbeddingLsh.buckets(normalizedQuestion);
+                final long completedSources;
+                try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_notes e "
+                                + "JOIN notes n ON n.path=e.path AND n.modified=e.modified "
+                                + "AND n.size=e.size AND n.raw_sha256=e.source_sha256 "
+                                + "WHERE e.model_key=? AND e.dimension=? "
+                                + "AND e.completed=e.chunks AND n.oversized=0 "
+                                + "AND n.generation=(SELECT value FROM meta "
+                                + "WHERE key='last_scan_generation')",
+                        new String[]{modelKey, Integer.toString(normalizedQuestion.length)})) {
+                    completedSources = c.moveToFirst() ? c.getLong(0) : 0;
+                }
+                if (completedSources == 0) {
+                    return Collections.emptyList();
+                }
+                final boolean deduplicate = temporaryExclusion;
+                final boolean memoryDedup =
+                        candidatePolicy == CandidatePolicy.MEMORY_DEDUP_SAMPLE_QUOTA;
+                final Set<String> inMemorySeen = memoryDedup ? new HashSet<>() : null;
+                final int rawScanLimit = memoryDedup
+                        ? candidateBudget + Math.min(candidateBudget, 4096) : candidateBudget;
+                if (deduplicate) {
+                    // TEMP schema belongs to this synthetic DB connection;
+                    // closing it discards the table and its private index.
+                    db.execSQL("CREATE TEMP TABLE qa_seen_lsh_candidates("
+                            + "path TEXT NOT NULL, chunk INTEGER NOT NULL, "
+                            + "PRIMARY KEY(path,chunk))");
+                }
+                int sampled = 0;
+                if (candidatePolicy == CandidatePolicy.SAMPLE_THEN_QUOTA
+                        || deduplicate || memoryDedup) {
+                    for (final int bucket : exact) {
+                        if (sampled == rawScanLimit
+                                || (memoryDedup && inMemorySeen.size() == candidateBudget)) {
+                            break;
+                        }
+                        final int rows = appendSemanticCandidatesRange(db,
+                                new int[]{bucket}, modelKey, normalizedQuestion,
+                                rawScanLimit - sampled, null, null, null,
+                                true, deduplicate, inMemorySeen, candidateBudget, best);
+                        if (rows < 0) return Collections.emptyList();
+                        sampled += rows;
+                    }
+                }
+                final int accepted = memoryDedup ? inMemorySeen.size() : sampled;
+                if (sampled == rawScanLimit || accepted == candidateBudget) {
+                    // The raw scan or distinct-candidate limit is spent.
+                    return rankSemanticHits(best, limit);
+                }
+                final int remaining = candidateBudget - accepted;
+                final int quota = (int) Math.max(1L, remaining / completedSources);
+                final int early = appendSemanticCandidatesRange(db, exact, modelKey,
+                        normalizedQuestion, rawScanLimit - sampled, null, null, quota,
+                        false, deduplicate, inMemorySeen, candidateBudget, best);
+                if (early < 0) {
+                    return Collections.emptyList();
+                }
+                sampled += early;
+                if (sampled < rawScanLimit
+                        && (memoryDedup ? inMemorySeen.size() < candidateBudget
+                                : early < remaining)
+                        && appendSemanticCandidatesRange(db, exact, modelKey,
+                                normalizedQuestion, rawScanLimit - sampled,
+                                null, quota, null, false, deduplicate,
+                                inMemorySeen, candidateBudget, best) < 0) {
+                    return Collections.emptyList();
+                }
+            } else {
+                // A chunk cap cannot truncate any source while the entire
+                // disposable vector index contains no more chunks. Preserve
+                // the original single SQL in this common case.
+                final boolean canTruncate;
+                try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM embedding_chunks", null)) {
+                    canTruncate = c.moveToFirst() && c.getLong(0) > candidateBudget;
+                }
+                if (!canTruncate) {
+                    if (appendSemanticCandidates(db, probes, modelKey, normalizedQuestion,
+                            candidateBudget, null, best) < 0) {
+                        return Collections.emptyList();
+                    }
+                } else {
+                    // Prioritize exact LSH signatures before one-bit neighbors.
+                    // Keep both passes bounded without a full-vector scan.
+                    final int stride = KnowledgeEmbeddingLsh.BITS + 1;
+                    final int[] exact = new int[KnowledgeEmbeddingLsh.TABLES];
+                    final int[] neighbors = new int[probes.length - exact.length];
+                    int next = 0;
+                    for (int i = 0; i < probes.length; i++) {
+                        if (i % stride == 0) {
+                            exact[i / stride] = probes[i];
+                        } else {
+                            neighbors[next++] = probes[i];
+                        }
+                    }
+                    final int exactRows = appendSemanticCandidates(db, exact, modelKey,
+                            normalizedQuestion, candidateBudget, null, best);
+                    if (exactRows < 0 || (exactRows < candidateBudget
+                            && appendSemanticCandidates(db, neighbors, modelKey,
+                                    normalizedQuestion, candidateBudget - exactRows, exact,
+                                    best) < 0)) {
+                        return Collections.emptyList();
+                    }
+                }
+            }
+        } finally {
+            try {
+                if (temporaryExclusion && db.inTransaction()) {
+                    // TEMP table and candidate inserts are never committed.
+                    db.endTransaction();
+                }
+            } finally {
+                db.close();
+            }
+        }
+        return rankSemanticHits(best, limit);
+    }
+
+    private static List<SemanticHit> rankSemanticHits(final Map<String, SemanticHit> best,
+                                                      final int limit) {
+        final List<SemanticHit> ranked = new ArrayList<>(best.values());
+        ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
+                .thenComparing(hit -> hit.relativePath));
+        return ranked.subList(0, Math.min(ranked.size(), limit));
+    }
+
+    /** Return the number of grouped SQL rows inspected in this pass, or -1
+     * if interrupted. The caller owns the connection and cosine ranking.
+     * Optional exact-bucket exclusion avoids overlap in production's two
+     * passes. Synthetic sample/quota phases may revisit a chunk, but every
+     * row still consumes their shared raw-candidate budget.
+     */
+    private static int appendSemanticCandidates(final SQLiteDatabase db, final int[] buckets,
+                                                final String modelKey,
+                                                final float[] normalizedQuestion,
+                                                final int candidateLimit,
+                                                final int[] excludedBuckets,
+                                                final Map<String, SemanticHit> best) {
+        return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
+                candidateLimit, excludedBuckets, null, null, best);
+    }
+
+    private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
+                                                     final int[] buckets, final String modelKey,
+                                                     final float[] normalizedQuestion,
+                                                     final int candidateLimit,
+                                                     final int[] excludedBuckets,
+                                                     final Integer minChunk,
+                                                     final Integer maxChunk,
+                                                     final Map<String, SemanticHit> best) {
+        return appendSemanticCandidatesRange(db, buckets, modelKey, normalizedQuestion,
+                candidateLimit, excludedBuckets, minChunk, maxChunk, false, false,
+                null, 0, best);
+    }
+
+    private static int appendSemanticCandidatesRange(final SQLiteDatabase db,
+                                                     final int[] buckets, final String modelKey,
+                                                     final float[] normalizedQuestion,
+                                                     final int candidateLimit,
+                                                     final int[] excludedBuckets,
+                                                     final Integer minChunk,
+                                                     final Integer maxChunk,
+                                                     final boolean samplePerSource,
+                                                     final boolean excludePreviouslyInspected,
+                                                     final Set<String> inMemorySeen,
+                                                     final int uniqueCap,
+                                                     final Map<String, SemanticHit> best) {
         final StringBuilder placeholders = new StringBuilder();
-        final String[] args = new String[buckets.length + 3];
+        final int excluded = excludedBuckets == null ? 0 : excludedBuckets.length;
+        final int ranged = (minChunk == null ? 0 : 1) + (maxChunk == null ? 0 : 1);
+        final String[] args = new String[buckets.length + excluded + ranged + 3];
         for (int i = 0; i < buckets.length; i++) {
             if (i > 0) {
                 placeholders.append(',');
@@ -695,28 +1163,71 @@ public final class KnowledgeLocalIndex {
             placeholders.append('?');
             args[i] = Integer.toString(buckets[i]);
         }
-        args[buckets.length] = modelKey;
-        args[buckets.length + 1] = Integer.toString(normalizedQuestion.length);
-        args[buckets.length + 2] = Integer.toString(MAX_SEMANTIC_CANDIDATES);
-        final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size "
+        final StringBuilder exclusion = new StringBuilder();
+        if (excluded > 0) {
+            exclusion.append(" AND NOT EXISTS (SELECT 1 FROM embedding_lsh prior "
+                    + "WHERE prior.path=l.path AND prior.chunk=l.chunk AND prior.bucket IN (");
+            for (int i = 0; i < excluded; i++) {
+                if (i > 0) exclusion.append(',');
+                exclusion.append('?');
+                args[buckets.length + i] = Integer.toString(excludedBuckets[i]);
+            }
+            exclusion.append("))");
+        }
+        final StringBuilder chunkRange = new StringBuilder();
+        int argument = buckets.length + excluded;
+        if (minChunk != null) {
+            chunkRange.append(" AND l.chunk>=?");
+            args[argument++] = Integer.toString(minChunk);
+        }
+        if (maxChunk != null) {
+            chunkRange.append(" AND l.chunk<?");
+            args[argument++] = Integer.toString(maxChunk);
+        }
+        args[argument++] = modelKey;
+        args[argument++] = Integer.toString(normalizedQuestion.length);
+        args[argument] = Integer.toString(candidateLimit);
+        final String sql = "SELECT e.path, n.title, v.offset, v.length, v.vector, e.modified, e.size"
+                + (excludePreviouslyInspected || inMemorySeen != null ? ", l.chunk " : " ")
                 + "FROM embedding_lsh l JOIN embedding_chunks v "
                 + "ON v.path=l.path AND v.chunk=l.chunk "
                 + "JOIN embedding_notes e ON e.path=v.path "
                 + "JOIN notes n ON n.path=e.path AND n.modified=e.modified AND n.size=e.size "
-                + "WHERE l.bucket IN (" + placeholders + ") AND e.model_key=? "
+                + "AND n.raw_sha256=e.source_sha256 "
+                + "WHERE l.bucket IN (" + placeholders + ")" + exclusion + chunkRange
+                + (excludePreviouslyInspected
+                        ? " AND NOT EXISTS (SELECT 1 FROM qa_seen_lsh_candidates seen "
+                                + "WHERE seen.path=l.path AND seen.chunk=l.chunk)"
+                        : "")
+                + " AND e.model_key=? "
                 + "AND e.dimension=? AND e.completed=e.chunks "
                 + "AND n.generation=(SELECT value FROM meta WHERE key='last_scan_generation') "
-                + "GROUP BY l.path, l.chunk LIMIT ?";
-        final Map<String, SemanticHit> best = new HashMap<>();
-        final SQLiteDatabase db = open();
+                + (samplePerSource ? "GROUP BY l.path LIMIT ?"
+                        : "GROUP BY l.path, l.chunk LIMIT ?");
+        int inspected = 0;
+        final List<String[]> selected = excludePreviouslyInspected ? new ArrayList<>() : null;
         try (Cursor c = db.rawQuery(sql, args)) {
             while (c.moveToNext()) {
                 if (Thread.currentThread().isInterrupted()) {
-                    return Collections.emptyList();
+                    return -1;
+                }
+                inspected++;
+                if (selected != null) {
+                    selected.add(new String[]{c.getString(0), Integer.toString(c.getInt(7))});
+                }
+                boolean reachedUniqueCap = false;
+                if (inMemorySeen != null) {
+                    final String path = c.getString(0);
+                    final String key = path.length() + ":" + path + ":" + c.getInt(7);
+                    if (!inMemorySeen.add(key)) {
+                        continue;
+                    }
+                    reachedUniqueCap = inMemorySeen.size() == uniqueCap;
                 }
                 final double score = KnowledgeEmbeddingVectors.similarity(normalizedQuestion,
                         c.getBlob(4));
                 if (!Double.isFinite(score)) {
+                    if (reachedUniqueCap) break;
                     continue;
                 }
                 final String path = c.getString(0);
@@ -725,14 +1236,24 @@ public final class KnowledgeLocalIndex {
                     best.put(path, new SemanticHit(path, c.getString(1), c.getInt(2),
                             c.getInt(3), score, c.getLong(5), c.getLong(6)));
                 }
+                if (reachedUniqueCap) break;
             }
-        } finally {
-            db.close();
         }
-        final List<SemanticHit> ranked = new ArrayList<>(best.values());
-        ranked.sort(Comparator.comparingDouble((SemanticHit hit) -> hit.score).reversed()
-                .thenComparing(hit -> hit.relativePath));
-        return ranked.subList(0, Math.min(ranked.size(), limit));
+        if (selected != null && !selected.isEmpty()) {
+            final SQLiteStatement insert = db.compileStatement(
+                    "INSERT OR IGNORE INTO qa_seen_lsh_candidates(path,chunk) VALUES(?,?)");
+            try {
+                for (final String[] pair : selected) {
+                    insert.clearBindings();
+                    insert.bindString(1, pair[0]);
+                    insert.bindLong(2, Integer.parseInt(pair[1]));
+                    insert.executeInsert();
+                }
+            } finally {
+                insert.close();
+            }
+        }
+        return inspected;
     }
 
     public synchronized void clearEmbeddings() {
@@ -876,7 +1397,7 @@ public final class KnowledgeLocalIndex {
         }
     }
 
-    private static String readBounded(final File file,
+    private static byte[] readBounded(final File file,
                                       final KnowledgeVaultScanner.Cancellation cancellation)
             throws IOException {
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -891,7 +1412,16 @@ public final class KnowledgeLocalIndex {
                 bytes.write(buffer, 0, count);
             }
         }
-        return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        return bytes.toByteArray();
+    }
+
+    private static boolean matchesStoredBody(final SQLiteDatabase db, final long rowId,
+                                             final String currentText) {
+        try (Cursor c = db.rawQuery("SELECT body FROM documents_fts WHERE docid=? LIMIT 1",
+                new String[]{Long.toString(rowId)})) {
+            return c.moveToFirst()
+                    && KnowledgeLlmEvidence.matchesIndexedText(c.getString(0), currentText);
+        }
     }
 
     /** A disappearing or externally edited file cannot confirm a stale snapshot. */
@@ -973,13 +1503,36 @@ public final class KnowledgeLocalIndex {
                         }
                     }
                 }
+                db.execSQL("PRAGMA user_version=3");
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        if (version < 4) {
+            // All v1-v3 source rows remain intact. Null seals require a
+            // verified backfill during sync before AI evidence is permitted.
+            db.beginTransaction();
+            try {
+                db.execSQL("ALTER TABLE notes ADD COLUMN raw_sha256 BLOB");
+                db.execSQL("PRAGMA user_version=4");
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        if (version < 5) {
+            // Legacy vectors cannot prove which exact bytes were embedded.
+            // Keep their rows for inspection, but exclude them from retrieval
+            // until the user explicitly approves rebuilding the embeddings.
+            db.beginTransaction();
+            try {
+                db.execSQL("ALTER TABLE embedding_notes ADD COLUMN source_sha256 BLOB");
                 db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
                 db.setTransactionSuccessful();
             } finally {
                 db.endTransaction();
             }
-        } else if (version != SCHEMA_VERSION) {
-            db.execSQL("PRAGMA user_version=" + SCHEMA_VERSION);
         }
         return db;
     }

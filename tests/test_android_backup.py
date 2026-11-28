@@ -37,6 +37,12 @@ class BackupTest(unittest.TestCase):
         self.assertEqual(self.original, Workspace(self.root / "restored")
                          .journal_path.read_text(encoding="utf-8"))
 
+    def test_empty_decision_journal_has_no_export_payload(self):
+        empty = Workspace(self.root / "no_decisions")
+        with self.assertRaisesRegex(ValueError, "Journal is empty"):
+            journal_export_info(str(empty.root))
+        self.assertFalse(empty.journal_path.is_file())
+
     def test_restore_refuses_existing_journal_or_changed_preview(self):
         with self.assertRaises(ValueError):
             journal_restore_preview(str(self.source.root), self.original)
