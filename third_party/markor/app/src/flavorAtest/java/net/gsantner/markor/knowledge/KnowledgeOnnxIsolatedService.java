@@ -72,12 +72,14 @@ public final class KnowledgeOnnxIsolatedService extends Service {
         }
         final boolean debugE5Fd = BuildConfig.DEBUG
                 && message.what == KnowledgeOnnxIsolatedProtocol.RUN_DEBUG_E5_FD;
+        final boolean debugDirectE5 = BuildConfig.DEBUG
+                && message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_INSPECT_DIRECT_E5_FD;
         final boolean debugLargeFd = BuildConfig.DEBUG
                 && message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_VERIFY_LARGE_FD;
         final boolean verifyOnlyFd =
                 message.what == KnowledgeOnnxIsolatedProtocol.VERIFY_ONLY_LARGE_FD;
         final boolean sessionRequest = message.what == KnowledgeOnnxIsolatedProtocol.RUN_MODEL_SESSION
-                || debugE5Fd;
+                || debugE5Fd || debugDirectE5;
         final boolean fdRequest = sessionRequest || debugLargeFd || verifyOnlyFd;
         final boolean debugOom = message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_SIMULATE_OOM;
         if ((debugOom && !BuildConfig.DEBUG) || (!fdRequest
@@ -107,7 +109,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                 }
                 simulatedLowMemory = BuildConfig.DEBUG && request.getBoolean(
                         KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, false);
-                if (debugE5Fd) {
+                if (debugE5Fd || debugDirectE5) {
                     debugVariant = request.getInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, 0);
                 }
             } catch (RuntimeException invalidParcel) {
@@ -124,7 +126,9 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                             verifyOnlyLength, expectedSha))
                     || (sessionRequest && (message.arg2 < 16
                             || message.arg2 > KnowledgeOnnxSessionGate.MAX_MODEL_BYTES))
-                    || (debugE5Fd && !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(debugVariant))) {
+                    || (debugE5Fd && !KnowledgeOnnxIsolatedProtocol.validDebugE5Variant(debugVariant))
+                    || (debugDirectE5 && !KnowledgeE5IsolatedSmoke.isPinnedDirectEnvelope(
+                            message.arg2, expectedSha, debugVariant))) {
                 closePipe(pipe);
                 if (verifyOnlyFd) answerVerifyOnly(reply, requestId, false);
                 else if (debugLargeFd) answerLargeFd(reply, requestId, false);
@@ -199,6 +203,23 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                         }
                     }
                     largeVerified = true;
+                } else if (debugDirectE5) {
+                    // DEBUG-only, two worker-pinned arithmetic E5 fixtures.
+                    // Exact SHA/size are pinned by the envelope and rechecked
+                    // on the FD. No received-FD heap copy or session.run();
+                    // the tiny independent pinned reference is regenerated.
+                    KnowledgeOnnxWorkerMemory.requireAvailableForDirect(
+                            this, size, false, debugLowMemory);
+                    try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe);
+                         KnowledgeE5DirectModelBuffer.Verified direct =
+                                 KnowledgeE5DirectModelBuffer.readVerified(stream, size, sha)) {
+                        // Independent byte comparison BEFORE any native ORT.
+                        KnowledgeE5IsolatedSmoke.requirePinnedDirectGraph(direct, variant);
+                        memory.observe(KnowledgeOnnxWorkerMemory.samplePssKiB());
+                        session = KnowledgeOnnxCpuBackend.inspectVerifiedDirectDebug(
+                                this, direct, memory);
+                        if (!validSessionReport(session)) session = null;
+                    }
                 } else if (sessionRequest) {
                     // Check in the worker immediately before allocating model bytes,
                     // then once more before native session creation. Neither check
@@ -218,14 +239,7 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                                 ? KnowledgeOnnxCpuBackend.runPinnedSyntheticE5(this, model,
                                         variant, memory)
                                 : KnowledgeOnnxCpuBackend.inspect(model, memory);
-                        if (session.sessionInitMillis < 0
-                                || session.sessionInitMillis > KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
-                                || session.inputs < 1 || session.inputs > 32
-                                || session.outputs < 1 || session.outputs > 32
-                                || !KnowledgeOnnxIoSummary.valid(
-                                        session.ioSummary, session.inputs, session.outputs)) {
-                            session = null;
-                        }
+                        if (!validSessionReport(session)) session = null;
                     } finally {
                         Arrays.fill(model, (byte) 0);
                     }
@@ -259,6 +273,15 @@ public final class KnowledgeOnnxIsolatedService extends Service {
             }
         });
         return true;
+    }
+
+    private static boolean validSessionReport(final KnowledgeOnnxSessionGate.Report session) {
+        return session != null && session.sessionInitMillis >= 0
+                && session.sessionInitMillis <= KnowledgeOnnxIsolatedProtocol.WATCHDOG_MILLIS
+                && session.inputs >= 1 && session.inputs <= KnowledgeOnnxIoSummary.MAX_IO
+                && session.outputs >= 1 && session.outputs <= KnowledgeOnnxIoSummary.MAX_IO
+                && KnowledgeOnnxIoSummary.valid(
+                        session.ioSummary, session.inputs, session.outputs);
     }
 
     private static void answerSession(final Messenger recipient, final int requestId,

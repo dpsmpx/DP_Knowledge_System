@@ -747,6 +747,116 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         }
     }
 
+    @Test public void pinnedDirectE5FdMetadataAgreesWithIndependentDescriptor()
+            throws Exception {
+        for (final int variant : new int[]{
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER,
+                KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT}) {
+            final boolean tokenTypes = variant
+                    == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
+            final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(
+                    6, tokenTypes, !tokenTypes);
+            final IsolatedWorkerConnection connection = bindWorker();
+            final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+            try {
+                connection.sendDebugDirectE5(pipe[0], graph.length,
+                        KnowledgeOnnxSessionPipe.sha256Hex(graph), variant, false);
+                closePipe(pipe[0]);
+                try (OutputStream sender = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                    sender.write(graph);
+                }
+                assertTrue("Pinned direct E5 metadata worker had no reply",
+                        connection.responded.await(25, TimeUnit.SECONDS));
+                assertEquals("Direct E5 native metadata inspection failed",
+                        KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_PASSED,
+                        connection.responseCode.get());
+                final Bundle result = connection.responseData.get();
+                assertNotNull("Direct E5 metadata IPC bundle missing", result);
+                assertEquals(tokenTypes ? 3 : 2,
+                        result.getLong(KnowledgeOnnxIsolatedProtocol.INPUTS));
+                assertEquals(tokenTypes ? 1 : 2,
+                        result.getLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS));
+                assertEquals(expectedE5DescriptorSha256(tokenTypes, !tokenTypes),
+                        result.getString(KnowledgeOnnxIsolatedProtocol.E5_DESCRIPTOR_SHA256));
+            } finally {
+                closePipe(pipe[0]);
+                closePipe(pipe[1]);
+                unbindWorker(connection);
+            }
+            // An isolated process may survive briefly after unbind. Give the
+            // next variant a distinct worker UID lifecycle, never reuse a
+            // completed one-shot service with running=true.
+            if (!tokenTypes) Thread.sleep(1000);
+        }
+    }
+
+    @Test public void directE5FdRejectsWrongEnvelopeBeforeReading() throws Exception {
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendDebugDirectE5(pipe[0], graph.length,
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER, false);
+            closePipe(pipe[0]);
+            // Keep the writer open; no data can be consumed before pin check.
+            assertTrue("Forged direct E5 envelope triggered an FD read",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void directE5FdLowRamRefusesBeforeReading() throws Exception {
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, false, true);
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendDebugDirectE5(pipe[0], graph.length,
+                    KnowledgeOnnxSessionPipe.sha256Hex(graph),
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_E5_TWO_INPUT_POOLER, true);
+            closePipe(pipe[0]);
+            // Leave the FD writer open and never send a byte.
+            assertTrue("Direct E5 low-RAM veto did not precede the FD read",
+                    connection.responded.await(10, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_MEMORY_DENIED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
+    @Test public void directE5FdRejectsTamperedPayloadWithPinnedEnvelope()
+            throws Exception {
+        final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(6, true, false);
+        final String pinnedSha = KnowledgeOnnxSessionPipe.sha256Hex(graph);
+        graph[graph.length / 2] ^= 1;
+        final IsolatedWorkerConnection connection = bindWorker();
+        final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        try {
+            connection.sendDebugDirectE5(pipe[0], graph.length, pinnedSha,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT, false);
+            closePipe(pipe[0]);
+            try (OutputStream sender = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                sender.write(graph);
+            }
+            assertTrue("Tampered direct E5 FD failed to complete",
+                    connection.responded.await(25, TimeUnit.SECONDS));
+            assertEquals(KnowledgeOnnxIsolatedProtocol.RESULT_SESSION_FAILED,
+                    connection.responseCode.get());
+        } finally {
+            closePipe(pipe[0]);
+            closePipe(pipe[1]);
+            unbindWorker(connection);
+        }
+    }
+
     @Test public void debugLargeFdRejectsForgedEnvelopeBeforeReading() throws Exception {
         final IsolatedWorkerConnection connection = bindWorker();
         final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
@@ -1240,6 +1350,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         final CountDownLatch died = new CountDownLatch(1);
         final CountDownLatch responded = new CountDownLatch(1);
         final AtomicInteger responseCode = new AtomicInteger();
+        final AtomicReference<Bundle> responseData = new AtomicReference<>();
         final Messenger reply = new Messenger(new Handler(Looper.getMainLooper(), message -> {
             if (message.what == KnowledgeOnnxIsolatedProtocol.DEBUG_STALL_STARTED) {
                 started.countDown();
@@ -1253,6 +1364,7 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MATCH
                     || message.what == KnowledgeOnnxIsolatedProtocol.RESULT_VERIFY_ONLY_MISMATCH) {
                 responseCode.set(message.what);
+                responseData.set(new Bundle(message.getData()));
                 responded.countDown();
             }
             return true;
@@ -1319,6 +1431,24 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
             data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
             data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
             data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, variant);
+            request.setData(data);
+            messenger.send(request);
+        }
+
+        void sendDebugDirectE5(final ParcelFileDescriptor readPipe, final int length,
+                               final String expectedSha, final int variant,
+                               final boolean debugLowMemory) throws RemoteException {
+            final Message request = Message.obtain(null,
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_INSPECT_DIRECT_E5_FD);
+            request.arg1 = 1;
+            request.arg2 = length;
+            request.replyTo = reply;
+            final Bundle data = new Bundle();
+            data.putParcelable(KnowledgeOnnxIsolatedProtocol.PIPE_FD, readPipe);
+            data.putString(KnowledgeOnnxIsolatedProtocol.MODEL_SHA256, expectedSha);
+            data.putInt(KnowledgeOnnxIsolatedProtocol.DEBUG_E5_VARIANT, variant);
+            if (debugLowMemory) data.putBoolean(
+                    KnowledgeOnnxIsolatedProtocol.DEBUG_FORCE_LOW_MEMORY, true);
             request.setData(data);
             messenger.send(request);
         }

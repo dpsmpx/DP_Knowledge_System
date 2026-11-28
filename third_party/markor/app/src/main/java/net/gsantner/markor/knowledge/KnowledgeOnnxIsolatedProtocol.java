@@ -29,6 +29,9 @@ final class KnowledgeOnnxIsolatedProtocol {
     static final int RESULT_VERIFY_ONLY_MATCH = 17;
     static final int RESULT_VERIFY_ONLY_MISMATCH = 18;
     static final String VERIFY_ONLY_FD_LENGTH = "verify_fd_length";
+    // DEBUG-only two pinned, generated E5 graphs via FD -> verified direct
+    // ByteBuffer -> ORT metadata. NO run(), real weights or trust grant.
+    static final int DEBUG_INSPECT_DIRECT_E5_FD = 19;
     static final int DEBUG_E5_TWO_INPUT_POOLER = 1;
     static final int DEBUG_E5_THREE_INPUT = 2;
     static final String DEBUG_E5_VARIANT = "debug_e5_variant";
