@@ -164,12 +164,29 @@ public final class KnowledgeOnnxIsolatedService extends Service {
                     // without exhausting RAM or opening a user-supplied model.
                     throw new OutOfMemoryError("debug-only simulated worker OOM");
                 } else if (debugLargeFd || verifyOnlyFd) {
-                    // No ONNX allocation, native session, filesystem or note data.
-                    // Debug is fixed-fixture only; verify-only checks the sender's
-                    // announced SHA, which is NOT proof of package provenance.
+                    // Never open ORT, filesystem paths or note data. Only the
+                    // pinned synthetic debug fixture exercises a direct-memory
+                    // quarantine; the real manual E5 verify-only command MUST
+                    // remain streaming and must not allocate model-sized RAM.
                     KnowledgeOnnxWorkerMemory.requireAvailable(this, false);
                     try (InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(inputPipe)) {
-                        KnowledgeE5LargeFdTransfer.verifyExactly(stream, largeLength, sha);
+                        if (debugLargeFd) {
+                            try (KnowledgeE5DirectModelBuffer.Verified direct =
+                                         KnowledgeE5DirectModelBuffer.readVerified(
+                                                 stream, largeLength, sha)) {
+                                // SHA and exact EOF must match before exposing a
+                                // direct, read-only view. Do not pass this
+                                // non-ONNX fixture to the native runtime.
+                                if (!direct.view().isDirect() || !direct.view().isReadOnly()
+                                        || direct.view().remaining() != largeLength) {
+                                    throw new IOException("Invalid synthetic E5 buffer");
+                                }
+                            }
+                        } else {
+                            // Announced SHA alone does not prove provenance;
+                            // the sender also audits its installed package.
+                            KnowledgeE5LargeFdTransfer.verifyExactly(stream, largeLength, sha);
+                        }
                     }
                     largeVerified = true;
                 } else if (sessionRequest) {
