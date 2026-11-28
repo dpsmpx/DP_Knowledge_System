@@ -25,6 +25,29 @@ IDS = {
 
 
 class E5ReferenceUiContract(unittest.TestCase):
+    def test_full_e5_onnx_host_json_import_is_opt_in_bounded_and_localized(self):
+        names = {
+            "knowledge_models_e5_graph_host_json_hint",
+            "knowledge_models_e5_graph_host_json_invalid",
+            "knowledge_models_e5_graph_reference_different_counts",
+        }
+        for locale in ("values", "values-ru"):
+            strings = ET.parse(ROOT / f"res/{locale}/knowledge_strings.xml").getroot()
+            by_name = {element.get("name"): element.text or ""
+                       for element in strings.findall("string")}
+            for field in names:
+                self.assertTrue(by_name[field].strip(), (locale, field))
+        helper = (BASE / "KnowledgeE5OnnxReferenceComparison.java").read_text()
+        activity = (BASE / "KnowledgeHubActivity.java").read_text()
+        self.assertIn("static HostMetadata parseHostMetadata(", helper)
+        self.assertIn("MAX_HOST_JSON_CHARS = 2048", helper)
+        self.assertIn("requireUniqueLiteralKeys(json)", helper)
+        self.assertIn("compareHostMetadata(", helper)
+        self.assertIn("hostJson.getText().toString().trim()", activity)
+        self.assertIn("KnowledgeE5OnnxReferenceComparison.parseHostMetadata(", activity)
+        self.assertIn("new InputFilter.LengthFilter(", activity)
+        self.assertNotIn("runnable", helper)
+
     def test_manual_e5_graph_fingerprint_is_localized_and_copyable(self):
         for locale in ("values", "values-ru"):
             strings = ET.parse(ROOT / f"res/{locale}/knowledge_strings.xml").getroot()

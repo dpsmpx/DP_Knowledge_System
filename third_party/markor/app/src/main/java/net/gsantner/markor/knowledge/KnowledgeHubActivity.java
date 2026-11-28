@@ -1019,7 +1019,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                                     result.descriptorSha256))
                             .setNegativeButton(R.string.knowledge_models_e5_graph_compare,
                                     (dialog, button) -> showE5OnnxReferenceComparison(
-                                            entry.sha256, result.descriptorSha256))
+                                            entry.sha256, result.descriptorSha256,
+                                            result.inputs, result.outputs))
                             .setNeutralButton(R.string.knowledge_models_e5_qa_copy,
                                     (dialog, button) -> {
                                         final ClipboardManager clipboard = (ClipboardManager)
@@ -1045,7 +1046,8 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
 
     /** No persistence or inference: both hashes must come from the same ONNX weight file. */
     private void showE5OnnxReferenceComparison(final String localWeightSha,
-                                                final String localDescriptorSha) {
+                                                final String localDescriptorSha,
+                                                final int localInputs, final int localOutputs) {
         if (isFinishing() || isDestroyed()) return;
         final LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
@@ -1068,33 +1070,63 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
         descriptorSha.setHint(R.string.knowledge_models_e5_graph_reference_descriptor);
         fields.addView(descriptorSha);
 
+        final EditText hostJson = new EditText(this);
+        hostJson.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        hostJson.setMinLines(3);
+        hostJson.setMaxLines(6);
+        hostJson.setFilters(new InputFilter[]{new InputFilter.LengthFilter(
+                KnowledgeE5OnnxReferenceComparison.MAX_HOST_JSON_CHARS)});
+        hostJson.setHint(R.string.knowledge_models_e5_graph_host_json_hint);
+        fields.addView(hostJson);
+
+        final ScrollView scroll = new ScrollView(this);
+        scroll.addView(fields);
+
         final AlertDialog comparison = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.knowledge_models_e5_graph_compare)
-                .setView(fields)
+                .setView(scroll)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.knowledge_models_e5_qa_compare_action, null)
                 .create();
         comparison.setOnShowListener(ignored -> comparison.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(view -> {
-                    final String referenceWeights = weightsSha.getText().toString().trim();
-                    final String referenceDescriptor = descriptorSha.getText().toString().trim();
-                    if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceWeights)) {
-                        weightsSha.setError(getString(
-                                R.string.knowledge_models_e5_qa_reference_invalid));
-                        return;
+                    final KnowledgeE5OnnxReferenceComparison.Verdict verdict;
+                    final String pastedJson = hostJson.getText().toString().trim();
+                    if (!pastedJson.isEmpty()) {
+                        try {
+                            final KnowledgeE5OnnxReferenceComparison.HostMetadata host =
+                                    KnowledgeE5OnnxReferenceComparison.parseHostMetadata(pastedJson);
+                            verdict = KnowledgeE5OnnxReferenceComparison.compareHostMetadata(
+                                    localWeightSha, localDescriptorSha,
+                                    localInputs, localOutputs, host);
+                        } catch (IOException | IllegalArgumentException invalid) {
+                            hostJson.setError(getString(
+                                    R.string.knowledge_models_e5_graph_host_json_invalid));
+                            return;
+                        }
+                    } else {
+                        final String referenceWeights = weightsSha.getText().toString().trim();
+                        final String referenceDescriptor = descriptorSha.getText().toString().trim();
+                        if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceWeights)) {
+                            weightsSha.setError(getString(
+                                    R.string.knowledge_models_e5_qa_reference_invalid));
+                            return;
+                        }
+                        if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceDescriptor)) {
+                            descriptorSha.setError(getString(
+                                    R.string.knowledge_models_e5_qa_reference_invalid));
+                            return;
+                        }
+                        verdict = KnowledgeE5OnnxReferenceComparison.compare(localWeightSha,
+                                localDescriptorSha, referenceWeights, referenceDescriptor);
                     }
-                    if (!KnowledgeE5OnnxReferenceComparison.validSha256(referenceDescriptor)) {
-                        descriptorSha.setError(getString(
-                                R.string.knowledge_models_e5_qa_reference_invalid));
-                        return;
-                    }
-                    final KnowledgeE5OnnxReferenceComparison.Verdict verdict =
-                            KnowledgeE5OnnxReferenceComparison.compare(localWeightSha,
-                                    localDescriptorSha, referenceWeights, referenceDescriptor);
                     final int messageId = verdict == KnowledgeE5OnnxReferenceComparison.Verdict.MATCH
                             ? R.string.knowledge_models_e5_graph_reference_match
                             : verdict == KnowledgeE5OnnxReferenceComparison.Verdict.DIFFERENT_WEIGHTS
                             ? R.string.knowledge_models_e5_graph_reference_different_weights
+                            : verdict == KnowledgeE5OnnxReferenceComparison.Verdict.DIFFERENT_COUNTS
+                            ? R.string.knowledge_models_e5_graph_reference_different_counts
                             : R.string.knowledge_models_e5_graph_reference_different_descriptor;
                     comparison.dismiss();
                     if (isFinishing() || isDestroyed()) return;
