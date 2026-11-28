@@ -677,6 +677,39 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         return KnowledgeE5OnnxSignature.descriptorSha256(inputs, outputs);
     }
 
+    /** Fresh independent GraphProto read of the exact generated FD payload. */
+    private KnowledgeE5OnnxMetadataProbe.Report inspectGeneratedE5Graph(
+            final byte[] graph) throws Exception {
+        final File staged = File.createTempFile("dpks-generated-e5-metadata-", ".onnx",
+                context.getCacheDir());
+        try {
+            try (FileOutputStream output = new FileOutputStream(staged)) {
+                output.write(graph);
+            }
+            return KnowledgeE5OnnxMetadataProbe.inspect(staged, graph.length,
+                    KnowledgeE5IsolatedSmoke.syntheticConfigProfile(),
+                    KnowledgeOnnxSessionPipe.sha256Hex(graph));
+        } finally {
+            assertTrue("Generated E5 metadata fixture was not removed", staged.delete());
+        }
+    }
+
+    /** Reconstruct only bounded native metadata; names and payloads stay private. */
+    private static KnowledgeOnnxIoSummary nativeE5Summary(final Bundle reply) {
+        return new KnowledgeOnnxIoSummary(
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.INPUT_TENSORS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.OUTPUT_TENSORS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.FLOAT_INPUTS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.FLOAT_OUTPUTS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.INT64_INPUTS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.INT64_OUTPUTS),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_INPUT_AXES),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.DYNAMIC_OUTPUT_AXES),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.MAX_INPUT_RANK),
+                reply.getInt(KnowledgeOnnxIsolatedProtocol.MAX_OUTPUT_RANK),
+                reply.getString(KnowledgeOnnxIsolatedProtocol.E5_DESCRIPTOR_SHA256));
+    }
+
     private static void assertWorkerPssSnapshots(final KnowledgeOnnxMemoryTrace memory) {
         assertNotNull("Missing isolated worker PSS report", memory);
         assertTrue("Malformed worker PSS report", KnowledgeOnnxMemoryTrace.valid(
@@ -756,6 +789,10 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     == KnowledgeOnnxIsolatedProtocol.DEBUG_E5_THREE_INPUT;
             final byte[] graph = KnowledgeE5TokenEmbeddingSmoke.graph(
                     6, tokenTypes, !tokenTypes);
+            final KnowledgeE5OnnxMetadataProbe.Report declared = inspectGeneratedE5Graph(graph);
+            assertEquals("Pinned GraphProto declaration differs from independently written contract",
+                    expectedE5DescriptorSha256(tokenTypes, !tokenTypes),
+                    declared.descriptorSha256);
             final IsolatedWorkerConnection connection = bindWorker();
             final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
             try {
@@ -778,6 +815,10 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                         result.getLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS));
                 assertEquals(expectedE5DescriptorSha256(tokenTypes, !tokenTypes),
                         result.getString(KnowledgeOnnxIsolatedProtocol.E5_DESCRIPTOR_SHA256));
+                KnowledgeE5NativeMetadataAgreement.requireMatching(declared,
+                        result.getLong(KnowledgeOnnxIsolatedProtocol.INPUTS),
+                        result.getLong(KnowledgeOnnxIsolatedProtocol.OUTPUTS),
+                        nativeE5Summary(result));
             } finally {
                 closePipe(pipe[0]);
                 closePipe(pipe[1]);
