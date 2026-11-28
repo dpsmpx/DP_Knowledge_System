@@ -1400,6 +1400,19 @@ public final class KnowledgeHubActivity extends MarkorBaseActivity {
                         }
                     }
 
+                    @Override public void matchWithDiagnostics(
+                            final KnowledgeE5FdVerificationMetrics.Report report) {
+                        if (!isFinishing() && !isDestroyed()
+                                && modelGeneration.get() == operation) {
+                            modelImportActive = false;
+                            restoreModelButton();
+                            modelStatus.setText(getString(
+                                    R.string.knowledge_models_e5_fd_verify_diagnostics,
+                                    report.verifiedBytes, report.elapsedMillis,
+                                    report.effectiveMiBPerSecond));
+                        }
+                    }
+
                     @Override public void failure() {
                         if (!isFinishing() && !isDestroyed()
                                 && modelGeneration.get() == operation) {
