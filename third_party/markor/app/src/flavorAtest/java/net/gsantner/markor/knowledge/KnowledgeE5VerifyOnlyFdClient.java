@@ -30,6 +30,10 @@ final class KnowledgeE5VerifyOnlyFdClient {
     interface Callback {
         /** Only says both byte checks agreed; not an ONNX/model trust grant. */
         void match();
+        /** Optional completion diagnostics; older callers still receive match(). */
+        default void matchWithDiagnostics(final KnowledgeE5FdVerificationMetrics.Report report) {
+            match();
+        }
         void failure();
     }
 
@@ -56,6 +60,8 @@ final class KnowledgeE5VerifyOnlyFdClient {
     private boolean receiverMatched;
     private int sequence;
     private int activeRequest;
+    private long activeBytes;
+    private long startedNanos;
     private final Runnable deadline = this::notifyFailure;
 
     KnowledgeE5VerifyOnlyFdClient(final Context owner) {
@@ -127,6 +133,8 @@ final class KnowledgeE5VerifyOnlyFdClient {
         senderComplete = false;
         receiverMatched = false;
         activeRequest = ++sequence;
+        activeBytes = length;
+        startedNanos = System.nanoTime();
         final int requestId = activeRequest;
         final ServiceConnection current = new ServiceConnection() {
             @Override public void onServiceConnected(final ComponentName name,
@@ -245,8 +253,11 @@ final class KnowledgeE5VerifyOnlyFdClient {
 
     private void completeIfReady() {
         if (!senderComplete || !receiverMatched || callback == null) return;
+        final KnowledgeE5FdVerificationMetrics.Report diagnostics =
+                KnowledgeE5FdVerificationMetrics.fromElapsedMillis(activeBytes,
+                        Math.max(1L, (System.nanoTime() - startedNanos) / 1_000_000L));
         final Callback done = finish();
-        if (done != null) done.match();
+        if (done != null) done.matchWithDiagnostics(diagnostics);
     }
 
     private void notifyFailure() {
@@ -290,6 +301,8 @@ final class KnowledgeE5VerifyOnlyFdClient {
         }
         senderComplete = false;
         receiverMatched = false;
+        activeBytes = 0L;
+        startedNanos = 0L;
         if (old != null && bound) {
             try {
                 context.unbindService(old);

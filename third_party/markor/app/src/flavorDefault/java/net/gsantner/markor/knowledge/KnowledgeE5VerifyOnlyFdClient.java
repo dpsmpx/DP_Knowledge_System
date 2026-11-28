@@ -7,6 +7,9 @@ import android.content.Context;
 final class KnowledgeE5VerifyOnlyFdClient {
     interface Callback {
         void match();
+        default void matchWithDiagnostics(final KnowledgeE5FdVerificationMetrics.Report report) {
+            match();
+        }
         void failure();
     }
 

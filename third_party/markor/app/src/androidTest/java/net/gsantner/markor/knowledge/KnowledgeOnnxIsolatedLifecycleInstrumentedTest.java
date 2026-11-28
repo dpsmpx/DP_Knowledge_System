@@ -1008,12 +1008,19 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
         final AtomicInteger passed = new AtomicInteger();
         final AtomicInteger failed = new AtomicInteger();
         final AtomicBoolean started = new AtomicBoolean();
+        final AtomicReference<KnowledgeE5FdVerificationMetrics.Report> metrics =
+                new AtomicReference<>();
         try {
             instrumentation.runOnMainSync(() -> started.set(client.startDebugSyntheticFixture(
                     new KnowledgeE5VerifyOnlyFdClient.Callback() {
                 @Override public void match() {
                     passed.incrementAndGet();
                     completed.countDown();
+                }
+                @Override public void matchWithDiagnostics(
+                        final KnowledgeE5FdVerificationMetrics.Report report) {
+                    metrics.set(report);
+                    match();
                 }
                 @Override public void failure() {
                     failed.incrementAndGet();
@@ -1025,6 +1032,12 @@ public final class KnowledgeOnnxIsolatedLifecycleInstrumentedTest {
                     completed.await(45, TimeUnit.SECONDS));
             assertEquals("Independent sender and receiver must both verify", 1, passed.get());
             assertEquals("Unexpected verify-only failure callback", 0, failed.get());
+            assertNotNull("Successful verification did not produce metrics", metrics.get());
+            assertEquals(KnowledgeE5LargeFdFixture.LENGTH_BYTES, metrics.get().verifiedBytes);
+            assertTrue(metrics.get().elapsedMillis >= 1L);
+            assertTrue(metrics.get().elapsedMillis <=
+                    KnowledgeE5VerifyOnlyFdClient.CLIENT_TIMEOUT_MILLIS);
+            assertTrue(Double.isFinite(metrics.get().effectiveMiBPerSecond));
         } finally {
             instrumentation.runOnMainSync(client::cancel);
         }
