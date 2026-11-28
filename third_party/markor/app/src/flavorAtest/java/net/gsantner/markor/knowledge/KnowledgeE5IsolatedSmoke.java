@@ -32,6 +32,12 @@ final class KnowledgeE5IsolatedSmoke {
 
     private KnowledgeE5IsolatedSmoke() { }
 
+    /** Canonical configuration of generated CI fixtures, never an installed model. */
+    static KnowledgeE5ConfigProfile.Result syntheticConfigProfile() throws IOException {
+        return KnowledgeE5ConfigProfile.parse(
+                CANONICAL_SYNTHETIC_CONFIG.getBytes(StandardCharsets.UTF_8), null);
+    }
+
     static void verify(final Context workerContext, final OrtEnvironment environment,
                        final OrtSession.SessionOptions options,
                        final KnowledgeOnnxMemoryTrace.Recorder memory) throws Exception {
@@ -39,8 +45,7 @@ final class KnowledgeE5IsolatedSmoke {
                 || !KnowledgeOnnxProcessIdentity.isWorker()) {
             throw new IOException("E5 synthetic CPU smoke requires the isolated worker UID");
         }
-        final KnowledgeE5ConfigProfile.Result profile = KnowledgeE5ConfigProfile.parse(
-                CANONICAL_SYNTHETIC_CONFIG.getBytes(StandardCharsets.UTF_8), null);
+        final KnowledgeE5ConfigProfile.Result profile = syntheticConfigProfile();
         final KnowledgeEmbeddingTensorContract.Inputs batch =
                 KnowledgeEmbeddingTensorContract.fromTokenizer(
                         new int[]{0, 3, 5, 2, 1, 1},
@@ -63,8 +68,7 @@ final class KnowledgeE5IsolatedSmoke {
             throw new IOException("Transported E5 test requires isolated worker UID");
         }
         requirePinnedGraph(received, variant);
-        final KnowledgeE5ConfigProfile.Result profile = KnowledgeE5ConfigProfile.parse(
-                CANONICAL_SYNTHETIC_CONFIG.getBytes(StandardCharsets.UTF_8), null);
+        final KnowledgeE5ConfigProfile.Result profile = syntheticConfigProfile();
         final KnowledgeEmbeddingTensorContract.Inputs batch =
                 KnowledgeEmbeddingTensorContract.fromTokenizer(
                         new int[]{0, 3, 5, 2, 1, 1},
